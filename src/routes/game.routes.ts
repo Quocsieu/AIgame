@@ -1,10 +1,15 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { GenerateGameRequestSchema } from '../contracts/game.contract.js';
+import { gameStore } from '../game/game.store.js';
 import { aiQuestionService } from '../services/ai.question.service.js';
 import { sourceStore } from '../storage/source.store.js';
 import { AppError, createSuccessResponse } from '../utils/errors.js';
+import { sessionRouter } from './game.session.routes.js';
 
 export const gameRouter = Router();
+
+// Mount Day 3 Game Session Router
+gameRouter.use('/sessions', sessionRouter);
 
 gameRouter.post(
   '/generate',
@@ -33,6 +38,9 @@ gameRouter.post(
 
       // 3 & 4 & 5. Build bounded AI input, generate, validate structured output
       const gameSpecification = await aiQuestionService.generateGame(documents, requestData);
+
+      // Save generated specification in store for local session execution
+      gameStore.save(gameSpecification);
 
       // 6. Return validated GameSpecification
       res.status(200).json(createSuccessResponse(gameSpecification));

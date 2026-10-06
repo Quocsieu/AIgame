@@ -12,13 +12,26 @@
     input[type="text"], select, textarea, input[type="number"], input[type="file"] { width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; }
     button { margin-top: 1rem; padding: 0.6rem 1.2rem; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
     button:hover { background: #1d4ed8; }
+    button.secondary { background: #64748b; margin-left: 0.5rem; }
+    button.secondary:hover { background: #475569; }
+    button.success { background: #16a34a; }
+    button.success:hover { background: #15803d; }
     pre { background: #0f172a; color: #f8fafc; padding: 1rem; border-radius: 4px; overflow-x: auto; max-height: 400px; }
     .badge { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; background: #e0e7ff; color: #3730a3; font-size: 0.85rem; font-weight: 600; margin-right: 0.5rem; }
+    .badge-success { background: #dcfce7; color: #166534; }
+    .badge-danger { background: #fee2e2; color: #991b1b; }
+    .choice-btn { display: block; width: 100%; text-align: left; margin-top: 0.5rem; padding: 0.75rem 1rem; background: #f1f5f9; color: #1e293b; border: 2px solid #cbd5e1; border-radius: 6px; font-size: 1rem; cursor: pointer; transition: all 0.15s; }
+    .choice-btn:hover { background: #e2e8f0; border-color: #94a3b8; }
+    .choice-btn.selected { background: #eff6ff; border-color: #2563eb; color: #1d4ed8; font-weight: 600; }
+    .timer-bar { height: 8px; background: #22c55e; border-radius: 4px; margin-top: 0.5rem; transition: width 0.25s linear; }
+    .stat-box { display: inline-block; background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 0.75rem 1.25rem; margin-right: 1rem; text-align: center; }
+    .stat-label { font-size: 0.8rem; color: #64748b; text-transform: uppercase; font-weight: 600; }
+    .stat-value { font-size: 1.5rem; font-weight: 700; color: #0f172a; }
   </style>
 </head>
 <body>
   <h1>AI Content &rarr; Question &rarr; Game Platform</h1>
-  <p>Developer Smoke-Test Interface (Sprint Day 1 & Day 2)</p>
+  <p>Developer Smoke-Test Interface (Sprint Day 1, Day 2 & Day 3 Game Engine)</p>
 
   <!-- Step 1: Content Ingestion -->
   <div class="card">
@@ -61,9 +74,112 @@
     <pre id="jsonOutput"></pre>
   </div>
 
+  <!-- Step 4: Local Game Engine Execution (Day 3) -->
+  <div class="card" id="playCard">
+    <h2>4. Local Game Engine (Day 3 - Single Player)</h2>
+    <p>Play a complete game deterministically with server-side validation and scoring.</p>
+
+    <!-- Session Setup -->
+    <div id="sessionSetup">
+      <label>Game Source:</label>
+      <div style="margin-top: 0.5rem;">
+        <button type="button" id="btnPlayGenerated" style="display: none;">Play Generated Game</button>
+        <button type="button" id="btnLoadSampleMC" class="secondary">Load Sample MULTIPLE_CHOICE</button>
+        <button type="button" id="btnLoadSampleFIB" class="secondary">Load Sample FILL_IN_BLANK</button>
+        <button type="button" id="btnLoadSampleQB" class="secondary">Load Sample QUICK_BUTTON</button>
+        <button type="button" id="btnLoadSampleCW" class="secondary">Load Sample CROSSWORD</button>
+      </div>
+      <div id="sessionSetupStatus" style="margin-top: 1rem;"></div>
+    </div>
+
+    <!-- Active Game Screen -->
+    <div id="gameScreen" style="display: none; margin-top: 1.5rem;">
+      <!-- Stats Header -->
+      <div style="margin-bottom: 1.5rem;">
+        <div class="stat-box">
+          <div class="stat-label">Score</div>
+          <div class="stat-value" id="displayScore">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Streak</div>
+          <div class="stat-value" id="displayStreak">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Question</div>
+          <div class="stat-value" id="displayQuestionNumber">1 / 1</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Time Remaining</div>
+          <div class="stat-value" id="displayTimer">20s</div>
+        </div>
+      </div>
+      <div class="timer-bar" id="timerBar" style="width: 100%;"></div>
+
+      <!-- Question Box -->
+      <div style="margin-top: 1.5rem; padding: 1.25rem; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+        <div style="margin-bottom: 0.75rem;">
+          <span class="badge" id="badgeType">MULTIPLE_CHOICE</span>
+          <span class="badge" id="badgeDifficulty">MEDIUM</span>
+        </div>
+        <h3 id="questionText" style="margin: 0.5rem 0 1rem 0;">Question text goes here</h3>
+
+        <!-- Interactive Answer Inputs -->
+        <div id="answerArea"></div>
+
+        <button type="button" id="btnSubmitAnswer" class="success" style="margin-top: 1.5rem;">Submit Answer</button>
+      </div>
+
+      <!-- Answer Feedback Box -->
+      <div id="feedbackBox" style="display: none; margin-top: 1.5rem; padding: 1.25rem; border-radius: 8px;">
+        <div id="feedbackBadge"></div>
+        <h4 id="feedbackTitle" style="margin: 0.5rem 0;"></h4>
+        <p id="feedbackPoints" style="font-weight: 600;"></p>
+        <p id="feedbackExplanation" style="color: #475569;"></p>
+        <p id="feedbackCorrectAnswer" style="font-weight: 600; color: #15803d;"></p>
+        <button type="button" id="btnNextQuestion" style="margin-top: 1rem;">Next Question &rarr;</button>
+      </div>
+    </div>
+
+    <!-- Final Result Screen -->
+    <div id="resultScreen" style="display: none; margin-top: 1.5rem; padding: 1.5rem; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px;">
+      <h3 style="color: #166534; margin-top: 0;">Game Finished!</h3>
+      <div style="margin: 1.5rem 0;">
+        <div class="stat-box">
+          <div class="stat-label">Final Score</div>
+          <div class="stat-value" id="resFinalScore">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Accuracy</div>
+          <div class="stat-value" id="resAccuracy">0%</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Correct</div>
+          <div class="stat-value" id="resCorrect">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Wrong</div>
+          <div class="stat-value" id="resWrong">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Max Streak</div>
+          <div class="stat-value" id="resStreak">0</div>
+        </div>
+      </div>
+      <button type="button" id="btnPlayAgain">Play Again</button>
+    </div>
+  </div>
+
   <script>
     let ingestedSourceIds = [];
+    let latestGeneratedSpec = null;
+    let activeSessionId = null;
+    let currentQuestionData = null;
+    let selectedChoiceValue = null;
+    let timerInterval = null;
+    let timeRemainingSec = 20;
+    let totalTimeLimitSec = 20;
 
+    // --- DAY 1: Ingestion ---
     document.getElementById('btnIngest').addEventListener('click', async () => {
       const statusDiv = document.getElementById('ingestStatus');
       statusDiv.innerHTML = 'Ingesting sources...';
@@ -95,7 +211,6 @@
         ingestedSourceIds = data.data.sources.map(s => s.sourceId);
         statusDiv.innerHTML = `<span style="color: green;">Successfully ingested ${data.data.sourceCount} source(s)! Normalized text length: ${data.data.normalizedContent.length} chars.</span>`;
 
-        // Enable Generation Card
         const genCard = document.getElementById('generationCard');
         genCard.style.opacity = '1';
         genCard.style.pointerEvents = 'auto';
@@ -104,6 +219,7 @@
       }
     });
 
+    // --- DAY 2: Generation ---
     document.getElementById('btnGenerate').addEventListener('click', async () => {
       const statusDiv = document.getElementById('generateStatus');
       statusDiv.innerHTML = 'Generating game specification...';
@@ -134,6 +250,7 @@
         outputCard.style.display = 'block';
 
         const spec = data.data;
+        latestGeneratedSpec = spec;
         document.getElementById('summaryBadge').innerHTML = `
           <span class="badge">Game ID: ${spec.gameId}</span>
           <span class="badge">Type: ${spec.gameType}</span>
@@ -141,9 +258,366 @@
           <span class="badge">Time: ${spec.settings.timePerQuestion}s/question</span>
         `;
         document.getElementById('jsonOutput').textContent = JSON.stringify(spec, null, 2);
+
+        // Show "Play Generated Game" button
+        const btnPlayGen = document.getElementById('btnPlayGenerated');
+        btnPlayGen.style.display = 'inline-block';
+        btnPlayGen.textContent = `Play Generated Game (${spec.questions.length} questions)`;
       } catch (err) {
         statusDiv.innerHTML = `<span style="color: red;">Network error: ${err.message}</span>`;
       }
+    });
+
+    // --- DAY 3: Local Game Engine ---
+
+    // Sample Game Fixtures for Immediate Smoke-Testing
+    const sampleFixtures = {
+      MULTIPLE_CHOICE: {
+        gameId: 'fixture_mc',
+        title: 'Computer Science Quiz (Multiple Choice)',
+        description: 'Single-player MC demo game',
+        gameType: 'MULTIPLE_CHOICE',
+        questions: [
+          {
+            id: 'q_1',
+            type: 'MULTIPLE_CHOICE',
+            question: 'What is the primary runtime for Node.js?',
+            choices: ['A. V8 JavaScript Engine', 'B. SpiderMonkey', 'C. JVM', 'D. JavaScriptCore'],
+            correctAnswer: 'A. V8 JavaScript Engine',
+            explanation: 'Node.js is built on Google Chrome\'s V8 engine.',
+            difficulty: 'EASY',
+            sourceReference: { sourceId: 's1', sourceType: 'WEBSITE', sourceLocation: 'https://nodejs.org' }
+          },
+          {
+            id: 'q_2',
+            type: 'MULTIPLE_CHOICE',
+            question: 'Which of the following is a superset of JavaScript?',
+            choices: ['A. Python', 'B. TypeScript', 'C. Rust', 'D. Kotlin'],
+            correctAnswer: 'B. TypeScript',
+            explanation: 'TypeScript adds optional static types to JavaScript.',
+            difficulty: 'EASY',
+            sourceReference: { sourceId: 's1', sourceType: 'WEBSITE', sourceLocation: 'https://typescriptlang.org' }
+          }
+        ],
+        settings: { questionCount: 2, timePerQuestion: 20, scoringMode: 'SPEED_BONUS' },
+        sourceSummary: { sourceCount: 1, sources: [{ sourceId: 's1', sourceType: 'WEBSITE', sourceName: 'nodejs.org', sourceLocation: 'https://nodejs.org' }] },
+        generatedAt: new Date().toISOString()
+      },
+      FILL_IN_THE_BLANK: {
+        gameId: 'fixture_fib',
+        title: 'Tech History (Fill in the Blank)',
+        description: 'Single-player FIB demo game',
+        gameType: 'FILL_IN_THE_BLANK',
+        questions: [
+          {
+            id: 'q_fib_1',
+            type: 'FILL_IN_THE_BLANK',
+            question: 'The creator of Linux and Git is Linus _______.',
+            correctAnswer: 'Torvalds',
+            acceptedAlternatives: ['Linus Torvalds'],
+            explanation: 'Linus Torvalds created Linux in 1991 and Git in 2005.',
+            difficulty: 'EASY',
+            sourceReference: { sourceId: 's1', sourceType: 'WEBSITE', sourceLocation: 'https://kernel.org' }
+          }
+        ],
+        settings: { questionCount: 1, timePerQuestion: 25, scoringMode: 'STANDARD' },
+        sourceSummary: { sourceCount: 1, sources: [{ sourceId: 's1', sourceType: 'WEBSITE', sourceName: 'kernel.org', sourceLocation: 'https://kernel.org' }] },
+        generatedAt: new Date().toISOString()
+      },
+      QUICK_BUTTON: {
+        gameId: 'fixture_qb',
+        title: 'Quick Decision (Buttons)',
+        description: 'Single-player Quick Button demo game',
+        gameType: 'QUICK_BUTTON',
+        questions: [
+          {
+            id: 'q_qb_1',
+            type: 'QUICK_BUTTON',
+            question: 'Is TypeScript dynamically typed or statically typed?',
+            choices: ['Statically Typed', 'Dynamically Typed'],
+            correctAnswer: 'Statically Typed',
+            explanation: 'TypeScript introduces compile-time static type checking.',
+            difficulty: 'EASY',
+            sourceReference: { sourceId: 's1', sourceType: 'WEBSITE', sourceLocation: 'https://typescriptlang.org' }
+          }
+        ],
+        settings: { questionCount: 1, timePerQuestion: 15, scoringMode: 'STANDARD' },
+        sourceSummary: { sourceCount: 1, sources: [{ sourceId: 's1', sourceType: 'WEBSITE', sourceName: 'typescriptlang.org', sourceLocation: 'https://typescriptlang.org' }] },
+        generatedAt: new Date().toISOString()
+      },
+      CROSSWORD: {
+        gameId: 'fixture_cw',
+        title: 'Crossword Puzzle Clue',
+        description: 'Single-player Crossword demo game',
+        gameType: 'CROSSWORD',
+        questions: [
+          {
+            id: 'q_cw_1',
+            type: 'CROSSWORD',
+            question: 'Capital city of France (5 letters)',
+            crosswordClue: 'Capital of France',
+            crosswordAnswer: 'PARIS',
+            correctAnswer: 'PARIS',
+            explanation: 'Paris is the capital of France.',
+            difficulty: 'EASY',
+            sourceReference: { sourceId: 's1', sourceType: 'WEBSITE', sourceLocation: 'https://france.fr' }
+          }
+        ],
+        settings: { questionCount: 1, timePerQuestion: 30, scoringMode: 'STANDARD' },
+        sourceSummary: { sourceCount: 1, sources: [{ sourceId: 's1', sourceType: 'WEBSITE', sourceName: 'france.fr', sourceLocation: 'https://france.fr' }] },
+        generatedAt: new Date().toISOString()
+      }
+    };
+
+    async function startSessionWithSpec(spec) {
+      const statusDiv = document.getElementById('sessionSetupStatus');
+      statusDiv.innerHTML = `Creating game session for "${spec.title}"...`;
+
+      try {
+        const createRes = await fetch('/api/games/sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gameId: spec.gameId, gameSpecification: spec })
+        });
+        const createData = await createRes.json();
+        if (!createData.success) {
+          statusDiv.innerHTML = `<span style="color: red;">Failed to create session: ${createData.error.message}</span>`;
+          return;
+        }
+
+        activeSessionId = createData.data.sessionId;
+
+        // Start session
+        const startRes = await fetch(`/api/games/sessions/${activeSessionId}/start`, { method: 'POST' });
+        const startData = await startRes.json();
+        if (!startData.success) {
+          statusDiv.innerHTML = `<span style="color: red;">Failed to start: ${startData.error.message}</span>`;
+          return;
+        }
+
+        statusDiv.innerHTML = `<span style="color: green;">Session active: ${activeSessionId}</span>`;
+        document.getElementById('sessionSetup').style.display = 'none';
+        document.getElementById('resultScreen').style.display = 'none';
+        document.getElementById('gameScreen').style.display = 'block';
+
+        renderQuestion(startData.data.question);
+      } catch (err) {
+        statusDiv.innerHTML = `<span style="color: red;">Network error: ${err.message}</span>`;
+      }
+    }
+
+    document.getElementById('btnPlayGenerated').addEventListener('click', () => {
+      if (latestGeneratedSpec) startSessionWithSpec(latestGeneratedSpec);
+    });
+    document.getElementById('btnLoadSampleMC').addEventListener('click', () => startSessionWithSpec(sampleFixtures.MULTIPLE_CHOICE));
+    document.getElementById('btnLoadSampleFIB').addEventListener('click', () => startSessionWithSpec(sampleFixtures.FILL_IN_THE_BLANK));
+    document.getElementById('btnLoadSampleQB').addEventListener('click', () => startSessionWithSpec(sampleFixtures.QUICK_BUTTON));
+    document.getElementById('btnLoadSampleCW').addEventListener('click', () => startSessionWithSpec(sampleFixtures.CROSSWORD));
+
+    function renderQuestion(q) {
+      currentQuestionData = q;
+      selectedChoiceValue = null;
+
+      document.getElementById('feedbackBox').style.display = 'none';
+      document.getElementById('btnSubmitAnswer').disabled = false;
+      document.getElementById('btnSubmitAnswer').style.display = 'inline-block';
+
+      document.getElementById('displayQuestionNumber').textContent = `${q.questionIndex + 1} / ${q.totalQuestions}`;
+      document.getElementById('badgeType').textContent = q.type;
+      document.getElementById('badgeDifficulty').textContent = q.difficulty;
+      document.getElementById('questionText').textContent = q.question;
+
+      const answerArea = document.getElementById('answerArea');
+      answerArea.innerHTML = '';
+
+      if (q.type === 'MULTIPLE_CHOICE' || q.type === 'QUICK_BUTTON') {
+        const choices = q.choices || [];
+        choices.forEach((choice, index) => {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'choice-btn';
+          btn.textContent = choice;
+          btn.addEventListener('click', () => {
+            document.querySelectorAll('.choice-btn').forEach(b => b.classList.remove('selected'));
+            btn.classList.add('selected');
+            selectedChoiceValue = choice;
+          });
+          answerArea.appendChild(btn);
+        });
+      } else if (q.type === 'FILL_IN_THE_BLANK') {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.id = 'freeformInput';
+        input.placeholder = 'Type your answer here...';
+        input.style.marginTop = '0.5rem';
+        input.style.fontSize = '1.1rem';
+        answerArea.appendChild(input);
+      } else if (q.type === 'CROSSWORD') {
+        if (q.crosswordClue) {
+          const clueDiv = document.createElement('p');
+          clueDiv.innerHTML = `<strong>Clue:</strong> ${q.crosswordClue}`;
+          answerArea.appendChild(clueDiv);
+        }
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.id = 'crosswordInput';
+        input.placeholder = 'Enter word...';
+        input.style.marginTop = '0.5rem';
+        input.style.fontSize = '1.1rem';
+        answerArea.appendChild(input);
+      }
+
+      // Reset and start visual timer
+      startVisualTimer(q.timePerQuestion);
+    }
+
+    function startVisualTimer(durationSeconds) {
+      if (timerInterval) clearInterval(timerInterval);
+      totalTimeLimitSec = durationSeconds;
+      timeRemainingSec = durationSeconds;
+
+      const timerDisplay = document.getElementById('displayTimer');
+      const timerBar = document.getElementById('timerBar');
+
+      timerDisplay.textContent = `${timeRemainingSec}s`;
+      timerBar.style.width = '100%';
+      timerBar.style.backgroundColor = '#22c55e';
+
+      timerInterval = setInterval(() => {
+        timeRemainingSec--;
+        if (timeRemainingSec <= 0) {
+          clearInterval(timerInterval);
+          timerDisplay.textContent = '0s (Expired)';
+          timerBar.style.width = '0%';
+          timerBar.style.backgroundColor = '#ef4444';
+          return;
+        }
+
+        timerDisplay.textContent = `${timeRemainingSec}s`;
+        const pct = Math.max(0, (timeRemainingSec / totalTimeLimitSec) * 100);
+        timerBar.style.width = `${pct}%`;
+        if (pct < 30) {
+          timerBar.style.backgroundColor = '#ef4444';
+        } else if (pct < 60) {
+          timerBar.style.backgroundColor = '#eab308';
+        }
+      }, 1000);
+    }
+
+    // Submit Answer
+    document.getElementById('btnSubmitAnswer').addEventListener('click', async () => {
+      if (!currentQuestionData || !activeSessionId) return;
+
+      let answer = selectedChoiceValue;
+      if (currentQuestionData.type === 'FILL_IN_THE_BLANK') {
+        const input = document.getElementById('freeformInput');
+        answer = input ? input.value : '';
+      } else if (currentQuestionData.type === 'CROSSWORD') {
+        const input = document.getElementById('crosswordInput');
+        answer = input ? input.value : '';
+      }
+
+      if (!answer) {
+        alert('Please choose or enter an answer before submitting.');
+        return;
+      }
+
+      if (timerInterval) clearInterval(timerInterval);
+
+      try {
+        const res = await fetch(`/api/games/sessions/${activeSessionId}/answer`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            questionId: currentQuestionData.id,
+            answer: answer
+          })
+        });
+
+        const data = await res.json();
+        if (!data.success) {
+          alert(`Submission error: ${data.error.message} (${data.error.code})`);
+          return;
+        }
+
+        const answerResult = data.data;
+
+        // Update score display
+        document.getElementById('displayScore').textContent = answerResult.score;
+
+        // Fetch session summary for updated streak
+        const sessionRes = await fetch(`/api/games/sessions/${activeSessionId}`);
+        const sessionData = await sessionRes.json();
+        if (sessionData.success) {
+          document.getElementById('displayStreak').textContent = sessionData.data.currentStreak;
+        }
+
+        // Render feedback box
+        const feedbackBox = document.getElementById('feedbackBox');
+        feedbackBox.style.display = 'block';
+        feedbackBox.style.background = answerResult.isCorrect ? '#f0fdf4' : '#fef2f2';
+        feedbackBox.style.border = answerResult.isCorrect ? '1px solid #bbf7d0' : '1px solid #fecaca';
+
+        const fbBadge = document.getElementById('feedbackBadge');
+        fbBadge.innerHTML = answerResult.isCorrect
+          ? '<span class="badge badge-success">&#10003; CORRECT</span>'
+          : '<span class="badge badge-danger">&#10007; INCORRECT</span>';
+
+        document.getElementById('feedbackTitle').textContent = answerResult.isCorrect
+          ? `Well done! +${answerResult.pointsEarned} points`
+          : 'Incorrect answer';
+
+        document.getElementById('feedbackPoints').textContent = `Points Earned: ${answerResult.pointsEarned}`;
+        document.getElementById('feedbackExplanation').textContent = answerResult.explanation ? `Explanation: ${answerResult.explanation}` : '';
+        document.getElementById('feedbackCorrectAnswer').textContent = `Authoritative Correct Answer: ${answerResult.correctAnswer}`;
+
+        document.getElementById('btnSubmitAnswer').style.display = 'none';
+
+        const nextBtn = document.getElementById('btnNextQuestion');
+        nextBtn.textContent = answerResult.nextQuestionAvailable ? 'Next Question &rarr;' : 'Finish Game &rarr;';
+      } catch (err) {
+        alert(`Network error: ${err.message}`);
+      }
+    });
+
+    // Advance Question
+    document.getElementById('btnNextQuestion').addEventListener('click', async () => {
+      if (!activeSessionId) return;
+
+      try {
+        const res = await fetch(`/api/games/sessions/${activeSessionId}/next`, { method: 'POST' });
+        const data = await res.json();
+        if (!data.success) {
+          alert(`Advance error: ${data.error.message}`);
+          return;
+        }
+
+        if (data.data.finished) {
+          // Show Result Screen
+          const result = data.data.result;
+          document.getElementById('gameScreen').style.display = 'none';
+          document.getElementById('resultScreen').style.display = 'block';
+
+          document.getElementById('resFinalScore').textContent = result.score;
+          document.getElementById('resAccuracy').textContent = `${result.accuracy}%`;
+          document.getElementById('resCorrect').textContent = result.correctCount;
+          document.getElementById('resWrong').textContent = result.wrongCount;
+          document.getElementById('resStreak').textContent = result.streak;
+        } else {
+          renderQuestion(data.data.question);
+        }
+      } catch (err) {
+        alert(`Network error: ${err.message}`);
+      }
+    });
+
+    // Play Again button
+    document.getElementById('btnPlayAgain').addEventListener('click', () => {
+      document.getElementById('resultScreen').style.display = 'none';
+      document.getElementById('sessionSetup').style.display = 'block';
+      document.getElementById('sessionSetupStatus').innerHTML = '';
+      activeSessionId = null;
+      currentQuestionData = null;
     });
   </script>
 </body>
