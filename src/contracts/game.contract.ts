@@ -141,6 +141,7 @@ export const GenerateGameRequestSchema = z.object({
   sourceId: z.string().optional(),
   sourceIds: z.array(z.string()).optional(),
   gameType: GameTypeEnum,
+  difficulty: DifficultyEnum.optional(),
   questionCount: z.number().int().min(1).max(20).default(5).optional(),
   timePerQuestion: z.number().int().min(5).max(120).default(20).optional(),
   title: z.string().min(1).optional(),

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useToast } from '../components/ToastContext.js';
 import { ingestSources, generateGame, createRoom, fetchRoomQr } from '../services/api.js';
-import type { GameSpecification, IngestedSource } from '../types/index.js';
+import type { Difficulty, GameSpecification, IngestedSource } from '../types/index.js';
 
 interface DemoPageProps {
   onNavigateToHost?: (roomCode: string, hostToken: string) => void;
@@ -17,6 +17,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({ onNavigateToHost, onNavigate
   const [showSampleText, setShowSampleText] = useState(false);
 
   const [gameType, setGameType] = useState('MULTIPLE_CHOICE');
+  const [difficulty, setDifficulty] = useState<Difficulty>('MEDIUM');
   const [questionCount, setQuestionCount] = useState(5);
   const [timePerQuestion, setTimePerQuestion] = useState(20);
 
@@ -95,6 +96,7 @@ Tổng quan:
       const spec = await generateGame({
         sourceId: sId,
         gameType,
+        difficulty,
         questionCount,
         timePerQuestion,
       });
@@ -275,7 +277,21 @@ Tổng quan:
               <option value="CROSSWORD">Ô chữ (Gợi ý từ khóa)</option>
             </select>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
+              <div>
+                <label style={{ display: 'block', color: '#cbd5e1', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.3rem' }}>
+                  Độ khó:
+                </label>
+                <select
+                  value={difficulty}
+                  onChange={(e) => setDifficulty(e.target.value as Difficulty)}
+                  style={{ width: '100%', padding: '0.65rem', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '6px', color: 'white' }}
+                >
+                  <option value="EASY">Dễ</option>
+                  <option value="MEDIUM">Trung bình</option>
+                  <option value="HARD">Khó</option>
+                </select>
+              </div>
               <div>
                 <label style={{ display: 'block', color: '#cbd5e1', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.3rem' }}>
                   Số câu hỏi:
@@ -409,6 +425,9 @@ Tổng quan:
               <div style={{ marginBottom: '0.5rem' }}>
                 <span style={{ backgroundColor: '#0369a1', color: '#e0f2fe', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700, marginRight: '0.5rem' }}>
                   {generatedSpec.gameType}
+                </span>
+                <span style={{ backgroundColor: '#475569', color: '#f1f5f9', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700, marginRight: '0.5rem' }}>
+                  Độ khó: {generatedSpec.questions[0]?.difficulty === 'EASY' ? 'Dễ' : generatedSpec.questions[0]?.difficulty === 'HARD' ? 'Khó' : 'Trung bình'}
                 </span>
                 <span style={{ backgroundColor: '#166534', color: '#dcfce7', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>
                   {generatedSpec.questions.length} câu hỏi

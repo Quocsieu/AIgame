@@ -1,4 +1,4 @@
-import type { CreateRoomResponse, GameSpecification, IngestedSource, QrResponse } from '../types/index.js';
+import type { CreateRoomResponse, Difficulty, GameSpecification, IngestedSource, QrResponse } from '../types/index.js';
 
 export async function ingestSources(params: {
   url?: string;
@@ -32,6 +32,7 @@ export async function generateGame(params: {
   gameType: string;
   questionCount: number;
   timePerQuestion: number;
+  difficulty?: Difficulty;
 }): Promise<GameSpecification> {
   const res = await fetch('/api/games/generate', {
     method: 'POST',
