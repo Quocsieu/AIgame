@@ -455,7 +455,7 @@ Tổng quan:
                       if (onNavigateToHost) {
                         onNavigateToHost(roomCode, hostToken);
                       } else {
-                        window.open(`/host.html?room=${roomCode}&token=${hostToken}`, '_blank');
+                        window.open(`/?room=${roomCode}&token=${hostToken}`, '_blank');
                       }
                     }}
                     style={{ backgroundColor: '#16a34a', color: 'white', border: 'none', borderRadius: '6px', padding: '0.65rem 1.25rem', fontWeight: 700, cursor: 'pointer' }}
@@ -469,7 +469,7 @@ Tổng quan:
                       if (onNavigateToPlay) {
                         onNavigateToPlay(roomCode);
                       } else {
-                        window.open(`/join.html?room=${roomCode}`, '_blank');
+                        window.open(`/?room=${roomCode}`, '_blank');
                       }
                     }}
                     style={{ backgroundColor: '#334155', color: 'white', border: 'none', borderRadius: '6px', padding: '0.65rem 1.25rem', fontWeight: 600, cursor: 'pointer' }}

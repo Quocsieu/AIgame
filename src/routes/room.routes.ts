@@ -13,7 +13,7 @@ export const roomRouter = Router();
 function buildJoinUrl(req: Request, roomCode: string): string {
   const host = req.get('host') || 'localhost:3000';
   const protocol = req.protocol || 'http';
-  return `${protocol}://${host}/join.html?room=${roomCode}`;
+  return `${protocol}://${host}/?room=${roomCode}`;
 }
 
 /**

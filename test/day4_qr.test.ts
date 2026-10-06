@@ -42,7 +42,7 @@ describe('DAY 4 - QR Code Generation Test Suite', () => {
     assert.equal(res.status, 200);
     assert.equal(res.body.success, true);
     assert.ok(res.body.data.joinUrl);
-    assert.match(res.body.data.joinUrl, /\/join\.html\?room=[A-Z0-9]{6}/);
+    assert.match(res.body.data.joinUrl, /\/\?room=[A-Z0-9]{6}/);
   });
 
   it('47. should return QR Data URL encoding player join URL via GET /api/rooms/:roomCode/qr', async () => {

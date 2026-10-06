@@ -155,7 +155,7 @@ export const HostPage: React.FC<HostPageProps> = ({
       setJoinUrl(qrData.joinUrl);
       setQrDataUrl(qrData.qrDataUrl);
     } catch {
-      setJoinUrl(`${window.location.origin}/join.html?room=${code}`);
+      setJoinUrl(`${window.location.origin}/?room=${code}`);
     }
     setViewState('lobby');
     connectToSocket(code, token);
@@ -297,7 +297,7 @@ export const HostPage: React.FC<HostPageProps> = ({
                 </span>
               </div>
               <p style={{ color: '#94a3b8', margin: '0.5rem 0' }}>
-                Tham gia tại: <strong style={{ color: '#38bdf8' }}>{joinUrl || `${window.location.origin}/join.html?room=${roomCode}`}</strong>
+                Tham gia tại: <strong style={{ color: '#38bdf8' }}>{joinUrl || `${window.location.origin}/?room=${roomCode}`}</strong>
               </p>
             </div>
 

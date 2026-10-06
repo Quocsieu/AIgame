@@ -52,14 +52,14 @@ describe('DAY 5 — End-to-End Integration Test Suite', () => {
     });
   });
 
-  it('1. GET /health and GET /demo.html return 200 OK', async () => {
+  it('1. GET /health and GET / return 200 OK with React root', async () => {
     const healthRes = await request(app).get('/health');
     assert.equal(healthRes.status, 200);
     assert.equal(healthRes.body.status, 'ok');
 
-    const demoRes = await request(app).get('/demo.html');
-    assert.equal(demoRes.status, 200);
-    assert.match(demoRes.text, /Demo Control Panel/);
+    const rootRes = await request(app).get('/');
+    assert.equal(rootRes.status, 200);
+    assert.match(rootRes.text, /<div id="root">/);
   });
 
   it('2. Full Primary Pipeline: Ingest DOCX -> AI Generate -> Create Room -> QR -> Realtime Gameplay -> Podium', async () => {
