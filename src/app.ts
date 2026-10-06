@@ -11,6 +11,10 @@ export function createApp(): express.Application {
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
+  // Serve React frontend application if built
+  const frontendDistPath = path.resolve(process.cwd(), 'frontend', 'dist');
+  app.use(express.static(frontendDistPath));
+
   // Serve minimal developer smoke-test interface
   app.use(express.static('public'));
 

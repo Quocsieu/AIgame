@@ -375,8 +375,8 @@ Overview:
         }
 
         const source = data.data.sources[0];
-        currentSourceId = source.id;
-        statusBox.innerHTML = `✓ Ingested source <strong>${source.name}</strong> (${source.charCount} chars, ~${source.tokenEstimate} tokens). Ready to generate!`;
+        currentSourceId = source.sourceId;
+        statusBox.innerHTML = `✓ Ingested source <strong>${source.sourceName || source.name || 'document'}</strong>. Ready to generate!`;
         document.getElementById('btnGenerate').disabled = false;
         return true;
       } catch (err) {
@@ -501,7 +501,7 @@ Overview:
             correctAnswer: 'B. WebSocket',
             explanation: 'WebSockets provide persistent, bi-directional, full-duplex communication channels.',
             difficulty: 'EASY',
-            sourceReference: { sourceId: currentSourceId || 'sample_src', sourceType: 'WEBSITE', sourceName: 'guide.html' }
+            sourceReference: { sourceId: currentSourceId || 'sample_src', sourceType: 'WEBSITE', sourceLocation: 'local://guide' }
           },
           {
             id: 'q_sample_2',
@@ -511,7 +511,7 @@ Overview:
             correctAnswer: 'B. Fast caching to reduce DB load',
             explanation: 'In-memory stores cache hot data to dramatically lower latency and database load.',
             difficulty: 'MEDIUM',
-            sourceReference: { sourceId: currentSourceId || 'sample_src', sourceType: 'WEBSITE', sourceName: 'guide.html' }
+            sourceReference: { sourceId: currentSourceId || 'sample_src', sourceType: 'WEBSITE', sourceLocation: 'local://guide' }
           }
         ],
         settings: { questionCount: 2, timePerQuestion: 20, scoringMode: 'SPEED_BONUS' },
