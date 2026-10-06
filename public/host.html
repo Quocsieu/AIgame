@@ -148,6 +148,44 @@
       element.textContent = text == null ? '' : String(text);
     }
 
+    // Auto-connect if room and host token are provided via URL query params (e.g. from demo panel)
+    const urlParams = new URLSearchParams(window.location.search);
+    const roomParam = urlParams.get('room');
+    const tokenParam = urlParams.get('token');
+    const gameIdParam = urlParams.get('gameId');
+
+    if (gameIdParam) {
+      const input = document.getElementById('gameIdInput');
+      if (input) input.value = gameIdParam;
+    }
+
+    if (roomParam && tokenParam) {
+      initExistingRoom(roomParam.toUpperCase().trim(), tokenParam.trim());
+    }
+
+    async function initExistingRoom(code, token) {
+      roomCode = code;
+      hostToken = token;
+      try {
+        const qrRes = await fetch(`/api/rooms/${roomCode}/qr`);
+        const qrData = await qrRes.json();
+        const joinUrl = qrData.success ? qrData.data.joinUrl : `${window.location.origin}/join.html?room=${roomCode}`;
+
+        renderSafeText(document.getElementById('displayRoomCode'), roomCode);
+        renderSafeText(document.getElementById('displayJoinUrl'), joinUrl);
+        if (qrData.success && qrData.data.qrDataUrl) {
+          document.getElementById('qrImage').src = qrData.data.qrDataUrl;
+        }
+
+        document.getElementById('setupCard').style.display = 'none';
+        document.getElementById('lobbyCard').style.display = 'block';
+
+        connectWebSocket();
+      } catch (err) {
+        console.error('Failed to init existing room from URL params:', err);
+      }
+    }
+
     document.getElementById('btnCreateRoom').addEventListener('click', async () => {
       const gameId = document.getElementById('gameIdInput').value.trim();
       const statusDiv = document.getElementById('createStatus');
