@@ -1,0 +1,44 @@
+{
+  "name": "ai-content-game-platform",
+  "version": "1.0.0",
+  "description": "Backend-first AI Content to Question Game Platform",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
+    "smoke": "tsx test/smoke_test.ts"
+  },
+  "keywords": [
+    "kahoot",
+    "game-platform",
+    "ai",
+    "content-ingestion"
+  ],
+  "license": "ISC",
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "dotenv": "^18.0.5",
+    "express": "^5.2.1",
+    "mammoth": "^1.13.0",
+    "multer": "^2.4.0",
+    "pdf-parse": "^1.1.1",
+    "xlsx": "^0.18.5",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/multer": "^2.3.0",
+    "@types/node": "^26.6.4",
+    "@types/pdf-parse": "^1.1.5",
+    "@types/pdfkit": "^0.17.6",
+    "@types/supertest": "^7.2.1",
+    "docx": "^9.8.1",
+    "pdfkit": "^0.20.2",
+    "supertest": "^7.3.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

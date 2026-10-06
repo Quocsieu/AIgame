@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Content -> Question -> Game Platform (Sprint Smoke Test)</title>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 2rem; background: #f8fafc; color: #1e293b; }
+    h1 { margin-bottom: 0.5rem; }
+    .card { background: white; padding: 1.5rem; border-radius: 8px; border: 1px solid #e2e8f0; margin-bottom: 1.5rem; max-width: 900px; }
+    label { display: block; font-weight: 600; margin-top: 1rem; margin-bottom: 0.25rem; }
+    input[type="text"], select, textarea, input[type="number"], input[type="file"] { width: 100%; padding: 0.5rem; border: 1px solid #cbd5e1; border-radius: 4px; box-sizing: border-box; }
+    button { margin-top: 1rem; padding: 0.6rem 1.2rem; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+    button:hover { background: #1d4ed8; }
+    pre { background: #0f172a; color: #f8fafc; padding: 1rem; border-radius: 4px; overflow-x: auto; max-height: 400px; }
+    .badge { display: inline-block; padding: 0.25rem 0.5rem; border-radius: 4px; background: #e0e7ff; color: #3730a3; font-size: 0.85rem; font-weight: 600; margin-right: 0.5rem; }
+  </style>
+</head>
+<body>
+  <h1>AI Content &rarr; Question &rarr; Game Platform</h1>
+  <p>Developer Smoke-Test Interface (Sprint Day 1 & Day 2)</p>
+
+  <!-- Step 1: Content Ingestion -->
+  <div class="card">
+    <h2>1. Ingest Content (Day 1)</h2>
+    <label for="urls">Website URLs (one per line):</label>
+    <textarea id="urls" rows="2" placeholder="https://example.com/topic"></textarea>
+
+    <label for="files">Upload File (DOCX, XLSX, or PDF):</label>
+    <input type="file" id="files" multiple accept=".docx,.xlsx,.pdf" />
+
+    <button type="button" id="btnIngest">Ingest Sources</button>
+    <div id="ingestStatus" style="margin-top: 1rem;"></div>
+  </div>
+
+  <!-- Step 2: Game Generation -->
+  <div class="card" id="generationCard" style="opacity: 0.6; pointer-events: none;">
+    <h2>2. Generate Game Specification (Day 2)</h2>
+    <label for="gameType">Game Type:</label>
+    <select id="gameType">
+      <option value="MULTIPLE_CHOICE">MULTIPLE_CHOICE (4 choices, 1 correct)</option>
+      <option value="FILL_IN_THE_BLANK">FILL_IN_THE_BLANK</option>
+      <option value="QUICK_BUTTON">QUICK_BUTTON</option>
+      <option value="CROSSWORD">CROSSWORD</option>
+    </select>
+
+    <label for="questionCount">Question Count (1 - 20):</label>
+    <input type="number" id="questionCount" value="5" min="1" max="20" />
+
+    <label for="gameTitle">Game Title (optional):</label>
+    <input type="text" id="gameTitle" placeholder="e.g. Science Knowledge Challenge" />
+
+    <button type="button" id="btnGenerate">Generate Game Specification</button>
+    <div id="generateStatus" style="margin-top: 1rem;"></div>
+  </div>
+
+  <!-- Step 3: Game Specification JSON Preview -->
+  <div class="card" id="outputCard" style="display: none;">
+    <h2>3. Generated Game Specification JSON</h2>
+    <div id="summaryBadge"></div>
+    <pre id="jsonOutput"></pre>
+  </div>
+
+  <script>
+    let ingestedSourceIds = [];
+
+    document.getElementById('btnIngest').addEventListener('click', async () => {
+      const statusDiv = document.getElementById('ingestStatus');
+      statusDiv.innerHTML = 'Ingesting sources...';
+
+      const formData = new FormData();
+      const rawUrls = document.getElementById('urls').value.trim();
+      if (rawUrls) {
+        const urlList = rawUrls.split('\n').map(u => u.trim()).filter(Boolean);
+        formData.append('urls', JSON.stringify(urlList));
+      }
+
+      const fileInput = document.getElementById('files');
+      for (const file of fileInput.files) {
+        formData.append('files', file);
+      }
+
+      try {
+        const res = await fetch('/api/content/ingest', {
+          method: 'POST',
+          body: formData,
+        });
+
+        const data = await res.json();
+        if (!data.success) {
+          statusDiv.innerHTML = `<span style="color: red;">Error: ${data.error.message} (${data.error.code})</span>`;
+          return;
+        }
+
+        ingestedSourceIds = data.data.sources.map(s => s.sourceId);
+        statusDiv.innerHTML = `<span style="color: green;">Successfully ingested ${data.data.sourceCount} source(s)! Normalized text length: ${data.data.normalizedContent.length} chars.</span>`;
+
+        // Enable Generation Card
+        const genCard = document.getElementById('generationCard');
+        genCard.style.opacity = '1';
+        genCard.style.pointerEvents = 'auto';
+      } catch (err) {
+        statusDiv.innerHTML = `<span style="color: red;">Network error: ${err.message}</span>`;
+      }
+    });
+
+    document.getElementById('btnGenerate').addEventListener('click', async () => {
+      const statusDiv = document.getElementById('generateStatus');
+      statusDiv.innerHTML = 'Generating game specification...';
+
+      const payload = {
+        sourceIds: ingestedSourceIds,
+        gameType: document.getElementById('gameType').value,
+        questionCount: parseInt(document.getElementById('questionCount').value, 10),
+        title: document.getElementById('gameTitle').value.trim() || undefined,
+      };
+
+      try {
+        const res = await fetch('/api/games/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+
+        const data = await res.json();
+        if (!data.success) {
+          statusDiv.innerHTML = `<span style="color: red;">Generation failed: ${data.error.message} (${data.error.code})</span>`;
+          return;
+        }
+
+        statusDiv.innerHTML = '<span style="color: green;">Game Specification successfully generated!</span>';
+
+        const outputCard = document.getElementById('outputCard');
+        outputCard.style.display = 'block';
+
+        const spec = data.data;
+        document.getElementById('summaryBadge').innerHTML = `
+          <span class="badge">Game ID: ${spec.gameId}</span>
+          <span class="badge">Type: ${spec.gameType}</span>
+          <span class="badge">Questions: ${spec.questions.length}</span>
+          <span class="badge">Time: ${spec.settings.timePerQuestion}s/question</span>
+        `;
+        document.getElementById('jsonOutput').textContent = JSON.stringify(spec, null, 2);
+      } catch (err) {
+        statusDiv.innerHTML = `<span style="color: red;">Network error: ${err.message}</span>`;
+      }
+    });
+  </script>
+</body>
+</html>
