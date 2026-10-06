@@ -31,7 +31,6 @@ export const DemoPage: React.FC<DemoPageProps> = ({ onNavigateToHost, onNavigate
   const [isIngesting, setIsIngesting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
-  const [isRunningPipeline, setIsRunningPipeline] = useState(false);
 
   const GENERIC_SAMPLE_TEXT = `Hướng dẫn Kiến trúc Đám mây & Kỹ thuật Web Hiện đại
 Tổng quan:
@@ -107,8 +106,8 @@ Tổng quan:
     } catch (err: any) {
       toast.removeToast(toastId);
       if (err.code === 'AI_KEY_NOT_CONFIGURED') {
-        toast.info(
-          'GEMINI_API_KEY chưa được cấu hình. Bạn có thể thiết lập khóa trong tệp môi trường của máy chủ hoặc dùng bộ câu hỏi thử nghiệm.',
+        toast.error(
+          'GEMINI_API_KEY chưa được cấu hình. Vui lòng thiết lập khóa trong tệp môi trường của máy chủ để tạo trò chơi bằng AI.',
           'Chưa có khóa AI'
         );
       } else {
@@ -118,54 +117,6 @@ Tổng quan:
     } finally {
       setIsGenerating(false);
     }
-  };
-
-  const handleLoadFallbackGame = () => {
-    const sampleSpec: GameSpecification = {
-      gameId: `game_sample_${Date.now()}`,
-      title: 'Kiểm tra Kiến thức Kiến trúc Web (Mẫu thử nghiệm)',
-      description: 'Bộ câu hỏi trắc nghiệm thử nghiệm kiến trúc đám mây và kỹ thuật web hiện đại.',
-      gameType: 'MULTIPLE_CHOICE',
-      questions: [
-        {
-          id: 'q_sample_1',
-          type: 'MULTIPLE_CHOICE',
-          question: 'Giao thức nào cung cấp kênh truyền thông hai chiều toàn phần (full-duplex) qua một kết nối TCP duy nhất?',
-          choices: ['A. HTTP/1.0', 'B. WebSocket', 'C. SMTP', 'D. FTP'],
-          correctAnswer: 'B. WebSocket',
-          explanation: 'WebSocket cung cấp kênh truyền dữ liệu hai chiều bền vững, có độ trễ thấp phù hợp cho trò chơi trực tuyến.',
-          difficulty: 'EASY',
-          sourceReference: {
-            sourceId: ingestedSources[0]?.sourceId || 'src_sample',
-            sourceType: 'WEBSITE',
-            sourceLocation: 'local://guide',
-          },
-        },
-        {
-          id: 'q_sample_2',
-          type: 'MULTIPLE_CHOICE',
-          question: 'Vai trò chính của bộ nhớ đệm trong RAM như Redis trong kiến trúc ứng dụng web là gì?',
-          choices: ['A. Lưu trữ lưu trữ vĩnh viễn', 'B. Giảm tải cơ sở dữ liệu và tăng tốc phản hồi', 'C. Xử lý đồ họa video', 'D. Định tuyến tên miền DNS'],
-          correctAnswer: 'B. Giảm tải cơ sở dữ liệu và tăng tốc phản hồi',
-          explanation: 'Bộ nhớ đệm lưu dữ liệu thường xuyên truy cập giúp giảm thời gian truy vấn đĩa cứng và tăng tốc độ xử lý.',
-          difficulty: 'MEDIUM',
-          sourceReference: {
-            sourceId: ingestedSources[0]?.sourceId || 'src_sample',
-            sourceType: 'WEBSITE',
-            sourceLocation: 'local://guide',
-          },
-        },
-      ],
-      settings: {
-        questionCount: 2,
-        timePerQuestion: 20,
-        scoringMode: 'SPEED_BONUS',
-      },
-      generatedAt: new Date().toISOString(),
-    };
-
-    setGeneratedSpec(sampleSpec);
-    toast.success('Đã nạp bộ câu hỏi thử nghiệm mẫu!', 'Sẵn sàng tạo phòng');
   };
 
   const handleCreateRoom = async (targetSpec?: GameSpecification): Promise<string | null> => {
@@ -206,21 +157,6 @@ Tổng quan:
       return null;
     } finally {
       setIsCreatingRoom(false);
-    }
-  };
-
-  const handleRunFullPipeline = async () => {
-    setIsRunningPipeline(true);
-    try {
-      const sId = await handleIngest();
-      if (!sId) return;
-
-      const spec = await handleGenerate(sId);
-      if (!spec) return;
-
-      await handleCreateRoom(spec);
-    } finally {
-      setIsRunningPipeline(false);
     }
   };
 
@@ -376,23 +312,6 @@ Tổng quan:
                 style={{ backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '6px', padding: '0.65rem 1.25rem', fontWeight: 600, cursor: (isGenerating || ingestedSources.length === 0) ? 'not-allowed' : 'pointer' }}
               >
                 {isGenerating ? 'Đang tạo bằng AI...' : 'Tạo trò chơi'}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleRunFullPipeline}
-                disabled={isRunningPipeline}
-                style={{ backgroundColor: '#16a34a', color: 'white', border: 'none', borderRadius: '6px', padding: '0.65rem 1.25rem', fontWeight: 600, cursor: isRunningPipeline ? 'not-allowed' : 'pointer' }}
-              >
-                {isRunningPipeline ? 'Đang chạy quy trình...' : 'Quy trình Demo 1-Click'}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleLoadFallbackGame}
-                style={{ backgroundColor: '#475569', color: '#e2e8f0', border: 'none', borderRadius: '6px', padding: '0.65rem 1rem', fontSize: '0.85rem', cursor: 'pointer' }}
-              >
-                Bộ câu hỏi thử nghiệm
               </button>
             </div>
           </div>
