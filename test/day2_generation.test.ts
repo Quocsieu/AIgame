@@ -568,4 +568,58 @@ describe('DAY 2 - AI Question Generation Test Suite', () => {
     assert.equal(data.leaderboard, undefined);
     assert.equal(data.wsUrl, undefined);
   });
+
+  // 19. Regression: Normalize null provenance fields from raw AI output
+  it('19. should normalize null provenance fields (page, sheet, row, section, paragraphIndex) from raw AI response without 422 error', async () => {
+    mockProvider.mockResponse = [
+      {
+        id: 'q_null_provenance',
+        type: 'MULTIPLE_CHOICE',
+        question: 'Does the system safely normalize null provenance fields?',
+        choices: ['A. Yes', 'B. No', 'C. Maybe', 'D. Never'],
+        correctAnswer: 'A. Yes',
+        explanation: 'Null provenance fields should be normalized to undefined.',
+        difficulty: 'EASY',
+        sourceReference: {
+          sourceId: 'src_test_day2_1',
+          sourceType: 'WEBSITE',
+          sourceLocation: 'https://tech-article.com/python-intro',
+          page: null,
+          sheet: null,
+          row: null,
+          section: null,
+          paragraphIndex: null,
+        },
+      },
+    ];
+
+    const res = await request(app)
+      .post('/api/games/generate')
+      .send({
+        sourceId: 'src_test_day2_1',
+        gameType: 'MULTIPLE_CHOICE',
+      });
+
+    assert.equal(res.status, 200);
+    assert.equal(res.body.success, true);
+    assert.ok(res.body.data.questions);
+    assert.equal(res.body.data.questions.length, 1);
+
+    const q = res.body.data.questions[0];
+    assert.equal(q.id, 'q_null_provenance');
+    assert.ok(q.sourceReference);
+    assert.equal(q.sourceReference.sourceId, 'src_test_day2_1');
+    assert.equal(q.sourceReference.sourceType, 'WEBSITE');
+    assert.equal(q.sourceReference.sourceLocation, 'https://tech-article.com/python-intro');
+    // Verify optional fields are not null (they serialize to undefined or fallback)
+    assert.equal(q.sourceReference.page, undefined);
+    assert.equal(q.sourceReference.sheet, undefined);
+    assert.equal(q.sourceReference.row, undefined);
+    assert.equal(q.sourceReference.paragraphIndex, undefined);
+    // Section should fallback to sampleDoc section title 'Overview'
+    assert.equal(q.sourceReference.section, 'Overview');
+
+    const parseResult = GameSpecificationSchema.safeParse(res.body.data);
+    assert.equal(parseResult.success, true);
+  });
 });

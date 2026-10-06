@@ -230,14 +230,30 @@ export class AiQuestionService {
 
       // Ensure id and fallback provenance if omitted by model
       const fallbackDoc = documents[0];
+      const rawRef = q.sourceReference;
+
+      const rawSection = typeof rawRef?.section === 'string' && rawRef.section.trim().length > 0
+        ? rawRef.section.trim()
+        : undefined;
+      const fallbackSection = (fallbackDoc.sections?.[0]?.title && fallbackDoc.sections[0].title.trim().length > 0)
+        ? fallbackDoc.sections[0].title.trim()
+        : undefined;
+
       const sourceReference = {
-        sourceId: q.sourceReference?.sourceId || fallbackDoc.sourceId,
-        sourceType: q.sourceReference?.sourceType || fallbackDoc.sourceType,
-        sourceLocation: q.sourceReference?.sourceLocation || fallbackDoc.sourceLocation,
-        section: q.sourceReference?.section || fallbackDoc.sections?.[0]?.title,
-        page: q.sourceReference?.page,
-        sheet: q.sourceReference?.sheet,
-        row: q.sourceReference?.row,
+        sourceId: (typeof rawRef?.sourceId === 'string' && rawRef.sourceId.trim().length > 0)
+          ? rawRef.sourceId.trim()
+          : fallbackDoc.sourceId,
+        sourceType: (typeof rawRef?.sourceType === 'string' && rawRef.sourceType.trim().length > 0)
+          ? rawRef.sourceType
+          : fallbackDoc.sourceType,
+        sourceLocation: (typeof rawRef?.sourceLocation === 'string' && rawRef.sourceLocation.trim().length > 0)
+          ? rawRef.sourceLocation.trim()
+          : fallbackDoc.sourceLocation,
+        section: rawSection ?? fallbackSection,
+        page: typeof rawRef?.page === 'number' && !Number.isNaN(rawRef.page) ? rawRef.page : undefined,
+        sheet: typeof rawRef?.sheet === 'string' && rawRef.sheet.trim().length > 0 ? rawRef.sheet.trim() : undefined,
+        row: typeof rawRef?.row === 'number' && !Number.isNaN(rawRef.row) ? rawRef.row : undefined,
+        paragraphIndex: typeof rawRef?.paragraphIndex === 'number' && !Number.isNaN(rawRef.paragraphIndex) ? rawRef.paragraphIndex : undefined,
       };
 
       const candidate = {
