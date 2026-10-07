@@ -8,6 +8,21 @@ interface DemoPageProps {
   onNavigateToPlay?: (roomCode: string) => void;
 }
 
+const formatGameTypeLabel = (type: string): string => {
+  switch (type) {
+    case 'MULTIPLE_CHOICE':
+      return 'Trắc nghiệm ABCD';
+    case 'FILL_IN_THE_BLANK':
+      return 'Điền từ';
+    case 'QUICK_BUTTON':
+      return 'Đúng / Sai';
+    case 'CROSSWORD':
+      return 'Ô chữ';
+    default:
+      return type;
+  }
+};
+
 export const DemoPage: React.FC<DemoPageProps> = ({ onNavigateToHost, onNavigateToPlay }) => {
   const toast = useToast();
 
@@ -520,7 +535,7 @@ Tổng quan:
                 </h2>
                 <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                   <span style={{ backgroundColor: '#1e293b', color: '#38bdf8', padding: '0.25rem 0.6rem', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, border: '1px solid #334155' }}>
-                    {generatedSpec.gameType}
+                    {formatGameTypeLabel(generatedSpec.gameType)}
                   </span>
                   <span style={{ backgroundColor: '#1e293b', color: '#f59e0b', padding: '0.25rem 0.6rem', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, border: '1px solid #334155' }}>
                     Độ khó: {generatedSpec.questions[0]?.difficulty === 'EASY' ? 'Dễ' : generatedSpec.questions[0]?.difficulty === 'HARD' ? 'Khó' : 'Trung bình'}

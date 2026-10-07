@@ -166,7 +166,7 @@ export const AppContent: React.FC = () => {
 
       {/* Chân trang */}
       <footer style={{ borderTop: '1px solid #1e293b', padding: '1.25rem', textAlign: 'center', color: '#64748b', fontSize: '0.825rem', backgroundColor: '#090d16' }}>
-        AI Content &rarr; Question &rarr; Realtime Multiplayer Game Engine &copy; 2026
+        Nội dung AI &rarr; Bộ câu hỏi &rarr; Đấu trường trực tiếp thời gian thực &copy; 2026
       </footer>
     </div>
   );
