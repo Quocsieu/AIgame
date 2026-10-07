@@ -31,7 +31,9 @@ export async function ingestSources(params: {
 }
 
 export async function generateGame(params: {
-  sourceId: string;
+  sourceId?: string;
+  sourceIds?: string[];
+  sources?: IngestedSource[];
   gameType: string;
   questionCount: number;
   timePerQuestion: number;

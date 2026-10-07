@@ -24,9 +24,12 @@ gameRouter.post(
 
       const requestData = parseResult.data;
 
-      // 2. Retrieve normalized source content from store
+      // 2. Retrieve normalized source content from sources passback or store fallback
       const sourceIds: string[] = requestData.sourceIds || (requestData.sourceId ? [requestData.sourceId] : []);
-      const documents = sourceStore.getMany(sourceIds);
+      const documents =
+        requestData.sources && requestData.sources.length > 0
+          ? requestData.sources
+          : sourceStore.getMany(sourceIds);
 
       if (documents.length === 0) {
         throw new AppError(

@@ -110,6 +110,7 @@ Tổng quan:
     try {
       const spec = await generateGame({
         sourceId: sId,
+        sources: ingestedSources,
         gameType,
         difficulty,
         questionCount,

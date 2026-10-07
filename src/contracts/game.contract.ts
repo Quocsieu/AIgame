@@ -1,5 +1,10 @@
 import { z } from 'zod';
-import { ProvenanceReferenceSchema, SourceTypeEnum } from './canonical.contract.js';
+import {
+  CanonicalDocument,
+  CanonicalDocumentSchema,
+  ProvenanceReferenceSchema,
+  SourceTypeEnum,
+} from './canonical.contract.js';
 
 export const GameTypeEnum = z.enum([
   'MULTIPLE_CHOICE',
@@ -140,13 +145,14 @@ export type GameSpecification = z.infer<typeof GameSpecificationSchema>;
 export const GenerateGameRequestSchema = z.object({
   sourceId: z.string().optional(),
   sourceIds: z.array(z.string()).optional(),
+  sources: z.array(CanonicalDocumentSchema).optional(),
   gameType: GameTypeEnum,
   difficulty: DifficultyEnum.optional(),
   questionCount: z.number().int().min(1).max(20).default(5).optional(),
   timePerQuestion: z.number().int().min(5).max(120).default(20).optional(),
   title: z.string().min(1).optional(),
-}).refine(data => data.sourceId || (data.sourceIds && data.sourceIds.length > 0), {
-  message: 'Either "sourceId" or "sourceIds" must be provided.',
+}).refine(data => data.sourceId || (data.sourceIds && data.sourceIds.length > 0) || (data.sources && data.sources.length > 0), {
+  message: 'Either "sourceId", "sourceIds", or "sources" must be provided.',
   path: ['sourceId'],
 });
 export type GenerateGameRequest = z.infer<typeof GenerateGameRequestSchema>;
