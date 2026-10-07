@@ -152,9 +152,36 @@ export class AiQuestionService {
 
     const sourceSnippets = documents.map(doc => {
       const boundedText = doc.text.slice(0, MAX_PROMPT_SOURCE_CHARS);
-      const preExtracted = doc.extractedItems.length > 0
-        ? `\nPRE-EXTRACTED QUESTIONS IN FILE:\n` + JSON.stringify(doc.extractedItems.slice(0, 10), null, 2)
-        : '';
+      let preExtracted = '';
+      if (doc.extractedItems.length > 0) {
+        const normalizedItems = doc.extractedItems.slice(0, 10).map(item => {
+          const normalized: Record<string, any> = {
+            id: item.id,
+            question: item.questionText,
+          };
+          if (item.choices && item.choices.length > 0) {
+            normalized.choices = item.choices;
+          }
+          if (typeof item.correctAnswer === 'string' && item.correctAnswer.trim().length > 0) {
+            normalized.correctAnswer = item.correctAnswer.trim();
+          }
+          if (item.sourceReference) {
+            normalized.sourceReference = item.sourceReference;
+          }
+          return normalized;
+        });
+
+        preExtracted = [
+          '',
+          'PRE-EXTRACTED QUESTIONS IN FILE (REFERENCE ONLY):',
+          'Note: The following questions were pre-extracted from the file. You may reference, adapt, or complete them.',
+          'CRITICAL SCHEMA RULES FOR OUTPUT:',
+          '- Final output MUST strictly adhere to the game schema with exact field names: "question", "choices", "correctAnswer".',
+          '- If a pre-extracted question lacks a correctAnswer, deduce the correct answer from the source content ONLY if supported by verifiable evidence in the source.',
+          '- NEVER invent or hallucinate answers outside the source content.',
+          JSON.stringify(normalizedItems, null, 2),
+        ].join('\n');
+      }
 
       return [
         `SOURCE ID: ${doc.sourceId}`,
@@ -300,11 +327,33 @@ export class AiQuestionService {
         paragraphIndex: typeof rawRef?.paragraphIndex === 'number' && !Number.isNaN(rawRef.paragraphIndex) ? rawRef.paragraphIndex : undefined,
       };
 
+      // Normalize question field with priority: q.question -> q.questionText -> q.question_text
+      let normalizedQuestion: string | undefined;
+      if (typeof q.question === 'string' && q.question.trim().length > 0) {
+        normalizedQuestion = q.question.trim();
+      } else if (typeof q.questionText === 'string' && q.questionText.trim().length > 0) {
+        normalizedQuestion = q.questionText.trim();
+      } else if (typeof q.question_text === 'string' && q.question_text.trim().length > 0) {
+        normalizedQuestion = q.question_text.trim();
+      }
+
+      // Normalize correctAnswer field with priority: q.correctAnswer -> q.correct_answer -> q.answer
+      let normalizedCorrectAnswer: string | undefined;
+      if (typeof q.correctAnswer === 'string' && q.correctAnswer.trim().length > 0) {
+        normalizedCorrectAnswer = q.correctAnswer.trim();
+      } else if (typeof q.correct_answer === 'string' && q.correct_answer.trim().length > 0) {
+        normalizedCorrectAnswer = q.correct_answer.trim();
+      } else if (typeof q.answer === 'string' && q.answer.trim().length > 0) {
+        normalizedCorrectAnswer = q.answer.trim();
+      }
+
       const candidate = {
         ...q,
         id: q.id || `q_${i + 1}`,
         type: gameType,
         difficulty: effectiveDifficulty,
+        question: normalizedQuestion,
+        correctAnswer: normalizedCorrectAnswer,
         sourceReference,
       };
 
