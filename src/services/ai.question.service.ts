@@ -36,7 +36,7 @@ export class GeminiModelProvider implements AiModelProvider {
     const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
 
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), LIMITS.HTTP_REQUEST_TIMEOUT_MS);
+    const timeoutId = setTimeout(() => controller.abort(), LIMITS.AI_GENERATION_TIMEOUT_MS);
 
     try {
       const response = await fetch(endpoint, {
@@ -78,7 +78,7 @@ export class GeminiModelProvider implements AiModelProvider {
     } catch (err: unknown) {
       if (err instanceof AppError) throw err;
       if (err instanceof Error && err.name === 'AbortError') {
-        throw new AppError('AI_TIMEOUT', `AI generation timed out after ${LIMITS.HTTP_REQUEST_TIMEOUT_MS}ms`, 504);
+        throw new AppError('AI_TIMEOUT', `AI generation timed out after ${LIMITS.AI_GENERATION_TIMEOUT_MS}ms`, 504);
       }
       throw new AppError('AI_GENERATION_FAILED', `AI generation call failed: ${err instanceof Error ? err.message : String(err)}`, 502);
     } finally {
