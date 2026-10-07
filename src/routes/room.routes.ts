@@ -11,6 +11,12 @@ export const roomRouter = Router();
  * Helper to construct the browser join URL for a room.
  */
 function buildJoinUrl(req: Request, roomCode: string): string {
+  const frontendUrl = (process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
+
+  if (frontendUrl) {
+    return `${frontendUrl}/?room=${roomCode}`;
+  }
+
   const host = req.get('host') || 'localhost:3000';
   const protocol = req.protocol || 'http';
   return `${protocol}://${host}/?room=${roomCode}`;
