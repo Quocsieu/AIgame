@@ -58,30 +58,37 @@ export const AppContent: React.FC = () => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#0f172a', color: '#f8fafc', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#f8fafc', display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       {/* Thanh điều hướng chính */}
-      <nav style={{ backgroundColor: '#1e293b', borderBottom: '1px solid #334155', padding: '0.75rem 1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }} onClick={() => setActiveTab('demo')}>
-          <span style={{ fontSize: '1.5rem' }}>⚡</span>
+      <nav style={{ backgroundColor: '#0f172a', borderBottom: '1px solid #1e293b', padding: '0.85rem 1.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', boxShadow: '0 4px 20px -2px rgba(0, 0, 0, 0.5)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', cursor: 'pointer', userSelect: 'none' }} onClick={() => setActiveTab('demo')}>
+          <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', boxShadow: '0 0 15px rgba(37, 99, 235, 0.4)' }}>
+            ⚡
+          </div>
           <div>
-            <div style={{ fontWeight: 800, fontSize: '1.15rem', color: '#38bdf8' }}>AI Game Platform</div>
-            <div style={{ fontSize: '0.75rem', color: '#94a3b8' }}>Nền tảng trò chơi kiến thức tương tác</div>
+            <div style={{ fontWeight: 800, fontSize: '1.2rem', color: '#ffffff', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              AI GAME PLATFORM
+            </div>
+            <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 500 }}>
+              Nền tảng thi đấu kiến thức trực tiếp nhiều người chơi
+            </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', backgroundColor: '#090d16', padding: '0.3rem', borderRadius: '8px', border: '1px solid #1e293b' }}>
           <button
             type="button"
             onClick={() => setActiveTab('demo')}
             style={{
-              padding: '0.5rem 1rem',
+              padding: '0.5rem 1.1rem',
               borderRadius: '6px',
               border: 'none',
-              backgroundColor: activeTab === 'demo' ? '#2563eb' : '#334155',
-              color: 'white',
+              backgroundColor: activeTab === 'demo' ? '#2563eb' : 'transparent',
+              color: activeTab === 'demo' ? '#ffffff' : '#94a3b8',
               fontWeight: 600,
-              fontSize: '0.9rem',
+              fontSize: '0.875rem',
               cursor: 'pointer',
+              transition: 'all 0.15s ease',
             }}
           >
             📋 Bảng Điều Khiển (Demo)
@@ -91,14 +98,15 @@ export const AppContent: React.FC = () => {
             type="button"
             onClick={() => setActiveTab('host')}
             style={{
-              padding: '0.5rem 1rem',
+              padding: '0.5rem 1.1rem',
               borderRadius: '6px',
               border: 'none',
-              backgroundColor: activeTab === 'host' ? '#2563eb' : '#334155',
-              color: 'white',
+              backgroundColor: activeTab === 'host' ? '#2563eb' : 'transparent',
+              color: activeTab === 'host' ? '#ffffff' : '#94a3b8',
               fontWeight: 600,
-              fontSize: '0.9rem',
+              fontSize: '0.875rem',
               cursor: 'pointer',
+              transition: 'all 0.15s ease',
             }}
           >
             👑 Quản Trị (Host)
@@ -108,14 +116,15 @@ export const AppContent: React.FC = () => {
             type="button"
             onClick={() => setActiveTab(roomCode && displayName ? 'play' : 'join')}
             style={{
-              padding: '0.5rem 1rem',
+              padding: '0.5rem 1.1rem',
               borderRadius: '6px',
               border: 'none',
-              backgroundColor: (activeTab === 'join' || activeTab === 'play') ? '#2563eb' : '#334155',
-              color: 'white',
+              backgroundColor: (activeTab === 'join' || activeTab === 'play') ? '#2563eb' : 'transparent',
+              color: (activeTab === 'join' || activeTab === 'play') ? '#ffffff' : '#94a3b8',
               fontWeight: 600,
-              fontSize: '0.9rem',
+              fontSize: '0.875rem',
               cursor: 'pointer',
+              transition: 'all 0.15s ease',
             }}
           >
             🎮 Người Chơi (Player)
@@ -124,7 +133,7 @@ export const AppContent: React.FC = () => {
       </nav>
 
       {/* Nội dung chính theo tab */}
-      <main style={{ flex: 1, padding: '1rem' }}>
+      <main style={{ flex: 1, padding: '1.25rem' }}>
         {activeTab === 'demo' && (
           <DemoPage
             onNavigateToHost={handleNavigateToHost}
@@ -156,7 +165,7 @@ export const AppContent: React.FC = () => {
       </main>
 
       {/* Chân trang */}
-      <footer style={{ borderTop: '1px solid #334155', padding: '1rem', textAlign: 'center', color: '#64748b', fontSize: '0.85rem' }}>
+      <footer style={{ borderTop: '1px solid #1e293b', padding: '1.25rem', textAlign: 'center', color: '#64748b', fontSize: '0.825rem', backgroundColor: '#090d16' }}>
         AI Content &rarr; Question &rarr; Realtime Multiplayer Game Engine &copy; 2026
       </footer>
     </div>

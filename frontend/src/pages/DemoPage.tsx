@@ -169,70 +169,82 @@ Tổng quan:
   };
 
   return (
-    <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '1.5rem' }}>
-      <header style={{ marginBottom: '2rem', borderBottom: '1px solid #334155', paddingBottom: '1rem' }}>
-        <h1 style={{ margin: 0, color: '#38bdf8', fontSize: '1.8rem', fontWeight: 800 }}>
-          Bảng Điều Khiển Nền Tảng Trò Chơi AI
+    <div style={{ maxWidth: '1140px', margin: '0 auto', padding: '1rem 0' }}>
+      {/* Header khu vực bảng điều khiển */}
+      <header style={{ marginBottom: '2rem', paddingBottom: '1.25rem', borderBottom: '1px solid #1e293b' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.25rem 0.75rem', borderRadius: '4px', backgroundColor: 'rgba(37, 99, 235, 0.12)', border: '1px solid rgba(37, 99, 235, 0.3)', color: '#60a5fa', fontSize: '0.75rem', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '0.75rem' }}>
+          <span>⚡ TRUNG TÂM KHỞI TẠO TRÒ CHƠI</span>
+        </div>
+        <h1 style={{ margin: 0, color: '#ffffff', fontSize: '2.1rem', fontWeight: 900, letterSpacing: '-0.025em' }}>
+          Biến Nội Dung Thành Đấu Trường Kiến Thức
         </h1>
-        <p style={{ color: '#94a3b8', margin: '0.4rem 0 0 0', fontSize: '1rem' }}>
-          Chuyển đổi nội dung tài liệu thành trò chơi tương tác nhiều người chơi theo thời gian thực
+        <p style={{ color: '#94a3b8', margin: '0.5rem 0 0 0', fontSize: '1.05rem', lineHeight: '1.5' }}>
+          Tự động trích xuất website và tài liệu doanh nghiệp, tổng hợp câu hỏi thực tế qua AI và tạo phòng thi đấu trực tiếp trong 3 bước.
         </p>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(420px, 1fr))', gap: '1.5rem' }}>
-        {/* Cột Trái: Nhập dữ liệu & Tạo trò chơi */}
-        <div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(440px, 1fr))', gap: '1.75rem', alignItems: 'start' }}>
+        {/* Cột Trái: Nhập dữ liệu & Cấu hình AI */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
           {/* Bước 1: Nhập dữ liệu nguồn */}
-          <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '10px', padding: '1.25rem', marginBottom: '1.5rem' }}>
-            <h2 style={{ margin: '0 0 0.5rem 0', color: '#f8fafc', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ backgroundColor: '#2563eb', color: 'white', borderRadius: '50%', width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem' }}>1</span>
-              Nhập nội dung nguồn
-            </h2>
-            <p style={{ color: '#94a3b8', fontSize: '0.875rem', margin: '0 0 1rem 0' }}>
-              Cung cấp liên kết Website hoặc tải lên tệp tài liệu (DOCX, XLSX, PDF).
+          <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '1.5rem', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+              <div style={{ width: '28px', height: '28px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem', fontWeight: 800 }}>
+                1
+              </div>
+              <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.25rem', fontWeight: 800 }}>
+                Nguồn Nội Dung
+              </h2>
+            </div>
+            <p style={{ color: '#94a3b8', fontSize: '0.875rem', margin: '0 0 1.25rem 0' }}>
+              Cung cấp liên kết Website bán hàng/dịch vụ hoặc tải lên tệp tài liệu (DOCX, XLSX, PDF).
             </p>
 
-            <label style={{ display: 'block', color: '#cbd5e1', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.3rem' }}>
-              Địa chỉ Website:
-            </label>
-            <input
-              type="text"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://example.com/bai-viet"
-              style={{ width: '100%', padding: '0.65rem', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '6px', color: 'white', marginBottom: '0.85rem' }}
-            />
-
-            <label style={{ display: 'block', color: '#cbd5e1', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.3rem' }}>
-              Hoặc Tải lên tệp tài liệu (DOCX, XLSX, PDF):
-            </label>
-            <input
-              type="file"
-              accept=".docx,.xlsx,.pdf"
-              onChange={(e) => setFile(e.target.files?.[0] || null)}
-              style={{ width: '100%', padding: '0.45rem', backgroundColor: '#0f172a', border: '1px dashed #475569', borderRadius: '6px', color: '#94a3b8', marginBottom: '0.85rem' }}
-            />
+            <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.4rem' }}>
+                🌐 Địa chỉ Website:
+              </label>
+              <input
+                type="text"
+                value={url}
+                onChange={(e) => setUrl(e.target.value)}
+                placeholder="https://example.com/san-pham-dich-vu"
+                style={{ width: '100%', padding: '0.75rem 0.85rem', backgroundColor: '#090d16', border: '1px solid #334155', borderRadius: '8px', color: '#ffffff', fontSize: '0.925rem', boxSizing: 'border-box' }}
+              />
+            </div>
 
             <div style={{ marginBottom: '1rem' }}>
+              <label style={{ display: 'block', color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.4rem' }}>
+                📁 Hoặc tải lên tệp tài liệu (DOCX, XLSX, PDF):
+              </label>
+              <input
+                type="file"
+                accept=".docx,.xlsx,.pdf"
+                onChange={(e) => setFile(e.target.files?.[0] || null)}
+                style={{ width: '100%', padding: '0.65rem 0.85rem', backgroundColor: '#090d16', border: '1px dashed #475569', borderRadius: '8px', color: '#94a3b8', fontSize: '0.875rem', boxSizing: 'border-box' }}
+              />
+            </div>
+
+            <div style={{ marginBottom: '1.25rem' }}>
               <button
                 type="button"
                 onClick={handleLoadSample}
-                style={{ backgroundColor: '#334155', color: '#cbd5e1', border: 'none', borderRadius: '4px', padding: '0.35rem 0.75rem', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 600 }}
+                style={{ backgroundColor: '#1e293b', color: '#94a3b8', border: '1px solid #334155', borderRadius: '6px', padding: '0.4rem 0.85rem', fontSize: '0.8rem', cursor: 'pointer', fontWeight: 600, transition: 'all 0.15s ease' }}
               >
-                Tải nội dung mẫu
+                📄 Nạp nội dung văn bản mẫu
               </button>
             </div>
 
             {showSampleText && (
-              <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', color: '#cbd5e1', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.3rem' }}>
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ display: 'block', color: '#cbd5e1', fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.4rem' }}>
                   Nội dung mẫu tham khảo:
                 </label>
                 <textarea
                   rows={4}
                   value={sampleText}
                   onChange={(e) => setSampleText(e.target.value)}
-                  style={{ width: '100%', padding: '0.5rem', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '6px', color: 'white', fontSize: '0.85rem' }}
+                  style={{ width: '100%', padding: '0.65rem', backgroundColor: '#090d16', border: '1px solid #334155', borderRadius: '8px', color: '#f8fafc', fontSize: '0.85rem', lineHeight: '1.4', boxSizing: 'border-box' }}
                 />
               </div>
             )}
@@ -241,59 +253,101 @@ Tổng quan:
               type="button"
               onClick={() => handleIngest()}
               disabled={isIngesting}
-              style={{ backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '6px', padding: '0.65rem 1.25rem', fontWeight: 600, cursor: isIngesting ? 'not-allowed' : 'pointer' }}
+              style={{
+                width: '100%',
+                backgroundColor: isIngesting ? '#334155' : '#2563eb',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '0.8rem 1.25rem',
+                fontWeight: 700,
+                fontSize: '0.95rem',
+                cursor: isIngesting ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                boxShadow: isIngesting ? 'none' : '0 4px 14px rgba(37, 99, 235, 0.35)',
+              }}
             >
-              {isIngesting ? 'Đang trích xuất...' : 'Trích xuất nội dung'}
+              {isIngesting ? '⏳ Đang trích xuất nội dung...' : 'Trích xuất nội dung nguồn'}
             </button>
 
             {ingestedSources.length > 0 && (
-              <div style={{ marginTop: '0.85rem', padding: '0.65rem', backgroundColor: '#0f172a', borderRadius: '6px', border: '1px solid #334155', color: '#38bdf8', fontSize: '0.85rem' }}>
-                ✓ Đã nạp thành công <strong>{ingestedSources[0].sourceName}</strong> (Mã: {ingestedSources[0].sourceId})
+              <div style={{ marginTop: '1rem', padding: '0.85rem 1rem', backgroundColor: 'rgba(16, 185, 129, 0.08)', borderRadius: '8px', border: '1px solid rgba(16, 185, 129, 0.3)', color: '#34d399', fontSize: '0.875rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span>✓</span>
+                <div>
+                  Đã nạp thành công <strong>{ingestedSources[0].sourceName}</strong> (Mã: {ingestedSources[0].sourceId})
+                </div>
               </div>
             )}
           </div>
 
           {/* Bước 2: Tạo trò chơi AI */}
-          <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '10px', padding: '1.25rem' }}>
-            <h2 style={{ margin: '0 0 0.5rem 0', color: '#f8fafc', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ backgroundColor: '#2563eb', color: 'white', borderRadius: '50%', width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem' }}>2</span>
-              Tạo trò chơi bằng AI
-            </h2>
-            <p style={{ color: '#94a3b8', fontSize: '0.875rem', margin: '0 0 1rem 0' }}>
-              Mô hình AI sẽ tự động tạo các câu hỏi bám sát thực tế dựa trên nội dung nguồn.
+          <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '1.5rem', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+              <div style={{ width: '28px', height: '28px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem', fontWeight: 800 }}>
+                2
+              </div>
+              <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.25rem', fontWeight: 800 }}>
+                Cấu Hình & Tạo Trò Chơi AI
+              </h2>
+            </div>
+            <p style={{ color: '#94a3b8', fontSize: '0.875rem', margin: '0 0 1.25rem 0' }}>
+              Mô hình AI tự động phân tích và tạo câu hỏi bám sát các thông tin thực tế từ tài liệu nguồn.
             </p>
 
-            <label style={{ display: 'block', color: '#cbd5e1', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.3rem' }}>
-              Loại trò chơi:
-            </label>
-            <select
-              value={gameType}
-              onChange={(e) => setGameType(e.target.value)}
-              style={{ width: '100%', padding: '0.65rem', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '6px', color: 'white', marginBottom: '0.85rem' }}
-            >
-              <option value="MULTIPLE_CHOICE">Trắc nghiệm (4 Lựa chọn)</option>
-              <option value="FILL_IN_THE_BLANK">Điền vào chỗ trống</option>
-              <option value="QUICK_BUTTON">Nút bấm nhanh (Đúng / Sai)</option>
-              <option value="CROSSWORD">Ô chữ (Gợi ý từ khóa)</option>
-            </select>
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.4rem' }}>
+                Hình thức câu hỏi:
+              </label>
+              <select
+                value={gameType}
+                onChange={(e) => setGameType(e.target.value)}
+                style={{ width: '100%', padding: '0.75rem 0.85rem', backgroundColor: '#090d16', border: '1px solid #334155', borderRadius: '8px', color: '#ffffff', fontSize: '0.925rem', boxSizing: 'border-box' }}
+              >
+                <option value="MULTIPLE_CHOICE">🎯 Trắc nghiệm (4 Lựa chọn ABCD)</option>
+                <option value="FILL_IN_THE_BLANK">✍️ Điền vào chỗ trống</option>
+                <option value="QUICK_BUTTON">⚡ Nút bấm nhanh (Đúng / Sai)</option>
+                <option value="CROSSWORD">🧩 Ô chữ (Gợi ý từ khóa)</option>
+              </select>
+            </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '1rem' }}>
-              <div>
-                <label style={{ display: 'block', color: '#cbd5e1', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.3rem' }}>
-                  Độ khó:
-                </label>
-                <select
-                  value={difficulty}
-                  onChange={(e) => setDifficulty(e.target.value as Difficulty)}
-                  style={{ width: '100%', padding: '0.65rem', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '6px', color: 'white' }}
-                >
-                  <option value="EASY">Dễ</option>
-                  <option value="MEDIUM">Trung bình</option>
-                  <option value="HARD">Khó</option>
-                </select>
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.5rem' }}>
+                Độ khó câu hỏi:
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+                {(['EASY', 'MEDIUM', 'HARD'] as Difficulty[]).map((lvl) => {
+                  const label = lvl === 'EASY' ? 'Dễ' : lvl === 'MEDIUM' ? 'Trung bình' : 'Khó';
+                  const isSelected = difficulty === lvl;
+                  return (
+                    <button
+                      key={lvl}
+                      type="button"
+                      onClick={() => setDifficulty(lvl)}
+                      style={{
+                        padding: '0.65rem 0.5rem',
+                        borderRadius: '8px',
+                        border: isSelected ? '1px solid #2563eb' : '1px solid #334155',
+                        backgroundColor: isSelected ? '#2563eb' : '#090d16',
+                        color: isSelected ? '#ffffff' : '#94a3b8',
+                        fontWeight: 700,
+                        fontSize: '0.875rem',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
               </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
               <div>
-                <label style={{ display: 'block', color: '#cbd5e1', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.3rem' }}>
+                <label style={{ display: 'block', color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.4rem' }}>
                   Số câu hỏi:
                 </label>
                 <input
@@ -302,88 +356,129 @@ Tổng quan:
                   max={20}
                   value={questionCount}
                   onChange={(e) => setQuestionCount(parseInt(e.target.value, 10) || 5)}
-                  style={{ width: '100%', padding: '0.65rem', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '6px', color: 'white' }}
+                  style={{ width: '100%', padding: '0.7rem 0.85rem', backgroundColor: '#090d16', border: '1px solid #334155', borderRadius: '8px', color: '#ffffff', fontSize: '0.925rem', boxSizing: 'border-box' }}
                 />
               </div>
               <div>
-                <label style={{ display: 'block', color: '#cbd5e1', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.3rem' }}>
-                  Thời gian / câu (giây):
+                <label style={{ display: 'block', color: '#e2e8f0', fontSize: '0.875rem', fontWeight: 600, marginBottom: '0.4rem' }}>
+                  Thời gian / câu:
                 </label>
-                <input
-                  type="number"
-                  min={5}
-                  max={120}
-                  value={timePerQuestion}
-                  onChange={(e) => setTimePerQuestion(parseInt(e.target.value, 10) || 20)}
-                  style={{ width: '100%', padding: '0.65rem', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '6px', color: 'white' }}
-                />
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="number"
+                    min={5}
+                    max={120}
+                    value={timePerQuestion}
+                    onChange={(e) => setTimePerQuestion(parseInt(e.target.value, 10) || 20)}
+                    style={{ width: '100%', padding: '0.7rem 2.5rem 0.7rem 0.85rem', backgroundColor: '#090d16', border: '1px solid #334155', borderRadius: '8px', color: '#ffffff', fontSize: '0.925rem', boxSizing: 'border-box' }}
+                  />
+                  <span style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: '#64748b', fontSize: '0.85rem', fontWeight: 600, pointerEvents: 'none' }}>
+                    giây
+                  </span>
+                </div>
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={() => handleGenerate()}
-                disabled={isGenerating || ingestedSources.length === 0}
-                style={{ backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '6px', padding: '0.65rem 1.25rem', fontWeight: 600, cursor: (isGenerating || ingestedSources.length === 0) ? 'not-allowed' : 'pointer' }}
-              >
-                {isGenerating ? 'Đang tạo bằng AI...' : 'Tạo trò chơi'}
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => handleGenerate()}
+              disabled={isGenerating || ingestedSources.length === 0}
+              style={{
+                width: '100%',
+                backgroundColor: (isGenerating || ingestedSources.length === 0) ? '#334155' : '#2563eb',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '0.85rem 1.25rem',
+                fontWeight: 700,
+                fontSize: '1rem',
+                cursor: (isGenerating || ingestedSources.length === 0) ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                boxShadow: (isGenerating || ingestedSources.length === 0) ? 'none' : '0 4px 16px rgba(37, 99, 235, 0.4)',
+              }}
+            >
+              {isGenerating ? '🤖 Đang tạo trò chơi bằng AI...' : 'Tạo trò chơi bằng AI →'}
+            </button>
           </div>
         </div>
 
-        {/* Cột Phải: Tạo phòng, QR & Danh sách câu hỏi */}
-        <div>
+        {/* Cột Phải: Tạo phòng, QR & Chi tiết câu hỏi */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.75rem' }}>
           {/* Bước 3: Tạo phòng chơi & QR */}
-          <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '10px', padding: '1.25rem', marginBottom: '1.5rem' }}>
-            <h2 style={{ margin: '0 0 0.5rem 0', color: '#f8fafc', fontSize: '1.2rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ backgroundColor: '#2563eb', color: 'white', borderRadius: '50%', width: '24px', height: '24px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.85rem' }}>3</span>
-              Phòng chơi nhiều người & Mã QR
-            </h2>
-            <p style={{ color: '#94a3b8', fontSize: '0.875rem', margin: '0 0 1rem 0' }}>
-              Khởi tạo phòng chơi hỗ trợ tối đa 300 người chơi đồng thời trên máy tính và điện thoại.
+          <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '1.5rem', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+              <div style={{ width: '28px', height: '28px', borderRadius: '6px', backgroundColor: '#2563eb', color: '#ffffff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.9rem', fontWeight: 800 }}>
+                3
+              </div>
+              <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.25rem', fontWeight: 800 }}>
+                Phòng Chơi & Mã QR
+              </h2>
+            </div>
+            <p style={{ color: '#94a3b8', fontSize: '0.875rem', margin: '0 0 1.25rem 0' }}>
+              Khởi tạo phòng đấu nhiều người chơi theo thời gian thực (hỗ trợ tối đa 300 người chơi đồng thời).
             </p>
 
             <button
               type="button"
               onClick={() => handleCreateRoom()}
               disabled={isCreatingRoom || !generatedSpec}
-              style={{ backgroundColor: '#2563eb', color: 'white', border: 'none', borderRadius: '6px', padding: '0.65rem 1.25rem', fontWeight: 600, cursor: (isCreatingRoom || !generatedSpec) ? 'not-allowed' : 'pointer' }}
+              style={{
+                width: '100%',
+                backgroundColor: (isCreatingRoom || !generatedSpec) ? '#334155' : '#2563eb',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '8px',
+                padding: '0.85rem 1.25rem',
+                fontWeight: 700,
+                fontSize: '1rem',
+                cursor: (isCreatingRoom || !generatedSpec) ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                boxShadow: (isCreatingRoom || !generatedSpec) ? 'none' : '0 4px 16px rgba(37, 99, 235, 0.4)',
+              }}
             >
-              {isCreatingRoom ? 'Đang tạo phòng...' : 'Tạo phòng chơi'}
+              {isCreatingRoom ? '⏳ Đang khởi tạo phòng chơi...' : 'Khởi tạo phòng chơi'}
             </button>
 
             {roomCode && (
-              <div style={{ marginTop: '1.25rem', padding: '1rem', backgroundColor: '#0f172a', borderRadius: '8px', border: '1px solid #334155' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
-                  <div>
-                    <span style={{ fontSize: '0.8rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 700, display: 'block' }}>MÃ PHÒNG:</span>
-                    <span style={{ fontSize: '2rem', fontWeight: 800, letterSpacing: '4px', color: '#38bdf8', padding: '0.2rem 1rem', borderRadius: '6px', display: 'inline-block', border: '2px dashed #0284c7', marginTop: '0.25rem' }}>
+              <div style={{ marginTop: '1.5rem', padding: '1.25rem', backgroundColor: '#090d16', borderRadius: '10px', border: '1px solid #1e293b' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.5rem' }}>
+                  <div style={{ flex: '1 1 200px' }}>
+                    <div style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.08em', marginBottom: '0.35rem' }}>
+                      MÃ PHÒNG THI ĐẤU
+                    </div>
+                    <div style={{ fontSize: '2.5rem', fontWeight: 900, letterSpacing: '0.15em', color: '#38bdf8', padding: '0.3rem 1.25rem', borderRadius: '8px', display: 'inline-block', border: '2px dashed #0284c7', backgroundColor: '#0f172a' }}>
                       {roomCode}
-                    </span>
-                    <p style={{ margin: '0.75rem 0 0.25rem 0', fontSize: '0.85rem', color: '#94a3b8' }}>
-                      Liên kết tham gia:<br />
-                      <span style={{ color: '#38bdf8', wordBreak: 'break-all', fontWeight: 600 }}>{joinUrl}</span>
-                    </p>
+                    </div>
+                    <div style={{ margin: '1rem 0 0.5rem 0', fontSize: '0.85rem', color: '#94a3b8' }}>
+                      Đường dẫn tham gia:<br />
+                      <span style={{ color: '#38bdf8', wordBreak: 'break-all', fontWeight: 600, fontSize: '0.9rem' }}>{joinUrl}</span>
+                    </div>
                     <button
                       type="button"
                       onClick={handleCopyLink}
-                      style={{ backgroundColor: '#334155', color: '#f8fafc', border: 'none', borderRadius: '4px', padding: '0.3rem 0.75rem', fontSize: '0.8rem', cursor: 'pointer', marginTop: '0.5rem' }}
+                      style={{ backgroundColor: '#1e293b', color: '#f8fafc', border: '1px solid #334155', borderRadius: '6px', padding: '0.4rem 0.85rem', fontSize: '0.8rem', cursor: 'pointer', marginTop: '0.4rem', fontWeight: 600 }}
                     >
-                      Sao chép liên kết
+                      📋 Sao chép liên kết
                     </button>
                   </div>
 
                   {qrDataUrl && (
                     <div style={{ textAlign: 'center' }}>
-                      <img src={qrDataUrl} alt="QR Tham Gia Phòng" style={{ width: '130px', height: '130px', borderRadius: '6px', border: '3px solid white', backgroundColor: 'white' }} />
-                      <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.25rem' }}>Quét mã để tham gia</div>
+                      <div style={{ padding: '8px', backgroundColor: 'white', borderRadius: '10px', display: 'inline-block', boxShadow: '0 8px 20px rgba(0, 0, 0, 0.5)' }}>
+                        <img src={qrDataUrl} alt="QR Tham Gia Phòng" style={{ width: '130px', height: '130px', display: 'block' }} />
+                      </div>
+                      <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginTop: '0.4rem', fontWeight: 600 }}>Quét mã QR để vào phòng</div>
                     </div>
                   )}
                 </div>
 
-                <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.25rem', flexWrap: 'wrap' }}>
+                <div style={{ display: 'flex', gap: '0.75rem', marginTop: '1.5rem', flexWrap: 'wrap' }}>
                   <button
                     type="button"
                     onClick={() => {
@@ -393,9 +488,9 @@ Tổng quan:
                         window.open(`/?room=${roomCode}&token=${hostToken}`, '_blank');
                       }
                     }}
-                    style={{ backgroundColor: '#16a34a', color: 'white', border: 'none', borderRadius: '6px', padding: '0.65rem 1.25rem', fontWeight: 700, cursor: 'pointer' }}
+                    style={{ flex: '1 1 180px', backgroundColor: '#16a34a', color: '#ffffff', border: 'none', borderRadius: '8px', padding: '0.75rem 1.25rem', fontWeight: 700, fontSize: '0.95rem', cursor: 'pointer', boxShadow: '0 4px 14px rgba(22, 163, 74, 0.35)', textAlign: 'center' }}
                   >
-                    Mở màn hình quản trị &rarr;
+                    👑 Mở màn hình quản trị (Host) →
                   </button>
 
                   <button
@@ -407,9 +502,9 @@ Tổng quan:
                         window.open(`/?room=${roomCode}`, '_blank');
                       }
                     }}
-                    style={{ backgroundColor: '#334155', color: 'white', border: 'none', borderRadius: '6px', padding: '0.65rem 1.25rem', fontWeight: 600, cursor: 'pointer' }}
+                    style={{ flex: '1 1 160px', backgroundColor: '#1e293b', color: '#ffffff', border: '1px solid #334155', borderRadius: '8px', padding: '0.75rem 1.25rem', fontWeight: 600, fontSize: '0.95rem', cursor: 'pointer', textAlign: 'center' }}
                   >
-                    Mở màn hình người chơi
+                    🎮 Mở màn hình người chơi
                   </button>
                 </div>
               </div>
@@ -418,38 +513,42 @@ Tổng quan:
 
           {/* Chi tiết trò chơi đã tạo */}
           {generatedSpec && (
-            <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '10px', padding: '1.25rem' }}>
-              <h2 style={{ margin: '0 0 0.5rem 0', color: '#f8fafc', fontSize: '1.15rem' }}>
-                Chi tiết bộ câu hỏi đã tạo
-              </h2>
-              <div style={{ marginBottom: '0.5rem' }}>
-                <span style={{ backgroundColor: '#0369a1', color: '#e0f2fe', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700, marginRight: '0.5rem' }}>
-                  {generatedSpec.gameType}
-                </span>
-                <span style={{ backgroundColor: '#475569', color: '#f1f5f9', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700, marginRight: '0.5rem' }}>
-                  Độ khó: {generatedSpec.questions[0]?.difficulty === 'EASY' ? 'Dễ' : generatedSpec.questions[0]?.difficulty === 'HARD' ? 'Khó' : 'Trung bình'}
-                </span>
-                <span style={{ backgroundColor: '#166534', color: '#dcfce7', padding: '0.2rem 0.5rem', borderRadius: '4px', fontSize: '0.75rem', fontWeight: 700 }}>
-                  {generatedSpec.questions.length} câu hỏi
-                </span>
+            <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '1.5rem', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.3)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+                <h2 style={{ margin: 0, color: '#f8fafc', fontSize: '1.2rem', fontWeight: 800 }}>
+                  Bộ Câu Hỏi Đã Khởi Tạo
+                </h2>
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  <span style={{ backgroundColor: '#1e293b', color: '#38bdf8', padding: '0.25rem 0.6rem', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, border: '1px solid #334155' }}>
+                    {generatedSpec.gameType}
+                  </span>
+                  <span style={{ backgroundColor: '#1e293b', color: '#f59e0b', padding: '0.25rem 0.6rem', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, border: '1px solid #334155' }}>
+                    Độ khó: {generatedSpec.questions[0]?.difficulty === 'EASY' ? 'Dễ' : generatedSpec.questions[0]?.difficulty === 'HARD' ? 'Khó' : 'Trung bình'}
+                  </span>
+                  <span style={{ backgroundColor: '#1e293b', color: '#34d399', padding: '0.25rem 0.6rem', borderRadius: '6px', fontSize: '0.75rem', fontWeight: 700, border: '1px solid #334155' }}>
+                    {generatedSpec.questions.length} câu hỏi
+                  </span>
+                </div>
               </div>
-              <h3 style={{ margin: '0.5rem 0 0.25rem 0', color: '#38bdf8', fontSize: '1.1rem' }}>
+
+              <h3 style={{ margin: '0 0 0.4rem 0', color: '#38bdf8', fontSize: '1.15rem', fontWeight: 800 }}>
                 {generatedSpec.title}
               </h3>
-              <p style={{ margin: '0 0 1rem 0', color: '#94a3b8', fontSize: '0.85rem' }}>
+              <p style={{ margin: '0 0 1.25rem 0', color: '#94a3b8', fontSize: '0.875rem', lineHeight: '1.5' }}>
                 {generatedSpec.description}
               </p>
 
-              <div style={{ maxHeight: '280px', overflowY: 'auto' }}>
+              <div style={{ maxHeight: '320px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.75rem', paddingRight: '0.25rem' }}>
                 {generatedSpec.questions.map((q, idx) => (
-                  <div key={q.id || idx} style={{ marginBottom: '0.65rem', padding: '0.65rem', backgroundColor: '#0f172a', borderRadius: '6px', border: '1px solid #334155' }}>
-                    <div style={{ fontWeight: 700, fontSize: '0.9rem', color: '#f1f5f9' }}>
-                      {idx + 1}. {q.question}
+                  <div key={q.id || idx} style={{ padding: '0.85rem 1rem', backgroundColor: '#090d16', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.925rem', color: '#f1f5f9', display: 'flex', gap: '0.5rem' }}>
+                      <span style={{ color: '#38bdf8' }}>{idx + 1}.</span>
+                      <span>{q.question}</span>
                     </div>
                     {q.choices && (
-                      <div style={{ marginTop: '0.35rem', color: '#94a3b8', fontSize: '0.8rem', display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                      <div style={{ marginTop: '0.5rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.4rem' }}>
                         {q.choices.map((c, cIdx) => (
-                          <div key={cIdx} style={{ padding: '0.2rem 0.4rem', backgroundColor: '#1e293b', borderRadius: '3px' }}>
+                          <div key={cIdx} style={{ padding: '0.35rem 0.6rem', backgroundColor: '#0f172a', borderRadius: '6px', border: '1px solid #1e293b', color: '#94a3b8', fontSize: '0.825rem' }}>
                             {c}
                           </div>
                         ))}

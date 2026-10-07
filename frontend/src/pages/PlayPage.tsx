@@ -188,53 +188,53 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   const timerPercentage = totalQuestionTime > 0 ? Math.max(0, (timeRemaining / totalQuestionTime) * 100) : 0;
 
   return (
-    <div style={{ maxWidth: '600px', margin: '0 auto', padding: '1rem' }}>
+    <div style={{ maxWidth: '640px', margin: '0 auto', padding: '1rem 0.5rem' }}>
       {/* Thanh thông tin người chơi */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '10px', padding: '0.75rem 1.25rem', marginBottom: '1rem' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px', padding: '0.85rem 1.25rem', marginBottom: '1.25rem', boxShadow: '0 4px 14px rgba(0, 0, 0, 0.3)' }}>
         <div>
-          <span style={{ color: '#94a3b8', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 600, display: 'block' }}>
-            Người chơi:
+          <span style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em', display: 'block' }}>
+            NGƯỜI THI ĐẤU
           </span>
-          <strong style={{ color: '#38bdf8', fontSize: '1.1rem' }}>{displayName}</strong>
+          <strong style={{ color: '#ffffff', fontSize: '1.15rem', fontWeight: 800 }}>{displayName}</strong>
         </div>
         <div style={{ textAlign: 'right' }}>
-          <span style={{ color: '#94a3b8', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 600, display: 'block' }}>
-            Điểm số:
+          <span style={{ color: '#94a3b8', fontSize: '0.75rem', textTransform: 'uppercase', fontWeight: 700, letterSpacing: '0.05em', display: 'block' }}>
+            ĐIỂM HIỆN TẠI
           </span>
-          <strong style={{ color: '#4ade80', fontSize: '1.3rem' }}>{playerScore}</strong>
+          <strong style={{ color: '#34d399', fontSize: '1.4rem', fontWeight: 900 }}>{playerScore}</strong>
         </div>
       </div>
 
       {/* 1. Màn hình Sảnh Chờ */}
       {screen === 'lobby' && (
-        <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '3rem 1.5rem', textAlign: 'center' }}>
+        <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '3rem 1.5rem', textAlign: 'center', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)' }}>
           <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>🎉</div>
-          <h2 style={{ color: '#38bdf8', fontSize: '1.5rem', margin: '0 0 0.5rem 0' }}>
-            Bạn đã vào phòng chơi thành công!
+          <h2 style={{ color: '#ffffff', fontSize: '1.6rem', margin: '0 0 0.5rem 0', fontWeight: 900, letterSpacing: '-0.02em' }}>
+            Đã Vào Phòng Thành Công!
           </h2>
-          <p style={{ color: '#94a3b8', fontSize: '1rem', margin: '0 0 2rem 0' }}>
-            Vui lòng giữ màn hình mở, trò chơi sẽ tự động bắt đầu khi chủ phòng kích hoạt...
+          <p style={{ color: '#94a3b8', fontSize: '1rem', margin: '0 0 2rem 0', lineHeight: '1.5' }}>
+            Vui lòng giữ màn hình sáng. Trò chơi sẽ tự động bắt đầu ngay khi chủ phòng bấm Bắt đầu...
           </p>
-          <div style={{ display: 'inline-block', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '6px', padding: '0.5rem 1.25rem', color: '#38bdf8', fontWeight: 700, letterSpacing: '2px', fontSize: '1.1rem' }}>
-            PHÒNG: {roomCode}
+          <div style={{ display: 'inline-block', backgroundColor: '#090d16', border: '2px dashed #0284c7', borderRadius: '8px', padding: '0.6rem 1.5rem', color: '#38bdf8', fontWeight: 800, letterSpacing: '0.12em', fontSize: '1.2rem' }}>
+            MÃ PHÒNG: {roomCode}
           </div>
         </div>
       )}
 
       {/* 2. Màn hình Câu hỏi đang diễn ra */}
       {screen === 'question' && currentQuestion && (
-        <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '1.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <span style={{ backgroundColor: '#334155', color: '#38bdf8', padding: '0.25rem 0.6rem', borderRadius: '4px', fontWeight: 700, fontSize: '0.85rem' }}>
-              Câu {(currentQuestion.questionIndex || 0) + 1} / {currentQuestion.totalQuestions || 5}
+        <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '1.5rem', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <span style={{ backgroundColor: 'rgba(56, 189, 248, 0.12)', color: '#38bdf8', padding: '0.25rem 0.65rem', borderRadius: '6px', fontWeight: 800, fontSize: '0.85rem' }}>
+              CÂU {(currentQuestion.questionIndex || 0) + 1} / {currentQuestion.totalQuestions || 5}
             </span>
-            <span style={{ color: timeRemaining <= 5 ? '#ef4444' : '#38bdf8', fontWeight: 800, fontSize: '1.1rem' }}>
+            <span style={{ color: timeRemaining <= 5 ? '#ef4444' : '#38bdf8', fontWeight: 900, fontSize: '1.25rem' }}>
               {timeRemaining}s
             </span>
           </div>
 
           {/* Thanh đếm ngược thời gian */}
-          <div style={{ width: '100%', height: '6px', backgroundColor: '#334155', borderRadius: '3px', overflow: 'hidden', margin: '0.5rem 0 1.25rem 0' }}>
+          <div style={{ width: '100%', height: '8px', backgroundColor: '#090d16', borderRadius: '4px', overflow: 'hidden', margin: '0.5rem 0 1.5rem 0', border: '1px solid #1e293b' }}>
             <div
               style={{
                 width: `${timerPercentage}%`,
@@ -245,13 +245,13 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             />
           </div>
 
-          <h3 style={{ margin: '0 0 1.5rem 0', fontSize: '1.25rem', color: '#f8fafc', lineHeight: 1.4 }}>
+          <h3 style={{ margin: '0 0 1.75rem 0', fontSize: '1.35rem', color: '#ffffff', lineHeight: 1.45, fontWeight: 800 }}>
             {currentQuestion.question}
           </h3>
 
           {/* Câu hỏi trắc nghiệm hoặc nút bấm nhanh */}
           {(currentQuestion.type === 'MULTIPLE_CHOICE' || currentQuestion.type === 'QUICK_BUTTON') && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
               {currentQuestion.choices?.map((choice, idx) => {
                 const isSelected = selectedAnswer === choice;
                 return (
@@ -266,19 +266,26 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                     style={{
                       width: '100%',
                       textAlign: 'left',
-                      padding: '1rem 1.25rem',
-                      backgroundColor: isSelected ? '#1e3a8a' : '#334155',
-                      color: isSelected ? '#38bdf8' : 'white',
-                      border: isSelected ? '2px solid #38bdf8' : '2px solid #475569',
-                      borderRadius: '8px',
-                      fontSize: '1.05rem',
-                      fontWeight: isSelected ? 700 : 500,
+                      padding: '1.1rem 1.25rem',
+                      backgroundColor: isSelected ? 'rgba(37, 99, 235, 0.25)' : '#090d16',
+                      color: isSelected ? '#ffffff' : '#e2e8f0',
+                      border: isSelected ? '2px solid #2563eb' : '1px solid #1e293b',
+                      borderRadius: '10px',
+                      fontSize: '1.1rem',
+                      fontWeight: isSelected ? 800 : 600,
                       cursor: isAnswerSubmitted ? 'not-allowed' : 'pointer',
-                      opacity: isAnswerSubmitted && !isSelected ? 0.6 : 1,
+                      opacity: isAnswerSubmitted && !isSelected ? 0.5 : 1,
                       transition: 'all 0.15s ease',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.85rem',
+                      boxShadow: isSelected ? '0 0 15px rgba(37, 99, 235, 0.3)' : 'none',
                     }}
                   >
-                    {choice}
+                    <span style={{ width: '32px', height: '32px', borderRadius: '6px', backgroundColor: isSelected ? '#2563eb' : '#1e293b', color: isSelected ? '#ffffff' : '#94a3b8', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 800, fontSize: '0.95rem', flexShrink: 0 }}>
+                      {String.fromCharCode(65 + idx)}
+                    </span>
+                    <span>{choice}</span>
                   </button>
                 );
               })}
@@ -294,7 +301,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 value={textInputAnswer}
                 onChange={(e) => setTextInputAnswer(e.target.value)}
                 placeholder="Nhập câu trả lời của bạn..."
-                style={{ width: '100%', padding: '0.85rem', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '6px', color: 'white', fontSize: '1.1rem', boxSizing: 'border-box' }}
+                style={{ width: '100%', padding: '0.9rem', backgroundColor: '#090d16', border: '1px solid #334155', borderRadius: '8px', color: '#ffffff', fontSize: '1.1rem', boxSizing: 'border-box' }}
               />
               <button
                 type="button"
@@ -302,18 +309,19 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 onClick={() => submitAnswer(textInputAnswer.trim())}
                 style={{
                   width: '100%',
-                  marginTop: '0.75rem',
-                  padding: '0.85rem',
-                  backgroundColor: '#16a34a',
-                  color: 'white',
+                  marginTop: '0.85rem',
+                  padding: '0.9rem',
+                  backgroundColor: '#2563eb',
+                  color: '#ffffff',
                   border: 'none',
-                  borderRadius: '6px',
+                  borderRadius: '8px',
                   fontSize: '1.1rem',
-                  fontWeight: 700,
+                  fontWeight: 800,
                   cursor: (isAnswerSubmitted || !textInputAnswer.trim()) ? 'not-allowed' : 'pointer',
+                  boxShadow: (isAnswerSubmitted || !textInputAnswer.trim()) ? 'none' : '0 4px 14px rgba(37, 99, 235, 0.4)',
                 }}
               >
-                Gửi câu trả lời
+                Gửi câu trả lời &rarr;
               </button>
             </div>
           )}
@@ -322,7 +330,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           {currentQuestion.type === 'CROSSWORD' && (
             <div>
               {currentQuestion.crosswordClue && (
-                <div style={{ backgroundColor: '#0f172a', padding: '0.75rem 1rem', borderRadius: '6px', border: '1px solid #334155', color: '#38bdf8', marginBottom: '1rem', fontSize: '1rem' }}>
+                <div style={{ backgroundColor: '#090d16', padding: '0.85rem 1rem', borderRadius: '8px', border: '1px solid #1e293b', color: '#38bdf8', marginBottom: '1rem', fontSize: '1rem' }}>
                   Gợi ý: <strong>{currentQuestion.crosswordClue}</strong>
                 </div>
               )}
@@ -332,7 +340,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 value={textInputAnswer}
                 onChange={(e) => setTextInputAnswer(e.target.value)}
                 placeholder="Nhập từ khóa ô chữ..."
-                style={{ width: '100%', padding: '0.85rem', backgroundColor: '#0f172a', border: '1px solid #475569', borderRadius: '6px', color: 'white', fontSize: '1.1rem', boxSizing: 'border-box' }}
+                style={{ width: '100%', padding: '0.9rem', backgroundColor: '#090d16', border: '1px solid #334155', borderRadius: '8px', color: '#ffffff', fontSize: '1.1rem', boxSizing: 'border-box' }}
               />
               <button
                 type="button"
@@ -340,24 +348,25 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 onClick={() => submitAnswer(textInputAnswer.trim())}
                 style={{
                   width: '100%',
-                  marginTop: '0.75rem',
-                  padding: '0.85rem',
-                  backgroundColor: '#16a34a',
-                  color: 'white',
+                  marginTop: '0.85rem',
+                  padding: '0.9rem',
+                  backgroundColor: '#2563eb',
+                  color: '#ffffff',
                   border: 'none',
-                  borderRadius: '6px',
+                  borderRadius: '8px',
                   fontSize: '1.1rem',
-                  fontWeight: 700,
+                  fontWeight: 800,
                   cursor: (isAnswerSubmitted || !textInputAnswer.trim()) ? 'not-allowed' : 'pointer',
+                  boxShadow: (isAnswerSubmitted || !textInputAnswer.trim()) ? 'none' : '0 4px 14px rgba(37, 99, 235, 0.4)',
                 }}
               >
-                Gửi từ khóa
+                Gửi từ khóa &rarr;
               </button>
             </div>
           )}
 
           {isAnswerSubmitted && (
-            <div style={{ marginTop: '1.5rem', textAlign: 'center', color: '#38bdf8', fontWeight: 600, padding: '0.75rem', backgroundColor: '#0f172a', borderRadius: '6px', border: '1px solid #0284c7' }}>
+            <div style={{ marginTop: '1.5rem', textAlign: 'center', color: '#38bdf8', fontWeight: 700, padding: '0.85rem', backgroundColor: '#090d16', borderRadius: '8px', border: '1px solid #0284c7' }}>
               ✓ Đã ghi nhận câu trả lời! Đang đợi công bố kết quả...
             </div>
           )}
@@ -366,47 +375,48 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
       {/* 3. Màn hình Công bố Đáp án & Kết quả Cá nhân */}
       {screen === 'reveal' && (
-        <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '2rem 1.5rem', textAlign: 'center' }}>
+        <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '2rem 1.5rem', textAlign: 'center', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)' }}>
           {personalResult && (
-            <div style={{ marginBottom: '1.25rem' }}>
+            <div style={{ marginBottom: '1.5rem' }}>
               <span
                 style={{
                   display: 'inline-block',
-                  padding: '0.4rem 1rem',
-                  borderRadius: '6px',
-                  fontWeight: 800,
-                  fontSize: '1.1rem',
-                  backgroundColor: personalResult.isCorrect ? '#14532d' : '#7f1d1d',
-                  color: personalResult.isCorrect ? '#4ade80' : '#f87171',
+                  padding: '0.5rem 1.25rem',
+                  borderRadius: '8px',
+                  fontWeight: 900,
+                  fontSize: '1.2rem',
+                  backgroundColor: personalResult.isCorrect ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                  border: personalResult.isCorrect ? '1px solid #10b981' : '1px solid #ef4444',
+                  color: personalResult.isCorrect ? '#34d399' : '#f87171',
                 }}
               >
                 {personalResult.isCorrect ? '✓ CHÍNH XÁC' : '✗ CHƯA ĐÚNG'}
               </span>
-              <div style={{ marginTop: '0.75rem', fontSize: '1.3rem', fontWeight: 800, color: personalResult.isCorrect ? '#4ade80' : '#94a3b8' }}>
+              <div style={{ marginTop: '0.85rem', fontSize: '1.4rem', fontWeight: 900, color: personalResult.isCorrect ? '#34d399' : '#94a3b8' }}>
                 {personalResult.pointsEarned > 0 ? `+${personalResult.pointsEarned} điểm` : '+0 điểm'}
               </div>
             </div>
           )}
 
-          <div style={{ margin: '1rem 0', color: '#cbd5e1', fontSize: '1rem' }}>
-            Đáp án đúng: <strong style={{ color: '#4ade80' }}>{correctAnswer}</strong>
+          <div style={{ margin: '1rem 0', color: '#cbd5e1', fontSize: '1.05rem' }}>
+            Đáp án đúng: <strong style={{ color: '#34d399' }}>{correctAnswer}</strong>
           </div>
 
           {explanation && (
-            <p style={{ color: '#94a3b8', fontSize: '0.85rem', fontStyle: 'italic', margin: '0.5rem 0 1.5rem 0' }}>
+            <p style={{ color: '#94a3b8', fontSize: '0.9rem', fontStyle: 'italic', margin: '0.5rem 0 1.5rem 0', lineHeight: '1.4' }}>
               ({explanation})
             </p>
           )}
 
           {/* Bảng xếp hạng thu gọn */}
-          <div style={{ marginTop: '1.5rem', textAlign: 'left' }}>
-            <h4 style={{ color: '#94a3b8', margin: '0 0 0.5rem 0', fontSize: '0.9rem', textTransform: 'uppercase' }}>
-              Bảng xếp hạng (Top 10):
+          <div style={{ marginTop: '1.75rem', textAlign: 'left', backgroundColor: '#090d16', border: '1px solid #1e293b', borderRadius: '10px', padding: '1rem' }}>
+            <h4 style={{ color: '#94a3b8', margin: '0 0 0.75rem 0', fontSize: '0.85rem', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em' }}>
+              BẢNG XẾP HẠNG (TOP 10)
             </h4>
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.95rem' }}>
                 <thead>
-                  <tr style={{ borderBottom: '1px solid #334155', color: '#94a3b8' }}>
+                  <tr style={{ borderBottom: '1px solid #1e293b', color: '#94a3b8' }}>
                     <th style={{ padding: '0.5rem', textAlign: 'left' }}>#</th>
                     <th style={{ padding: '0.5rem', textAlign: 'left' }}>Người chơi</th>
                     <th style={{ padding: '0.5rem', textAlign: 'right' }}>Điểm</th>
@@ -419,16 +429,16 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                       <tr
                         key={entry.playerId}
                         style={{
-                          borderBottom: '1px solid #334155',
-                          backgroundColor: isMe ? '#1e3a8a' : 'transparent',
-                          fontWeight: isMe ? 700 : 400,
+                          borderBottom: '1px solid #1e293b',
+                          backgroundColor: isMe ? 'rgba(37, 99, 235, 0.2)' : 'transparent',
+                          fontWeight: isMe ? 800 : 500,
                         }}
                       >
-                        <td style={{ padding: '0.5rem' }}>{entry.rank}</td>
+                        <td style={{ padding: '0.5rem', color: entry.rank === 1 ? '#facc15' : '#94a3b8' }}>{entry.rank}</td>
                         <td style={{ padding: '0.5rem', color: isMe ? '#38bdf8' : '#f8fafc' }}>
-                          {entry.displayName} {isMe ? '(Bạn)' : ''}
+                          {entry.displayName} {isMe ? ' (Bạn)' : ''}
                         </td>
-                        <td style={{ padding: '0.5rem', textAlign: 'right', color: '#4ade80' }}>{entry.score}</td>
+                        <td style={{ padding: '0.5rem', textAlign: 'right', color: '#34d399', fontWeight: 700 }}>{entry.score}</td>
                       </tr>
                     );
                   })}
@@ -441,16 +451,16 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
       {/* 4. Màn hình Kết thúc */}
       {screen === 'finish' && (
-        <div style={{ backgroundColor: '#1e293b', border: '1px solid #334155', borderRadius: '12px', padding: '2.5rem 1.5rem', textAlign: 'center' }}>
-          <div style={{ fontSize: '3rem', marginBottom: '0.5rem' }}>🏆</div>
-          <h2 style={{ color: '#facc15', fontSize: '1.8rem', margin: '0 0 0.5rem 0' }}>
+        <div style={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '14px', padding: '2.5rem 1.5rem', textAlign: 'center', boxShadow: '0 10px 25px -5px rgba(0, 0, 0, 0.4)' }}>
+          <div style={{ fontSize: '3.5rem', marginBottom: '0.5rem' }}>🏆</div>
+          <h2 style={{ color: '#facc15', fontSize: '2rem', margin: '0 0 0.5rem 0', fontWeight: 900 }}>
             Trò Chơi Kết Thúc!
           </h2>
           <p style={{ color: '#94a3b8', fontSize: '1.1rem', margin: '0.5rem 0' }}>
-            Điểm chung cuộc: <strong style={{ color: '#4ade80', fontSize: '1.5rem' }}>{playerScore}</strong> điểm
+            Điểm chung cuộc: <strong style={{ color: '#34d399', fontSize: '1.6rem', fontWeight: 900 }}>{playerScore}</strong> điểm
           </p>
           {finalRank !== null && (
-            <p style={{ color: '#38bdf8', fontSize: '1.2rem', fontWeight: 700, margin: '0.5rem 0 1.5rem 0' }}>
+            <p style={{ color: '#38bdf8', fontSize: '1.25rem', fontWeight: 800, margin: '0.75rem 0 2rem 0' }}>
               Bạn đạt vị trí thứ #{finalRank} trên tổng số {leaderboard.length} người chơi!
             </p>
           )}
@@ -467,14 +477,15 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               }}
               style={{
                 width: '100%',
-                padding: '0.85rem',
+                padding: '0.9rem',
                 backgroundColor: '#2563eb',
-                color: 'white',
+                color: '#ffffff',
                 border: 'none',
-                borderRadius: '6px',
+                borderRadius: '8px',
                 fontSize: '1.1rem',
-                fontWeight: 700,
+                fontWeight: 800,
                 cursor: 'pointer',
+                boxShadow: '0 4px 14px rgba(37, 99, 235, 0.4)',
               }}
             >
               Tham gia trò chơi khác
