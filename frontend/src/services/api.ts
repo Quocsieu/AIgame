@@ -1,4 +1,7 @@
+/// <reference types="vite/client" />
 import type { CreateRoomResponse, Difficulty, GameSpecification, IngestedSource, QrResponse } from '../types/index.js';
+
+const API_BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/+$/, '');
 
 export async function ingestSources(params: {
   url?: string;
@@ -16,7 +19,7 @@ export async function ingestSources(params: {
     formData.append('files', blob, 'sample_reference.txt');
   }
 
-  const res = await fetch('/api/content/ingest', {
+  const res = await fetch(`${API_BASE_URL}/content/ingest`, {
     method: 'POST',
     body: formData,
   });
@@ -34,7 +37,7 @@ export async function generateGame(params: {
   timePerQuestion: number;
   difficulty?: Difficulty;
 }): Promise<GameSpecification> {
-  const res = await fetch('/api/games/generate', {
+  const res = await fetch(`${API_BASE_URL}/games/generate`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -53,7 +56,7 @@ export async function createRoom(params: {
   gameSpecification?: GameSpecification;
   capacity?: number;
 }): Promise<CreateRoomResponse> {
-  const res = await fetch('/api/rooms', {
+  const res = await fetch(`${API_BASE_URL}/rooms`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(params),
@@ -66,7 +69,7 @@ export async function createRoom(params: {
 }
 
 export async function fetchRoomQr(roomCode: string): Promise<QrResponse> {
-  const res = await fetch(`/api/rooms/${roomCode}/qr`);
+  const res = await fetch(`${API_BASE_URL}/rooms/${roomCode}/qr`);
   const data = await res.json();
   if (!data.success) {
     throw new Error(data.error?.message || 'Lỗi khi tải mã QR phòng.');
