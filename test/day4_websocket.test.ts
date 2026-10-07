@@ -332,5 +332,134 @@ describe('DAY 4 - WebSocket Multiplayer Integration Test Suite', () => {
     p1Ws.close();
     p2Ws.close();
   });
+
+  // ==========================================
+  // DAY 11.1 - AUTO ADVANCE INTEGRATION TESTS
+  // ==========================================
+
+  it('61. allAnswered early-reveal path automatically advances to next question and finishes after final question', async () => {
+    const spec = createSampleSpec();
+    const room = roomService.createRoom(spec);
+
+    const hostWs = await createClient();
+    hostWs.send(JSON.stringify({ type: 'host.join', roomCode: room.roomCode, hostToken: room.hostToken }));
+    await waitForMessage(hostWs, (m) => m.type === 'room.joined');
+
+    const p1Ws = await createClient();
+    p1Ws.send(JSON.stringify({ type: 'player.join', roomCode: room.roomCode, displayName: 'Alice' }));
+    await waitForMessage(p1Ws, (m) => m.type === 'room.joined');
+
+    // Host starts game
+    const p1Q1Wait = waitForMessage(p1Ws, (m) => m.type === 'question.started');
+    hostWs.send(JSON.stringify({ type: 'host.start' }));
+    await p1Q1Wait;
+
+    // Player answers Q1 -> triggers early reveal
+    const p1RevealWait = waitForMessage(p1Ws, (m) => m.type === 'question.revealed');
+    p1Ws.send(JSON.stringify({ type: 'player.answer', questionId: 'q_ws_1', answer: 'B. WebSocket' }));
+    await p1RevealWait;
+
+    // DO NOT send host.next! Wait for auto-advance to Q2 after 4 seconds
+    const p1Q2Wait = waitForMessage(p1Ws, (m) => m.type === 'question.started');
+    const p1Q2 = await p1Q2Wait;
+    assert.equal(p1Q2.question.id, 'q_ws_2');
+
+    // Player answers Q2 (last question) -> triggers early reveal
+    const p1Rev2Wait = waitForMessage(p1Ws, (m) => m.type === 'question.revealed');
+    p1Ws.send(JSON.stringify({ type: 'player.answer', questionId: 'q_ws_2', answer: 'A. 80' }));
+    await p1Rev2Wait;
+
+    // DO NOT send host.next! Wait for auto-advance to game.finished after 4 seconds
+    const hostFinishWait = waitForMessage(hostWs, (m) => m.type === 'game.finished');
+    const hostFinish = await hostFinishWait;
+    assert.equal(hostFinish.type, 'game.finished');
+    assert.equal(hostFinish.winner.displayName, 'Alice');
+
+    hostWs.close();
+    p1Ws.close();
+  });
+
+  it('62. manual Host Next before 4s cancels auto-advance timer and prevents double advance', async () => {
+    const spec = createSampleSpec();
+    const room = roomService.createRoom(spec);
+
+    const hostWs = await createClient();
+    hostWs.send(JSON.stringify({ type: 'host.join', roomCode: room.roomCode, hostToken: room.hostToken }));
+    await waitForMessage(hostWs, (m) => m.type === 'room.joined');
+
+    const p1Ws = await createClient();
+    p1Ws.send(JSON.stringify({ type: 'player.join', roomCode: room.roomCode, displayName: 'Alice' }));
+    await waitForMessage(p1Ws, (m) => m.type === 'room.joined');
+
+    hostWs.send(JSON.stringify({ type: 'host.start' }));
+    await waitForMessage(p1Ws, (m) => m.type === 'question.started');
+
+    // Player answers Q1
+    p1Ws.send(JSON.stringify({ type: 'player.answer', questionId: 'q_ws_1', answer: 'B. WebSocket' }));
+    await waitForMessage(p1Ws, (m) => m.type === 'question.revealed');
+
+    // Host manually sends host.next after 200ms (before 4s auto-advance)
+    await new Promise((r) => setTimeout(r, 200));
+    hostWs.send(JSON.stringify({ type: 'host.next' }));
+    const p1Q2 = await waitForMessage(p1Ws, (m) => m.type === 'question.started');
+    assert.equal(p1Q2.question.id, 'q_ws_2');
+
+    // Track any messages received in the next 4.5 seconds
+    let duplicateAdvanced = false;
+    const extraMsgListener = (data: Buffer | string) => {
+      try {
+        const m = JSON.parse(data.toString());
+        if (m.type === 'question.started' || m.type === 'game.finished') {
+          duplicateAdvanced = true;
+        }
+      } catch {}
+    };
+    hostWs.on('message', extraMsgListener);
+
+    // Wait until past the 4000ms delay
+    await new Promise((r) => setTimeout(r, 4500));
+    hostWs.off('message', extraMsgListener);
+
+    assert.equal(duplicateAdvanced, false, 'Auto-advance timer should have been canceled and not fired again');
+    assert.equal(room.state, 'QUESTION_ACTIVE');
+    assert.equal(room.currentQuestionIndex, 1);
+
+    hostWs.close();
+    p1Ws.close();
+  });
+
+  it('63. timeout path automatically reveals and advances to next question without player input', async () => {
+    const spec = createSampleSpec();
+    const room = roomService.createRoom(spec);
+
+    const hostWs = await createClient();
+    hostWs.send(JSON.stringify({ type: 'host.join', roomCode: room.roomCode, hostToken: room.hostToken }));
+    await waitForMessage(hostWs, (m) => m.type === 'room.joined');
+
+    const p1Ws = await createClient();
+    p1Ws.send(JSON.stringify({ type: 'player.join', roomCode: room.roomCode, displayName: 'Alice' }));
+    await waitForMessage(p1Ws, (m) => m.type === 'room.joined');
+
+    hostWs.send(JSON.stringify({ type: 'host.start' }));
+    await waitForMessage(p1Ws, (m) => m.type === 'question.started');
+
+    // Simulate question timeout in 100ms
+    room.questionDeadlineAt = Date.now() + 100;
+    (wsServer as any).scheduleQuestionTimer(room);
+
+    // Wait for timeout reveal
+    const hostReveal = await waitForMessage(hostWs, (m) => m.type === 'question.revealed');
+    assert.equal(hostReveal.type, 'question.revealed');
+    assert.equal(room.state, 'QUESTION_REVEAL');
+
+    // Wait for auto-advance to Q2 after 4 seconds
+    const p1Q2 = await waitForMessage(p1Ws, (m) => m.type === 'question.started');
+    assert.equal(p1Q2.question.id, 'q_ws_2');
+    assert.equal(room.state, 'QUESTION_ACTIVE');
+    assert.equal(room.currentQuestionIndex, 1);
+
+    hostWs.close();
+    p1Ws.close();
+  });
 });
 

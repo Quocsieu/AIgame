@@ -502,10 +502,15 @@ export class MultiplayerWebSocketServer {
   private handleQuestionTimeout(room: MultiplayerRoom): void {
     if (room.state !== 'QUESTION_ACTIVE') return;
 
-    // 1. Reveal question and broadcast results to all clients
     this.revealQuestionAndBroadcast(room);
+  }
 
-    // 2. Schedule automatic advance after reveal duration
+  private scheduleAutoAdvance(room: MultiplayerRoom): void {
+    if (room.timerHandle) {
+      clearTimeout(room.timerHandle);
+      room.timerHandle = null;
+    }
+
     const questionIndexAtReveal = room.currentQuestionIndex;
     const AUTO_ADVANCE_DELAY_MS = 4000;
 
@@ -513,8 +518,11 @@ export class MultiplayerWebSocketServer {
       if (room.state === 'QUESTION_REVEAL' && room.currentQuestionIndex === questionIndexAtReveal) {
         try {
           this.advanceNextQuestion(room, room.hostToken);
-        } catch {
-          // Guard against race conditions or unexpected room states
+        } catch (err: unknown) {
+          console.error(
+            `[Multiplayer] Failed to auto-advance question in room ${room.roomCode} (idx: ${questionIndexAtReveal}):`,
+            err
+          );
         }
       }
     }, AUTO_ADVANCE_DELAY_MS);
@@ -530,31 +538,34 @@ export class MultiplayerWebSocketServer {
 
     // Send question.revealed to all connected room sockets
     const socketSet = this.roomSockets.get(room.roomCode);
-    if (!socketSet) return;
+    if (socketSet) {
+      for (const ws of socketSet) {
+        if (ws.readyState !== WebSocket.OPEN) continue;
 
-    for (const ws of socketSet) {
-      if (ws.readyState !== WebSocket.OPEN) continue;
+        const meta = this.socketMeta.get(ws);
+        let personalResult = undefined;
 
-      const meta = this.socketMeta.get(ws);
-      let personalResult = undefined;
-
-      if (meta && meta.role === 'player') {
-        const player = room.players.get(meta.token);
-        if (player) {
-          personalResult = player.questionResults.get(revealData.questionId);
+        if (meta && meta.role === 'player') {
+          const player = room.players.get(meta.token);
+          if (player) {
+            personalResult = player.questionResults.get(revealData.questionId);
+          }
         }
-      }
 
-      this.send(ws, {
-        type: 'question.revealed',
-        questionId: revealData.questionId,
-        correctAnswer: revealData.correctAnswer,
-        explanation: revealData.explanation,
-        leaderboard: revealData.leaderboard,
-        answerStats: revealData.answerStats,
-        personalResult,
-      });
+        this.send(ws, {
+          type: 'question.revealed',
+          questionId: revealData.questionId,
+          correctAnswer: revealData.correctAnswer,
+          explanation: revealData.explanation,
+          leaderboard: revealData.leaderboard,
+          answerStats: revealData.answerStats,
+          personalResult,
+        });
+      }
     }
+
+    // Schedule auto advance for every reveal path (timeout or all players answered)
+    this.scheduleAutoAdvance(room);
   }
 
   private registerSocket(
