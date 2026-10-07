@@ -1,4 +1,27 @@
+/// <reference types="vite/client" />
+
 export type SocketEventHandler = (event: any) => void;
+
+function getWebSocketUrl(): string {
+  // 1. Ưu tiên biến VITE_WS_URL nếu có cấu hình riêng biệt
+  const explicitWsUrl = import.meta.env.VITE_WS_URL;
+  if (explicitWsUrl) {
+    return explicitWsUrl.trim();
+  }
+
+  // 2. Dẫn xuất từ VITE_API_URL nếu là absolute URL
+  const apiUrl = import.meta.env.VITE_API_URL;
+  if (apiUrl && (apiUrl.startsWith('http://') || apiUrl.startsWith('https://'))) {
+    const url = new URL(apiUrl);
+    const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${wsProtocol}//${url.host}/ws`;
+  }
+
+  // 3. Fallback local/Vite proxy
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host;
+  return `${protocol}//${host}/ws`;
+}
 
 export class GameSocketClient {
   private ws: WebSocket | null = null;
@@ -12,9 +35,7 @@ export class GameSocketClient {
       return;
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const wsUrl = `${protocol}//${host}/ws`;
+    const wsUrl = getWebSocketUrl();
 
     this.ws = new WebSocket(wsUrl);
 
