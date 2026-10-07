@@ -402,7 +402,16 @@ export class MultiplayerWebSocketServer {
       return;
     }
 
-    const nextResult = room.nextQuestion(meta.token);
+    this.advanceNextQuestion(room, meta.token);
+  }
+
+  private advanceNextQuestion(room: MultiplayerRoom, hostToken: string): void {
+    if (room.timerHandle) {
+      clearTimeout(room.timerHandle);
+      room.timerHandle = null;
+    }
+
+    const nextResult = room.nextQuestion(hostToken);
 
     if (nextResult.nextQuestionAvailable && nextResult.question) {
       this.broadcastToRoom(room.roomCode, {
@@ -486,8 +495,29 @@ export class MultiplayerWebSocketServer {
 
     const remainingMs = Math.max(0, (room.questionDeadlineAt || Date.now()) - Date.now());
     room.timerHandle = setTimeout(() => {
-      this.revealQuestionAndBroadcast(room);
+      this.handleQuestionTimeout(room);
     }, remainingMs + 100);
+  }
+
+  private handleQuestionTimeout(room: MultiplayerRoom): void {
+    if (room.state !== 'QUESTION_ACTIVE') return;
+
+    // 1. Reveal question and broadcast results to all clients
+    this.revealQuestionAndBroadcast(room);
+
+    // 2. Schedule automatic advance after reveal duration
+    const questionIndexAtReveal = room.currentQuestionIndex;
+    const AUTO_ADVANCE_DELAY_MS = 4000;
+
+    room.timerHandle = setTimeout(() => {
+      if (room.state === 'QUESTION_REVEAL' && room.currentQuestionIndex === questionIndexAtReveal) {
+        try {
+          this.advanceNextQuestion(room, room.hostToken);
+        } catch {
+          // Guard against race conditions or unexpected room states
+        }
+      }
+    }, AUTO_ADVANCE_DELAY_MS);
   }
 
   private revealQuestionAndBroadcast(room: MultiplayerRoom): void {
