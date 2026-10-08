@@ -28,8 +28,6 @@ export const DemoPage: React.FC<DemoPageProps> = ({ onNavigateToHost, onNavigate
 
   const [url, setUrl] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  const [sampleText, setSampleText] = useState('');
-  const [showSampleText, setShowSampleText] = useState(false);
 
   const [gameType, setGameType] = useState('MULTIPLE_CHOICE');
   const [difficulty, setDifficulty] = useState<Difficulty>('MEDIUM');
@@ -50,23 +48,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({ onNavigateToHost, onNavigate
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
 
-  const GENERIC_SAMPLE_TEXT = `Hướng dẫn Kiến trúc Đám mây & Kỹ thuật Web Hiện đại
-Tổng quan:
-1. Microservices vs Monoliths: Kiến trúc Microservices phân tách các ranh giới nghiệp vụ độc lập giao tiếp qua REST hoặc gRPC.
-2. WebSockets: Cung cấp kênh truyền thông hai chiều toàn phần (full-duplex) liên tục qua một kết nối TCP duy nhất.
-3. Chiến lược Caching: Bộ nhớ đệm trong RAM như Redis giúp giảm tải cơ sở dữ liệu và tăng tốc độ phản hồi.
-4. Bảo mật: Mã hóa HTTPS ngăn chặn tấn công nghe lén; CORS kiểm soát các yêu cầu truy cập từ trình duyệt khác nguồn.
-5. Tính sẵn sàng cao: Bộ cân bằng tải (Load Balancer) điều phối lưu lượng truy cập phân bổ đều đến các máy chủ hoạt động tốt.`;
-
-  const handleLoadSample = () => {
-    setShowSampleText(true);
-    setSampleText(GENERIC_SAMPLE_TEXT);
-    toast.info('Đã nạp nội dung mẫu thành công.', 'Nội dung mẫu');
-  };
-
   const handleIngest = async (): Promise<string | null> => {
-    if (!url && !file && !sampleText) {
-      toast.error('Vui lòng nhập địa chỉ URL, chọn tệp tải lên hoặc dùng nội dung mẫu.', 'Thiếu thông tin');
+    if (!url && !file) {
+      toast.error('Vui lòng nhập địa chỉ URL hoặc chọn tệp tải lên.', 'Thiếu thông tin');
       return null;
     }
 
@@ -77,7 +61,6 @@ Tổng quan:
       const sources = await ingestSources({
         url: url.trim() || undefined,
         file: file || undefined,
-        sampleText: sampleText.trim() || undefined,
       });
 
       toast.removeToast(toastId);
@@ -192,25 +175,6 @@ Tổng quan:
     <div style={{ maxWidth: '1080px', margin: '0 auto', padding: '0.5rem 0 2rem 0' }}>
       {/* Header khu vực bảng điều khiển */}
       <header style={{ marginBottom: '1.75rem', textAlign: 'center' }}>
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.4rem',
-            padding: '0.3rem 0.85rem',
-            borderRadius: '999px',
-            backgroundColor: 'rgba(37, 99, 235, 0.12)',
-            border: '1px solid rgba(37, 99, 235, 0.3)',
-            color: 'var(--accent-sky)',
-            fontSize: '0.8rem',
-            fontWeight: 800,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-            marginBottom: '0.75rem',
-          }}
-        >
-          <span>⚡ KHỞI TẠO ĐẤU TRƯỜNG KIẾN THỨC</span>
-        </div>
         <h1
           style={{
             margin: 0,
@@ -222,17 +186,6 @@ Tổng quan:
         >
           Biến Nội Dung Thành Trò Chơi Tương Tác
         </h1>
-        <p
-          style={{
-            color: 'var(--text-secondary)',
-            margin: '0.5rem auto 0 auto',
-            fontSize: '1rem',
-            maxWidth: '650px',
-            lineHeight: 1.5,
-          }}
-        >
-          Trích xuất website và tài liệu doanh nghiệp, tổng hợp câu hỏi thực tế qua AI và tạo phòng thi đấu trực tiếp theo 3 bước.
-        </p>
       </header>
 
       {/* THANH TIẾN TRÌNH STEPPER 3 BƯỚC */}
@@ -280,9 +233,6 @@ Tổng quan:
             {ingestedSources.length > 0 ? '✓' : '1'}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
-              Bước 1
-            </div>
             <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               Nguồn Nội Dung
             </div>
@@ -328,9 +278,6 @@ Tổng quan:
             {generatedSpec ? '✓' : '2'}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
-              Bước 2
-            </div>
             <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               Cấu Hình AI
             </div>
@@ -376,9 +323,6 @@ Tổng quan:
             {roomCode ? '✓' : '3'}
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>
-              Bước 3
-            </div>
             <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
               Phòng Đấu & QR
             </div>
@@ -421,14 +365,11 @@ Tổng quan:
                 1
               </div>
               <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.35rem', fontWeight: 800 }}>
-                Nguồn Nội Dung Doanh Nghiệp
+                Nguồn nội dung
               </h2>
             </div>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', margin: '0 0 1.5rem 0' }}>
-              Cung cấp liên kết Website bán hàng/dịch vụ hoặc tải lên tệp tài liệu (DOCX, XLSX, PDF) để AI trích xuất dữ kiện thực tế.
-            </p>
 
-            <div style={{ marginBottom: '1.25rem' }}>
+            <div style={{ marginBottom: '1.25rem', marginTop: '1.25rem' }}>
               <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
                 🌐 Địa chỉ Website:
               </label>
@@ -471,50 +412,6 @@ Tổng quan:
               />
             </div>
 
-            <div style={{ marginBottom: '1.25rem' }}>
-              <button
-                type="button"
-                onClick={handleLoadSample}
-                style={{
-                  backgroundColor: 'var(--bg-input)',
-                  color: 'var(--text-secondary)',
-                  border: '1px solid var(--border-strong)',
-                  borderRadius: '8px',
-                  padding: '0.45rem 0.9rem',
-                  fontSize: '0.85rem',
-                  cursor: 'pointer',
-                  fontWeight: 600,
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                📄 Nạp nội dung mẫu tham khảo
-              </button>
-            </div>
-
-            {showSampleText && (
-              <div style={{ marginBottom: '1.5rem' }}>
-                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.85rem', fontWeight: 700, marginBottom: '0.4rem' }}>
-                  Nội dung văn bản mẫu:
-                </label>
-                <textarea
-                  rows={4}
-                  value={sampleText}
-                  onChange={(e) => setSampleText(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '0.75rem',
-                    backgroundColor: 'var(--bg-input)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '10px',
-                    color: 'var(--text-primary)',
-                    fontSize: '0.875rem',
-                    lineHeight: '1.45',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-            )}
-
             <div style={{ display: 'flex', gap: '0.85rem', flexWrap: 'wrap' }}>
               <button
                 type="button"
@@ -538,7 +435,7 @@ Tổng quan:
                   transition: 'all 0.15s ease',
                 }}
               >
-                {isIngesting ? '⏳ Đang trích xuất nội dung...' : 'Trích xuất nội dung nguồn ⚡'}
+                {isIngesting ? '⏳ Đang trích xuất nội dung...' : 'Trích xuất nội dung ⚡'}
               </button>
 
               {ingestedSources.length > 0 && (
@@ -556,7 +453,7 @@ Tổng quan:
                     cursor: 'pointer',
                   }}
                 >
-                  Tiếp tục: Cấu hình AI (Bước 2) &rarr;
+                  Tiếp tục (Bước 2) &rarr;
                 </button>
               )}
             </div>
@@ -615,14 +512,11 @@ Tổng quan:
                 2
               </div>
               <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.35rem', fontWeight: 800 }}>
-                Cấu Hình Đấu Trường AI
+                Cấu hình câu hỏi AI
               </h2>
             </div>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', margin: '0 0 1.5rem 0' }}>
-              Chọn thể thức thi đấu, thiết lập cấp độ và điều chỉnh thời gian phản hồi cho từng câu hỏi.
-            </p>
 
-            <div style={{ marginBottom: '1.25rem' }}>
+            <div style={{ marginBottom: '1.25rem', marginTop: '1.25rem' }}>
               <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
                 Hình thức thi đấu:
               </label>
@@ -641,7 +535,7 @@ Tổng quan:
                   boxSizing: 'border-box',
                 }}
               >
-                <option value="MULTIPLE_CHOICE">🎯 Trắc nghiệm ABCD (Đấu trường 4 lựa chọn rực rỡ)</option>
+                <option value="MULTIPLE_CHOICE">🎯 Trắc nghiệm ABCD</option>
                 <option value="FILL_IN_THE_BLANK">✍️ Điền từ vào chỗ trống</option>
                 <option value="QUICK_BUTTON">⚡ Nút bấm nhanh Đúng / Sai</option>
                 <option value="CROSSWORD">🧩 Ô chữ giải đố</option>
@@ -769,7 +663,7 @@ Tổng quan:
                   transition: 'all 0.15s ease',
                 }}
               >
-                {isGenerating ? '🤖 Đang tổng hợp câu hỏi AI...' : 'Tạo trò chơi bằng AI ⚡'}
+                {isGenerating ? '🤖 Đang tổng hợp câu hỏi AI...' : 'Tạo trò chơi AI ⚡'}
               </button>
 
               {generatedSpec && (
@@ -787,7 +681,7 @@ Tổng quan:
                     cursor: 'pointer',
                   }}
                 >
-                  Tiếp tục: Tạo phòng đấu (Bước 3) &rarr;
+                  Tiếp tục (Bước 3) &rarr;
                 </button>
               )}
             </div>
@@ -833,9 +727,6 @@ Tổng quan:
                 Khởi Tạo Phòng Đấu Trực Tiếp
               </h2>
             </div>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', margin: '0 0 1.5rem 0' }}>
-              Mở phòng thi đấu nhiều người chơi theo thời gian thực (hỗ trợ tối đa 300 người chơi đồng thời qua mã phòng hoặc quét QR).
-            </p>
 
             <button
               type="button"
@@ -843,6 +734,7 @@ Tổng quan:
               disabled={isCreatingRoom || !generatedSpec}
               style={{
                 width: '100%',
+                marginTop: '1.25rem',
                 backgroundColor: (isCreatingRoom || !generatedSpec) ? 'var(--border-strong)' : 'var(--primary)',
                 color: '#ffffff',
                 border: 'none',
@@ -858,7 +750,7 @@ Tổng quan:
                 boxShadow: (isCreatingRoom || !generatedSpec) ? 'none' : 'var(--btn-shadow)',
               }}
             >
-              {isCreatingRoom ? '⏳ Đang khởi tạo phòng chơi...' : 'Khởi tạo phòng chơi ngay 🚀'}
+              {isCreatingRoom ? '⏳ Đang khởi tạo phòng chơi...' : 'Tạo phòng chơi 🚀'}
             </button>
 
             {!generatedSpec && (
@@ -964,7 +856,7 @@ Tổng quan:
                       textAlign: 'center',
                     }}
                   >
-                    👑 Mở màn hình quản trị (Host) &rarr;
+                    Màn hình Host &rarr;
                   </button>
 
                   <button
@@ -989,7 +881,7 @@ Tổng quan:
                       textAlign: 'center',
                     }}
                   >
-                    🎮 Mở màn hình người chơi
+                    Màn hình Player &rarr;
                   </button>
                 </div>
               </div>
