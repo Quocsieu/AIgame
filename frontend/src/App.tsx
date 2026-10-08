@@ -13,6 +13,28 @@ export const AppContent: React.FC = () => {
   const [hostToken, setHostToken] = useState('');
   const [displayName, setDisplayName] = useState('');
 
+  const [theme, setTheme] = useState<'dark' | 'light'>(() => {
+    try {
+      const saved = localStorage.getItem('app_theme');
+      return saved === 'light' ? 'light' : 'dark';
+    } catch {
+      return 'dark';
+    }
+  });
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme);
+    try {
+      localStorage.setItem('app_theme', theme);
+    } catch {
+      // ignore
+    }
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
+  };
+
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const room = (params.get('room') || '').toUpperCase().trim();
@@ -58,77 +80,196 @@ export const AppContent: React.FC = () => {
   };
 
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: '#090d16', color: '#f8fafc', display: 'flex', flexDirection: 'column', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
+    <div
+      style={{
+        minHeight: '100vh',
+        backgroundColor: 'var(--bg-body)',
+        color: 'var(--text-primary)',
+        display: 'flex',
+        flexDirection: 'column',
+        transition: 'background-color 0.2s ease, color 0.2s ease',
+      }}
+    >
       {/* Thanh điều hướng chính */}
-      <nav style={{ backgroundColor: '#0f172a', borderBottom: '1px solid #1e293b', padding: '0.85rem 1.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', boxShadow: '0 4px 20px -2px rgba(0, 0, 0, 0.5)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', cursor: 'pointer', userSelect: 'none' }} onClick={() => setActiveTab('demo')}>
-          <div style={{ width: '38px', height: '38px', borderRadius: '8px', backgroundColor: '#2563eb', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.25rem', boxShadow: '0 0 15px rgba(37, 99, 235, 0.4)' }}>
+      <nav
+        style={{
+          backgroundColor: 'var(--bg-surface)',
+          borderBottom: '1px solid var(--border-subtle)',
+          padding: '0.85rem 1.5rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '1rem',
+          boxShadow: 'var(--card-shadow)',
+          position: 'sticky',
+          top: 0,
+          zIndex: 100,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.85rem',
+            cursor: 'pointer',
+            userSelect: 'none',
+          }}
+          onClick={() => setActiveTab('demo')}
+        >
+          <div
+            style={{
+              width: '42px',
+              height: '42px',
+              borderRadius: '12px',
+              background: 'linear-gradient(135deg, #2563eb, #38bdf8)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontSize: '1.4rem',
+              boxShadow: '0 4px 14px var(--primary-glow)',
+              color: '#ffffff',
+            }}
+          >
             ⚡
           </div>
           <div>
-            <div style={{ fontWeight: 800, fontSize: '1.2rem', color: '#ffffff', letterSpacing: '-0.02em', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-              AI GAME PLATFORM
+            <div
+              style={{
+                fontWeight: 900,
+                fontSize: '1.25rem',
+                letterSpacing: '-0.02em',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}
+            >
+              <span>AI GAME PLATFORM</span>
+              <span
+                style={{
+                  fontSize: '0.65rem',
+                  padding: '0.15rem 0.45rem',
+                  borderRadius: '999px',
+                  backgroundColor: 'rgba(37, 99, 235, 0.15)',
+                  color: 'var(--accent-sky)',
+                  fontWeight: 800,
+                  border: '1px solid rgba(37, 99, 235, 0.3)',
+                }}
+              >
+                LIVE
+              </span>
             </div>
-            <div style={{ fontSize: '0.75rem', color: '#94a3b8', fontWeight: 500 }}>
-              Nền tảng thi đấu kiến thức trực tiếp nhiều người chơi
+            <div
+              style={{
+                fontSize: '0.75rem',
+                color: 'var(--text-secondary)',
+                fontWeight: 500,
+              }}
+            >
+              Đấu trường kiến thức thời gian thực nhiều người chơi
             </div>
           </div>
         </div>
 
-        <div style={{ display: 'flex', gap: '0.5rem', backgroundColor: '#090d16', padding: '0.3rem', borderRadius: '8px', border: '1px solid #1e293b' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            flexWrap: 'wrap',
+          }}
+        >
+          {/* Nút chuyển đổi Theme */}
           <button
             type="button"
-            onClick={() => setActiveTab('demo')}
+            onClick={toggleTheme}
+            title={theme === 'dark' ? 'Chuyển sang giao diện Sáng' : 'Chuyển sang giao diện Tối'}
             style={{
-              padding: '0.5rem 1.1rem',
-              borderRadius: '6px',
-              border: 'none',
-              backgroundColor: activeTab === 'demo' ? '#2563eb' : 'transparent',
-              color: activeTab === 'demo' ? '#ffffff' : '#94a3b8',
+              padding: '0.5rem 0.85rem',
+              borderRadius: '8px',
+              border: '1px solid var(--border-strong)',
+              backgroundColor: 'var(--bg-input)',
+              color: 'var(--text-primary)',
+              fontSize: '0.85rem',
               fontWeight: 600,
-              fontSize: '0.875rem',
               cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
               transition: 'all 0.15s ease',
             }}
           >
-            📋 Bảng Điều Khiển (Demo)
+            {theme === 'dark' ? '☀️ Sáng' : '🌙 Tối'}
           </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab('host')}
+          {/* Nhóm tab điều hướng */}
+          <div
             style={{
-              padding: '0.5rem 1.1rem',
-              borderRadius: '6px',
-              border: 'none',
-              backgroundColor: activeTab === 'host' ? '#2563eb' : 'transparent',
-              color: activeTab === 'host' ? '#ffffff' : '#94a3b8',
-              fontWeight: 600,
-              fontSize: '0.875rem',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
+              display: 'flex',
+              gap: '0.35rem',
+              backgroundColor: 'var(--bg-input)',
+              padding: '0.25rem',
+              borderRadius: '10px',
+              border: '1px solid var(--border-subtle)',
             }}
           >
-            👑 Quản Trị (Host)
-          </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('demo')}
+              style={{
+                padding: '0.55rem 1.1rem',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: activeTab === 'demo' ? 'var(--primary)' : 'transparent',
+                color: activeTab === 'demo' ? '#ffffff' : 'var(--text-secondary)',
+                fontWeight: 700,
+                fontSize: '0.875rem',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                boxShadow: activeTab === 'demo' ? 'var(--btn-shadow)' : 'none',
+              }}
+            >
+              📋 Tạo Game (Demo)
+            </button>
 
-          <button
-            type="button"
-            onClick={() => setActiveTab(roomCode && displayName ? 'play' : 'join')}
-            style={{
-              padding: '0.5rem 1.1rem',
-              borderRadius: '6px',
-              border: 'none',
-              backgroundColor: (activeTab === 'join' || activeTab === 'play') ? '#2563eb' : 'transparent',
-              color: (activeTab === 'join' || activeTab === 'play') ? '#ffffff' : '#94a3b8',
-              fontWeight: 600,
-              fontSize: '0.875rem',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            🎮 Người Chơi (Player)
-          </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('host')}
+              style={{
+                padding: '0.55rem 1.1rem',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: activeTab === 'host' ? 'var(--primary)' : 'transparent',
+                color: activeTab === 'host' ? '#ffffff' : 'var(--text-secondary)',
+                fontWeight: 700,
+                fontSize: '0.875rem',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                boxShadow: activeTab === 'host' ? 'var(--btn-shadow)' : 'none',
+              }}
+            >
+              👑 Quản Trị (Host)
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab(roomCode && displayName ? 'play' : 'join')}
+              style={{
+                padding: '0.55rem 1.1rem',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: activeTab === 'join' || activeTab === 'play' ? 'var(--primary)' : 'transparent',
+                color: activeTab === 'join' || activeTab === 'play' ? '#ffffff' : 'var(--text-secondary)',
+                fontWeight: 700,
+                fontSize: '0.875rem',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                boxShadow: activeTab === 'join' || activeTab === 'play' ? 'var(--btn-shadow)' : 'none',
+              }}
+            >
+              🎮 Người Chơi (Player)
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -165,7 +306,17 @@ export const AppContent: React.FC = () => {
       </main>
 
       {/* Chân trang */}
-      <footer style={{ borderTop: '1px solid #1e293b', padding: '1.25rem', textAlign: 'center', color: '#64748b', fontSize: '0.825rem', backgroundColor: '#090d16' }}>
+      <footer
+        style={{
+          borderTop: '1px solid var(--border-subtle)',
+          padding: '1.25rem',
+          textAlign: 'center',
+          color: 'var(--text-muted)',
+          fontSize: '0.825rem',
+          backgroundColor: 'var(--bg-surface)',
+          transition: 'background-color 0.2s ease, border-color 0.2s ease',
+        }}
+      >
         Nội dung AI &rarr; Bộ câu hỏi &rarr; Đấu trường trực tiếp thời gian thực &copy; 2026
       </footer>
     </div>

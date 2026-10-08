@@ -106,32 +106,36 @@ const ToastCard: React.FC<{ toast: ToastItem; onDismiss: () => void }> = ({ toas
     switch (toast.type) {
       case 'success':
         return {
-          background: '#064e3b',
-          borderColor: '#10b981',
-          iconColor: '#34d399',
+          background: 'rgba(16, 185, 129, 0.95)',
+          borderColor: '#059669',
+          iconColor: '#ffffff',
           icon: '✓',
+          shadow: '0 8px 24px rgba(16, 185, 129, 0.35)',
         };
       case 'error':
         return {
-          background: '#7f1d1d',
-          borderColor: '#ef4444',
-          iconColor: '#f87171',
+          background: 'rgba(239, 68, 68, 0.95)',
+          borderColor: '#dc2626',
+          iconColor: '#ffffff',
           icon: '✕',
+          shadow: '0 8px 24px rgba(239, 68, 68, 0.35)',
         };
       case 'loading':
         return {
-          background: '#1e3a8a',
-          borderColor: '#3b82f6',
-          iconColor: '#60a5fa',
-          icon: '⟳',
+          background: 'rgba(37, 99, 235, 0.95)',
+          borderColor: '#1d4ed8',
+          iconColor: '#ffffff',
+          icon: '⚡',
+          shadow: '0 8px 24px rgba(37, 99, 235, 0.35)',
         };
       case 'info':
       default:
         return {
-          background: '#0f172a',
+          background: 'rgba(15, 23, 42, 0.95)',
           borderColor: '#38bdf8',
           iconColor: '#38bdf8',
           icon: 'ℹ',
+          shadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
         };
     }
   };
@@ -144,33 +148,41 @@ const ToastCard: React.FC<{ toast: ToastItem; onDismiss: () => void }> = ({ toas
         pointerEvents: 'auto',
         backgroundColor: style.background,
         border: `1px solid ${style.borderColor}`,
-        borderRadius: '8px',
-        padding: '0.85rem 1.15rem',
-        color: '#f8fafc',
-        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -2px rgba(0, 0, 0, 0.3)',
+        borderRadius: '12px',
+        padding: '0.9rem 1.25rem',
+        color: '#ffffff',
+        boxShadow: style.shadow,
         display: 'flex',
         alignItems: 'flex-start',
-        gap: '0.75rem',
+        gap: '0.85rem',
+        backdropFilter: 'blur(8px)',
+        animation: 'popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
         transition: 'all 0.2s ease',
       }}
     >
       <div
         style={{
-          color: style.iconColor,
-          fontWeight: 800,
-          fontSize: '1.25rem',
-          lineHeight: '1.2',
+          width: '28px',
+          height: '28px',
+          borderRadius: '8px',
+          backgroundColor: 'rgba(255, 255, 255, 0.2)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontWeight: 900,
+          fontSize: '1rem',
+          flexShrink: 0,
         }}
       >
         {style.icon}
       </div>
       <div style={{ flex: 1 }}>
         {toast.title && (
-          <div style={{ fontWeight: 700, fontSize: '0.95rem', marginBottom: '0.2rem' }}>
+          <div style={{ fontWeight: 800, fontSize: '0.95rem', marginBottom: '0.2rem', letterSpacing: '-0.01em' }}>
             {toast.title}
           </div>
         )}
-        <div style={{ fontSize: '0.875rem', color: '#e2e8f0', wordBreak: 'break-word' }}>
+        <div style={{ fontSize: '0.875rem', color: '#f8fafc', wordBreak: 'break-word', lineHeight: 1.4 }}>
           {toast.message}
         </div>
       </div>
@@ -178,14 +190,20 @@ const ToastCard: React.FC<{ toast: ToastItem; onDismiss: () => void }> = ({ toas
         type="button"
         onClick={onDismiss}
         style={{
-          background: 'transparent',
+          background: 'rgba(255, 255, 255, 0.15)',
           border: 'none',
-          color: '#94a3b8',
+          borderRadius: '6px',
+          color: '#ffffff',
           cursor: 'pointer',
           fontSize: '1rem',
-          fontWeight: 700,
-          padding: '0 0.25rem',
+          fontWeight: 800,
+          width: '24px',
+          height: '24px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
           marginLeft: '0.25rem',
+          flexShrink: 0,
         }}
       >
         ×
