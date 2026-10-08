@@ -64,9 +64,6 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
           <h1 style={{ margin: 0, fontSize: '1.85rem', color: 'var(--text-primary)', fontWeight: 900, letterSpacing: '-0.03em' }}>
             Tham Gia Phòng Đấu
           </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', margin: '0.5rem 0 0 0', lineHeight: 1.45 }}>
-            Nhập mã phòng và biệt danh của bạn để tranh tài kiến thức trực tiếp cùng mọi người!
-          </p>
         </div>
 
         <form onSubmit={handleSubmit}>
@@ -102,7 +99,7 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
 
           <div style={{ marginBottom: '1.75rem' }}>
             <label style={{ display: 'block', marginBottom: '0.45rem', color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              TÊN / BIỆT DANH
+              TÊN NGƯỜI CHƠI
             </label>
             <input
               type="text"
@@ -146,7 +143,7 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
               gap: '0.5rem',
             }}
           >
-            <span>Vào phòng chiến ngay</span>
+            <span>Vào phòng</span>
             <span>🚀</span>
           </button>
         </form>

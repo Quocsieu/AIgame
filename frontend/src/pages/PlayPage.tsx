@@ -302,7 +302,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             Sẵn Sàng Chiến Đấu!
           </h2>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', margin: '0 0 1.75rem 0', lineHeight: '1.5' }}>
-            Bạn đã kết nối thành công. Vui lòng giữ sáng màn hình thiết bị. Trận đấu sẽ tự động bắt đầu ngay khi chủ phòng kích hoạt!
+            Giữ sáng màn hình. Trận đấu sẽ bắt đầu khi chủ phòng bấm Bắt đầu.
           </p>
 
           <div
@@ -318,29 +318,10 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               fontWeight: 800,
               letterSpacing: '0.1em',
               fontSize: '1.15rem',
-              marginBottom: '1.75rem',
             }}
           >
             <span>MÃ PHÒNG:</span>
             <span>{roomCode}</span>
-          </div>
-
-          <div
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '12px',
-              padding: '1rem',
-              textAlign: 'left',
-              display: 'flex',
-              gap: '0.75rem',
-              alignItems: 'flex-start',
-            }}
-          >
-            <span style={{ fontSize: '1.25rem' }}>💡</span>
-            <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.45' }}>
-              <strong style={{ color: 'var(--text-primary)' }}>Mẹo thi đấu:</strong> Trả lời càng nhanh và chính xác thì điểm cộng càng lớn. Chuỗi câu đúng liên tiếp sẽ kích hoạt hệ số nhân điểm đặc biệt!
-            </div>
           </div>
         </div>
       )}

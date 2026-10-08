@@ -139,34 +139,9 @@ export const AppContent: React.FC = () => {
                 fontWeight: 900,
                 fontSize: '1.25rem',
                 letterSpacing: '-0.02em',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
               }}
             >
-              <span>AI GAME PLATFORM</span>
-              <span
-                style={{
-                  fontSize: '0.65rem',
-                  padding: '0.15rem 0.45rem',
-                  borderRadius: '999px',
-                  backgroundColor: 'rgba(37, 99, 235, 0.15)',
-                  color: 'var(--accent-sky)',
-                  fontWeight: 800,
-                  border: '1px solid rgba(37, 99, 235, 0.3)',
-                }}
-              >
-                LIVE
-              </span>
-            </div>
-            <div
-              style={{
-                fontSize: '0.75rem',
-                color: 'var(--text-secondary)',
-                fontWeight: 500,
-              }}
-            >
-              Đấu trường kiến thức thời gian thực nhiều người chơi
+              AI GAME PLATFORM
             </div>
           </div>
         </div>
@@ -230,25 +205,6 @@ export const AppContent: React.FC = () => {
               }}
             >
               📋 Tạo Game (Demo)
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('host')}
-              style={{
-                padding: '0.55rem 1.1rem',
-                borderRadius: '8px',
-                border: 'none',
-                backgroundColor: activeTab === 'host' ? 'var(--primary)' : 'transparent',
-                color: activeTab === 'host' ? '#ffffff' : 'var(--text-secondary)',
-                fontWeight: 700,
-                fontSize: '0.875rem',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                boxShadow: activeTab === 'host' ? 'var(--btn-shadow)' : 'none',
-              }}
-            >
-              👑 Quản Trị (Host)
             </button>
 
             <button

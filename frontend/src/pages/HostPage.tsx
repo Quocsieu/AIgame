@@ -276,30 +276,9 @@ export const HostPage: React.FC<HostPageProps> = ({
           }}
         >
           <div>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                padding: '0.2rem 0.65rem',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                border: '1px solid rgba(56, 189, 248, 0.25)',
-                color: 'var(--accent-sky)',
-                fontSize: '0.75rem',
-                fontWeight: 800,
-                textTransform: 'uppercase',
-                marginBottom: '0.35rem',
-              }}
-            >
-              👑 QUẢN TRỊ PHÒNG CHƠI
-            </div>
             <h1 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.65rem', fontWeight: 900, letterSpacing: '-0.02em' }}>
               Bảng Điều Khiển Chủ Phòng
             </h1>
-            <p style={{ color: 'var(--text-secondary)', margin: '0.25rem 0 0 0', fontSize: '0.875rem' }}>
-              Theo dõi người tham gia thời gian thực, điều khiển câu hỏi và trình chiếu trực tiếp
-            </p>
           </div>
 
           {viewState === 'lobby' && (
@@ -978,9 +957,6 @@ export const HostPage: React.FC<HostPageProps> = ({
           >
             <span>
               Số câu trả lời đã ghi nhận: <strong style={{ color: 'var(--accent-sky)', fontSize: '1.1rem' }}>{answerCount}</strong>
-            </span>
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-              Trò chơi sẽ tự động chuyển sang công bố kết quả khi hết thời gian
             </span>
           </div>
         </div>
