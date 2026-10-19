@@ -1,6 +1,14 @@
 import path from 'node:path';
 import express from 'express';
+import { optionalAuthMiddleware } from './middleware/auth.middleware.js';
 import { errorHandler } from './middleware/errorHandler.js';
+import {
+  analyticsRouter,
+  historyRouter,
+  observabilityRouter,
+  quotaRouter,
+} from './routes/analytics.routes.js';
+import { authRouter } from './routes/auth.routes.js';
 import { contentRouter } from './routes/content.routes.js';
 import { gameRouter } from './routes/game.routes.js';
 import { roomRouter } from './routes/room.routes.js';
@@ -15,6 +23,15 @@ const ALLOWED_ORIGINS = new Set([
 
 export function createApp(): express.Application {
   const app = express();
+
+  // Only trust reverse proxy headers (X-Forwarded-For) when explicitly configured.
+  const trustProxy = process.env.TRUST_PROXY;
+  if (trustProxy !== undefined && trustProxy !== '' && trustProxy !== 'false' && trustProxy !== '0') {
+    const hopCount = Number(trustProxy);
+    app.set('trust proxy', Number.isInteger(hopCount) && hopCount > 0 ? hopCount : trustProxy === 'true' ? 1 : trustProxy);
+  } else {
+    app.set('trust proxy', false);
+  }
 
   // CORS middleware (allowlist-based for production & local development)
   app.use((req, res, next) => {
@@ -37,6 +54,9 @@ export function createApp(): express.Application {
   app.use(express.json({ limit: '1mb' }));
   app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 
+  // Attach optional authentication context to all API requests
+  app.use(optionalAuthMiddleware);
+
   // Serve React frontend application if built
   const frontendDistPath = path.resolve(process.cwd(), 'frontend', 'dist');
   app.use(express.static(frontendDistPath));
@@ -48,6 +68,15 @@ export function createApp(): express.Application {
   app.get('/health', (_req, res) => {
     res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
   });
+
+  // Authentication & Account API (Phase 4)
+  app.use('/api/auth', authRouter);
+
+  // Quotas, Learning Analytics, AI Observability & History APIs (Phase 3 & 4)
+  app.use('/api/quotas', quotaRouter);
+  app.use('/api/analytics', analyticsRouter);
+  app.use('/api/observability', observabilityRouter);
+  app.use('/api/history', historyRouter);
 
   // Content ingestion API (Day 1)
   app.use('/api/content', contentRouter);
@@ -65,3 +94,4 @@ export function createApp(): express.Application {
 }
 
 export const app = createApp();
+

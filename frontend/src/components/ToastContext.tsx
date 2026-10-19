@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
 
-export type ToastType = 'success' | 'error' | 'info' | 'loading';
+export type ToastType = 'success' | 'error' | 'warning' | 'info' | 'loading';
 
 export interface ToastItem {
   id: string;
@@ -16,6 +16,7 @@ interface ToastContextType {
   removeToast: (id: string) => void;
   success: (message: string, title?: string) => string;
   error: (message: string, title?: string) => string;
+  warning: (message: string, title?: string) => string;
   info: (message: string, title?: string) => string;
   loading: (message: string, title?: string) => string;
 }
@@ -52,6 +53,10 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return addToast({ type: 'error', message, title: title || 'Lỗi xử lý' });
   }, [addToast]);
 
+  const warning = useCallback((message: string, title?: string) => {
+    return addToast({ type: 'warning', message, title: title || 'Cảnh báo' });
+  }, [addToast]);
+
   const info = useCallback((message: string, title?: string) => {
     return addToast({ type: 'info', message, title: title || 'Thông báo' });
   }, [addToast]);
@@ -61,7 +66,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [addToast]);
 
   return (
-    <ToastContext.Provider value={{ toasts, addToast, removeToast, success, error, info, loading }}>
+    <ToastContext.Provider value={{ toasts, addToast, removeToast, success, error, warning, info, loading }}>
       {children}
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
     </ToastContext.Provider>
@@ -119,6 +124,14 @@ const ToastCard: React.FC<{ toast: ToastItem; onDismiss: () => void }> = ({ toas
           iconColor: '#ffffff',
           icon: '✕',
           shadow: '0 8px 24px rgba(239, 68, 68, 0.35)',
+        };
+      case 'warning':
+        return {
+          background: 'rgba(245, 158, 11, 0.95)',
+          borderColor: '#d97706',
+          iconColor: '#ffffff',
+          icon: '⚠',
+          shadow: '0 8px 24px rgba(245, 158, 11, 0.35)',
         };
       case 'loading':
         return {

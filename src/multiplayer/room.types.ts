@@ -25,6 +25,7 @@ export const MULTIPLAYER_CONFIG = {
   ROOM_CODE_LENGTH: 6,
   // Ambiguity-free uppercase alphabet (excludes confusing characters: 0, O, 1, I, 5, S)
   ROOM_CODE_ALPHABET: 'ABCDEFGHJKLMNPQRTUVWXYZ2346789',
+  AUTO_ADVANCE_DELAY_MS: parseInt(process.env.AUTO_ADVANCE_DELAY_MS || '4000', 10),
 } as const;
 
 /**
@@ -188,6 +189,14 @@ export type OutboundMessage =
   | {
       type: 'question.answerReceived';
       questionId: string;
+      answeredCount?: number;
+      totalPlayers?: number;
+    }
+  | {
+      type: 'question.answerCountUpdated';
+      questionId: string;
+      answeredCount: number;
+      totalPlayers: number;
     }
   | {
       type: 'question.timeUp';
@@ -200,6 +209,7 @@ export type OutboundMessage =
       leaderboard: LeaderboardEntry[];
       personalResult?: PlayerQuestionResult;
       answerStats?: Record<string, number>;
+      autoAdvanceMs?: number;
     }
   | {
       type: 'leaderboard.updated';

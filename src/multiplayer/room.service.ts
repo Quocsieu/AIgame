@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { GameSpecification, GameSpecificationSchema } from '../contracts/game.contract.js';
 import { calculateScore } from '../game/game.scoring.js';
 import { getHandler } from '../game/handlers/index.js';
+import { persistenceRepo } from '../storage/persistence.repository.js';
 import { AppError } from '../utils/errors.js';
 import { roomStore } from './room.store.js';
 import {
@@ -20,11 +21,14 @@ export class MultiplayerRoom {
   public readonly gameId: string;
   public readonly gameSpecification: GameSpecification;
   public readonly hostToken: string;
+  public ownerUserId: string | null = null;
   public state: RoomState = 'WAITING';
   public readonly capacity: number;
   public currentQuestionIndex: number = 0;
   public questionStartedAt: number | null = null;
   public questionDeadlineAt: number | null = null;
+  public startedAtIso: string | null = null;
+  public finishedAtIso: string | null = null;
   public readonly createdAt: number;
   public updatedAt: number;
 
@@ -37,13 +41,15 @@ export class MultiplayerRoom {
     roomCode: string,
     gameSpecification: GameSpecification,
     hostToken: string,
-    capacity: number = MULTIPLAYER_CONFIG.MAX_PLAYERS_PER_ROOM
+    capacity: number = MULTIPLAYER_CONFIG.MAX_PLAYERS_PER_ROOM,
+    ownerUserId?: string | null
   ) {
     this.roomId = roomId;
     this.roomCode = roomCode.toUpperCase();
     this.gameId = gameSpecification.gameId;
     this.gameSpecification = Object.freeze(JSON.parse(JSON.stringify(gameSpecification)));
     this.hostToken = hostToken;
+    this.ownerUserId = ownerUserId ?? gameSpecification.ownerUserId ?? null;
     this.capacity = capacity;
     this.createdAt = Date.now();
     this.updatedAt = Date.now();
@@ -154,6 +160,7 @@ export class MultiplayerRoom {
       throw new AppError('INVALID_ROOM_STATE', 'Cannot start game without any players in the room.', 400);
     }
 
+    this.startedAtIso = new Date().toISOString();
     this.currentQuestionIndex = 0;
     return this.activateQuestion(0);
   }
@@ -187,7 +194,7 @@ export class MultiplayerRoom {
     questionId: string,
     rawAnswer: string,
     now: number = Date.now()
-  ): { result: PlayerQuestionResult; allAnswered: boolean } {
+  ): { result: PlayerQuestionResult; allAnswered: boolean; answeredCount: number; totalPlayers: number } {
     const player = this.players.get(playerToken);
     if (!player) {
       throw new AppError('SESSION_NOT_FOUND', 'Player session not found in this room.', 404);
@@ -260,10 +267,16 @@ export class MultiplayerRoom {
 
     // Check if all connected players have answered
     const connectedPlayers = Array.from(this.players.values()).filter(p => p.connected);
-    const answeredCount = connectedPlayers.filter(p => p.answeredQuestionIds.has(questionId)).length;
-    const allAnswered = connectedPlayers.length > 0 && answeredCount >= connectedPlayers.length;
+    const totalAnsweredCount = Array.from(this.players.values()).filter(p => p.answeredQuestionIds.has(questionId)).length;
+    const connectedAnsweredCount = connectedPlayers.filter(p => p.answeredQuestionIds.has(questionId)).length;
+    const allAnswered = connectedPlayers.length > 0 && connectedAnsweredCount >= connectedPlayers.length;
 
-    return { result, allAnswered };
+    return {
+      result,
+      allAnswered,
+      answeredCount: totalAnsweredCount,
+      totalPlayers: this.players.size,
+    };
   }
 
   /**
@@ -329,7 +342,10 @@ export class MultiplayerRoom {
     } else {
       this.state = 'FINISHED';
       this.updatedAt = Date.now();
-      return { nextQuestionAvailable: false, finished: true, finalLeaderboard: this.getLeaderboard() };
+      this.finishedAtIso = new Date().toISOString();
+      const finalLeaderboard = this.getLeaderboard();
+      this.persistHistory(finalLeaderboard);
+      return { nextQuestionAvailable: false, finished: true, finalLeaderboard };
     }
   }
 
@@ -348,7 +364,29 @@ export class MultiplayerRoom {
 
     this.state = 'FINISHED';
     this.updatedAt = Date.now();
-    return this.getLeaderboard();
+    this.finishedAtIso = new Date().toISOString();
+    const finalLeaderboard = this.getLeaderboard();
+    this.persistHistory(finalLeaderboard);
+    return finalLeaderboard;
+  }
+
+  public persistHistory(leaderboardOverride?: LeaderboardEntry[]): void {
+    const leaderboard = leaderboardOverride || this.getLeaderboard();
+    persistenceRepo.saveRoomHistory({
+      roomId: this.roomId,
+      roomCode: this.roomCode,
+      gameId: this.gameId,
+      ownerUserId: this.ownerUserId,
+      gameTitle: this.gameSpecification.title,
+      gameType: this.gameSpecification.gameType,
+      scoringMode: this.gameSpecification.settings.scoringMode,
+      state: this.state,
+      playerCount: this.players.size,
+      totalQuestions: this.gameSpecification.questions.length,
+      leaderboard,
+      startedAt: this.startedAtIso,
+      finishedAt: this.finishedAtIso,
+    });
   }
 
   /**
@@ -437,15 +475,24 @@ export class MultiplayerRoom {
 class RoomService {
   public createRoom(
     gameSpecification: GameSpecification,
-    capacity: number = MULTIPLAYER_CONFIG.MAX_PLAYERS_PER_ROOM
+    capacity: number = MULTIPLAYER_CONFIG.MAX_PLAYERS_PER_ROOM,
+    ownerUserId?: string | null
   ): MultiplayerRoom {
     GameSpecificationSchema.parse(gameSpecification);
 
     const roomId = `room_${crypto.randomUUID()}`;
     const roomCode = roomStore.generateUniqueRoomCode();
     const hostToken = `host_${crypto.randomUUID()}`;
+    const resolvedOwner = ownerUserId !== undefined ? ownerUserId : gameSpecification.ownerUserId ?? null;
 
-    const room = new MultiplayerRoom(roomId, roomCode, gameSpecification, hostToken, capacity);
+    const room = new MultiplayerRoom(
+      roomId,
+      roomCode,
+      gameSpecification,
+      hostToken,
+      capacity,
+      resolvedOwner
+    );
     roomStore.save(room);
     return room;
   }

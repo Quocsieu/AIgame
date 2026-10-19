@@ -48,6 +48,7 @@ export interface QuestionResult {
   answeredAt: string;
   correctAnswer: string;
   explanation?: string;
+  sourceReference?: GameQuestion['sourceReference'];
 }
 
 /**

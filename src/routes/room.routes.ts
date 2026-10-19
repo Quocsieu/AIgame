@@ -1,8 +1,12 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import QRCode from 'qrcode';
 import { gameStore } from '../game/game.store.js';
+import { roomCreateRateLimiter } from '../middleware/rateLimiter.js';
 import { roomService } from '../multiplayer/room.service.js';
 import { CreateRoomRequestSchema } from '../multiplayer/room.types.js';
+import { authService } from '../services/auth.service.js';
+import { quotaService } from '../services/quota.service.js';
+import { persistenceRepo } from '../storage/persistence.repository.js';
 import { AppError, createSuccessResponse } from '../utils/errors.js';
 
 export const roomRouter = Router();
@@ -26,7 +30,7 @@ function buildJoinUrl(req: Request, roomCode: string): string {
  * POST /api/rooms
  * Create a new multiplayer room.
  */
-roomRouter.post('/', async (req: Request, res: Response, next: NextFunction) => {
+roomRouter.post('/', roomCreateRateLimiter.middleware, async (req: Request, res: Response, next: NextFunction) => {
   try {
     const parseResult = CreateRoomRequestSchema.safeParse(req.body);
     if (!parseResult.success) {
@@ -42,9 +46,24 @@ roomRouter.post('/', async (req: Request, res: Response, next: NextFunction) => 
       if (!spec) {
         throw new AppError('GAME_NOT_FOUND', `Game with ID "${gameId}" was not found. Please provide gameSpecification or ingest/generate first.`, 404);
       }
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+      const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
+
+      authService.assertResourceAccess({
+        resourceType: 'bộ câu hỏi',
+        ownerUserId,
+        currentUser: req.user,
+        mode: 'read',
+        isPublic,
+      });
     }
 
-    const room = roomService.createRoom(spec, capacity);
+    if (req.user) {
+      quotaService.enforceActiveRoomLimit(req.user.userId);
+    }
+
+    const room = roomService.createRoom(spec, capacity, req.user?.userId ?? null);
     const joinUrl = buildJoinUrl(req, room.roomCode);
 
     res.status(200).json(
@@ -106,4 +125,3 @@ roomRouter.get('/:roomCode/qr', async (req: Request, res: Response, next: NextFu
     next(err);
   }
 });
-

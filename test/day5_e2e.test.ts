@@ -314,10 +314,10 @@ describe('DAY 5 — End-to-End Integration Test Suite', () => {
       {
         id: 'q_qb_1',
         type: 'QUICK_BUTTON',
-        question: 'HTTP is a stateful transport protocol.',
-        choices: ['True', 'False'],
-        correctAnswer: 'False',
-        explanation: 'HTTP is inherently a stateless application-level protocol.',
+        question: 'HTTP là giao thức lưu trạng thái (stateful).',
+        choices: ['Đúng', 'Sai'],
+        correctAnswer: 'Sai',
+        explanation: 'HTTP là giao thức không lưu trạng thái (stateless) ở tầng ứng dụng.',
         difficulty: 'EASY',
         sourceReference: {
           sourceId: 'src_dummy',
@@ -376,10 +376,10 @@ describe('DAY 5 — End-to-End Integration Test Suite', () => {
     hostWs.send(JSON.stringify({ type: 'host.start' }));
     const qData = await qPromise;
     assert.equal(qData.question.type, 'QUICK_BUTTON');
-    assert.deepEqual(qData.question.choices, ['True', 'False']);
+    assert.deepEqual(qData.question.choices, ['Đúng', 'Sai']);
 
     const revPromise = waitFor(playerWs, 'question.revealed');
-    playerWs.send(JSON.stringify({ type: 'player.answer', questionId: 'q_qb_1', answer: 'False' }));
+    playerWs.send(JSON.stringify({ type: 'player.answer', questionId: 'q_qb_1', answer: 'Sai' }));
     const revData = await revPromise;
     assert.equal(revData.personalResult.isCorrect, true);
 

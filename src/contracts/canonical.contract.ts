@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const SourceTypeEnum = z.enum(['WEBSITE', 'DOCX', 'XLSX', 'PDF']);
+export const SourceTypeEnum = z.enum(['WEBSITE', 'DOCX', 'XLSX', 'PDF', 'TXT', 'MARKDOWN', 'CSV']);
 export type SourceType = z.infer<typeof SourceTypeEnum>;
 
 export const ProvenanceReferenceSchema = z.object({

@@ -122,6 +122,20 @@ export const HostPage: React.FC<HostPageProps> = ({
       toast.info(`Bắt đầu câu hỏi số ${(msg.question.questionIndex || 0) + 1}!`, 'Câu hỏi mới');
     });
 
+    client.on('question.answerCountUpdated', (msg: any) => {
+      if (typeof msg.answeredCount === 'number') {
+        setAnswerCount(msg.answeredCount);
+      } else {
+        setAnswerCount((prev) => prev + 1);
+      }
+    });
+
+    client.on('question.answerReceived', (msg: any) => {
+      if (typeof msg.answeredCount === 'number') {
+        setAnswerCount(msg.answeredCount);
+      }
+    });
+
     client.on('question.revealed', (msg: any) => {
       stopTimer();
       setRevealData({
@@ -956,7 +970,10 @@ export const HostPage: React.FC<HostPageProps> = ({
             }}
           >
             <span>
-              Số câu trả lời đã ghi nhận: <strong style={{ color: 'var(--accent-sky)', fontSize: '1.1rem' }}>{answerCount}</strong>
+              Số câu trả lời đã ghi nhận:{' '}
+              <strong style={{ color: 'var(--accent-sky)', fontSize: '1.1rem' }}>
+                {answerCount}{players.length > 0 ? ` / ${players.length}` : ''}
+              </strong>
             </span>
           </div>
         </div>

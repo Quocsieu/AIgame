@@ -1,17 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { ToastProvider } from './components/ToastContext.js';
+import { AnalyticsPage } from './pages/AnalyticsPage.js';
 import { DemoPage } from './pages/DemoPage.js';
 import { HostPage } from './pages/HostPage.js';
 import { JoinPage } from './pages/JoinPage.js';
 import { PlayPage } from './pages/PlayPage.js';
+import { getOrCreateGuestToken, setStoredAuthToken } from './services/api.js';
+import type { GameSpecification } from './types/index.js';
 
-type Tab = 'demo' | 'host' | 'join' | 'play';
+type Tab = 'demo' | 'analytics' | 'host' | 'join' | 'play';
 
 export const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('demo');
   const [roomCode, setRoomCode] = useState('');
   const [hostToken, setHostToken] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [selectedSavedSpec, setSelectedSavedSpec] = useState<GameSpecification | null>(null);
 
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
@@ -30,6 +34,12 @@ export const AppContent: React.FC = () => {
       // ignore
     }
   }, [theme]);
+
+  useEffect(() => {
+    // Ensure guest mode token is initialized and no legacy login session overrides guest scope
+    setStoredAuthToken(null);
+    getOrCreateGuestToken();
+  }, []);
 
   const toggleTheme = () => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
@@ -53,7 +63,7 @@ export const AppContent: React.FC = () => {
     } else if (room) {
       setRoomCode(room);
       setActiveTab('join');
-    } else if (tab && ['demo', 'host', 'join', 'play'].includes(tab)) {
+    } else if (tab && ['demo', 'analytics', 'host', 'join', 'play'].includes(tab)) {
       setActiveTab(tab);
     }
   }, []);
@@ -77,6 +87,11 @@ export const AppContent: React.FC = () => {
 
   const handleLeaveGame = () => {
     setActiveTab('join');
+  };
+
+  const handleSelectSavedGame = (spec: GameSpecification) => {
+    setSelectedSavedSpec(spec);
+    setActiveTab('demo');
   };
 
   return (
@@ -192,38 +207,57 @@ export const AppContent: React.FC = () => {
               type="button"
               onClick={() => setActiveTab('demo')}
               style={{
-                padding: '0.55rem 1.1rem',
+                padding: '0.55rem 1rem',
                 borderRadius: '8px',
                 border: 'none',
                 backgroundColor: activeTab === 'demo' ? 'var(--primary)' : 'transparent',
                 color: activeTab === 'demo' ? '#ffffff' : 'var(--text-secondary)',
                 fontWeight: 700,
-                fontSize: '0.875rem',
+                fontSize: '0.85rem',
                 cursor: 'pointer',
                 transition: 'all 0.15s ease',
                 boxShadow: activeTab === 'demo' ? 'var(--btn-shadow)' : 'none',
               }}
             >
-              📋 Tạo Game (Demo)
+              📋 Tạo Game
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('analytics')}
+              style={{
+                padding: '0.55rem 1rem',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: activeTab === 'analytics' ? 'var(--primary)' : 'transparent',
+                color: activeTab === 'analytics' ? '#ffffff' : 'var(--text-secondary)',
+                fontWeight: 700,
+                fontSize: '0.85rem',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                boxShadow: activeTab === 'analytics' ? 'var(--btn-shadow)' : 'none',
+              }}
+            >
+              📚 Bộ Câu Hỏi Đã Tạo
             </button>
 
             <button
               type="button"
               onClick={() => setActiveTab(roomCode && displayName ? 'play' : 'join')}
               style={{
-                padding: '0.55rem 1.1rem',
+                padding: '0.55rem 1rem',
                 borderRadius: '8px',
                 border: 'none',
                 backgroundColor: activeTab === 'join' || activeTab === 'play' ? 'var(--primary)' : 'transparent',
                 color: activeTab === 'join' || activeTab === 'play' ? '#ffffff' : 'var(--text-secondary)',
                 fontWeight: 700,
-                fontSize: '0.875rem',
+                fontSize: '0.85rem',
                 cursor: 'pointer',
                 transition: 'all 0.15s ease',
                 boxShadow: activeTab === 'join' || activeTab === 'play' ? 'var(--btn-shadow)' : 'none',
               }}
             >
-              🎮 Người Chơi (Player)
+              🎮 Người Chơi
             </button>
           </div>
         </div>
@@ -235,6 +269,13 @@ export const AppContent: React.FC = () => {
           <DemoPage
             onNavigateToHost={handleNavigateToHost}
             onNavigateToPlay={handleNavigateToPlayFromDemo}
+            initialSpec={selectedSavedSpec}
+          />
+        )}
+
+        {activeTab === 'analytics' && (
+          <AnalyticsPage
+            onSelectSavedGame={handleSelectSavedGame}
           />
         )}
 
@@ -287,4 +328,3 @@ export const App: React.FC = () => {
   );
 };
 export default App;
-

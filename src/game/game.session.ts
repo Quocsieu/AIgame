@@ -1,4 +1,5 @@
 import { GameQuestion, GameSpecification } from '../contracts/game.contract.js';
+import { persistenceRepo } from '../storage/persistence.repository.js';
 import { AppError } from '../utils/errors.js';
 import { calculateMaxPossibleScore, calculateScore } from './game.scoring.js';
 import { ClockFunction, GameTimer } from './game.timer.js';
@@ -14,6 +15,7 @@ import { getHandler } from './handlers/index.js';
 export class GameSession {
   public readonly sessionId: string;
   public readonly specification: GameSpecification;
+  public ownerUserId: string | null = null;
   public state: GameSessionState = 'NOT_STARTED';
   public currentQuestionIndex: number = 0;
   public score: number = 0;
@@ -30,10 +32,12 @@ export class GameSession {
   constructor(
     sessionId: string,
     specification: GameSpecification,
-    clock?: ClockFunction
+    clock?: ClockFunction,
+    ownerUserId?: string | null
   ) {
     this.sessionId = sessionId;
     this.specification = specification;
+    this.ownerUserId = ownerUserId ?? specification.ownerUserId ?? null;
     this.timer = new GameTimer(clock);
   }
 
@@ -202,6 +206,7 @@ export class GameSession {
       answeredAt: new Date().toISOString(),
       correctAnswer: currentQuestion.correctAnswer,
       explanation: currentQuestion.explanation,
+      sourceReference: currentQuestion.sourceReference,
     };
 
     this.questionResults.push(result);
@@ -227,11 +232,33 @@ export class GameSession {
       throw new AppError('INVALID_GAME_STATE', 'Cannot advance an abandoned session.', 400);
     }
     if (this.state === 'QUESTION_ACTIVE') {
-      throw new AppError(
-        'INVALID_GAME_STATE',
-        'Cannot advance while the current question is still active. Please submit an answer first.',
-        400
-      );
+      if (!this.timer.isExpired()) {
+        throw new AppError(
+          'INVALID_GAME_STATE',
+          'Cannot advance while the current question is still active. Please submit an answer first.',
+          400
+        );
+      }
+
+      // Question timer expired without answer: record timeout miss and allow advancing
+      const expiredQ = this.specification.questions[this.currentQuestionIndex];
+      if (expiredQ && !this.answeredQuestionIds.has(expiredQ.id)) {
+        this.wrongCount++;
+        this.currentStreak = 0;
+        this.answeredQuestionIds.add(expiredQ.id);
+        this.questionResults.push({
+          questionId: expiredQ.id,
+          answer: '',
+          isCorrect: false,
+          pointsEarned: 0,
+          responseTimeMs: this.specification.settings.timePerQuestion * 1000,
+          answeredAt: new Date().toISOString(),
+          correctAnswer: expiredQ.correctAnswer,
+          explanation: expiredQ.explanation,
+          sourceReference: expiredQ.sourceReference,
+        });
+      }
+      this.state = 'QUESTION_ANSWERED';
     }
 
     const nextIndex = this.currentQuestionIndex + 1;
@@ -248,11 +275,13 @@ export class GameSession {
     } else {
       this.state = 'FINISHED';
       this.finishedAt = new Date().toISOString();
+      const result = this.getResult();
+      this.persistSessionState(result);
 
       return {
         nextQuestionAvailable: false,
         finished: true,
-        result: this.getResult(),
+        result,
       };
     }
   }
@@ -265,7 +294,41 @@ export class GameSession {
       this.state = 'FINISHED';
       this.finishedAt = new Date().toISOString();
     }
-    return this.getResult();
+    const result = this.getResult();
+    this.persistSessionState(result);
+    return result;
+  }
+
+  /**
+   * Persists the session state and result to SQLite.
+   */
+  public persistSessionState(precomputedResult?: GameResult): void {
+    const result = precomputedResult || this.getResult();
+    const totalDurationMs = this.questionResults.reduce(
+      (sum, r) => sum + (Number.isFinite(r.responseTimeMs) ? r.responseTimeMs : 0),
+      0
+    );
+
+    persistenceRepo.savePracticeSession({
+      sessionId: this.sessionId,
+      gameId: this.specification.gameId,
+      ownerUserId: this.ownerUserId,
+      gameTitle: this.specification.title,
+      gameType: this.specification.gameType,
+      scoringMode: this.specification.settings.scoringMode,
+      state: this.state,
+      totalQuestions: result.totalQuestions,
+      answeredQuestions: this.questionResults.length,
+      correctAnswers: this.correctCount,
+      wrongAnswers: this.wrongCount,
+      totalScore: this.score,
+      maxPossibleScore: result.maxPossibleScore,
+      maxStreak: this.maxStreak,
+      durationMs: totalDurationMs,
+      questionResults: result.questionResults,
+      startedAt: this.startedAt,
+      finishedAt: this.finishedAt,
+    });
   }
 
   /**

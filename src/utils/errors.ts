@@ -18,6 +18,7 @@ export interface ApiErrorResponse {
   error: {
     code: string;
     message: string;
+    details?: unknown;
   };
 }
 
@@ -26,12 +27,13 @@ export interface ApiSuccessResponse<T> {
   data: T;
 }
 
-export function createErrorResponse(code: string, message: string): ApiErrorResponse {
+export function createErrorResponse(code: string, message: string, details?: unknown): ApiErrorResponse {
   return {
     success: false,
     error: {
       code,
       message,
+      ...(details !== undefined ? { details } : {}),
     },
   };
 }

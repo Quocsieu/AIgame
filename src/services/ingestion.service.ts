@@ -5,8 +5,10 @@ import {
   IngestionResult,
   IngestionResultSchema,
 } from '../contracts/canonical.contract.js';
+import { extractCsvContent } from '../extractors/csv.extractor.js';
 import { extractDocxContent } from '../extractors/docx.extractor.js';
 import { extractPdfContent } from '../extractors/pdf.extractor.js';
+import { extractTextContent } from '../extractors/text.extractor.js';
 import { extractWebsiteContent } from '../extractors/website.extractor.js';
 import { extractXlsxContent } from '../extractors/xlsx.extractor.js';
 import { sourceStore } from '../storage/source.store.js';
@@ -22,12 +24,14 @@ export interface UploadedFilePayload {
 export interface IngestSourcesInput {
   urls?: string[];
   files?: UploadedFilePayload[];
+  ownerUserId?: string | null;
 }
 
 export class IngestionService {
   public async ingest(input: IngestSourcesInput): Promise<IngestionResult> {
     const urls = (input.urls || []).map(u => u.trim()).filter(Boolean);
     const files = input.files || [];
+    const ownerUserId = input.ownerUserId || null;
 
     if (urls.length === 0 && files.length === 0) {
       throw new AppError('NO_SOURCES_PROVIDED', 'At least one URL or file must be provided.', 400);
@@ -57,7 +61,7 @@ export class IngestionService {
       const sourceId = `src_url_${Date.now()}_${sourceCounter++}`;
       const doc = await extractWebsiteContent(url, sourceId);
       documents.push(doc);
-      sourceStore.save(doc);
+      sourceStore.save(doc, Date.now(), ownerUserId);
     }
 
     // 2. Process Files
@@ -73,16 +77,22 @@ export class IngestionService {
         doc = await extractXlsxContent(file.buffer, file.originalname, sourceId);
       } else if (ext === '.pdf') {
         doc = await extractPdfContent(file.buffer, file.originalname, sourceId);
+      } else if (ext === '.txt') {
+        doc = await extractTextContent(file.buffer, file.originalname, sourceId, 'TXT');
+      } else if (ext === '.md' || ext === '.markdown') {
+        doc = await extractTextContent(file.buffer, file.originalname, sourceId, 'MARKDOWN');
+      } else if (ext === '.csv') {
+        doc = await extractCsvContent(file.buffer, file.originalname, sourceId);
       } else {
         throw new AppError(
           'UNSUPPORTED_FILE_TYPE',
-          `Unsupported file extension "${ext}". Supported types are .docx, .xlsx, and .pdf.`,
+          `Unsupported file extension "${ext}". Supported types are .docx, .xlsx, .pdf, .txt, .md, and .csv.`,
           415
         );
       }
 
       documents.push(doc);
-      sourceStore.save(doc);
+      sourceStore.save(doc, Date.now(), ownerUserId);
     }
 
     // Combine normalized content

@@ -9,6 +9,7 @@ import {
   HostNextSchema,
   HostStartSchema,
   LeaderboardEntry,
+  MULTIPLAYER_CONFIG,
   OutboundMessage,
   PlayerAnswerSchema,
   PlayerJoinSchema,
@@ -376,11 +377,20 @@ export class MultiplayerWebSocketServer {
     }
 
     const { questionId, answer } = parse.data;
-    const { allAnswered } = room.submitPlayerAnswer(meta.token, questionId, answer);
+    const { allAnswered, answeredCount, totalPlayers } = room.submitPlayerAnswer(meta.token, questionId, answer);
 
     this.send(ws, {
       type: 'question.answerReceived',
       questionId,
+      answeredCount,
+      totalPlayers,
+    });
+
+    this.broadcastToRoom(room.roomCode, {
+      type: 'question.answerCountUpdated',
+      questionId,
+      answeredCount,
+      totalPlayers,
     });
 
     // If all active players have answered, trigger early reveal
@@ -399,6 +409,11 @@ export class MultiplayerWebSocketServer {
     const room = roomStore.getByRoomCode(meta.roomCode);
     if (!room) {
       this.sendError(ws, 'ROOM_NOT_FOUND', 'Room not found.');
+      return;
+    }
+
+    // Guard against double-advance if auto-advance just transitioned the room
+    if (room.state !== 'QUESTION_REVEAL') {
       return;
     }
 
@@ -512,7 +527,7 @@ export class MultiplayerWebSocketServer {
     }
 
     const questionIndexAtReveal = room.currentQuestionIndex;
-    const AUTO_ADVANCE_DELAY_MS = 4000;
+    const autoAdvanceDelayMs = MULTIPLAYER_CONFIG.AUTO_ADVANCE_DELAY_MS;
 
     room.timerHandle = setTimeout(() => {
       if (room.state === 'QUESTION_REVEAL' && room.currentQuestionIndex === questionIndexAtReveal) {
@@ -525,7 +540,7 @@ export class MultiplayerWebSocketServer {
           );
         }
       }
-    }, AUTO_ADVANCE_DELAY_MS);
+    }, autoAdvanceDelayMs);
   }
 
   private revealQuestionAndBroadcast(room: MultiplayerRoom): void {
@@ -560,6 +575,7 @@ export class MultiplayerWebSocketServer {
           leaderboard: revealData.leaderboard,
           answerStats: revealData.answerStats,
           personalResult,
+          autoAdvanceMs: MULTIPLAYER_CONFIG.AUTO_ADVANCE_DELAY_MS,
         });
       }
     }

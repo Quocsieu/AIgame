@@ -1,7 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { LIMITS } from '../config/limits.js';
+import { ingestRateLimiter } from '../middleware/rateLimiter.js';
 import { ingestionService, UploadedFilePayload } from '../services/ingestion.service.js';
+import { quotaService } from '../services/quota.service.js';
 import { createSuccessResponse } from '../utils/errors.js';
 
 const upload = multer({
@@ -16,9 +18,14 @@ export const contentRouter = Router();
 
 contentRouter.post(
   '/ingest',
+  ingestRateLimiter.middleware,
   upload.array('files', LIMITS.MAX_FILES_PER_REQUEST),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
+      if (req.user) {
+        quotaService.consumeUserQuota(req.user.userId, 'DAILY_INGESTIONS', 1);
+      }
+
       let urls: string[] = [];
 
       if (req.body?.urls) {
@@ -48,7 +55,11 @@ contentRouter.post(
         size: f.size,
       }));
 
-      const result = await ingestionService.ingest({ urls, files });
+      const result = await ingestionService.ingest({
+        urls,
+        files,
+        ownerUserId: req.user?.userId || null,
+      });
 
       res.status(200).json(createSuccessResponse(result));
     } catch (err) {
@@ -56,3 +67,4 @@ contentRouter.post(
     }
   }
 );
+

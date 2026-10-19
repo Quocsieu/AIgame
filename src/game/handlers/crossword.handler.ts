@@ -3,12 +3,16 @@ import { AnswerValidationResult, GameTypeHandler } from './handler.interface.js'
 
 /**
  * Deterministically normalizes crossword words:
- * Trims, Unicode NFC, uppercase, and removes all whitespace.
+ * Trims, strips Vietnamese diacritics (NFD + combining marks + đ/Đ -> D),
+ * uppercases, and removes all whitespace.
  */
 export function normalizeCrosswordWord(text: string): string {
   return text
     .trim()
-    .normalize('NFC')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
     .toUpperCase()
     .replace(/\s+/g, '');
 }

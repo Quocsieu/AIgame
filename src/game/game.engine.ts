@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { GameSpecification, GameSpecificationSchema } from '../contracts/game.contract.js';
+import { persistenceRepo } from '../storage/persistence.repository.js';
 import { AppError } from '../utils/errors.js';
 import { GameSession } from './game.session.js';
 import { gameStore, sessionStore } from './game.store.js';
@@ -27,7 +28,11 @@ export class GameEngine {
   /**
    * Creates a new game session for a single player.
    */
-  public createSession(gameId: string, customSpec?: GameSpecification): GameSession {
+  public createSession(
+    gameId: string,
+    customSpec?: GameSpecification,
+    ownerUserId?: string | null
+  ): GameSession {
     let spec = customSpec;
 
     if (!spec) {
@@ -38,11 +43,12 @@ export class GameEngine {
     } else {
       // Validate provided custom specification
       GameSpecificationSchema.parse(spec);
-      gameStore.save(spec);
+      gameStore.save(spec, Date.now(), ownerUserId);
     }
 
     const sessionId = `session_${crypto.randomUUID()}`;
-    const session = new GameSession(sessionId, spec, this.clock);
+    const resolvedOwner = ownerUserId !== undefined ? ownerUserId : spec.ownerUserId ?? null;
+    const session = new GameSession(sessionId, spec, this.clock, resolvedOwner);
     sessionStore.save(session);
 
     return session;
@@ -125,14 +131,45 @@ export class GameEngine {
   }
 
   /**
-   * Retrieves the final GameResult once the game is finished.
+   * Retrieves the final GameResult once the game is finished (from memory or SQLite history).
    */
   public getResult(sessionId: string): GameResult {
-    const session = this.getSession(sessionId);
-    if (session.state !== 'FINISHED') {
-      throw new AppError('INVALID_GAME_STATE', 'Game session is not finished yet.', 400);
+    const inMemory = sessionStore.get(sessionId);
+    if (inMemory) {
+      if (inMemory.state !== 'FINISHED') {
+        throw new AppError('INVALID_GAME_STATE', 'Game session is not finished yet.', 400);
+      }
+      return inMemory.getResult();
     }
-    return session.getResult();
+
+    const persisted = persistenceRepo.getPracticeSessionById(sessionId);
+    if (persisted) {
+      if (persisted.state !== 'FINISHED') {
+        throw new AppError('INVALID_GAME_STATE', 'Game session is not finished yet.', 400);
+      }
+      const accuracy =
+        persisted.totalQuestions > 0
+          ? Math.round((persisted.correctAnswers / persisted.totalQuestions) * 100)
+          : 0;
+      return {
+        sessionId: persisted.sessionId,
+        gameId: persisted.gameId,
+        title: persisted.gameTitle,
+        gameType: persisted.gameType,
+        totalQuestions: persisted.totalQuestions,
+        correctCount: persisted.correctAnswers,
+        wrongCount: persisted.wrongAnswers,
+        score: persisted.totalScore,
+        maxPossibleScore: persisted.maxPossibleScore,
+        startedAt: persisted.startedAt || persisted.createdAt,
+        finishedAt: persisted.finishedAt || persisted.updatedAt,
+        questionResults: persisted.questionResults,
+        accuracy,
+        streak: persisted.maxStreak,
+      };
+    }
+
+    throw new AppError('SESSION_NOT_FOUND', `Game session "${sessionId}" not found.`, 404);
   }
 
   /**
@@ -145,4 +182,5 @@ export class GameEngine {
 }
 
 export const gameEngine = new GameEngine();
+
 

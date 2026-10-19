@@ -1,20 +1,24 @@
-export type GameType = 'MULTIPLE_CHOICE' | 'FILL_IN_THE_BLANK' | 'QUICK_BUTTON' | 'CROSSWORD';
+export type QuestionType = 'MULTIPLE_CHOICE' | 'FILL_IN_THE_BLANK' | 'QUICK_BUTTON' | 'CROSSWORD';
+export type GameType = QuestionType | 'MIXED';
 export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 export type ScoringMode = 'STANDARD' | 'SPEED_BONUS' | 'STREAK';
+export type SourceType = 'WEBSITE' | 'DOCX' | 'XLSX' | 'PDF' | 'TXT' | 'MARKDOWN' | 'CSV';
 
 export interface ProvenanceReference {
   sourceId: string;
-  sourceType: 'WEBSITE' | 'DOCX' | 'XLSX' | 'PDF';
+  sourceType: SourceType;
   sourceLocation: string;
   page?: number;
   sheet?: string;
   row?: number;
+  section?: string;
   sectionHeading?: string;
+  paragraphIndex?: number;
 }
 
 export interface GameQuestion {
   id: string;
-  type: GameType;
+  type: QuestionType;
   question: string;
   choices?: string[];
   correctAnswer: string;
@@ -28,6 +32,8 @@ export interface GameQuestion {
 
 export interface GameSpecification {
   gameId: string;
+  ownerUserId?: string | null;
+  isPublic?: boolean;
   title: string;
   description: string;
   gameType: GameType;
@@ -39,14 +45,20 @@ export interface GameSpecification {
   };
   sourceSummary?: {
     sourceCount: number;
-    sources: any[];
+    sources: {
+      sourceId: string;
+      sourceType: SourceType;
+      sourceName: string;
+      sourceLocation: string;
+    }[];
   };
+  diagnostics?: string[];
   generatedAt: string;
 }
 
 export interface SanitizedQuestion {
   id: string;
-  type: GameType;
+  type: QuestionType;
   question: string;
   choices?: string[];
   difficulty: Difficulty;
@@ -77,14 +89,30 @@ export interface PlayerQuestionResult {
   answeredAt: number;
 }
 
+export interface IngestedSourceSection {
+  title?: string;
+  content: string;
+  provenance?: ProvenanceReference;
+}
+
 export interface IngestedSource {
   sourceId: string;
-  sourceType: string;
+  sourceType: SourceType;
   sourceName: string;
   sourceLocation: string;
+  title?: string;
+  sections?: IngestedSourceSection[];
   metadata?: {
+    originalSize?: number;
     characterCount?: number;
+    pageCount?: number;
+    sheetCount?: number;
   };
+  diagnostics?: {
+    code: string;
+    message: string;
+    severity: 'info' | 'warning' | 'error';
+  }[];
   tokenEstimate?: number;
 }
 
@@ -102,3 +130,187 @@ export interface QrResponse {
   qrDataUrl: string;
 }
 
+// Single-Player Practice Mode Types
+export interface PracticeQuestionResult {
+  questionId: string;
+  answer: string;
+  isCorrect: boolean;
+  pointsEarned: number;
+  responseTimeMs: number;
+  answeredAt: string;
+  correctAnswer: string;
+  explanation?: string;
+  sourceReference?: ProvenanceReference;
+}
+
+export interface PracticeFinalResult {
+  sessionId: string;
+  gameId: string;
+  title: string;
+  gameType: GameType;
+  totalQuestions: number;
+  correctCount?: number;
+  wrongCount?: number;
+  correctAnswers?: number;
+  wrongAnswers?: number;
+  score?: number;
+  totalScore?: number;
+  maxPossibleScore: number;
+  startedAt?: string;
+  finishedAt?: string;
+  questionResults: PracticeQuestionResult[];
+  accuracy?: number;
+  streak?: number;
+  maxStreak?: number;
+  durationMs?: number;
+}
+
+// Phase 3 & Phase 4 Types: Auth, Quotas, Persistence, Analytics & Observability
+export interface AuthenticatedUser {
+  userId: string;
+  email: string;
+  displayName: string;
+  role: 'USER' | 'ADMIN';
+  createdAt: string;
+}
+
+export interface QuotaCheckItem {
+  quotaKey: string;
+  windowKey: string;
+  limit: number;
+  used: number;
+  remaining: number;
+  resetAt: string;
+}
+
+export interface UserQuotaSummary {
+  userId: string;
+  windowKey: string;
+  resetAt: string;
+  dailyIngestions: QuotaCheckItem;
+  dailyGameGenerations: QuotaCheckItem;
+  dailyAiCalls: QuotaCheckItem;
+  activeSessions: {
+    used: number;
+    limit: number;
+    remaining: number;
+  };
+  activeRooms: {
+    used: number;
+    limit: number;
+    remaining: number;
+  };
+}
+
+export interface PersistedGameSummary {
+  gameId: string;
+  ownerUserId: string | null;
+  isPublic: boolean;
+  title: string;
+  description: string;
+  gameType: GameType;
+  questionCount: number;
+  timePerQuestion: number;
+  scoringMode: ScoringMode;
+  sourceCount: number;
+  generatedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface PersistedPracticeSessionRecord {
+  sessionId: string;
+  gameId: string;
+  ownerUserId: string | null;
+  gameTitle: string;
+  gameType: GameType;
+  scoringMode: ScoringMode;
+  state: string;
+  totalQuestions: number;
+  answeredQuestions: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  totalScore: number;
+  maxPossibleScore: number;
+  maxStreak: number;
+  durationMs: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+}
+
+export interface LearningAnalyticsSummary {
+  scope: {
+    userId: string | null;
+    from: string | null;
+    to: string | null;
+    tzOffsetMinutes: number;
+  };
+  hasData: boolean;
+  overview: {
+    totalGamesCreated: number;
+    completedPracticeSessions: number;
+    completedMultiplayerRooms: number;
+    totalQuestionsAnswered: number;
+    totalCorrectAnswers: number;
+    totalWrongAnswers: number;
+    overallAccuracyPercent: number | null;
+    totalScoreEarned: number;
+    averageScorePerSession: number | null;
+    bestStreak: number;
+    totalPracticeDurationMs: number;
+  };
+  progressOverTime: Array<{
+    date: string;
+    sessionsCount: number;
+    questionsAnswered: number;
+    correctAnswers: number;
+    accuracyPercent: number | null;
+    averageScore: number;
+    totalDurationMs: number;
+  }>;
+  byGameType: Array<{
+    gameType: string;
+    sessionsCount: number;
+    questionsAnswered: number;
+    correctAnswers: number;
+    accuracyPercent: number | null;
+    averageScore: number;
+  }>;
+  byGameTopic: Array<{
+    gameId: string;
+    gameTitle: string;
+    gameType: string;
+    sessionsCount: number;
+    questionsAnswered: number;
+    correctAnswers: number;
+    accuracyPercent: number | null;
+    bestScore: number;
+    lastPlayedAt: string;
+  }>;
+}
+
+export interface AiObservabilitySummary {
+  totals: {
+    totalCalls: number;
+    successfulCalls: number;
+    failedCalls: number;
+    averageLatencyMs: number | null;
+    callsWithReportedTokens: number;
+    callsWithUnknownTokens: number;
+    reportedInputTokens: number | null;
+    reportedOutputTokens: number | null;
+    reportedTotalTokens: number | null;
+    estimatedCostUsd: number | null;
+    pricingConfigured: boolean;
+  };
+  questionQuality: {
+    totalRequested: number;
+    totalGeneratedRaw: number;
+    totalValidAccepted: number;
+    totalRejectedInvalid: number;
+    totalDuplicatesFiltered: number;
+    totalDiagnostics: number;
+    acceptanceRatePercent: number | null;
+  };
+}

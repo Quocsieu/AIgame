@@ -1,9 +1,14 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { gameEngine } from '../game/game.engine.js';
+import { gameStore } from '../game/game.store.js';
 import {
   CreateSessionRequestSchema,
   SubmitAnswerRequestSchema,
 } from '../game/game.types.js';
+import { authService } from '../services/auth.service.js';
+import { exportService, ExportFormat } from '../services/export.service.js';
+import { quotaService } from '../services/quota.service.js';
+import { persistenceRepo } from '../storage/persistence.repository.js';
 import { AppError, createSuccessResponse } from '../utils/errors.js';
 
 export const sessionRouter = Router();
@@ -21,7 +26,28 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
     }
 
     const { gameId, gameSpecification } = parseResult.data;
-    const session = gameEngine.createSession(gameId, gameSpecification);
+
+    if (!gameSpecification) {
+      const storedSpec = gameStore.get(gameId);
+      if (storedSpec) {
+        const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+        const ownerUserId = storedSpec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+        const isPublic = storedSpec.isPublic ?? ownerInfo?.isPublic ?? false;
+        authService.assertResourceAccess({
+          resourceType: 'bộ câu hỏi',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'read',
+          isPublic,
+        });
+      }
+    }
+
+    if (req.user) {
+      quotaService.enforceActiveSessionLimit(req.user.userId);
+    }
+
+    const session = gameEngine.createSession(gameId, gameSpecification, req.user?.userId ?? null);
 
     res.status(200).json(
       createSuccessResponse({
@@ -43,6 +69,14 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
 sessionRouter.post('/:sessionId/start', (req: Request, res: Response, next: NextFunction) => {
   try {
     const sessionId = String(req.params.sessionId);
+    const session = gameEngine.getSession(sessionId);
+    authService.assertResourceAccess({
+      resourceType: 'phiên luyện tập',
+      ownerUserId: session.ownerUserId,
+      currentUser: req.user,
+      mode: 'write',
+    });
+
     const startResult = gameEngine.start(sessionId);
 
     res.status(200).json(createSuccessResponse(startResult));
@@ -59,6 +93,12 @@ sessionRouter.get('/:sessionId', (req: Request, res: Response, next: NextFunctio
   try {
     const sessionId = String(req.params.sessionId);
     const session = gameEngine.getSession(sessionId);
+    authService.assertResourceAccess({
+      resourceType: 'phiên luyện tập',
+      ownerUserId: session.ownerUserId,
+      currentUser: req.user,
+      mode: 'read',
+    });
 
     res.status(200).json(createSuccessResponse(session.getSummary()));
   } catch (err) {
@@ -73,6 +113,14 @@ sessionRouter.get('/:sessionId', (req: Request, res: Response, next: NextFunctio
 sessionRouter.get('/:sessionId/question', (req: Request, res: Response, next: NextFunction) => {
   try {
     const sessionId = String(req.params.sessionId);
+    const session = gameEngine.getSession(sessionId);
+    authService.assertResourceAccess({
+      resourceType: 'phiên luyện tập',
+      ownerUserId: session.ownerUserId,
+      currentUser: req.user,
+      mode: 'read',
+    });
+
     const question = gameEngine.getCurrentQuestion(sessionId);
 
     res.status(200).json(createSuccessResponse(question));
@@ -88,6 +136,14 @@ sessionRouter.get('/:sessionId/question', (req: Request, res: Response, next: Ne
 sessionRouter.post('/:sessionId/answer', (req: Request, res: Response, next: NextFunction) => {
   try {
     const sessionId = String(req.params.sessionId);
+    const session = gameEngine.getSession(sessionId);
+    authService.assertResourceAccess({
+      resourceType: 'phiên luyện tập',
+      ownerUserId: session.ownerUserId,
+      currentUser: req.user,
+      mode: 'write',
+    });
+
     const parseResult = SubmitAnswerRequestSchema.safeParse(req.body);
 
     if (!parseResult.success) {
@@ -111,6 +167,14 @@ sessionRouter.post('/:sessionId/answer', (req: Request, res: Response, next: Nex
 sessionRouter.post('/:sessionId/next', (req: Request, res: Response, next: NextFunction) => {
   try {
     const sessionId = String(req.params.sessionId);
+    const session = gameEngine.getSession(sessionId);
+    authService.assertResourceAccess({
+      resourceType: 'phiên luyện tập',
+      ownerUserId: session.ownerUserId,
+      currentUser: req.user,
+      mode: 'write',
+    });
+
     const advanceResult = gameEngine.advance(sessionId);
 
     res.status(200).json(createSuccessResponse(advanceResult));
@@ -126,11 +190,108 @@ sessionRouter.post('/:sessionId/next', (req: Request, res: Response, next: NextF
 sessionRouter.get('/:sessionId/result', (req: Request, res: Response, next: NextFunction) => {
   try {
     const sessionId = String(req.params.sessionId);
-    const result = gameEngine.getResult(sessionId);
+    try {
+      const activeSession = gameEngine.getSession(sessionId);
+      authService.assertResourceAccess({
+        resourceType: 'kết quả phiên luyện tập',
+        ownerUserId: activeSession.ownerUserId,
+        currentUser: req.user,
+        mode: 'read',
+      });
+      const result = gameEngine.getResult(sessionId);
+      res.status(200).json(createSuccessResponse(result));
+      return;
+    } catch (innerErr) {
+      if (innerErr instanceof AppError && innerErr.code !== 'SESSION_NOT_FOUND') {
+        throw innerErr;
+      }
+    }
 
-    res.status(200).json(createSuccessResponse(result));
+    // Fallback to persisted practice session result if evicted from active memory or after server restart
+    const persisted = persistenceRepo.getPracticeSessionById(sessionId);
+    if (!persisted) {
+      throw new AppError('SESSION_NOT_FOUND', `Game session "${sessionId}" was not found.`, 404);
+    }
+    authService.assertResourceAccess({
+      resourceType: 'kết quả phiên luyện tập',
+      ownerUserId: persisted.ownerUserId,
+      currentUser: req.user,
+      mode: 'read',
+    });
+
+    if (persisted.state !== 'FINISHED') {
+      throw new AppError('GAME_NOT_FINISHED', 'Game session is not finished yet.', 400);
+    }
+
+    res.status(200).json(
+      createSuccessResponse({
+        sessionId: persisted.sessionId,
+        gameId: persisted.gameId,
+        title: persisted.gameTitle,
+        gameType: persisted.gameType,
+        state: 'FINISHED',
+        totalScore: persisted.totalScore,
+        maxPossibleScore: persisted.maxPossibleScore,
+        correctAnswers: persisted.correctAnswers,
+        wrongAnswers: persisted.wrongAnswers,
+        totalQuestions: persisted.totalQuestions,
+        maxStreak: persisted.maxStreak,
+        durationMs: persisted.durationMs,
+        questionResults: persisted.questionResults,
+      })
+    );
   } catch (err) {
     next(err);
   }
 });
 
+/**
+ * GET /api/games/sessions/:sessionId/export?format=csv|json
+ * Export completed practice session result in CSV or JSON format.
+ */
+sessionRouter.get('/:sessionId/export', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const sessionId = String(req.params.sessionId);
+    const rawFormat = String(req.query.format || 'json').toLowerCase();
+    if (rawFormat !== 'csv' && rawFormat !== 'json') {
+      throw new AppError('INVALID_EXPORT_FORMAT', `Unsupported export format "${rawFormat}". Supported formats: csv, json.`, 400);
+    }
+    const format: ExportFormat = rawFormat;
+
+    const persisted = persistenceRepo.getPracticeSessionById(sessionId);
+    if (!persisted || persisted.state !== 'FINISHED') {
+      // Check if session exists in active memory
+      try {
+        const activeSession = gameEngine.getSession(sessionId);
+        authService.assertResourceAccess({
+          resourceType: 'phiên luyện tập',
+          ownerUserId: activeSession.ownerUserId,
+          currentUser: req.user,
+          mode: 'read',
+        });
+        if (activeSession.state !== 'FINISHED') {
+          throw new AppError('SESSION_NOT_FINISHED', 'Cannot export session before it is finished.', 400);
+        }
+      } catch (innerErr) {
+        if (innerErr instanceof AppError && innerErr.code !== 'SESSION_NOT_FOUND') {
+          throw innerErr;
+        }
+      }
+      throw new AppError('SESSION_NOT_FOUND', `Completed practice session "${sessionId}" not found.`, 404);
+    }
+
+    authService.assertResourceAccess({
+      resourceType: 'kết quả phiên luyện tập',
+      ownerUserId: persisted.ownerUserId,
+      currentUser: req.user,
+      mode: 'read',
+    });
+
+    const payload = exportService.exportPracticeSession(persisted, format);
+    res.setHeader('Content-Type', payload.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${payload.filename}"`);
+    res.status(200).send(payload.body);
+  } catch (err) {
+    next(err);
+  }
+});
