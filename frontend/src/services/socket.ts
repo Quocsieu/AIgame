@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 
 export type SocketEventHandler = (event: any) => void;
+export type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'reconnecting';
 
 function getWebSocketUrl(): string {
   // 1. Ưu tiên biến VITE_WS_URL nếu có cấu hình riêng biệt
@@ -29,46 +30,121 @@ export class GameSocketClient {
   private onOpenCallbacks: Set<() => void> = new Set();
   private onCloseCallbacks: Set<() => void> = new Set();
   private onErrorCallbacks: Set<(err: any) => void> = new Set();
+  private onStatusCallbacks: Set<(status: ConnectionStatus) => void> = new Set();
+
+  public status: ConnectionStatus = 'disconnected';
+  private isExplicitClose: boolean = false;
+  private reconnectAttempts: number = 0;
+  private maxReconnectAttempts: number = 10;
+  private reconnectTimer: any = null;
+
+  private setStatus(newStatus: ConnectionStatus): void {
+    if (this.status !== newStatus) {
+      this.status = newStatus;
+      this.onStatusCallbacks.forEach((cb) => {
+        try {
+          cb(newStatus);
+        } catch {
+          // ignore callback error
+        }
+      });
+    }
+  }
 
   public connect(): void {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
 
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    this.isExplicitClose = false;
+    this.setStatus(this.reconnectAttempts > 0 ? 'reconnecting' : 'connecting');
+
     const wsUrl = getWebSocketUrl();
 
-    this.ws = new WebSocket(wsUrl);
+    try {
+      this.ws = new WebSocket(wsUrl);
 
-    this.ws.onopen = () => {
-      this.onOpenCallbacks.forEach(cb => cb());
-    };
+      this.ws.onopen = () => {
+        this.reconnectAttempts = 0;
+        this.setStatus('connected');
+        this.onOpenCallbacks.forEach((cb) => {
+          try {
+            cb();
+          } catch {}
+        });
+      };
 
-    this.ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg.type) {
-          const handlers = this.listeners.get(msg.type);
-          if (handlers) {
-            handlers.forEach(h => h(msg));
+      this.ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type) {
+            const handlers = this.listeners.get(msg.type);
+            if (handlers) {
+              handlers.forEach((h) => {
+                try {
+                  h(msg);
+                } catch {}
+              });
+            }
           }
+          // Also emit to wildcard
+          const allHandlers = this.listeners.get('*');
+          if (allHandlers) {
+            allHandlers.forEach((h) => {
+              try {
+                h(msg);
+              } catch {}
+            });
+          }
+        } catch (err) {
+          console.error('Lỗi khi phân tích dữ liệu WebSocket:', err);
         }
-        // Also emit to wildcard
-        const allHandlers = this.listeners.get('*');
-        if (allHandlers) {
-          allHandlers.forEach(h => h(msg));
+      };
+
+      this.ws.onclose = () => {
+        this.onCloseCallbacks.forEach((cb) => {
+          try {
+            cb();
+          } catch {}
+        });
+
+        if (this.isExplicitClose) {
+          this.setStatus('disconnected');
+          return;
         }
-      } catch (err) {
-        console.error('Lỗi khi phân tích dữ liệu WebSocket:', err);
-      }
-    };
 
-    this.ws.onclose = () => {
-      this.onCloseCallbacks.forEach(cb => cb());
-    };
+        if (this.reconnectAttempts < this.maxReconnectAttempts) {
+          this.reconnectAttempts++;
+          this.setStatus('reconnecting');
+          const delay = Math.min(5000, 1000 * Math.pow(1.3, this.reconnectAttempts));
+          this.reconnectTimer = setTimeout(() => {
+            this.connect();
+          }, delay);
+        } else {
+          this.setStatus('disconnected');
+        }
+      };
 
-    this.ws.onerror = (err) => {
-      this.onErrorCallbacks.forEach(cb => cb(err));
-    };
+      this.ws.onerror = (err) => {
+        this.onErrorCallbacks.forEach((cb) => {
+          try {
+            cb(err);
+          } catch {}
+        });
+      };
+    } catch (err) {
+      this.setStatus('disconnected');
+      this.onErrorCallbacks.forEach((cb) => {
+        try {
+          cb(err);
+        } catch {}
+      });
+    }
   }
 
   public isConnected(): boolean {
@@ -77,8 +153,13 @@ export class GameSocketClient {
 
   public send(msg: any): boolean {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(msg));
-      return true;
+      try {
+        this.ws.send(JSON.stringify(msg));
+        return true;
+      } catch (err) {
+        console.warn('Lỗi khi gửi dữ liệu qua WebSocket:', err);
+        return false;
+      }
     } else {
       console.warn('Không thể gửi tin nhắn WebSocket: Kết nối chưa mở.');
       return false;
@@ -92,6 +173,14 @@ export class GameSocketClient {
     this.listeners.get(eventType)!.add(handler);
     return () => {
       this.listeners.get(eventType)?.delete(handler);
+    };
+  }
+
+  public onStatusChange(cb: (status: ConnectionStatus) => void): () => void {
+    this.onStatusCallbacks.add(cb);
+    cb(this.status);
+    return () => {
+      this.onStatusCallbacks.delete(cb);
     };
   }
 
@@ -120,14 +209,22 @@ export class GameSocketClient {
   }
 
   public close(): void {
+    this.isExplicitClose = true;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
     if (this.ws) {
-      this.ws.close();
+      try {
+        this.ws.close();
+      } catch {}
       this.ws = null;
     }
+    this.setStatus('disconnected');
     this.listeners.clear();
     this.onOpenCallbacks.clear();
     this.onCloseCallbacks.clear();
     this.onErrorCallbacks.clear();
+    this.onStatusCallbacks.clear();
   }
 }
-

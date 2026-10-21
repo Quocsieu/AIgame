@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from '../components/ToastContext.js';
-import { GameSocketClient } from '../services/socket.js';
+import { GameSocketClient, ConnectionStatus } from '../services/socket.js';
 import { createRoom, fetchRoomQr } from '../services/api.js';
 import type { LeaderboardEntry, SanitizedQuestion } from '../types/index.js';
 
@@ -17,16 +17,25 @@ export const HostPage: React.FC<HostPageProps> = ({
 }) => {
   const toast = useToast();
 
-  const [roomCode, setRoomCode] = useState(initialRoomCode || '');
-  const [hostToken, setHostToken] = useState(initialHostToken || '');
+  const [roomCode, setRoomCode] = useState(
+    initialRoomCode || sessionStorage.getItem('active_host_room') || ''
+  );
+  const [hostToken, setHostToken] = useState(
+    initialHostToken || sessionStorage.getItem('active_host_token') || ''
+  );
   const [gameId, setGameId] = useState(initialGameId || '');
   const [gameTitle, setGameTitle] = useState('');
   const [joinUrl, setJoinUrl] = useState('');
   const [qrDataUrl, setQrDataUrl] = useState('');
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
+  const [isLocked, setIsLocked] = useState(false);
 
   // Host screens: 'setup' | 'lobby' | 'question' | 'reveal' | 'finish'
   const [viewState, setViewState] = useState<'setup' | 'lobby' | 'question' | 'reveal' | 'finish'>(
-    initialRoomCode && initialHostToken ? 'lobby' : 'setup'
+    (initialRoomCode || sessionStorage.getItem('active_host_room')) &&
+      (initialHostToken || sessionStorage.getItem('active_host_token'))
+      ? 'lobby'
+      : 'setup'
   );
   const [isPresentationMode, setIsPresentationMode] = useState(false);
 
@@ -80,6 +89,10 @@ export const HostPage: React.FC<HostPageProps> = ({
     const client = new GameSocketClient();
     socketRef.current = client;
 
+    client.onStatusChange((status) => {
+      setConnectionStatus(status);
+    });
+
     client.onOpen(() => {
       client.send({
         type: 'host.join',
@@ -90,7 +103,32 @@ export const HostPage: React.FC<HostPageProps> = ({
 
     client.on('room.joined', (msg: any) => {
       setGameTitle(msg.title || 'Trò chơi nhiều người');
+      if (Array.isArray(msg.players)) {
+        setPlayers(msg.players.map((p: any) => ({ id: p.id, displayName: p.displayName })));
+      }
+      if (typeof msg.isLocked === 'boolean') {
+        setIsLocked(msg.isLocked);
+      }
+      if (msg.state === 'WAITING') {
+        setViewState('lobby');
+      } else if (msg.state === 'QUESTION_ACTIVE') {
+        setViewState('question');
+      } else if (msg.state === 'QUESTION_REVEAL') {
+        setViewState('reveal');
+      } else if (msg.state === 'FINISHED') {
+        setViewState('finish');
+      }
       toast.info(`Đã kết nối với phòng ${code}`, 'Kết nối thành công');
+    });
+
+    client.on('room.lockStateChanged', (msg: any) => {
+      if (typeof msg.isLocked === 'boolean') {
+        setIsLocked(msg.isLocked);
+        toast.info(
+          msg.isLocked ? 'Phòng chơi đã được khóa đối với người mới.' : 'Phòng chơi đã mở lại.',
+          'Trạng thái phòng'
+        );
+      }
     });
 
     client.on('lobby.playerJoined', (msg: any) => {
@@ -116,9 +154,12 @@ export const HostPage: React.FC<HostPageProps> = ({
 
     client.on('question.started', (msg: any) => {
       setCurrentQuestion(msg.question);
-      setAnswerCount(0);
+      setAnswerCount(typeof msg.answeredCount === 'number' ? msg.answeredCount : 0);
       setViewState('question');
-      startTimer(msg.question.timePerQuestion || 20);
+      const remainingSec = msg.question.deadlineAt
+        ? Math.max(0, Math.ceil((msg.question.deadlineAt - Date.now()) / 1000))
+        : (msg.question.timePerQuestion || 20);
+      startTimer(remainingSec || 20);
       toast.info(`Bắt đầu câu hỏi số ${(msg.question.questionIndex || 0) + 1}!`, 'Câu hỏi mới');
     });
 
@@ -177,8 +218,15 @@ export const HostPage: React.FC<HostPageProps> = ({
   };
 
   useEffect(() => {
-    if (initialRoomCode && initialHostToken) {
-      handleInitExistingRoom(initialRoomCode, initialHostToken);
+    const effCode =
+      initialRoomCode || (sessionStorage.getItem('active_host_room') || '').trim();
+    const effToken =
+      initialHostToken || (sessionStorage.getItem('active_host_token') || '').trim();
+
+    if (effCode && effToken) {
+      setRoomCode(effCode);
+      setHostToken(effToken);
+      handleInitExistingRoom(effCode, effToken);
     }
 
     return () => {
@@ -204,6 +252,16 @@ export const HostPage: React.FC<HostPageProps> = ({
       setJoinUrl(res.joinUrl);
 
       try {
+        sessionStorage.setItem('active_host_room', res.roomCode);
+        sessionStorage.setItem('active_host_token', res.hostToken);
+        window.history.replaceState(
+          {},
+          '',
+          `/?tab=host&room=${res.roomCode}&token=${encodeURIComponent(res.hostToken)}`
+        );
+      } catch {}
+
+      try {
         const qr = await fetchRoomQr(res.roomCode);
         setQrDataUrl(qr.qrDataUrl);
       } catch {
@@ -219,6 +277,14 @@ export const HostPage: React.FC<HostPageProps> = ({
       toast.error(err.message || 'Không thể tạo phòng chơi.', 'Lỗi khởi tạo');
     } finally {
       setIsCreatingRoom(false);
+    }
+  };
+
+  const handleToggleLock = () => {
+    if (socketRef.current) {
+      socketRef.current.send({
+        type: isLocked ? 'host.unlock' : 'host.lock',
+      });
     }
   };
 
@@ -252,6 +318,11 @@ export const HostPage: React.FC<HostPageProps> = ({
       socketRef.current.close();
       socketRef.current = null;
     }
+    try {
+      sessionStorage.removeItem('active_host_room');
+      sessionStorage.removeItem('active_host_token');
+      window.history.replaceState({}, '', '/?tab=host');
+    } catch {}
     setIsPresentationMode(false);
     setRoomCode('');
     setHostToken('');
@@ -272,6 +343,66 @@ export const HostPage: React.FC<HostPageProps> = ({
 
   return (
     <div style={{ maxWidth: isPresentationMode ? '1180px' : '1050px', margin: '0 auto', padding: '0.75rem 0.5rem 2rem 0.5rem' }}>
+      {/* Reconnect & Connection Status Banners */}
+      {connectionStatus === 'reconnecting' && (
+        <div
+          style={{
+            backgroundColor: 'rgba(245, 158, 11, 0.15)',
+            border: '1px solid var(--accent-amber)',
+            color: 'var(--accent-amber)',
+            padding: '0.65rem 1rem',
+            borderRadius: '10px',
+            marginBottom: '1rem',
+            fontWeight: 800,
+            fontSize: '0.88rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+        >
+          <span>⏳</span>
+          <span>Đang kết nối lại máy chủ phòng chơi... Vui lòng chờ trong giây lát.</span>
+        </div>
+      )}
+
+      {connectionStatus === 'disconnected' && viewState !== 'setup' && (
+        <div
+          style={{
+            backgroundColor: 'rgba(244, 63, 94, 0.15)',
+            border: '1px solid var(--accent-rose)',
+            color: 'var(--accent-rose)',
+            padding: '0.65rem 1rem',
+            borderRadius: '10px',
+            marginBottom: '1rem',
+            fontWeight: 800,
+            fontSize: '0.88rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.5rem',
+          }}
+        >
+          <span>⚠️ Mất kết nối tới máy chủ phòng chơi.</span>
+          <button
+            type="button"
+            onClick={() => connectToSocket(roomCode, hostToken)}
+            style={{
+              backgroundColor: 'var(--accent-rose)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '0.35rem 0.75rem',
+              fontWeight: 800,
+              fontSize: '0.8rem',
+              cursor: 'pointer',
+            }}
+          >
+            🔄 Kết nối lại
+          </button>
+        </div>
+      )}
+
       {/* Host Top Header (Shown in Normal Admin Mode) */}
       {!isPresentationMode && (
         <header
@@ -297,6 +428,26 @@ export const HostPage: React.FC<HostPageProps> = ({
 
           {viewState === 'lobby' && (
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={handleToggleLock}
+                style={{
+                  backgroundColor: isLocked ? 'rgba(244, 63, 94, 0.15)' : 'var(--bg-card)',
+                  color: isLocked ? 'var(--accent-rose)' : 'var(--text-secondary)',
+                  border: isLocked ? '1px solid var(--accent-rose)' : '1px solid var(--border-strong)',
+                  borderRadius: '10px',
+                  padding: '0.7rem 1.15rem',
+                  fontSize: '0.92rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                {isLocked ? '🔒 Phòng đang khóa' : '🔓 Khóa phòng'}
+              </button>
+
               <button
                 type="button"
                 onClick={() => setIsPresentationMode(true)}

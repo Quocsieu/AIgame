@@ -51,9 +51,9 @@ export const AppContent: React.FC = () => {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const playGameId = (params.get('play') || '').trim();
-    const room = (params.get('room') || '').toUpperCase().trim();
-    const token = (params.get('token') || '').trim();
-    const name = (params.get('name') || '').trim();
+    let room = (params.get('room') || '').toUpperCase().trim();
+    let token = (params.get('token') || '').trim();
+    let name = (params.get('name') || '').trim();
     const tab = params.get('tab') as Tab;
 
     if (playGameId) {
@@ -77,6 +77,26 @@ export const AppContent: React.FC = () => {
       return;
     }
 
+    // F5 Session Recovery: Check sessionStorage if URL parameters are incomplete
+    if (!token && (tab === 'host' || !tab)) {
+      const storedToken = (sessionStorage.getItem('active_host_token') || '').trim();
+      const storedRoom = (sessionStorage.getItem('active_host_room') || '').trim();
+      if (storedToken && storedRoom) {
+        token = storedToken;
+        room = room || storedRoom;
+      }
+    }
+
+    if (!name && (tab === 'play' || room)) {
+      const storedName =
+        sessionStorage.getItem(`name_${room}`) ||
+        sessionStorage.getItem('active_player_name') ||
+        '';
+      if (storedName.trim()) {
+        name = storedName.trim();
+      }
+    }
+
     if (room && token) {
       setRoomCode(room);
       setHostToken(token);
@@ -96,6 +116,15 @@ export const AppContent: React.FC = () => {
   const handleNavigateToHost = (code: string, token: string) => {
     setRoomCode(code);
     setHostToken(token);
+    try {
+      sessionStorage.setItem('active_host_room', code);
+      sessionStorage.setItem('active_host_token', token);
+      window.history.replaceState(
+        {},
+        '',
+        `/?tab=host&room=${code}&token=${encodeURIComponent(token)}`
+      );
+    } catch {}
     setActiveTab('host');
   };
 
@@ -107,10 +136,26 @@ export const AppContent: React.FC = () => {
   const handleJoinGame = (code: string, name: string) => {
     setRoomCode(code);
     setDisplayName(name);
+    try {
+      sessionStorage.setItem('active_player_room', code);
+      sessionStorage.setItem('active_player_name', name);
+      sessionStorage.setItem(`name_${code}`, name);
+      window.history.replaceState(
+        {},
+        '',
+        `/?tab=play&room=${code}&name=${encodeURIComponent(name)}`
+      );
+    } catch {}
     setActiveTab('play');
   };
 
   const handleLeaveGame = () => {
+    try {
+      sessionStorage.removeItem('active_player_room');
+      sessionStorage.removeItem('active_player_name');
+      window.history.replaceState({}, '', '/?tab=join');
+    } catch {}
+    setDisplayName('');
     setActiveTab('join');
   };
 

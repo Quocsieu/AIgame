@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from '../components/ToastContext.js';
-import { GameSocketClient } from '../services/socket.js';
+import { GameSocketClient, ConnectionStatus } from '../services/socket.js';
 import type { LeaderboardEntry, SanitizedQuestion } from '../types/index.js';
 
 interface PlayPageProps {
@@ -27,6 +27,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   const [playerId, setPlayerId] = useState('');
   const playerIdRef = useRef('');
   const [playerScore, setPlayerScore] = useState(0);
+  const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
+  const [roomError, setRoomError] = useState<string | null>(null);
 
   // 'lobby' | 'question' | 'reveal' | 'finish'
   const [screen, setScreen] = useState<'lobby' | 'question' | 'reveal' | 'finish'>('lobby');
@@ -116,6 +118,10 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
     const client = new GameSocketClient();
     socketRef.current = client;
 
+    client.onStatusChange((status) => {
+      setConnectionStatus(status);
+    });
+
     const tokenKey = `token_${roomCode}`;
     const savedToken = sessionStorage.getItem(tokenKey);
 
@@ -136,6 +142,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
     });
 
     client.on('room.joined', (msg: any) => {
+      setRoomError(null);
       if (msg.playerToken) {
         sessionStorage.setItem(tokenKey, msg.playerToken);
       }
@@ -145,6 +152,15 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       }
       if (typeof msg.score === 'number') {
         setPlayerScore(msg.score);
+      }
+      if (msg.state === 'WAITING') {
+        setScreen('lobby');
+      } else if (msg.state === 'QUESTION_ACTIVE') {
+        setScreen('question');
+      } else if (msg.state === 'QUESTION_REVEAL') {
+        setScreen('reveal');
+      } else if (msg.state === 'FINISHED') {
+        setScreen('finish');
       }
       toast.success(`Đã vào phòng [${roomCode}] thành công!`, 'Tham gia thành công');
     });
@@ -164,8 +180,10 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       setPersonalResult(null);
       setScreen('question');
 
-      const duration = msg.question.timePerQuestion || 20;
-      startTimer(duration);
+      const duration = msg.question.deadlineAt
+        ? Math.max(0, Math.ceil((msg.question.deadlineAt - Date.now()) / 1000))
+        : (msg.question.timePerQuestion || 20);
+      startTimer(duration || 20);
     });
 
     client.on('question.answerReceived', () => {
@@ -227,7 +245,15 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
     client.on('error', (msg: any) => {
       setIsSubmittingAnswer(false);
-      if (msg.code === 'QUESTION_ALREADY_ANSWERED' || msg.code === 'ANSWER_TIMEOUT') {
+      if (
+        msg.code === 'ROOM_NOT_FOUND' ||
+        msg.code === 'ROOM_EXPIRED' ||
+        msg.code === 'GAME_FINISHED' ||
+        msg.code === 'ROOM_LOCKED'
+      ) {
+        setRoomError(msg.message || 'Phòng chơi không tồn tại, đã kết thúc hoặc đang bị khóa.');
+        sessionStorage.removeItem(tokenKey);
+      } else if (msg.code === 'QUESTION_ALREADY_ANSWERED' || msg.code === 'ANSWER_TIMEOUT') {
         setIsAnswerSubmitted(true);
       } else {
         setAnswerError(msg.message || 'Câu trả lời không hợp lệ, vui lòng kiểm tra lại.');
@@ -254,8 +280,99 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
     { bg: '#10b981', hover: '#059669', icon: '■', label: 'D' },
   ];
 
+  if (roomError) {
+    return (
+      <div style={{ maxWidth: '520px', margin: '3rem auto', padding: '2rem', textAlign: 'center', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--accent-rose)', borderRadius: '16px', boxShadow: 'var(--card-shadow)' }}>
+        <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>⚠️</div>
+        <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', fontWeight: 900, color: 'var(--accent-rose)' }}>
+          Không Thể Tham Gia Phòng Chơi
+        </h2>
+        <p style={{ margin: '0 0 1.25rem 0', color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: 1.5 }}>
+          {roomError}
+        </p>
+        <button
+          type="button"
+          onClick={() => {
+            if (onLeave) onLeave();
+          }}
+          style={{
+            backgroundColor: 'var(--primary)',
+            color: '#ffffff',
+            border: 'none',
+            borderRadius: '10px',
+            padding: '0.65rem 1.25rem',
+            fontWeight: 800,
+            fontSize: '0.9rem',
+            cursor: 'pointer',
+          }}
+        >
+          Quay lại trang chủ / Tham gia phòng khác
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div style={{ maxWidth: '640px', margin: '0 auto', padding: '0.75rem 0.5rem 2rem 0.5rem' }}>
+      {/* Reconnecting Status Banner */}
+      {connectionStatus === 'reconnecting' && (
+        <div
+          style={{
+            backgroundColor: 'rgba(245, 158, 11, 0.15)',
+            border: '1px solid var(--accent-amber)',
+            color: 'var(--accent-amber)',
+            padding: '0.6rem 1rem',
+            borderRadius: '10px',
+            marginBottom: '1rem',
+            fontWeight: 800,
+            fontSize: '0.86rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.45rem',
+          }}
+        >
+          <span>⏳</span>
+          <span>Đang kết nối lại tới máy chủ phòng chơi...</span>
+        </div>
+      )}
+
+      {connectionStatus === 'disconnected' && (
+        <div
+          style={{
+            backgroundColor: 'rgba(244, 63, 94, 0.15)',
+            border: '1px solid var(--accent-rose)',
+            color: 'var(--accent-rose)',
+            padding: '0.6rem 1rem',
+            borderRadius: '10px',
+            marginBottom: '1rem',
+            fontWeight: 800,
+            fontSize: '0.86rem',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '0.45rem',
+          }}
+        >
+          <span>⚠️ Mất kết nối tới máy chủ phòng chơi.</span>
+          <button
+            type="button"
+            onClick={() => socketRef.current?.connect()}
+            style={{
+              backgroundColor: 'var(--accent-rose)',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '0.3rem 0.7rem',
+              fontWeight: 800,
+              fontSize: '0.78rem',
+              cursor: 'pointer',
+            }}
+          >
+            Thử lại
+          </button>
+        </div>
+      )}
+
       {/* 1. Top Player Status Bar */}
       <div
         style={{

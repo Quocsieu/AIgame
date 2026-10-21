@@ -6,8 +6,10 @@ import { roomStore } from './room.store.js';
 import {
   HostEndSchema,
   HostJoinSchema,
+  HostLockSchema,
   HostNextSchema,
   HostStartSchema,
+  HostUnlockSchema,
   LeaderboardEntry,
   MULTIPLAYER_CONFIG,
   OutboundMessage,
@@ -19,7 +21,7 @@ import {
 
 interface SocketMeta {
   roomCode: string;
-  role: 'host' | 'player';
+  role: 'host' | 'player' | null;
   token: string; // hostToken or playerToken
   playerId?: string;
   isAlive: boolean;
@@ -40,7 +42,7 @@ export class MultiplayerWebSocketServer {
     this.wss.on('connection', (ws: WebSocket) => {
       const meta: SocketMeta = {
         roomCode: '',
-        role: 'player',
+        role: null,
         token: '',
         isAlive: true,
       };
@@ -145,6 +147,14 @@ export class MultiplayerWebSocketServer {
           this.handleHostEnd(ws, payload);
           break;
 
+        case 'host.lock':
+          this.handleHostLock(ws, true);
+          break;
+
+        case 'host.unlock':
+          this.handleHostLock(ws, false);
+          break;
+
         case 'player.join':
           this.handlePlayerJoin(ws, payload);
           break;
@@ -202,12 +212,25 @@ export class MultiplayerWebSocketServer {
       gameType: room.gameSpecification.gameType,
       totalQuestions: room.gameSpecification.questions.length,
       playerCount: room.players.size,
+      players: Array.from(room.players.values()).map((p) => ({
+        id: p.playerId,
+        displayName: p.displayName,
+        connected: p.connected,
+      })),
+      isLocked: room.isLocked,
+      currentQuestionIndex: room.currentQuestionIndex,
     });
 
     if (room.state === 'QUESTION_ACTIVE') {
+      const currentQ = room.getSanitizedCurrentQuestion();
+      const answeredCount = Array.from(room.players.values()).filter((p) =>
+        p.answeredQuestionIds.has(currentQ.id)
+      ).length;
       this.send(ws, {
         type: 'question.started',
-        question: room.getSanitizedCurrentQuestion(),
+        question: currentQ,
+        answeredCount,
+        totalPlayers: room.players.size,
       });
     } else if (room.state === 'QUESTION_REVEAL') {
       const activeQ = room.gameSpecification.questions[room.currentQuestionIndex];
@@ -218,7 +241,35 @@ export class MultiplayerWebSocketServer {
         explanation: activeQ.explanation,
         leaderboard: room.getLeaderboard(),
       });
+    } else if (room.state === 'FINISHED') {
+      const leaderboard = room.getLeaderboard();
+      this.send(ws, {
+        type: 'game.finished',
+        leaderboard,
+        winner: leaderboard[0],
+        totalQuestions: room.gameSpecification.questions.length,
+      });
     }
+  }
+
+  private handleHostLock(ws: WebSocket, locked: boolean): void {
+    const meta = this.socketMeta.get(ws);
+    if (!meta || meta.role !== 'host') {
+      this.sendError(ws, 'NOT_HOST', 'Only the room host can lock or unlock the room.');
+      return;
+    }
+
+    const room = roomStore.getByRoomCode(meta.roomCode);
+    if (!room) {
+      this.sendError(ws, 'ROOM_NOT_FOUND', 'Room not found.');
+      return;
+    }
+
+    room.setLock(meta.token, locked);
+    this.broadcastToRoom(room.roomCode, {
+      type: 'room.lockStateChanged',
+      isLocked: locked,
+    });
   }
 
   private handlePlayerJoin(ws: WebSocket, payload: unknown): void {
@@ -251,6 +302,8 @@ export class MultiplayerWebSocketServer {
       gameType: room.gameSpecification.gameType,
       totalQuestions: room.gameSpecification.questions.length,
       playerCount: room.players.size,
+      isLocked: room.isLocked,
+      currentQuestionIndex: room.currentQuestionIndex,
     });
 
     if (!isReconnect) {
@@ -263,9 +316,14 @@ export class MultiplayerWebSocketServer {
 
     if (room.state === 'QUESTION_ACTIVE') {
       const currentQ = room.getSanitizedCurrentQuestion();
+      const answeredCount = Array.from(room.players.values()).filter((p) =>
+        p.answeredQuestionIds.has(currentQ.id)
+      ).length;
       this.send(ws, {
         type: 'question.started',
         question: currentQ,
+        answeredCount,
+        totalPlayers: room.players.size,
       });
       if (player.answeredQuestionIds.has(currentQ.id)) {
         this.send(ws, {
@@ -283,6 +341,14 @@ export class MultiplayerWebSocketServer {
         explanation: activeQ.explanation,
         leaderboard: room.getLeaderboard(),
         personalResult,
+      });
+    } else if (room.state === 'FINISHED') {
+      const leaderboard = room.getLeaderboard();
+      this.send(ws, {
+        type: 'game.finished',
+        leaderboard,
+        winner: leaderboard[0],
+        totalQuestions: room.gameSpecification.questions.length,
       });
     }
   }
@@ -317,13 +383,20 @@ export class MultiplayerWebSocketServer {
       gameType: room.gameSpecification.gameType,
       totalQuestions: room.gameSpecification.questions.length,
       playerCount: room.players.size,
+      isLocked: room.isLocked,
+      currentQuestionIndex: room.currentQuestionIndex,
     });
 
     if (room.state === 'QUESTION_ACTIVE') {
       const currentQ = room.getSanitizedCurrentQuestion();
+      const answeredCount = Array.from(room.players.values()).filter((p) =>
+        p.answeredQuestionIds.has(currentQ.id)
+      ).length;
       this.send(ws, {
         type: 'question.started',
         question: currentQ,
+        answeredCount,
+        totalPlayers: room.players.size,
       });
       if (player.answeredQuestionIds.has(currentQ.id)) {
         this.send(ws, {
@@ -341,6 +414,14 @@ export class MultiplayerWebSocketServer {
         explanation: activeQ.explanation,
         leaderboard: room.getLeaderboard(),
         personalResult,
+      });
+    } else if (room.state === 'FINISHED') {
+      const leaderboard = room.getLeaderboard();
+      this.send(ws, {
+        type: 'game.finished',
+        leaderboard,
+        winner: leaderboard[0],
+        totalQuestions: room.gameSpecification.questions.length,
       });
     }
   }
@@ -368,6 +449,8 @@ export class MultiplayerWebSocketServer {
     this.broadcastToRoom(room.roomCode, {
       type: 'question.started',
       question,
+      answeredCount: 0,
+      totalPlayers: room.players.size,
     });
 
     this.scheduleQuestionTimer(room);
@@ -448,6 +531,8 @@ export class MultiplayerWebSocketServer {
       this.broadcastToRoom(room.roomCode, {
         type: 'question.started',
         question: nextResult.question,
+        answeredCount: 0,
+        totalPlayers: room.players.size,
       });
 
       this.scheduleQuestionTimer(room);

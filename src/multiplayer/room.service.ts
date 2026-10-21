@@ -23,6 +23,7 @@ export class MultiplayerRoom {
   public readonly hostToken: string;
   public ownerUserId: string | null = null;
   public state: RoomState = 'WAITING';
+  public isLocked: boolean = false;
   public readonly capacity: number;
   public currentQuestionIndex: number = 0;
   public questionStartedAt: number | null = null;
@@ -77,13 +78,30 @@ export class MultiplayerRoom {
       throw new AppError('GAME_FINISHED', 'Cannot join a game room that is already finished or closed.', 400);
     }
 
+    if (this.isLocked) {
+      throw new AppError('ROOM_LOCKED', 'Phòng chơi đã bị khóa bởi chủ phòng.', 403);
+    }
+
     if (this.players.size >= this.capacity) {
       throw new AppError('ROOM_FULL', `Room has reached maximum capacity of ${this.capacity} players.`, 400);
     }
 
-    const cleanName = displayName.trim().slice(0, 30);
-    if (!cleanName) {
+    const rawName = displayName.trim().slice(0, 30);
+    if (!rawName) {
       throw new AppError('INVALID_REQUEST', 'Player display name cannot be empty.', 400);
+    }
+
+    // Gracefully disambiguate duplicate display names in the room (e.g. Tuấn Kiệt #2)
+    let cleanName = rawName;
+    const existingNames = new Set(
+      Array.from(this.players.values()).map((p) => p.displayName.trim().toLowerCase())
+    );
+    if (existingNames.has(rawName.toLowerCase())) {
+      let counter = 2;
+      while (existingNames.has(`${rawName} #${counter}`.toLowerCase())) {
+        counter++;
+      }
+      cleanName = `${rawName} #${counter}`;
     }
 
     const playerId = `player_${crypto.randomUUID()}`;
@@ -142,6 +160,19 @@ export class MultiplayerRoom {
     player.lastSeenAt = Date.now();
     this.updatedAt = Date.now();
     return player;
+  }
+
+  /**
+   * Sets room lock status (Host only).
+   * Locked rooms prevent new players from joining, but allow existing players to reconnect.
+   */
+  public setLock(hostToken: string, locked: boolean): boolean {
+    if (hostToken !== this.hostToken) {
+      throw new AppError('INVALID_HOST_TOKEN', 'Action denied: invalid host token.', 403);
+    }
+    this.isLocked = locked;
+    this.updatedAt = Date.now();
+    return this.isLocked;
   }
 
   /**

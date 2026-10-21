@@ -113,6 +113,14 @@ export const HostEndSchema = z.object({
   type: z.literal('host.end'),
 });
 
+export const HostLockSchema = z.object({
+  type: z.literal('host.lock'),
+});
+
+export const HostUnlockSchema = z.object({
+  type: z.literal('host.unlock'),
+});
+
 export const PlayerJoinSchema = z.object({
   type: z.literal('player.join'),
   roomCode: z.string().min(1),
@@ -140,7 +148,9 @@ export type HostInboundMessage =
   | z.infer<typeof HostJoinSchema>
   | z.infer<typeof HostStartSchema>
   | z.infer<typeof HostNextSchema>
-  | z.infer<typeof HostEndSchema>;
+  | z.infer<typeof HostEndSchema>
+  | z.infer<typeof HostLockSchema>
+  | z.infer<typeof HostUnlockSchema>;
 
 export type PlayerInboundMessage =
   | z.infer<typeof PlayerJoinSchema>
@@ -168,6 +178,9 @@ export type OutboundMessage =
       gameType: GameType;
       totalQuestions: number;
       playerCount: number;
+      players?: Array<{ id: string; displayName: string; connected: boolean }>;
+      isLocked?: boolean;
+      currentQuestionIndex?: number;
     }
   | {
       type: 'lobby.playerJoined';
@@ -180,12 +193,18 @@ export type OutboundMessage =
       playerId: string;
     }
   | {
+      type: 'room.lockStateChanged';
+      isLocked: boolean;
+    }
+  | {
       type: 'game.started';
       totalQuestions: number;
     }
   | {
       type: 'question.started';
       question: SanitizedQuestion;
+      answeredCount?: number;
+      totalPlayers?: number;
     }
   | {
       type: 'question.answerReceived';
