@@ -10,6 +10,7 @@ import {
 } from './routes/analytics.routes.js';
 import { authRouter } from './routes/auth.routes.js';
 import { adminRouter } from './routes/admin.routes.js';
+import { adminAuthRouter } from './routes/admin.auth.routes.js';
 import { contentRouter } from './routes/content.routes.js';
 import { gameRouter } from './routes/game.routes.js';
 import { roomRouter } from './routes/room.routes.js';
@@ -40,8 +41,9 @@ export function createApp(): express.Application {
     if (origin && ALLOWED_ORIGINS.has(origin)) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Guest-Token');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Guest-Token,X-Player-Token');
     }
 
     if (req.method === 'OPTIONS') {
@@ -72,6 +74,9 @@ export function createApp(): express.Application {
 
   // Authentication & Account API (Phase 4)
   app.use('/api/auth', authRouter);
+
+  // Dedicated Admin Password Authentication API
+  app.use('/api/admin/auth', adminAuthRouter);
 
   // Administrative API
   app.use('/api/admin', adminRouter);

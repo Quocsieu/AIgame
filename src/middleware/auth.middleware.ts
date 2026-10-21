@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { NextFunction, Request, Response } from 'express';
+import { adminAuthService, extractAdminTokenFromRequest } from '../services/admin.auth.service.js';
 import { AuthenticatedUser, authService } from '../services/auth.service.js';
 import { AppError } from '../utils/errors.js';
 
@@ -79,6 +80,17 @@ export function optionalAuthMiddleware(
   try {
     const token = extractBearerToken(req);
     if (!token) {
+      // 1. Check for valid Admin session cookie or Bearer fallback
+      const adminUser = adminAuthService.verifyAdminSession(req);
+      if (adminUser) {
+        req.user = adminUser;
+        req.authToken = extractAdminTokenFromRequest(req);
+        req.isGuest = false;
+        next();
+        return;
+      }
+
+      // 2. Check for Guest token
       const guestUser = extractGuestUser(req);
       req.user = guestUser;
       req.authToken = null;
@@ -142,6 +154,7 @@ export function requireAuthMiddleware(
 
 /**
  * Strictly requires an authenticated user with ADMIN role.
+ * Accepts either an HttpOnly admin_session cookie or a valid Authorization: Bearer token.
  */
 export function requireAdminMiddleware(
   req: Request,
@@ -149,11 +162,17 @@ export function requireAdminMiddleware(
   next: NextFunction
 ): void {
   try {
-    const token = extractBearerToken(req);
+    // If already populated and verified as ADMIN
+    if (req.user && req.user.role === 'ADMIN') {
+      next();
+      return;
+    }
+
+    const token = extractAdminTokenFromRequest(req);
     if (!token) {
       throw new AppError(
         'UNAUTHORIZED',
-        'Yêu cầu đăng nhập tài khoản Quản trị viên (Admin) để thực hiện thao tác này.',
+        'Yêu cầu xác thực mật khẩu Quản trị viên (Admin) để thực hiện thao tác này.',
         401
       );
     }
@@ -162,7 +181,7 @@ export function requireAdminMiddleware(
     if (!user) {
       throw new AppError(
         'UNAUTHORIZED',
-        'Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.',
+        'Phiên quản trị không hợp lệ hoặc đã hết hạn. Vui lòng nhập lại mật khẩu Admin.',
         401
       );
     }
@@ -170,7 +189,7 @@ export function requireAdminMiddleware(
     if (user.role !== 'ADMIN') {
       throw new AppError(
         'ACCESS_DENIED',
-        'Chỉ tài khoản Quản trị viên (Admin) mới có quyền truy cập khu vực này.',
+        'Chỉ Quản trị viên (Admin) mới có quyền truy cập khu vực này.',
         403
       );
     }

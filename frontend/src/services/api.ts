@@ -22,28 +22,35 @@ import type {
 } from '../types/index.js';
 
 const API_BASE_URL = (import.meta.env.VITE_API_URL || '/api').replace(/\/+$/, '');
-const AUTH_TOKEN_KEY = 'ai_game_auth_token';
+const SESSION_AUTH_TOKEN_KEY = 'ai_game_admin_session_token';
 const GUEST_TOKEN_KEY = 'ai_game_guest_token';
 
-export function getStoredAuthToken(): string | null {
+export function getSessionAuthToken(): string | null {
   try {
-    return localStorage.getItem(AUTH_TOKEN_KEY);
+    return sessionStorage.getItem(SESSION_AUTH_TOKEN_KEY);
   } catch {
     return null;
   }
 }
 
-export function setStoredAuthToken(token: string | null): void {
+export function setSessionAuthToken(token: string | null): void {
   try {
+    // Purge old long-term localStorage token to comply with requirement
+    localStorage.removeItem('ai_game_auth_token');
+
     if (token) {
-      localStorage.setItem(AUTH_TOKEN_KEY, token);
+      sessionStorage.setItem(SESSION_AUTH_TOKEN_KEY, token);
     } else {
-      localStorage.removeItem(AUTH_TOKEN_KEY);
+      sessionStorage.removeItem(SESSION_AUTH_TOKEN_KEY);
     }
   } catch {
     // ignore storage errors
   }
 }
+
+// Backward compatibility aliases
+export const getStoredAuthToken = getSessionAuthToken;
+export const setStoredAuthToken = setSessionAuthToken;
 
 let inMemoryGuestToken: string | null = null;
 
@@ -75,7 +82,7 @@ export function getOrCreateGuestToken(): string {
 
 function buildAuthHeaders(extraHeaders?: Record<string, string>): Record<string, string> {
   const headers: Record<string, string> = { ...(extraHeaders || {}) };
-  const token = getStoredAuthToken();
+  const token = getSessionAuthToken();
   if (token) {
     headers.Authorization = `Bearer ${token}`;
   } else {
@@ -85,7 +92,65 @@ function buildAuthHeaders(extraHeaders?: Record<string, string>): Record<string,
 }
 
 // ==========================================
-// Authentication & Quota APIs (Phase 4)
+// Dedicated Admin Password Authentication APIs
+// ==========================================
+
+export async function adminLogin(password: string): Promise<{
+  authenticated: boolean;
+  user: AuthenticatedUser;
+  token: string;
+  expiresAt: string;
+}> {
+  const res = await fetch(`${API_BASE_URL}/admin/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ password }),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Mật khẩu quản trị viên không chính xác.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  setSessionAuthToken(data.data.token);
+  return data.data;
+}
+
+export async function adminLogout(): Promise<void> {
+  try {
+    await fetch(`${API_BASE_URL}/admin/auth/logout`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: buildAuthHeaders(),
+    });
+  } finally {
+    setSessionAuthToken(null);
+  }
+}
+
+export async function fetchAdminMe(): Promise<{
+  authenticated: boolean;
+  user: AuthenticatedUser | null;
+}> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/admin/auth/me`, {
+      headers: buildAuthHeaders(),
+      credentials: 'include',
+    });
+    const data = await res.json();
+    if (!data.success || !data.data?.authenticated) {
+      setSessionAuthToken(null);
+      return { authenticated: false, user: null };
+    }
+    return data.data;
+  } catch {
+    return { authenticated: false, user: null };
+  }
+}
+
+// ==========================================
+// Backward-compatible Auth APIs
 // ==========================================
 
 export async function registerUser(params: {
@@ -101,6 +166,7 @@ export async function registerUser(params: {
   const res = await fetch(`${API_BASE_URL}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
     body: JSON.stringify(params),
   });
   const data = await res.json();
@@ -109,64 +175,37 @@ export async function registerUser(params: {
     (err as any).code = data.error?.code;
     throw err;
   }
-  setStoredAuthToken(data.data.token);
+  setSessionAuthToken(data.data.token);
   return data.data;
 }
 
 export async function loginUser(params: {
-  email: string;
+  email?: string;
   password: string;
 }): Promise<{
   user: AuthenticatedUser;
   token: string;
   expiresAt: string;
-  quotas: UserQuotaSummary;
 }> {
-  const res = await fetch(`${API_BASE_URL}/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(params),
-  });
-  const data = await res.json();
-  if (!data.success) {
-    const err = new Error(data.error?.message || 'Đăng nhập thất bại.');
-    (err as any).code = data.error?.code;
-    throw err;
-  }
-  setStoredAuthToken(data.data.token);
-  return data.data;
+  // Directly authenticate with admin password
+  return adminLogin(params.password);
 }
 
 export async function logoutUser(): Promise<void> {
-  try {
-    await fetch(`${API_BASE_URL}/auth/logout`, {
-      method: 'POST',
-      headers: buildAuthHeaders(),
-    });
-  } finally {
-    setStoredAuthToken(null);
-  }
+  await adminLogout();
 }
 
 export async function fetchCurrentUser(): Promise<{
   user: AuthenticatedUser;
-  quotas: UserQuotaSummary;
+  quotas?: UserQuotaSummary;
 } | null> {
-  const token = getStoredAuthToken();
-  if (!token) return null;
-
-  const res = await fetch(`${API_BASE_URL}/auth/me`, {
-    headers: buildAuthHeaders(),
-  });
-  if (res.status === 401) {
-    setStoredAuthToken(null);
-    return null;
+  const adminCheck = await fetchAdminMe();
+  if (adminCheck.authenticated && adminCheck.user) {
+    return {
+      user: adminCheck.user,
+    };
   }
-  const data = await res.json();
-  if (!data.success) {
-    return null;
-  }
-  return data.data;
+  return null;
 }
 
 export async function fetchWhoAmI(): Promise<{

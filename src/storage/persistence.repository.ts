@@ -287,7 +287,7 @@ export class PersistenceRepository {
         resolvedOwner ?? null,
         resolvedPublic ? 1 : 0,
         spec.title,
-        spec.description,
+        spec.description ?? '',
         spec.gameType,
         JSON.stringify(spec.settings ?? { questionCount: 5, timePerQuestion: 20, scoringMode: 'STANDARD' }),
         JSON.stringify(spec.sourceSummary ?? { sourceCount: 0, sources: [] }),
@@ -319,7 +319,7 @@ export class PersistenceRepository {
           q.acceptedAlternatives ? JSON.stringify(q.acceptedAlternatives) : null,
           q.explanation ?? null,
           q.difficulty ?? 'MEDIUM',
-          q.sourceReference ? JSON.stringify(q.sourceReference) : null,
+          q.sourceReference ? JSON.stringify(q.sourceReference) : '{}',
           q.crosswordClue ?? null,
           q.crosswordAnswer ?? null
         );

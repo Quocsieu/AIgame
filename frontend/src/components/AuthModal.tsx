@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useToast } from './ToastContext.js';
-import { loginUser } from '../services/api.js';
+import { adminLogin } from '../services/api.js';
 import type { AuthenticatedUser } from '../types/index.js';
 
 interface AuthModalProps {
@@ -20,7 +20,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   subtitle,
 }) => {
   const toast = useToast();
-  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -33,12 +32,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(true);
 
     try {
-      const res = await loginUser({ email, password });
-      toast.success(`Chào mừng trở lại, ${res.user.displayName}!`, 'Đăng nhập thành công');
+      const res = await adminLogin(password);
+      toast.success('Xác thực Quản trị viên thành công!', 'Truy cập Admin');
       onSuccess(res.user);
       onClose();
     } catch (err: any) {
-      setErrorMessage(err.message || 'Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.');
+      setErrorMessage(err.message || 'Mật khẩu quản trị viên không chính xác. Vui lòng thử lại.');
     } finally {
       setIsLoading(false);
     }
@@ -102,11 +101,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             🔒
           </div>
           <h2 style={{ margin: '0 0 0.35rem 0', fontSize: '1.35rem', fontWeight: 900 }}>
-            {title || 'Đăng Nhập Quản Trị Viên (Admin)'}
+            {title || 'Xác Thực Quản Trị Viên (Admin)'}
           </h2>
           <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: 1.45 }}>
             {subtitle ||
-              'Dành riêng cho Quản trị viên để tạo và quản lý game. Người chơi chỉ cần quét mã QR hoặc mở link để tham gia trực tiếp, không cần đăng ký hay đăng nhập.'}
+              'Nhập mật khẩu Admin để truy cập các tính năng tạo, chỉnh sửa và quản lý hệ thống game. Người chơi quét QR hoặc mở link trực tiếp để chơi mà không cần mật khẩu.'}
           </p>
         </div>
 
@@ -128,73 +127,43 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
         )}
 
-        {/* Form đăng nhập Admin */}
+        {/* Form nhập mật khẩu Admin */}
         <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '1rem' }}>
-            <label
-              style={{
-                display: 'block',
-                fontSize: '0.82rem',
-                fontWeight: 700,
-                marginBottom: '0.35rem',
-                color: 'var(--text-secondary)',
-              }}
-            >
-              Email Admin
-            </label>
-            <input
-              type="email"
-              required
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@example.com"
-              style={{
-                width: '100%',
-                boxSizing: 'border-box',
-                padding: '0.7rem 0.85rem',
-                borderRadius: '8px',
-                backgroundColor: 'var(--bg-input)',
-                border: '1px solid var(--border-strong)',
-                color: 'var(--text-primary)',
-                fontSize: '0.9rem',
-              }}
-            />
-          </div>
-
           <div style={{ marginBottom: '1.5rem' }}>
             <label
               style={{
                 display: 'block',
                 fontSize: '0.82rem',
                 fontWeight: 700,
-                marginBottom: '0.35rem',
+                marginBottom: '0.45rem',
                 color: 'var(--text-secondary)',
               }}
             >
-              Mật khẩu
+              Mật khẩu Quản trị viên
             </label>
             <input
               type="password"
               required
+              autoFocus
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Nhập mật khẩu quản trị"
+              placeholder="Nhập mật khẩu Admin của hệ thống"
               style={{
                 width: '100%',
                 boxSizing: 'border-box',
-                padding: '0.7rem 0.85rem',
+                padding: '0.75rem 0.95rem',
                 borderRadius: '8px',
                 backgroundColor: 'var(--bg-input)',
                 border: '1px solid var(--border-strong)',
                 color: 'var(--text-primary)',
-                fontSize: '0.9rem',
+                fontSize: '0.95rem',
               }}
             />
           </div>
 
           <button
             type="submit"
-            disabled={isLoading}
+            disabled={isLoading || !password.trim()}
             style={{
               width: '100%',
               padding: '0.85rem',
@@ -205,12 +174,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               fontWeight: 800,
               fontSize: '0.95rem',
               cursor: isLoading ? 'wait' : 'pointer',
-              opacity: isLoading ? 0.7 : 1,
+              opacity: isLoading || !password.trim() ? 0.7 : 1,
               boxShadow: 'var(--btn-shadow)',
               transition: 'all 0.15s ease',
             }}
           >
-            {isLoading ? 'Đang xác thực...' : 'Đăng Nhập Admin'}
+            {isLoading ? 'Đang xác thực...' : 'Xác Thực Quyền Admin'}
           </button>
         </form>
 
@@ -225,7 +194,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             lineHeight: 1.4,
           }}
         >
-          💡 Bạn là người chơi? Hãy quét mã QR do Quản trị viên cung cấp hoặc bấm vào link chia sẻ để bắt đầu chơi ngay lập tức mà không cần tài khoản.
+          💡 Bạn là người chơi? Hãy quét mã QR do Quản trị viên cung cấp hoặc bấm vào link chia sẻ để bắt đầu chơi ngay lập tức mà không cần mật khẩu.
         </div>
       </div>
     </div>

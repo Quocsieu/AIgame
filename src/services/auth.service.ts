@@ -286,13 +286,14 @@ export class AuthService {
     isPublic?: boolean;
   }): void {
     const ownerId = options.ownerUserId ?? null;
-    if (!ownerId) {
-      // Unowned / demo resource
+    const currentUserId = options.currentUser?.userId ?? null;
+
+    if (options.currentUser?.role === 'ADMIN') {
       return;
     }
 
-    const currentUserId = options.currentUser?.userId ?? null;
-    if (options.currentUser?.role === 'ADMIN') {
+    if (!ownerId) {
+      // Unowned / demo resource
       return;
     }
 

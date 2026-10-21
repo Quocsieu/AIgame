@@ -140,11 +140,19 @@ export const authRateLimiter = new InMemoryRateLimiter({
   message: 'Too many authentication attempts. Please wait before trying again.',
 });
 
+export const adminLoginRateLimiter = new InMemoryRateLimiter({
+  name: 'admin-login',
+  windowMs: LIMITS.RATE_LIMIT_WINDOW_MS,
+  maxRequests: LIMITS.RATE_LIMIT_ADMIN_LOGIN_MAX,
+  message: 'Bạn đã thử mật khẩu sai quá nhiều lần. Vui lòng đợi 1 phút trước khi thử lại.',
+});
+
 export function resetAllRateLimiters(): void {
   ingestRateLimiter.reset();
   generateRateLimiter.reset();
   roomCreateRateLimiter.reset();
   authRateLimiter.reset();
+  adminLoginRateLimiter.reset();
 }
 
 

@@ -45,6 +45,12 @@ export const LIMITS = {
   QUOTA_DAILY_AI_CALLS: parseInt(process.env.QUOTA_DAILY_AI_CALLS || '30', 10),
   QUOTA_MAX_ACTIVE_SESSIONS_PER_USER: parseInt(process.env.QUOTA_MAX_ACTIVE_SESSIONS_PER_USER || '5', 10),
   QUOTA_MAX_ACTIVE_ROOMS_PER_USER: parseInt(process.env.QUOTA_MAX_ACTIVE_ROOMS_PER_USER || '3', 10),
+
+  // Dedicated Admin Authentication
+  ADMIN_PASSWORD_HASH: (process.env.ADMIN_PASSWORD_HASH || '').trim(),
+  ADMIN_PASSWORD: (process.env.ADMIN_PASSWORD || '').trim(),
+  ADMIN_SESSION_TTL_MS: parseInt(process.env.ADMIN_SESSION_TTL_MS || String(24 * 60 * 60 * 1000), 10),
+  RATE_LIMIT_ADMIN_LOGIN_MAX: parseInt(process.env.RATE_LIMIT_ADMIN_LOGIN_MAX || '5', 10),
 };
 
 

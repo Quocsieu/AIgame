@@ -283,7 +283,7 @@ export const AppContent: React.FC = () => {
             {theme === 'dark' ? '☀️ Sáng' : '🌙 Tối'}
           </button>
 
-          {/* Nút Đăng nhập cho Admin */}
+          {/* Nút Xác thực cho Admin */}
           {!currentUser && !autoStartSoloPlay && (
             <button
               type="button"
@@ -303,22 +303,22 @@ export const AppContent: React.FC = () => {
                 boxShadow: 'var(--btn-shadow)',
               }}
             >
-              🔒 Đăng nhập Admin
+              🔒 Xác thực Admin
             </button>
           )}
 
-          {/* Thông tin tài khoản đăng nhập (nếu có) */}
+          {/* Thông tin Quản trị viên (nếu đã xác thực) */}
           {currentUser && !autoStartSoloPlay && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem' }}>
               <span style={{ fontWeight: 700, color: 'var(--accent-sky)' }}>
-                👤 {currentUser.displayName} ({currentUser.role === 'ADMIN' ? 'Admin' : 'Quản trị'})
+                🛡️ Quản Trị Viên
               </span>
               <button
                 type="button"
                 onClick={async () => {
                   await logoutUser();
                   setCurrentUser(null);
-                  window.location.reload();
+                  setActiveTab('analytics');
                 }}
                 style={{
                   background: 'transparent',
@@ -327,9 +327,12 @@ export const AppContent: React.FC = () => {
                   fontSize: '0.8rem',
                   cursor: 'pointer',
                   fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.2rem',
                 }}
               >
-                Đăng xuất
+                🚪 Đăng xuất
               </button>
             </div>
           )}
