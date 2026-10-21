@@ -406,6 +406,7 @@ export async function createRoom(params: {
   gameId: string;
   gameSpecification?: GameSpecification;
   capacity?: number;
+  requirePublished?: boolean;
 }): Promise<CreateRoomResponse> {
   const res = await fetch(`${API_BASE_URL}/rooms`, {
     method: 'POST',
@@ -414,7 +415,30 @@ export async function createRoom(params: {
   });
   const data = await res.json();
   if (!data.success) {
-    throw new Error(data.error?.message || 'Lỗi khi tạo phòng chơi.');
+    const err = new Error(data.error?.message || 'Lỗi khi tạo phòng chơi.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function fetchGameQr(gameId: string): Promise<{
+  gameId: string;
+  title: string;
+  gameType: string;
+  questionCount: number;
+  isPublic: boolean;
+  playUrl: string;
+  qrDataUrl: string;
+}> {
+  const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/qr`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải liên kết / mã QR chơi đơn.');
+    (err as any).code = data.error?.code;
+    throw err;
   }
   return data.data;
 }

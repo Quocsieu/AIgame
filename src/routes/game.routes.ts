@@ -1,4 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
+import QRCode from 'qrcode';
 import {
   GameSpecificationSchema,
   GenerateGameRequestSchema,
@@ -29,6 +30,16 @@ function rejectPlayerClientWrite(req: Request): void {
       403
     );
   }
+}
+
+function buildSoloPlayUrl(req: Request, gameId: string): string {
+  const frontendUrl = (process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
+  if (frontendUrl) {
+    return `${frontendUrl}/?play=${encodeURIComponent(gameId)}`;
+  }
+  const host = req.get('host') || 'localhost:3000';
+  const protocol = req.protocol || 'http';
+  return `${protocol}://${host}/?play=${encodeURIComponent(gameId)}`;
 }
 
 /**
@@ -304,6 +315,52 @@ gameRouter.delete(
         createSuccessResponse({
           deleted: true,
           gameId,
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * GET /api/games/:gameId/qr
+ * Generate a real QR code and public solo-play link for a published game.
+ */
+gameRouter.get(
+  '/:gameId/qr',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const gameId = String(req.params.gameId || '');
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
+
+      if (!isPublic) {
+        throw new AppError(
+          'GAME_NOT_PUBLISHED',
+          'Game này chưa được xuất bản nên không thể tạo liên kết và mã QR chơi công khai.',
+          403
+        );
+      }
+
+      const playUrl = buildSoloPlayUrl(req, gameId);
+      const qrDataUrl = await QRCode.toDataURL(playUrl, {
+        margin: 1,
+        width: 256,
+        errorCorrectionLevel: 'M',
+      });
+
+      res.status(200).json(
+        createSuccessResponse({
+          gameId,
+          title: spec.title,
+          playUrl,
+          qrDataUrl,
         })
       );
     } catch (err) {

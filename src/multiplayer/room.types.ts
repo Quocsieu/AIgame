@@ -236,6 +236,7 @@ export const CreateRoomRequestSchema = z.object({
   gameId: z.string().min(1),
   gameSpecification: GameSpecificationSchema.optional(),
   capacity: z.number().int().min(1).max(300).optional(),
+  requirePublished: z.boolean().optional(),
 });
 export type CreateRoomRequest = z.infer<typeof CreateRoomRequestSchema>;
 

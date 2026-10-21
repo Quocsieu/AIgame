@@ -32,13 +32,17 @@ function buildJoinUrl(req: Request, roomCode: string): string {
  */
 roomRouter.post('/', roomCreateRateLimiter.middleware, async (req: Request, res: Response, next: NextFunction) => {
   try {
+    if (req.headers['x-player-token']) {
+      throw new AppError('ACCESS_DENIED', 'Người chơi trong phòng không có quyền tạo phòng mới.', 403);
+    }
+
     const parseResult = CreateRoomRequestSchema.safeParse(req.body);
     if (!parseResult.success) {
       const issues = parseResult.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
       throw new AppError('INVALID_REQUEST', `Invalid room creation request: ${issues}`, 400);
     }
 
-    const { gameId, gameSpecification, capacity } = parseResult.data;
+    const { gameId, gameSpecification, capacity, requirePublished } = parseResult.data;
 
     let spec = gameSpecification;
     if (!spec) {
@@ -50,6 +54,14 @@ roomRouter.post('/', roomCreateRateLimiter.middleware, async (req: Request, res:
       const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
       const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
 
+      if (requirePublished && !isPublic) {
+        throw new AppError(
+          'GAME_NOT_PUBLISHED',
+          'Game này chưa được xuất bản nên không thể mở phòng chơi nhiều người.',
+          403
+        );
+      }
+
       authService.assertResourceAccess({
         resourceType: 'bộ câu hỏi',
         ownerUserId,
@@ -57,6 +69,12 @@ roomRouter.post('/', roomCreateRateLimiter.middleware, async (req: Request, res:
         mode: 'read',
         isPublic,
       });
+    } else if (requirePublished && !spec.isPublic) {
+      throw new AppError(
+        'GAME_NOT_PUBLISHED',
+        'Game này chưa được xuất bản nên không thể mở phòng chơi nhiều người.',
+        403
+      );
     }
 
     if (req.user) {

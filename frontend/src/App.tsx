@@ -5,7 +5,7 @@ import { DemoPage } from './pages/DemoPage.js';
 import { HostPage } from './pages/HostPage.js';
 import { JoinPage } from './pages/JoinPage.js';
 import { PlayPage } from './pages/PlayPage.js';
-import { getOrCreateGuestToken, setStoredAuthToken } from './services/api.js';
+import { fetchGameById, getOrCreateGuestToken, setStoredAuthToken } from './services/api.js';
 import type { GameSpecification } from './types/index.js';
 
 type Tab = 'demo' | 'analytics' | 'host' | 'join' | 'play';
@@ -16,6 +16,9 @@ export const AppContent: React.FC = () => {
   const [hostToken, setHostToken] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [selectedSavedSpec, setSelectedSavedSpec] = useState<GameSpecification | null>(null);
+  const [autoStartSoloPlay, setAutoStartSoloPlay] = useState(false);
+  const [soloPlayLoading, setSoloPlayLoading] = useState(false);
+  const [soloPlayError, setSoloPlayError] = useState<string | null>(null);
 
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
@@ -47,10 +50,32 @@ export const AppContent: React.FC = () => {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
+    const playGameId = (params.get('play') || '').trim();
     const room = (params.get('room') || '').toUpperCase().trim();
     const token = (params.get('token') || '').trim();
     const name = (params.get('name') || '').trim();
     const tab = params.get('tab') as Tab;
+
+    if (playGameId) {
+      setSoloPlayLoading(true);
+      setSoloPlayError(null);
+      fetchGameById(playGameId, { mode: 'public' })
+        .then((spec) => {
+          setSelectedSavedSpec(spec);
+          setAutoStartSoloPlay(true);
+          setActiveTab('demo');
+        })
+        .catch((err: any) => {
+          setSoloPlayError(
+            err.message ||
+              'Bộ câu hỏi này không tồn tại hoặc chưa được xuất bản để chơi công khai.'
+          );
+        })
+        .finally(() => {
+          setSoloPlayLoading(false);
+        });
+      return;
+    }
 
     if (room && token) {
       setRoomCode(room);
@@ -89,8 +114,10 @@ export const AppContent: React.FC = () => {
     setActiveTab('join');
   };
 
-  const handleSelectSavedGame = (spec: GameSpecification) => {
+  const handleSelectSavedGame = (spec: GameSpecification, startSolo: boolean = false) => {
+    setSoloPlayError(null);
     setSelectedSavedSpec(spec);
+    setAutoStartSoloPlay(startSolo);
     setActiveTab('demo');
   };
 
@@ -130,7 +157,11 @@ export const AppContent: React.FC = () => {
             cursor: 'pointer',
             userSelect: 'none',
           }}
-          onClick={() => setActiveTab('demo')}
+          onClick={() => {
+            setSoloPlayError(null);
+            setAutoStartSoloPlay(false);
+            setActiveTab('demo');
+          }}
         >
           <div
             style={{
@@ -205,7 +236,11 @@ export const AppContent: React.FC = () => {
           >
             <button
               type="button"
-              onClick={() => setActiveTab('demo')}
+              onClick={() => {
+                setSoloPlayError(null);
+                setAutoStartSoloPlay(false);
+                setActiveTab('demo');
+              }}
               style={{
                 padding: '0.55rem 1rem',
                 borderRadius: '8px',
@@ -224,7 +259,10 @@ export const AppContent: React.FC = () => {
 
             <button
               type="button"
-              onClick={() => setActiveTab('analytics')}
+              onClick={() => {
+                setSoloPlayError(null);
+                setActiveTab('analytics');
+              }}
               style={{
                 padding: '0.55rem 1rem',
                 borderRadius: '8px',
@@ -238,12 +276,15 @@ export const AppContent: React.FC = () => {
                 boxShadow: activeTab === 'analytics' ? 'var(--btn-shadow)' : 'none',
               }}
             >
-              📚 Bộ Câu Hỏi Đã Tạo
+              📚 Kho Game
             </button>
 
             <button
               type="button"
-              onClick={() => setActiveTab(roomCode && displayName ? 'play' : 'join')}
+              onClick={() => {
+                setSoloPlayError(null);
+                setActiveTab(roomCode && displayName ? 'play' : 'join');
+              }}
               style={{
                 padding: '0.55rem 1rem',
                 borderRadius: '8px',
@@ -265,40 +306,112 @@ export const AppContent: React.FC = () => {
 
       {/* Nội dung chính theo tab */}
       <main style={{ flex: 1, padding: '1.25rem' }}>
-        {activeTab === 'demo' && (
-          <DemoPage
-            onNavigateToHost={handleNavigateToHost}
-            onNavigateToPlay={handleNavigateToPlayFromDemo}
-            initialSpec={selectedSavedSpec}
-          />
+        {soloPlayLoading && (
+          <div
+            style={{
+              maxWidth: '520px',
+              margin: '3rem auto',
+              padding: '2rem',
+              borderRadius: '16px',
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-subtle)',
+              textAlign: 'center',
+              boxShadow: 'var(--card-shadow)',
+            }}
+          >
+            <div style={{ fontSize: '2.2rem', marginBottom: '0.6rem' }}>⏳</div>
+            <h2 style={{ margin: '0 0 0.4rem 0', fontSize: '1.2rem', fontWeight: 900 }}>
+              Đang tải trò chơi...
+            </h2>
+            <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+              Hệ thống đang khởi tạo phiên chơi đơn của bạn.
+            </p>
+          </div>
         )}
 
-        {activeTab === 'analytics' && (
-          <AnalyticsPage
-            onSelectSavedGame={handleSelectSavedGame}
-          />
+        {!soloPlayLoading && soloPlayError && (
+          <div
+            style={{
+              maxWidth: '540px',
+              margin: '3rem auto',
+              padding: '2rem',
+              borderRadius: '16px',
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--accent-rose)',
+              textAlign: 'center',
+              boxShadow: 'var(--card-shadow)',
+            }}
+          >
+            <div style={{ fontSize: '2.5rem', marginBottom: '0.6rem' }}>⚠️</div>
+            <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', fontWeight: 900, color: 'var(--accent-rose)' }}>
+              Không thể mở trò chơi này
+            </h2>
+            <p style={{ margin: '0 0 1.25rem 0', color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: 1.5 }}>
+              {soloPlayError}
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setSoloPlayError(null);
+                window.history.replaceState({}, '', window.location.pathname);
+                setActiveTab('demo');
+              }}
+              style={{
+                backgroundColor: 'var(--primary)',
+                color: '#ffffff',
+                border: 'none',
+                borderRadius: '10px',
+                padding: '0.65rem 1.25rem',
+                fontWeight: 800,
+                fontSize: '0.9rem',
+                cursor: 'pointer',
+              }}
+            >
+              Về trang chủ
+            </button>
+          </div>
         )}
 
-        {activeTab === 'host' && (
-          <HostPage
-            initialRoomCode={roomCode}
-            initialHostToken={hostToken}
-          />
-        )}
+        {!soloPlayLoading && !soloPlayError && (
+          <>
+            {activeTab === 'demo' && (
+              <DemoPage
+                onNavigateToHost={handleNavigateToHost}
+                onNavigateToPlay={handleNavigateToPlayFromDemo}
+                initialSpec={selectedSavedSpec}
+                autoStartSoloPlay={autoStartSoloPlay}
+              />
+            )}
 
-        {activeTab === 'join' && (
-          <JoinPage
-            initialRoomCode={roomCode}
-            onJoin={handleJoinGame}
-          />
-        )}
+            {activeTab === 'analytics' && (
+              <AnalyticsPage
+                onSelectSavedGame={handleSelectSavedGame}
+                onNavigateToHost={handleNavigateToHost}
+              />
+            )}
 
-        {activeTab === 'play' && (
-          <PlayPage
-            roomCode={roomCode}
-            displayName={displayName}
-            onLeave={handleLeaveGame}
-          />
+            {activeTab === 'host' && (
+              <HostPage
+                initialRoomCode={roomCode}
+                initialHostToken={hostToken}
+              />
+            )}
+
+            {activeTab === 'join' && (
+              <JoinPage
+                initialRoomCode={roomCode}
+                onJoin={handleJoinGame}
+              />
+            )}
+
+            {activeTab === 'play' && (
+              <PlayPage
+                roomCode={roomCode}
+                displayName={displayName}
+                onLeave={handleLeaveGame}
+              />
+            )}
+          </>
         )}
       </main>
 

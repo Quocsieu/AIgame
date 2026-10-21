@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { useToast } from '../components/ToastContext.js';
 import {
+  createRoom,
   deleteSavedGame,
   downloadGameExport,
   fetchGameById,
+  fetchGameQr,
+  fetchRoomQr,
   fetchSavedGames,
   saveEditedQuestions,
 } from '../services/api.js';
@@ -12,10 +15,12 @@ import type {
   GameSpecification,
   PersistedGameSummary,
   QuestionType,
+  ScoringMode,
 } from '../types/index.js';
 
 interface AnalyticsPageProps {
-  onSelectSavedGame?: (spec: GameSpecification) => void;
+  onSelectSavedGame?: (spec: GameSpecification, autoStartSolo?: boolean) => void;
+  onNavigateToHost?: (roomCode: string, hostToken: string) => void;
 }
 
 const formatGameTypeName = (type: string): string => {
@@ -48,8 +53,11 @@ const formatScoringModeName = (mode: string): string => {
   }
 };
 
+const PAGE_SIZE = 6;
+
 export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   onSelectSavedGame,
+  onNavigateToHost,
 }) => {
   const toast = useToast();
 
@@ -58,10 +66,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
 
   const [savedGames, setSavedGames] = useState<PersistedGameSummary[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [page, setPage] = useState(1);
+  const [hasMore, setHasMore] = useState(false);
 
   // Bộ lọc & tìm kiếm
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('ALL');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'PUBLISHED' | 'DRAFT'>('ALL');
 
   // Chi tiết & chỉnh sửa bộ câu hỏi đang mở
   const [activeGameSpec, setActiveGameSpec] = useState<GameSpecification | null>(null);
@@ -69,6 +80,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const [isEditMode, setIsEditMode] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
+  const [editTimePerQuestion, setEditTimePerQuestion] = useState<number>(15);
+  const [editScoringMode, setEditScoringMode] = useState<ScoringMode>('SPEED_BONUS');
+  const [editIsPublic, setEditIsPublic] = useState<boolean>(true);
   const [editQuestions, setEditQuestions] = useState<GameQuestion[]>([]);
   const [isSavingEdits, setIsSavingEdits] = useState(false);
 
@@ -76,17 +90,48 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const [confirmDeleteGame, setConfirmDeleteGame] = useState<PersistedGameSummary | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
 
-  const loadSavedGames = async (search = searchQuery, gameType = selectedTypeFilter) => {
+  // Modal Chia sẻ Chơi Đơn (Link + QR)
+  const [soloShareData, setSoloShareData] = useState<{
+    gameId: string;
+    title: string;
+    playUrl: string;
+    qrDataUrl: string;
+  } | null>(null);
+  const [isLoadingSoloShare, setIsLoadingSoloShare] = useState(false);
+
+  // Modal Mở phòng Multiplayer (Link + QR + Vào Host)
+  const [multiplayerShareData, setMultiplayerShareData] = useState<{
+    gameId: string;
+    title: string;
+    roomCode: string;
+    hostToken: string;
+    joinUrl: string;
+    qrDataUrl: string;
+  } | null>(null);
+  const [isOpeningRoomGameId, setIsOpeningRoomGameId] = useState<string | null>(null);
+
+  const loadSavedGames = async (
+    targetPage = page,
+    search = searchQuery,
+    gameType = selectedTypeFilter,
+    status = statusFilter
+  ) => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
+      const offset = (targetPage - 1) * PAGE_SIZE;
       const data = await fetchSavedGames({
-        limit: 50,
+        limit: PAGE_SIZE,
+        offset,
         gameType: gameType !== 'ALL' ? gameType : undefined,
         search: search.trim() || undefined,
+        status,
+        scope: 'manage',
       });
       setSavedGames(data.games || []);
-      setTotalCount(data.total ?? (data.games ? data.games.length : 0));
+      const total = data.total ?? (data.games ? data.games.length : 0);
+      setTotalCount(total);
+      setHasMore(Boolean(data.hasMore ?? offset + (data.games?.length || 0) < total));
     } catch (err: any) {
       setErrorMessage(err.message || 'Không thể tải danh sách bộ câu hỏi đã tạo.');
     } finally {
@@ -95,22 +140,42 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   };
 
   useEffect(() => {
-    loadSavedGames(searchQuery, selectedTypeFilter);
-  }, [selectedTypeFilter]);
+    setPage(1);
+    loadSavedGames(1, searchQuery, selectedTypeFilter, statusFilter);
+  }, [selectedTypeFilter, statusFilter]);
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    loadSavedGames(searchQuery, selectedTypeFilter);
+    setPage(1);
+    loadSavedGames(1, searchQuery, selectedTypeFilter, statusFilter);
+  };
+
+  const handlePageChange = (nextPage: number) => {
+    if (nextPage < 1) return;
+    setPage(nextPage);
+    loadSavedGames(nextPage, searchQuery, selectedTypeFilter, statusFilter);
+  };
+
+  const syncEditorFromSpec = (spec: GameSpecification) => {
+    setEditTitle(spec.title);
+    setEditDescription(spec.description);
+    setEditTimePerQuestion(spec.settings.timePerQuestion || 15);
+    setEditScoringMode(spec.settings.scoringMode || 'SPEED_BONUS');
+    setEditIsPublic(spec.isPublic ?? false);
+    setEditQuestions(
+      spec.questions.map((q) => ({
+        ...q,
+        choices: q.choices ? [...q.choices] : undefined,
+      }))
+    );
   };
 
   const handleViewOrEditGame = async (gameId: string, startInEditMode: boolean = false) => {
     setIsDetailLoading(true);
     try {
-      const spec = await fetchGameById(gameId);
+      const spec = await fetchGameById(gameId, { mode: 'manage' });
       setActiveGameSpec(spec);
-      setEditTitle(spec.title);
-      setEditDescription(spec.description);
-      setEditQuestions(spec.questions.map((q) => ({ ...q, choices: q.choices ? [...q.choices] : undefined })));
+      syncEditorFromSpec(spec);
       setIsEditMode(startInEditMode);
     } catch (err: any) {
       toast.error(err.message || 'Không thể tải chi tiết bộ câu hỏi.', 'Lỗi');
@@ -119,15 +184,78 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     }
   };
 
-  const handlePlaySavedGame = async (gameId: string) => {
+  const handlePlaySavedGame = async (gameId: string, autoStartSolo: boolean = false) => {
     try {
-      const spec = activeGameSpec?.gameId === gameId ? activeGameSpec : await fetchGameById(gameId);
+      const spec =
+        activeGameSpec?.gameId === gameId
+          ? activeGameSpec
+          : await fetchGameById(gameId, { mode: 'manage' });
       if (onSelectSavedGame) {
-        onSelectSavedGame(spec);
+        onSelectSavedGame(spec, autoStartSolo);
       }
-      toast.success(`Đã nạp bộ câu hỏi "${spec.title}" để luyện tập hoặc mở phòng chơi.`, 'Sẵn sàng chơi');
+      toast.success(
+        autoStartSolo
+          ? `Đang bắt đầu chế độ chơi đơn cho "${spec.title}".`
+          : `Đã nạp bộ câu hỏi "${spec.title}" để luyện tập hoặc mở phòng chơi.`,
+        'Sẵn sàng chơi'
+      );
     } catch (err: any) {
       toast.error(err.message || 'Không thể mở lại bộ câu hỏi.', 'Lỗi');
+    }
+  };
+
+  const handleOpenSoloShareModal = async (game: { gameId: string; title: string; isPublic?: boolean }) => {
+    if (game.isPublic === false) {
+      toast.warning(
+        'Game này đang ở trạng thái Bản nháp. Vui lòng Xuất bản game trước khi lấy Link / QR chơi đơn.',
+        'Chưa xuất bản'
+      );
+      return;
+    }
+    setIsLoadingSoloShare(true);
+    try {
+      const qrData = await fetchGameQr(game.gameId);
+      setSoloShareData({
+        gameId: qrData.gameId,
+        title: qrData.title,
+        playUrl: qrData.playUrl,
+        qrDataUrl: qrData.qrDataUrl,
+      });
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể tạo Link / QR chơi đơn.', 'Lỗi chia sẻ');
+    } finally {
+      setIsLoadingSoloShare(false);
+    }
+  };
+
+  const handleOpenMultiplayerRoom = async (game: { gameId: string; title: string; isPublic?: boolean }) => {
+    if (game.isPublic === false) {
+      toast.warning(
+        'Game này đang ở trạng thái Bản nháp. Vui lòng Xuất bản game trước khi mở phòng Multiplayer.',
+        'Chưa xuất bản'
+      );
+      return;
+    }
+    setIsOpeningRoomGameId(game.gameId);
+    try {
+      const created = await createRoom({
+        gameId: game.gameId,
+        requirePublished: true,
+      });
+      const qr = await fetchRoomQr(created.roomCode);
+      setMultiplayerShareData({
+        gameId: game.gameId,
+        title: game.title,
+        roomCode: created.roomCode,
+        hostToken: created.hostToken,
+        joinUrl: qr.joinUrl,
+        qrDataUrl: qr.qrDataUrl,
+      });
+      toast.success(`Đã mở phòng Multiplayer #${created.roomCode}!`, 'Mở phòng thành công');
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể mở phòng Multiplayer.', 'Lỗi mở phòng');
+    } finally {
+      setIsOpeningRoomGameId(null);
     }
   };
 
@@ -150,7 +278,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         setActiveGameSpec(null);
       }
       setConfirmDeleteGame(null);
-      await loadSavedGames(searchQuery, selectedTypeFilter);
+      await loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter);
     } catch (err: any) {
       toast.error(err.message || 'Không thể xóa bộ câu hỏi.', 'Lỗi xóa');
     } finally {
@@ -167,7 +295,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           if (patch.type === 'MULTIPLE_CHOICE' && (!updated.choices || updated.choices.length !== 4)) {
             updated.choices = ['Lựa chọn A', 'Lựa chọn B', 'Lựa chọn C', 'Lựa chọn D'];
             updated.correctAnswer = 'Lựa chọn A';
-          } else if (patch.type === 'QUICK_BUTTON') {
+          } else if (patch.type === 'QUICK_BUTTON' && (!updated.choices || updated.choices.length < 2)) {
             updated.choices = ['Đúng', 'Sai'];
             updated.correctAnswer = 'Đúng';
           } else if (patch.type === 'FILL_IN_THE_BLANK' || patch.type === 'CROSSWORD') {
@@ -177,6 +305,34 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         return updated;
       })
     );
+  };
+
+  const handleMoveEditQuestion = (index: number, direction: 'UP' | 'DOWN') => {
+    setEditQuestions((prev) => {
+      const targetIndex = direction === 'UP' ? index - 1 : index + 1;
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
+      const copy = [...prev];
+      const temp = copy[index];
+      copy[index] = copy[targetIndex];
+      copy[targetIndex] = temp;
+      return copy;
+    });
+  };
+
+  const handleDuplicateEditQuestion = (index: number) => {
+    const target = editQuestions[index];
+    if (!target) return;
+    const cloned: GameQuestion = {
+      ...target,
+      id: `q_dup_${Date.now()}_${editQuestions.length + 1}`,
+      choices: target.choices ? [...target.choices] : undefined,
+    };
+    setEditQuestions((prev) => {
+      const next = [...prev];
+      next.splice(index + 1, 0, cloned);
+      return next;
+    });
+    toast.info(`Đã nhân bản Câu #${index + 1}`, 'Đã nhân bản');
   };
 
   const handleAddEditQuestion = () => {
@@ -232,17 +388,25 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         title: editTitle.trim() || activeGameSpec.title,
         description: editDescription.trim() || activeGameSpec.description,
         questions: editQuestions,
+        settings: {
+          timePerQuestion: editTimePerQuestion,
+          scoringMode: editScoringMode,
+        },
+        isPublic: editIsPublic,
       });
       setActiveGameSpec(updated);
+      syncEditorFromSpec(updated);
       setIsEditMode(false);
       toast.success('Đã lưu cập nhật bộ câu hỏi thành công.', 'Đã lưu');
-      await loadSavedGames(searchQuery, selectedTypeFilter);
+      await loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter);
     } catch (err: any) {
       toast.error(err.message || 'Không thể lưu chỉnh sửa câu hỏi.', 'Lỗi lưu');
     } finally {
       setIsSavingEdits(false);
     }
   };
+
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   return (
     <div style={{ maxWidth: '1080px', margin: '0 auto', padding: '0.5rem 0 2.5rem 0' }}>
@@ -259,16 +423,16 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       >
         <div>
           <h1 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-            📚 Bộ Câu Hỏi Đã Tạo
+            📚 Kho Game & Bộ Câu Hỏi Dùng Chung
           </h1>
           <p style={{ margin: '0.35rem 0 0 0', color: 'var(--text-secondary)', fontSize: '0.92rem' }}>
-            Xem lại, tìm kiếm, chỉnh sửa nội dung, xuất tệp CSV/JSON hoặc chơi lại các bộ câu hỏi đã tạo.
+            Quản lý, tìm kiếm, lọc theo trạng thái/thể loại, chỉnh sửa câu hỏi, chia sẻ Link/QR chơi đơn và mở phòng Multiplayer.
           </p>
         </div>
 
         <button
           type="button"
-          onClick={() => loadSavedGames(searchQuery, selectedTypeFilter)}
+          onClick={() => loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter)}
           disabled={isLoading}
           style={{
             backgroundColor: 'var(--bg-surface)',
@@ -281,11 +445,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
             cursor: isLoading ? 'not-allowed' : 'pointer',
           }}
         >
-          {isLoading ? '⏳ Đang tải...' : '🔄 Làm mới danh sách'}
+          {isLoading ? '⏳ Đang tải...' : '🔄 Làm mới kho game'}
         </button>
       </div>
 
-      {/* Thanh tìm kiếm & lọc theo loại trò chơi */}
+      {/* Thanh tìm kiếm & lọc theo loại trò chơi / trạng thái */}
       <section
         style={{
           backgroundColor: 'var(--bg-surface)',
@@ -340,7 +504,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               type="button"
               onClick={() => {
                 setSearchQuery('');
-                loadSavedGames('', selectedTypeFilter);
+                setPage(1);
+                loadSavedGames(1, '', selectedTypeFilter, statusFilter);
               }}
               style={{
                 backgroundColor: 'var(--bg-input)',
@@ -358,31 +523,57 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           )}
         </form>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-            Loại câu hỏi:
-          </span>
-          <select
-            value={selectedTypeFilter}
-            onChange={(e) => setSelectedTypeFilter(e.target.value)}
-            style={{
-              padding: '0.6rem 0.85rem',
-              borderRadius: '8px',
-              border: '1px solid var(--border-strong)',
-              backgroundColor: 'var(--bg-input)',
-              color: 'var(--text-primary)',
-              fontWeight: 700,
-              fontSize: '0.86rem',
-              cursor: 'pointer',
-            }}
-          >
-            <option value="ALL">Tất cả ({totalCount})</option>
-            <option value="MULTIPLE_CHOICE">Trắc nghiệm ABCD</option>
-            <option value="FILL_IN_THE_BLANK">Điền từ</option>
-            <option value="QUICK_BUTTON">Đúng / Sai</option>
-            <option value="CROSSWORD">Ô chữ</option>
-            <option value="MIXED">Hỗn hợp (Mixed)</option>
-          </select>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+              Trạng thái:
+            </span>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'ALL' | 'PUBLISHED' | 'DRAFT')}
+              style={{
+                padding: '0.6rem 0.8rem',
+                borderRadius: '8px',
+                border: '1px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontWeight: 700,
+                fontSize: '0.85rem',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="ALL">Tất cả trạng thái</option>
+              <option value="PUBLISHED">🚀 Đã xuất bản</option>
+              <option value="DRAFT">📝 Bản nháp</option>
+            </select>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+            <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+              Thể loại:
+            </span>
+            <select
+              value={selectedTypeFilter}
+              onChange={(e) => setSelectedTypeFilter(e.target.value)}
+              style={{
+                padding: '0.6rem 0.85rem',
+                borderRadius: '8px',
+                border: '1px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontWeight: 700,
+                fontSize: '0.85rem',
+                cursor: 'pointer',
+              }}
+            >
+              <option value="ALL">Tất cả ({totalCount})</option>
+              <option value="MULTIPLE_CHOICE">Trắc nghiệm ABCD</option>
+              <option value="FILL_IN_THE_BLANK">Điền từ</option>
+              <option value="QUICK_BUTTON">Đúng / Sai</option>
+              <option value="CROSSWORD">Ô chữ</option>
+              <option value="MIXED">Hỗn hợp (Mixed)</option>
+            </select>
+          </div>
         </div>
       </section>
 
@@ -428,47 +619,120 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           >
             <div style={{ flex: '1 1 380px' }}>
               {isEditMode ? (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
-                      Tiêu đề bộ câu hỏi:
-                    </label>
-                    <input
-                      type="text"
-                      value={editTitle}
-                      onChange={(e) => setEditTitle(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '0.65rem 0.85rem',
-                        borderRadius: '8px',
-                        border: '1px solid var(--border-strong)',
-                        backgroundColor: 'var(--bg-input)',
-                        color: 'var(--text-primary)',
-                        fontWeight: 800,
-                        fontSize: '1rem',
-                        boxSizing: 'border-box',
-                      }}
-                    />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.75rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                        Tiêu đề bộ câu hỏi:
+                      </label>
+                      <input
+                        type="text"
+                        value={editTitle}
+                        onChange={(e) => setEditTitle(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '0.6rem 0.85rem',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-primary)',
+                          fontWeight: 800,
+                          fontSize: '0.95rem',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                        Mô tả:
+                      </label>
+                      <input
+                        type="text"
+                        value={editDescription}
+                        onChange={(e) => setEditDescription(e.target.value)}
+                        style={{
+                          width: '100%',
+                          padding: '0.6rem 0.85rem',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-primary)',
+                          fontSize: '0.88rem',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
                   </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
-                      Mô tả:
-                    </label>
-                    <input
-                      type="text"
-                      value={editDescription}
-                      onChange={(e) => setEditDescription(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '0.6rem 0.85rem',
-                        borderRadius: '8px',
-                        border: '1px solid var(--border-strong)',
-                        backgroundColor: 'var(--bg-input)',
-                        color: 'var(--text-primary)',
-                        fontSize: '0.88rem',
-                        boxSizing: 'border-box',
-                      }}
-                    />
+
+                  {/* Cấu hình thời gian, điểm số & trạng thái xuất bản */}
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                        Thời gian mỗi câu (5-60 giây):
+                      </label>
+                      <input
+                        type="number"
+                        min={5}
+                        max={60}
+                        value={editTimePerQuestion}
+                        onChange={(e) => setEditTimePerQuestion(Math.max(5, Math.min(60, Number(e.target.value) || 15)))}
+                        style={{
+                          width: '100%',
+                          padding: '0.55rem 0.75rem',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-primary)',
+                          fontWeight: 700,
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                        Chế độ tính điểm:
+                      </label>
+                      <select
+                        value={editScoringMode}
+                        onChange={(e) => setEditScoringMode(e.target.value as ScoringMode)}
+                        style={{
+                          width: '100%',
+                          padding: '0.55rem 0.75rem',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-primary)',
+                          fontWeight: 700,
+                        }}
+                      >
+                        <option value="SPEED_BONUS">Thưởng tốc độ (Speed Bonus)</option>
+                        <option value="STANDARD">Tiêu chuẩn (Standard)</option>
+                        <option value="STREAK">Chuỗi đúng (Streak)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                        Trạng thái xuất bản:
+                      </label>
+                      <select
+                        value={editIsPublic ? 'PUBLISHED' : 'DRAFT'}
+                        onChange={(e) => setEditIsPublic(e.target.value === 'PUBLISHED')}
+                        style={{
+                          width: '100%',
+                          padding: '0.55rem 0.75rem',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-input)',
+                          color: editIsPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+                          fontWeight: 800,
+                        }}
+                      >
+                        <option value="PUBLISHED">🚀 Đã xuất bản (Cho phép chơi & mở phòng)</option>
+                        <option value="DRAFT">📝 Bản nháp (Ẩn khỏi người chơi)</option>
+                      </select>
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -486,8 +750,22 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     >
                       {formatGameTypeName(activeGameSpec.gameType)}
                     </span>
+                    <span
+                      style={{
+                        backgroundColor: activeGameSpec.isPublic
+                          ? 'rgba(16, 185, 129, 0.14)'
+                          : 'rgba(245, 158, 11, 0.15)',
+                        color: activeGameSpec.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+                        padding: '0.2rem 0.65rem',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                        fontWeight: 800,
+                      }}
+                    >
+                      {activeGameSpec.isPublic ? '🚀 Đã xuất bản' : '📝 Bản nháp'}
+                    </span>
                     <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                      • {activeGameSpec.questions.length} câu hỏi • Chế độ điểm: {formatScoringModeName(activeGameSpec.settings.scoringMode)}
+                      • {activeGameSpec.questions.length} câu hỏi • {activeGameSpec.settings.timePerQuestion}s/câu • Điểm: {formatScoringModeName(activeGameSpec.settings.scoringMode)}
                     </span>
                   </div>
                   <h2 style={{ margin: '0.45rem 0 0.25rem 0', fontSize: '1.35rem', fontWeight: 900, color: 'var(--text-primary)' }}>
@@ -539,9 +817,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      setEditTitle(activeGameSpec.title);
-                      setEditDescription(activeGameSpec.description);
-                      setEditQuestions(activeGameSpec.questions.map((q) => ({ ...q, choices: q.choices ? [...q.choices] : undefined })));
+                      syncEditorFromSpec(activeGameSpec);
                       setIsEditMode(false);
                     }}
                     style={{
@@ -562,20 +838,72 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                 <>
                   <button
                     type="button"
-                    onClick={() => handlePlaySavedGame(activeGameSpec.gameId)}
+                    onClick={() => handlePlaySavedGame(activeGameSpec.gameId, true)}
                     style={{
                       backgroundColor: 'var(--primary)',
                       color: '#ffffff',
                       border: 'none',
                       borderRadius: '8px',
-                      padding: '0.55rem 1rem',
+                      padding: '0.55rem 0.95rem',
                       fontWeight: 800,
-                      fontSize: '0.84rem',
+                      fontSize: '0.83rem',
                       cursor: 'pointer',
                     }}
                   >
-                    🎮 Chơi / Mở Phòng
+                    🎯 Chơi đơn
                   </button>
+                  {activeGameSpec.isPublic && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenSoloShareModal({
+                            gameId: activeGameSpec.gameId,
+                            title: activeGameSpec.title,
+                            isPublic: activeGameSpec.isPublic,
+                          })
+                        }
+                        disabled={isLoadingSoloShare}
+                        style={{
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--accent-sky)',
+                          border: '1px solid var(--accent-sky)',
+                          borderRadius: '8px',
+                          padding: '0.55rem 0.9rem',
+                          fontWeight: 800,
+                          fontSize: '0.83rem',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        🔗 Link / QR Chơi đơn
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleOpenMultiplayerRoom({
+                            gameId: activeGameSpec.gameId,
+                            title: activeGameSpec.title,
+                            isPublic: activeGameSpec.isPublic,
+                          })
+                        }
+                        disabled={isOpeningRoomGameId === activeGameSpec.gameId}
+                        style={{
+                          backgroundColor: 'var(--accent-emerald)',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: '8px',
+                          padding: '0.55rem 0.95rem',
+                          fontWeight: 800,
+                          fontSize: '0.83rem',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {isOpeningRoomGameId === activeGameSpec.gameId
+                          ? '⏳ Đang mở phòng...'
+                          : '🏟️ Mở phòng Multiplayer'}
+                      </button>
+                    </>
+                  )}
                   <button
                     type="button"
                     onClick={() => setIsEditMode(true)}
@@ -590,7 +918,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       cursor: 'pointer',
                     }}
                   >
-                    ✏️ Chỉnh sửa câu hỏi
+                    ✏️ Sửa game
                   </button>
                   <button
                     type="button"
@@ -678,7 +1006,57 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   </div>
 
                   {isEditMode && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() => handleMoveEditQuestion(idx, 'UP')}
+                        style={{
+                          padding: '0.25rem 0.55rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-surface)',
+                          color: idx === 0 ? 'var(--text-muted)' : 'var(--text-primary)',
+                          fontSize: '0.75rem',
+                          fontWeight: 800,
+                          cursor: idx === 0 ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        ↑ Lên
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === editQuestions.length - 1}
+                        onClick={() => handleMoveEditQuestion(idx, 'DOWN')}
+                        style={{
+                          padding: '0.25rem 0.55rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-surface)',
+                          color: idx === editQuestions.length - 1 ? 'var(--text-muted)' : 'var(--text-primary)',
+                          fontSize: '0.75rem',
+                          fontWeight: 800,
+                          cursor: idx === editQuestions.length - 1 ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        ↓ Xuống
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDuplicateEditQuestion(idx)}
+                        style={{
+                          padding: '0.25rem 0.55rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-surface)',
+                          color: 'var(--accent-sky)',
+                          fontSize: '0.75rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        📋 Nhân bản
+                      </button>
                       {activeGameSpec.gameType === 'MIXED' && (
                         <select
                           value={q.type}
@@ -744,7 +1122,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       />
                     </div>
 
-                    {q.type === 'MULTIPLE_CHOICE' && q.choices && (
+                    {(q.type === 'MULTIPLE_CHOICE' || q.type === 'QUICK_BUTTON') && q.choices && (
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem' }}>
                         {q.choices.map((ch, cIdx) => (
                           <div key={cIdx}>
@@ -785,24 +1163,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--accent-emerald)', marginBottom: '0.2rem' }}>
                           Đáp án đúng:
                         </label>
-                        {q.type === 'QUICK_BUTTON' ? (
-                          <select
-                            value={q.correctAnswer}
-                            onChange={(e) => handleUpdateEditQuestion(idx, { correctAnswer: e.target.value })}
-                            style={{
-                              width: '100%',
-                              padding: '0.5rem 0.7rem',
-                              borderRadius: '6px',
-                              border: '1px solid var(--border-strong)',
-                              backgroundColor: 'var(--bg-surface)',
-                              color: 'var(--text-primary)',
-                              fontWeight: 700,
-                            }}
-                          >
-                            <option value="Đúng">Đúng</option>
-                            <option value="Sai">Sai</option>
-                          </select>
-                        ) : q.type === 'MULTIPLE_CHOICE' && q.choices ? (
+                        {(q.type === 'QUICK_BUTTON' || q.type === 'MULTIPLE_CHOICE') && q.choices ? (
                           <select
                             value={q.correctAnswer}
                             onChange={(e) => handleUpdateEditQuestion(idx, { correctAnswer: e.target.value })}
@@ -940,7 +1301,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           }}
         >
           <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-            🗂️ Danh Sách Bộ Câu Hỏi Đã Lưu ({savedGames.length})
+            🗂️ Kho Game Dùng Chung ({totalCount} bộ câu hỏi)
           </h2>
           {isDetailLoading && (
             <span style={{ fontSize: '0.84rem', color: 'var(--accent-sky)', fontWeight: 700 }}>
@@ -988,8 +1349,24 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   }}
                 >
                   <div style={{ flex: '1 1 300px' }}>
-                    <div style={{ fontWeight: 900, color: 'var(--text-primary)', fontSize: '1.02rem' }}>
-                      {g.title}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
+                      <div style={{ fontWeight: 900, color: 'var(--text-primary)', fontSize: '1.02rem' }}>
+                        {g.title}
+                      </div>
+                      <span
+                        style={{
+                          backgroundColor: g.isPublic
+                            ? 'rgba(16, 185, 129, 0.14)'
+                            : 'rgba(245, 158, 11, 0.15)',
+                          color: g.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+                          padding: '0.15rem 0.55rem',
+                          borderRadius: '6px',
+                          fontSize: '0.73rem',
+                          fontWeight: 800,
+                        }}
+                      >
+                        {g.isPublic ? '🚀 Đã xuất bản' : '📝 Bản nháp'}
+                      </span>
                     </div>
                     {g.description && (
                       <div style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
@@ -1021,27 +1398,65 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       <span>• {g.questionCount} câu hỏi</span>
                       <span>• {g.timePerQuestion}s/câu</span>
                       <span>• Điểm: {formatScoringModeName(g.scoringMode)}</span>
-                      <span>• {new Date(g.createdAt).toLocaleString('vi-VN')}</span>
+                      <span>• Cập nhật: {new Date(g.updatedAt || g.createdAt).toLocaleString('vi-VN')}</span>
                     </div>
                   </div>
 
                   <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      onClick={() => handlePlaySavedGame(g.gameId)}
-                      style={{
-                        backgroundColor: 'var(--primary)',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: '8px',
-                        padding: '0.48rem 0.85rem',
-                        fontWeight: 800,
-                        fontSize: '0.8rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      🎮 Chơi lại
-                    </button>
+                    {g.isPublic && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handlePlaySavedGame(g.gameId, true)}
+                          style={{
+                            backgroundColor: 'var(--primary)',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '8px',
+                            padding: '0.48rem 0.8rem',
+                            fontWeight: 800,
+                            fontSize: '0.79rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          🎯 Chơi đơn
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenSoloShareModal(g)}
+                          disabled={isLoadingSoloShare}
+                          style={{
+                            backgroundColor: 'var(--bg-surface)',
+                            color: 'var(--accent-sky)',
+                            border: '1px solid var(--accent-sky)',
+                            borderRadius: '8px',
+                            padding: '0.48rem 0.78rem',
+                            fontWeight: 800,
+                            fontSize: '0.79rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          🔗 Link / QR
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenMultiplayerRoom(g)}
+                          disabled={isOpeningRoomGameId === g.gameId}
+                          style={{
+                            backgroundColor: 'var(--accent-emerald)',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '8px',
+                            padding: '0.48rem 0.82rem',
+                            fontWeight: 800,
+                            fontSize: '0.79rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {isOpeningRoomGameId === g.gameId ? '⏳...' : '🏟️ Mở phòng'}
+                        </button>
+                      </>
+                    )}
 
                     <button
                       type="button"
@@ -1133,7 +1548,354 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
             })}
           </div>
         )}
+
+        {/* Thanh phân trang */}
+        {totalCount > PAGE_SIZE && (
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginTop: '1.25rem',
+              paddingTop: '1rem',
+              borderTop: '1px solid var(--border-subtle)',
+              flexWrap: 'wrap',
+              gap: '0.75rem',
+            }}
+          >
+            <span style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+              Trang {page} / {totalPages} • Tổng cộng {totalCount} bộ câu hỏi
+            </span>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button
+                type="button"
+                disabled={page <= 1 || isLoading}
+                onClick={() => handlePageChange(page - 1)}
+                style={{
+                  padding: '0.5rem 0.95rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: page <= 1 ? 'var(--text-muted)' : 'var(--text-primary)',
+                  fontWeight: 800,
+                  fontSize: '0.84rem',
+                  cursor: page <= 1 ? 'not-allowed' : 'pointer',
+                }}
+              >
+                ← Trang trước
+              </button>
+              <button
+                type="button"
+                disabled={!hasMore || isLoading}
+                onClick={() => handlePageChange(page + 1)}
+                style={{
+                  padding: '0.5rem 0.95rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: !hasMore ? 'var(--text-muted)' : 'var(--text-primary)',
+                  fontWeight: 800,
+                  fontSize: '0.84rem',
+                  cursor: !hasMore ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Trang tiếp →
+              </button>
+            </div>
+          </div>
+        )}
       </section>
+
+      {/* Modal Chia Sẻ Link / QR Chơi Đơn */}
+      {soloShareData && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 300,
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-strong)',
+              borderRadius: '16px',
+              padding: '1.5rem',
+              width: '100%',
+              maxWidth: '460px',
+              boxShadow: 'var(--card-shadow)',
+              textAlign: 'center',
+            }}
+          >
+            <h3 style={{ margin: '0 0 0.4rem 0', fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+              🔗 Chia Sẻ Chơi Đơn (Link & QR)
+            </h3>
+            <p style={{ margin: '0 0 1rem 0', fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
+              Người chơi có thể quét mã QR hoặc mở đường dẫn dưới đây để tự chơi độc lập game{' '}
+              <strong style={{ color: 'var(--text-primary)' }}>"{soloShareData.title}"</strong>.
+            </p>
+
+            <div
+              style={{
+                backgroundColor: '#ffffff',
+                padding: '0.85rem',
+                borderRadius: '12px',
+                display: 'inline-block',
+                marginBottom: '1rem',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <img
+                src={soloShareData.qrDataUrl}
+                alt={`QR chơi đơn ${soloShareData.title}`}
+                style={{ width: '210px', height: '210px', display: 'block' }}
+              />
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                gap: '0.5rem',
+                marginBottom: '1.1rem',
+              }}
+            >
+              <input
+                type="text"
+                readOnly
+                value={soloShareData.playUrl}
+                style={{
+                  flex: 1,
+                  padding: '0.55rem 0.75rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.82rem',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(soloShareData.playUrl);
+                  toast.success('Đã sao chép đường dẫn chơi đơn!', 'Đã sao chép');
+                }}
+                style={{
+                  backgroundColor: 'var(--primary)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '0.55rem 0.9rem',
+                  fontWeight: 800,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                }}
+              >
+                📋 Copy Link
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const gameId = soloShareData.gameId;
+                  setSoloShareData(null);
+                  handlePlaySavedGame(gameId, true);
+                }}
+                style={{
+                  backgroundColor: 'var(--accent-emerald)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '0.55rem 1rem',
+                  fontWeight: 800,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                }}
+              >
+                🎯 Chơi đơn ngay
+              </button>
+              <button
+                type="button"
+                onClick={() => setSoloShareData(null)}
+                style={{
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '8px',
+                  padding: '0.55rem 1rem',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Mở Phòng Multiplayer */}
+      {multiplayerShareData && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 300,
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-strong)',
+              borderRadius: '16px',
+              padding: '1.5rem',
+              width: '100%',
+              maxWidth: '480px',
+              boxShadow: 'var(--card-shadow)',
+              textAlign: 'center',
+            }}
+          >
+            <h3 style={{ margin: '0 0 0.4rem 0', fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+              🏟️ Phòng Chơi Multiplayer Đã Mở!
+            </h3>
+            <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
+              Game: <strong style={{ color: 'var(--text-primary)' }}>"{multiplayerShareData.title}"</strong>
+            </p>
+
+            <div
+              style={{
+                backgroundColor: 'rgba(16, 185, 129, 0.14)',
+                border: '1px solid var(--accent-emerald)',
+                borderRadius: '10px',
+                padding: '0.6rem 1rem',
+                marginBottom: '1rem',
+                display: 'inline-block',
+              }}
+            >
+              <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                MÃ PHÒNG:{' '}
+              </span>
+              <strong style={{ fontSize: '1.35rem', color: 'var(--accent-emerald)', letterSpacing: '0.1em' }}>
+                {multiplayerShareData.roomCode}
+              </strong>
+            </div>
+
+            <div>
+              <div
+                style={{
+                  backgroundColor: '#ffffff',
+                  padding: '0.85rem',
+                  borderRadius: '12px',
+                  display: 'inline-block',
+                  marginBottom: '1rem',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                <img
+                  src={multiplayerShareData.qrDataUrl}
+                  alt={`QR phòng ${multiplayerShareData.roomCode}`}
+                  style={{ width: '200px', height: '200px', display: 'block' }}
+                />
+              </div>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                gap: '0.5rem',
+                marginBottom: '1.15rem',
+              }}
+            >
+              <input
+                type="text"
+                readOnly
+                value={multiplayerShareData.joinUrl}
+                style={{
+                  flex: 1,
+                  padding: '0.55rem 0.75rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.82rem',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard.writeText(multiplayerShareData.joinUrl);
+                  toast.success('Đã sao chép đường dẫn tham gia phòng!', 'Đã sao chép');
+                }}
+                style={{
+                  backgroundColor: 'var(--primary)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '0.55rem 0.9rem',
+                  fontWeight: 800,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                }}
+              >
+                📋 Copy Link
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.6rem', flexWrap: 'wrap' }}>
+              {onNavigateToHost && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const { roomCode, hostToken } = multiplayerShareData;
+                    setMultiplayerShareData(null);
+                    onNavigateToHost(roomCode, hostToken);
+                  }}
+                  style={{
+                    backgroundColor: 'var(--accent-emerald)',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '0.55rem 1.05rem',
+                    fontWeight: 800,
+                    fontSize: '0.86rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  🚀 Vào Màn Hình Điều Khiển (Host)
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setMultiplayerShareData(null)}
+                style={{
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '8px',
+                  padding: '0.55rem 1rem',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal xác nhận xóa bộ câu hỏi */}
       {confirmDeleteGame && (
