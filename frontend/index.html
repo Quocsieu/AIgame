@@ -4,68 +4,220 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI Content &rarr; Question &rarr; Game Platform</title>
+    <!-- Google Fonts: Plus Jakarta Sans for crisp modern typography with offline fallback -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
     <style>
       :root,
       [data-theme="dark"] {
-        --bg-body: #090d16;
-        --bg-surface: #0f172a;
-        --bg-card: #131c31;
-        --bg-card-hover: #1a2744;
-        --bg-input: #090d16;
-        --text-primary: #f8fafc;
-        --text-secondary: #94a3b8;
-        --text-muted: #64748b;
-        --border-subtle: #1e293b;
-        --border-strong: #334155;
+        /* Color Tokens - Dark Mode (WCAG AA Compliant) */
+        --bg-body: #0a0e17;
+        --bg-surface: #111827;
+        --bg-card: #182235;
+        --bg-card-hover: #1e2b43;
+        --bg-input: #0d131f;
+        --bg-elevated: #1f293d;
+
+        --text-primary: #f9fafb;
+        --text-secondary: #cbd5e1;
+        --text-muted: #94a3b8; /* Contrast 5.6:1 against #111827 -> WCAG AA Pass */
+
+        --border-subtle: #1f2937;
+        --border-strong: #374151;
+        --border-focus: #3b82f6;
+
         --primary: #2563eb;
         --primary-hover: #1d4ed8;
-        --primary-glow: rgba(37, 99, 235, 0.4);
+        --primary-active: #1e40af;
+        --primary-subtle: rgba(37, 99, 235, 0.15);
+
         --accent-sky: #38bdf8;
+        --accent-sky-subtle: rgba(56, 189, 248, 0.15);
         --accent-emerald: #10b981;
+        --accent-emerald-subtle: rgba(16, 185, 129, 0.15);
         --accent-amber: #f59e0b;
+        --accent-amber-subtle: rgba(245, 158, 11, 0.15);
         --accent-rose: #ef4444;
-        --card-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
-        --btn-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+        --accent-rose-subtle: rgba(239, 68, 68, 0.15);
+
+        /* Elevation & Shadow Tokens - Refined, avoiding heavy glow */
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.4);
+        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
+        --shadow-modal: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.6);
+        --card-shadow: var(--shadow-md);
+        --btn-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.3);
+        --focus-ring: 0 0 0 3px rgba(59, 130, 246, 0.4);
       }
 
       [data-theme="light"] {
-        --bg-body: #f1f5f9;
+        /* Color Tokens - Light Mode (WCAG AA Compliant) */
+        --bg-body: #f8fafc;
         --bg-surface: #ffffff;
         --bg-card: #ffffff;
-        --bg-card-hover: #f8fafc;
+        --bg-card-hover: #f1f5f9;
         --bg-input: #f8fafc;
+        --bg-elevated: #ffffff;
+
         --text-primary: #0f172a;
-        --text-secondary: #475569;
-        --text-muted: #94a3b8;
+        --text-secondary: #334155;
+        --text-muted: #64748b; /* Contrast 4.6:1 against #ffffff -> WCAG AA Pass */
+
         --border-subtle: #e2e8f0;
         --border-strong: #cbd5e1;
+        --border-focus: #2563eb;
+
         --primary: #2563eb;
         --primary-hover: #1d4ed8;
-        --primary-glow: rgba(37, 99, 235, 0.25);
+        --primary-active: #1e40af;
+        --primary-subtle: rgba(37, 99, 235, 0.1);
+
         --accent-sky: #0284c7;
+        --accent-sky-subtle: rgba(2, 132, 199, 0.1);
         --accent-emerald: #059669;
+        --accent-emerald-subtle: rgba(5, 150, 105, 0.1);
         --accent-amber: #d97706;
+        --accent-amber-subtle: rgba(217, 119, 6, 0.1);
         --accent-rose: #dc2626;
-        --card-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 8px 10px -6px rgba(0, 0, 0, 0.04);
-        --btn-shadow: 0 4px 14px rgba(37, 99, 235, 0.25);
+        --accent-rose-subtle: rgba(220, 38, 38, 0.1);
+
+        /* Elevation & Shadow Tokens - Soft, clean */
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
+        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+        --shadow-modal: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
+        --card-shadow: var(--shadow-md);
+        --btn-shadow: 0 1px 3px 0 rgba(37, 99, 235, 0.2);
+        --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.35);
       }
 
-      * {
+      /* Kahoot-inspired Vibrant Color Palette */
+      :root {
+        --k-red: #ef4444;
+        --k-red-hover: #dc2626;
+        --k-blue: #3b82f6;
+        --k-blue-hover: #2563eb;
+        --k-yellow: #f59e0b;
+        --k-yellow-hover: #d97706;
+        --k-green: #10b981;
+        --k-green-hover: #059669;
+        --k-purple: #8b5cf6;
+        --k-purple-hover: #7c3aed;
+        --k-cyan: #06b6d4;
+        --k-cyan-hover: #0891b2;
+      }
+
+      /* Vibrant Block Elements */
+      .vibrant-card {
+        border-radius: 14px;
+        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+      }
+      .vibrant-card:hover {
+        transform: translateY(-2px);
+      }
+
+      .btn-vibrant-red {
+        background-color: var(--k-red) !important;
+        color: #ffffff !important;
+        box-shadow: 0 3px 0 #b91c1c !important;
+      }
+      .btn-vibrant-red:hover:not(:disabled) {
+        background-color: var(--k-red-hover) !important;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 0 #991b1b !important;
+      }
+      .btn-vibrant-red:active:not(:disabled) {
+        transform: translateY(2px) !important;
+        box-shadow: 0 1px 0 #991b1b !important;
+      }
+
+      .btn-vibrant-blue {
+        background-color: var(--k-blue) !important;
+        color: #ffffff !important;
+        box-shadow: 0 3px 0 #1d4ed8 !important;
+      }
+      .btn-vibrant-blue:hover:not(:disabled) {
+        background-color: var(--k-blue-hover) !important;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 0 #1e40af !important;
+      }
+      .btn-vibrant-blue:active:not(:disabled) {
+        transform: translateY(2px) !important;
+        box-shadow: 0 1px 0 #1e40af !important;
+      }
+
+      .btn-vibrant-green {
+        background-color: var(--k-green) !important;
+        color: #ffffff !important;
+        box-shadow: 0 3px 0 #047857 !important;
+      }
+      .btn-vibrant-green:hover:not(:disabled) {
+        background-color: var(--k-green-hover) !important;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 0 #065f46 !important;
+      }
+      .btn-vibrant-green:active:not(:disabled) {
+        transform: translateY(2px) !important;
+        box-shadow: 0 1px 0 #065f46 !important;
+      }
+
+      .btn-vibrant-purple {
+        background-color: var(--k-purple) !important;
+        color: #ffffff !important;
+        box-shadow: 0 3px 0 #6d28d9 !important;
+      }
+      .btn-vibrant-purple:hover:not(:disabled) {
+        background-color: var(--k-purple-hover) !important;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 0 #5b21b6 !important;
+      }
+      .btn-vibrant-purple:active:not(:disabled) {
+        transform: translateY(2px) !important;
+        box-shadow: 0 1px 0 #5b21b6 !important;
+      }
+
+      /* Global Layout & Typography */
+      *, *::before, *::after {
         box-sizing: border-box;
       }
+
       body {
         margin: 0;
         padding: 0;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
         background-color: var(--bg-body);
         color: var(--text-primary);
         min-height: 100vh;
-        transition: background-color 0.2s ease, color 0.2s ease;
+        line-height: 1.5;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        transition: background-color 0.18s ease, color 0.18s ease;
       }
+
       input, select, textarea, button {
         font-family: inherit;
+        font-size: inherit;
       }
-      /* Custom scrollbar */
+
+      /* Global Focus Rings (WCAG AA a11y) */
+      :focus-visible {
+        outline: none;
+        box-shadow: var(--focus-ring) !important;
+      }
+
+      /* Interactive Button Base */
+      button {
+        transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+      }
+      button:active:not(:disabled) {
+        transform: translateY(1px);
+      }
+
+      /* Custom Accessible Scrollbar */
       ::-webkit-scrollbar {
         width: 8px;
         height: 8px;
@@ -80,17 +232,41 @@
       ::-webkit-scrollbar-thumb:hover {
         background: var(--text-muted);
       }
-      @keyframes pulseGlow {
-        0%, 100% { box-shadow: 0 0 15px var(--primary-glow); }
-        50% { box-shadow: 0 0 25px var(--primary-glow), 0 0 35px var(--primary-glow); }
-      }
+
+      /* Micro-Animations & Pop-in */
       @keyframes popIn {
-        0% { transform: scale(0.92); opacity: 0; }
+        0% { transform: scale(0.96); opacity: 0; }
         100% { transform: scale(1); opacity: 1; }
       }
-      @keyframes countdownTick {
-        from { transform: scaleX(1); }
-        to { transform: scaleX(0); }
+      @keyframes fadeIn {
+        0% { opacity: 0; }
+        100% { opacity: 1; }
+      }
+      @keyframes spinSlow {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+
+      /* Prefers-reduced-motion: respect user motion accessibility */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
+
+      /* Responsive Navigation Breakpoints (Kahoot-style Mobile App Shell) */
+      @media (min-width: 768px) {
+        .mobile-bottom-nav {
+          display: none !important;
+        }
+      }
+      @media (max-width: 767px) {
+        .desktop-nav {
+          display: none !important;
+        }
       }
     </style>
   </head>

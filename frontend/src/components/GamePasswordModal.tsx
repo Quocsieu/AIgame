@@ -1,5 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { verifyGamePassword } from '../services/api.js';
+import {
+  AlertTriangleIcon,
+  EyeIcon,
+  EyeOffIcon,
+  LockIcon,
+  SpinnerIcon,
+} from './Icons.js';
 
 interface GamePasswordModalProps {
   isOpen: boolean;
@@ -21,16 +28,34 @@ export const GamePasswordModal: React.FC<GamePasswordModalProps> = ({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const modalRef = useRef<HTMLDivElement>(null);
+  const previousActiveElement = useRef<HTMLElement | null>(null);
 
   useEffect(() => {
     if (isOpen) {
+      previousActiveElement.current = document.activeElement as HTMLElement | null;
       setPassword('');
       setError(null);
-      setTimeout(() => {
+
+      const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape' && !loading) {
+          e.preventDefault();
+          onClose();
+        }
+      };
+      window.addEventListener('keydown', handleKeyDown);
+
+      const timer = setTimeout(() => {
         inputRef.current?.focus();
       }, 100);
+
+      return () => {
+        window.removeEventListener('keydown', handleKeyDown);
+        clearTimeout(timer);
+        previousActiveElement.current?.focus();
+      };
     }
-  }, [isOpen]);
+  }, [isOpen, loading, onClose]);
 
   if (!isOpen) return null;
 
@@ -38,6 +63,7 @@ export const GamePasswordModal: React.FC<GamePasswordModalProps> = ({
     e.preventDefault();
     if (!password.trim()) {
       setError('Vui lòng nhập mật khẩu của bộ câu hỏi.');
+      inputRef.current?.focus();
       return;
     }
 
@@ -55,6 +81,7 @@ export const GamePasswordModal: React.FC<GamePasswordModalProps> = ({
       }
     } catch (err: any) {
       setError(err?.message || 'Mật khẩu bộ câu hỏi không chính xác. Vui lòng thử lại.');
+      inputRef.current?.focus();
     } finally {
       setLoading(false);
     }
@@ -62,16 +89,20 @@ export const GamePasswordModal: React.FC<GamePasswordModalProps> = ({
 
   return (
     <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="game-password-modal-title"
       style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: 'rgba(0, 0, 0, 0.75)',
-        backdropFilter: 'blur(5px)',
+        backgroundColor: 'rgba(0, 0, 0, 0.65)',
+        backdropFilter: 'blur(4px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 1000,
         padding: '1rem',
+        animation: 'fadeIn 0.15s ease-out',
       }}
       onClick={(e) => {
         if (e.target === e.currentTarget && !loading) {
@@ -80,41 +111,46 @@ export const GamePasswordModal: React.FC<GamePasswordModalProps> = ({
       }}
     >
       <div
+        ref={modalRef}
+        tabIndex={-1}
         style={{
           backgroundColor: 'var(--bg-surface)',
           borderRadius: '16px',
           padding: '2rem',
           maxWidth: '440px',
           width: '100%',
-          boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.4), 0 10px 10px -5px rgba(0, 0, 0, 0.3)',
-          border: '1px solid var(--border-subtle)',
+          boxShadow: 'var(--shadow-modal)',
+          border: '1px solid var(--border-strong)',
+          outline: 'none',
           animation: 'popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
+        onClick={(e) => e.stopPropagation()}
       >
         <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
           <div
             style={{
-              width: '56px',
-              height: '56px',
-              borderRadius: '50%',
-              backgroundColor: 'rgba(56, 189, 248, 0.15)',
+              width: '52px',
+              height: '52px',
+              borderRadius: '14px',
+              backgroundColor: 'var(--accent-sky-subtle)',
               color: 'var(--accent-sky)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '1.75rem',
               margin: '0 auto 1rem auto',
-              border: '1px solid rgba(56, 189, 248, 0.3)',
+              border: '1px solid var(--accent-sky-subtle)',
             }}
           >
-            🔒
+            <LockIcon size={26} />
           </div>
           <h3
+            id="game-password-modal-title"
             style={{
               margin: '0 0 0.5rem 0',
-              fontSize: '1.35rem',
+              fontSize: '1.3rem',
               fontWeight: 800,
               color: 'var(--text-primary)',
+              letterSpacing: '-0.02em',
             }}
           >
             Bộ Câu Hỏi Được Bảo Vệ
@@ -122,9 +158,9 @@ export const GamePasswordModal: React.FC<GamePasswordModalProps> = ({
           <p
             style={{
               margin: 0,
-              fontSize: '0.88rem',
-              color: 'var(--text-muted)',
-              lineHeight: 1.45,
+              fontSize: '0.9rem',
+              color: 'var(--text-secondary)',
+              lineHeight: 1.5,
             }}
           >
             {gameTitle ? (
@@ -139,22 +175,23 @@ export const GamePasswordModal: React.FC<GamePasswordModalProps> = ({
 
         {error && (
           <div
+            role="alert"
             style={{
               padding: '0.85rem 1rem',
               borderRadius: '10px',
-              backgroundColor: 'rgba(239, 68, 68, 0.12)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              color: '#ef4444',
-              fontSize: '0.85rem',
+              backgroundColor: 'var(--accent-rose-subtle)',
+              border: '1px solid var(--accent-rose)',
+              color: 'var(--accent-rose)',
+              fontSize: '0.86rem',
               marginBottom: '1.25rem',
               fontWeight: 600,
               display: 'flex',
               alignItems: 'center',
-              gap: '0.5rem',
+              gap: '0.6rem',
             }}
           >
-            <span>⚠️</span>
-            <span>{error}</span>
+            <AlertTriangleIcon size={18} />
+            <span style={{ flex: 1 }}>{error}</span>
           </div>
         )}
 
@@ -163,14 +200,19 @@ export const GamePasswordModal: React.FC<GamePasswordModalProps> = ({
             <label
               htmlFor="game-password-input"
               style={{
-                display: 'block',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
                 fontSize: '0.82rem',
                 fontWeight: 700,
                 color: 'var(--text-secondary)',
-                marginBottom: '0.45rem',
+                marginBottom: '0.5rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
               }}
             >
-              🔑 MẬT KHẨU BỘ CÂU HỎI
+              <LockIcon size={15} />
+              <span>Mật khẩu bộ câu hỏi</span>
             </label>
             <div style={{ position: 'relative' }}>
               <input
@@ -181,37 +223,43 @@ export const GamePasswordModal: React.FC<GamePasswordModalProps> = ({
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Nhập mật khẩu do người tạo cung cấp..."
                 disabled={loading}
+                autoComplete="current-password"
                 style={{
                   width: '100%',
-                  padding: '0.85rem 3rem 0.85rem 1rem',
+                  padding: '0.85rem 3.2rem 0.85rem 1rem',
                   borderRadius: '10px',
                   border: '1px solid var(--border-strong)',
                   backgroundColor: 'var(--bg-input)',
                   color: 'var(--text-primary)',
                   fontSize: '0.95rem',
-                  outline: 'none',
                   boxSizing: 'border-box',
                 }}
               />
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                tabIndex={-1}
+                tabIndex={0}
+                aria-label={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
+                title={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
                 style={{
                   position: 'absolute',
-                  right: '0.85rem',
+                  right: '4px',
                   top: '50%',
                   transform: 'translateY(-50%)',
                   background: 'none',
                   border: 'none',
                   cursor: 'pointer',
                   color: 'var(--text-muted)',
-                  fontSize: '1rem',
+                  minWidth: '40px',
+                  minHeight: '40px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
                   padding: 0,
+                  borderRadius: '6px',
                 }}
-                title={showPassword ? 'Ẩn mật khẩu' : 'Hiện mật khẩu'}
               >
-                {showPassword ? '👁️' : '🔒'}
+                {showPassword ? <EyeOffIcon size={18} /> : <EyeIcon size={18} />}
               </button>
             </div>
           </div>
@@ -223,7 +271,8 @@ export const GamePasswordModal: React.FC<GamePasswordModalProps> = ({
               disabled={loading}
               style={{
                 flex: 1,
-                padding: '0.85rem',
+                minHeight: '44px',
+                padding: '0.75rem 1rem',
                 borderRadius: '10px',
                 border: '1px solid var(--border-strong)',
                 backgroundColor: 'transparent',
@@ -240,7 +289,8 @@ export const GamePasswordModal: React.FC<GamePasswordModalProps> = ({
               disabled={loading}
               style={{
                 flex: 2,
-                padding: '0.85rem',
+                minHeight: '44px',
+                padding: '0.75rem 1.25rem',
                 borderRadius: '10px',
                 border: 'none',
                 backgroundColor: 'var(--primary)',
@@ -249,10 +299,21 @@ export const GamePasswordModal: React.FC<GamePasswordModalProps> = ({
                 fontSize: '0.92rem',
                 cursor: loading ? 'not-allowed' : 'pointer',
                 boxShadow: 'var(--btn-shadow)',
-                opacity: loading ? 0.7 : 1,
+                opacity: loading ? 0.75 : 1,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
               }}
             >
-              {loading ? 'Đang xác thực...' : 'Mở Khóa & Chơi &rarr;'}
+              {loading ? (
+                <>
+                  <SpinnerIcon size={18} />
+                  <span>Đang xác thực...</span>
+                </>
+              ) : (
+                <span>Mở Khóa & Chơi &rarr;</span>
+              )}
             </button>
           </div>
         </form>
@@ -260,4 +321,3 @@ export const GamePasswordModal: React.FC<GamePasswordModalProps> = ({
     </div>
   );
 };
-

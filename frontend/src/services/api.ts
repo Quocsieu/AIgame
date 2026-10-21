@@ -11,6 +11,7 @@ import type {
   GameSpecification,
   IngestedSource,
   LearningAnalyticsSummary,
+  MixedQuestionDistribution,
   PersistedGameSummary,
   PersistedPracticeSessionRecord,
   PracticeFinalResult,
@@ -280,6 +281,7 @@ export async function generateGame(params: {
   title?: string;
   passwordProtected?: boolean;
   password?: string;
+  mixedDistribution?: MixedQuestionDistribution;
 }): Promise<GameSpecification> {
   const res = await fetch(`${API_BASE_URL}/games/generate`, {
     method: 'POST',
@@ -291,6 +293,9 @@ export async function generateGame(params: {
     const err = new Error(data.error?.message || 'Lỗi khi tạo trò chơi bằng AI.');
     (err as any).code = data.error?.code;
     throw err;
+  }
+  if (data.data?.gameAccessToken && data.data?.gameId) {
+    setStoredGameAccessToken(data.data.gameId, data.data.gameAccessToken);
   }
   return data.data;
 }
@@ -345,7 +350,7 @@ export async function fetchSavedGames(
 export async function deleteSavedGame(gameId: string): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}`, {
     method: 'DELETE',
-    headers: buildAuthHeaders(),
+    headers: buildAuthHeaders({}, { gameId }),
   });
   const data = await res.json();
   if (!data.success) {
@@ -383,6 +388,7 @@ export async function saveEditedQuestions(
     settings?: {
       timePerQuestion?: number;
       scoringMode?: ScoringMode;
+      mixedDistribution?: MixedQuestionDistribution;
     };
     isPublic?: boolean;
     passwordProtected?: boolean;
@@ -392,12 +398,15 @@ export async function saveEditedQuestions(
 ): Promise<GameSpecification> {
   const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/questions`, {
     method: 'PATCH',
-    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { gameId }),
     body: JSON.stringify(params),
   });
   const data = await res.json();
   if (!data.success) {
     throw new Error(data.error?.message || 'Không thể lưu chỉnh sửa bộ câu hỏi.');
+  }
+  if (data.data?.gameAccessToken) {
+    setStoredGameAccessToken(gameId, data.data.gameAccessToken);
   }
   return data.data;
 }

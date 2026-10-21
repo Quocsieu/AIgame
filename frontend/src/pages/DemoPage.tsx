@@ -1,41 +1,72 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GameModeSelectionModal } from '../components/GameModeSelectionModal.js';
+import { GameTypeSelector } from '../components/GameTypeSelector.js';
 import { useToast } from '../components/ToastContext.js';
 import {
-  advancePracticeSession,
+  AlertTriangleIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  BookOpenIcon,
+  CheckIcon,
+  CircleShapeIcon,
+  ClockIcon,
+  CopyIcon,
+  DiamondIcon,
+  FileTextIcon,
+  FlameIcon,
+  GamepadIcon,
+  GlobeIcon,
+  HomeIcon,
+  InfoIcon,
+  LockIcon,
+  PencilIcon,
+  PlayIcon,
+  PlusIcon,
+  RefreshIcon,
+  SparklesIcon,
+  SpinnerIcon,
+  SquareShapeIcon,
+  StarIcon,
+  TrashIcon,
+  TriangleIcon,
+  TrophyIcon,
+  UploadIcon,
+  UsersIcon,
+  XMarkIcon,
+} from '../components/Icons.js';
+import {
   createPracticeSession,
   createRoom,
   downloadGameExport,
-  downloadSessionExport,
   fetchRoomQr,
   generateGame,
   ingestSources,
   saveEditedQuestions,
-  startPracticeSession,
-  submitPracticeAnswer,
 } from '../services/api.js';
-import type {
-  AuthenticatedUser,
-  Difficulty,
-  GameQuestion,
-  GameSpecification,
-  GameType,
-  IngestedSource,
-  PracticeFinalResult,
-  PracticeQuestionResult,
-  ProvenanceReference,
-  QuestionType,
-  SanitizedQuestion,
-  ScoringMode,
+import {
+  calculateMixedTypeCounts,
+  type AuthenticatedUser,
+  type Difficulty,
+  type GameQuestion,
+  type GameSpecification,
+  type GameType,
+  type IngestedSource,
+  type MixedQuestionDistribution,
+  type ProvenanceReference,
+  type QuestionType,
+  type ScoringMode,
 } from '../types/index.js';
 
 interface DemoPageProps {
   onNavigateToHost?: (roomCode: string, hostToken: string) => void;
   onNavigateToPlay?: (roomCode: string) => void;
+  onNavigateToSoloPlay?: (spec: GameSpecification) => void;
   initialSpec?: GameSpecification | null;
   autoStartSoloPlay?: boolean;
   onExitSoloPlay?: () => void;
   onNavigateToLibrary?: () => void;
+  initialGameType?: GameType;
+  onBackToHome?: () => void;
 }
 
 const MAX_URLS = 5;
@@ -183,10 +214,13 @@ const validateQuestionItem = (q: GameQuestion): string | null => {
 export const DemoPage: React.FC<DemoPageProps> = ({
   onNavigateToHost,
   onNavigateToPlay,
+  onNavigateToSoloPlay,
   initialSpec,
   autoStartSoloPlay,
   onExitSoloPlay,
   onNavigateToLibrary,
+  initialGameType,
+  onBackToHome,
 }) => {
   const toast = useToast();
 
@@ -202,13 +236,25 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [gamePassword, setGamePassword] = useState('');
 
   // AI configuration state (Batch 4 & Batch 5)
-  const [gameType, setGameType] = useState<GameType>('MULTIPLE_CHOICE');
+  const [gameType, setGameType] = useState<GameType>(initialGameType || 'MULTIPLE_CHOICE');
+
+  useEffect(() => {
+    if (initialGameType) {
+      setGameType(initialGameType);
+    }
+  }, [initialGameType]);
   const [difficulty, setDifficulty] = useState<Difficulty>('MEDIUM');
   const [scoringMode, setScoringMode] = useState<ScoringMode>('STANDARD');
   const [questionCount, setQuestionCount] = useState(5);
   const [timePerQuestion, setTimePerQuestion] = useState(20);
   const [topicFocus, setTopicFocus] = useState('');
   const [selectedSections, setSelectedSections] = useState<string[]>([]);
+  const [mixedDistribution, setMixedDistribution] = useState<MixedQuestionDistribution>({
+    MULTIPLE_CHOICE: 40,
+    QUICK_BUTTON: 20,
+    FILL_IN_THE_BLANK: 20,
+    CROSSWORD: 20,
+  });
 
   const [ingestedSources, setIngestedSources] = useState<IngestedSource[]>([]);
   const [generatedSpec, setGeneratedSpec] = useState<GameSpecification | null>(null);
@@ -229,34 +275,6 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   // Modal Chọn chế độ chơi (Luồng 1 & Luồng 2)
   const [isModeModalOpen, setIsModeModalOpen] = useState(false);
   const [modeModalSpec, setModeModalSpec] = useState<GameSpecification | null>(null);
-
-  // Single-Player Practice Mode state (Batch 7)
-  const [isPracticeOpen, setIsPracticeOpen] = useState(false);
-  const [practiceSessionId, setPracticeSessionId] = useState<string | null>(null);
-  const [practiceQuestion, setPracticeQuestion] = useState<SanitizedQuestion | null>(null);
-  const [practiceSelectedChoice, setPracticeSelectedChoice] = useState<string | null>(null);
-  const [practiceAnswerInput, setPracticeAnswerInput] = useState('');
-  const [practiceError, setPracticeError] = useState<string | null>(null);
-  const [practiceFeedback, setPracticeFeedback] = useState<PracticeQuestionResult | null>(null);
-  const [practiceFinalResult, setPracticeFinalResult] = useState<PracticeFinalResult | null>(null);
-  const [practiceScore, setPracticeScore] = useState(0);
-  const [practiceStreak, setPracticeStreak] = useState(0);
-  const [practiceTimeLeft, setPracticeTimeLeft] = useState(0);
-  const [isSubmittingPractice, setIsSubmittingPractice] = useState(false);
-  const practiceTimerRef = useRef<number | null>(null);
-
-  const stopPracticeTimer = () => {
-    if (practiceTimerRef.current) {
-      window.clearInterval(practiceTimerRef.current);
-      practiceTimerRef.current = null;
-    }
-  };
-
-  useEffect(() => {
-    return () => {
-      stopPracticeTimer();
-    };
-  }, []);
 
   useEffect(() => {
     if (initialSpec) {
@@ -404,6 +422,21 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       return null;
     }
 
+    if (gameType === 'MIXED') {
+      const sum =
+        (mixedDistribution.MULTIPLE_CHOICE || 0) +
+        (mixedDistribution.QUICK_BUTTON || 0) +
+        (mixedDistribution.FILL_IN_THE_BLANK || 0) +
+        (mixedDistribution.CROSSWORD || 0);
+      if (sum !== 100) {
+        toast.error(
+          `Tổng tỷ lệ các loại câu hỏi cho chế độ MIXED hiện tại là ${sum}%. Bạn cần điều chỉnh để tổng đúng chính xác 100%.`,
+          'Tỷ lệ câu hỏi chưa đúng 100%'
+        );
+        return null;
+      }
+    }
+
     setIsGenerating(true);
     const toastId = toast.loading('Đang yêu cầu AI tổng hợp câu hỏi và phương án trả lời...');
 
@@ -422,6 +455,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         title: customGameTitle.trim() || undefined,
         passwordProtected: isPasswordProtected,
         password: isPasswordProtected && gamePassword.trim() ? gamePassword.trim() : undefined,
+        mixedDistribution: gameType === 'MIXED' ? mixedDistribution : undefined,
       });
 
       toast.removeToast(toastId);
@@ -770,189 +804,24 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }
   };
 
-  const handleExportCurrentSession = async (format: 'csv' | 'json') => {
-    const sid = practiceFinalResult?.sessionId || practiceSessionId;
-    if (!sid) return;
-    try {
-      await downloadSessionExport(sid, format);
-      toast.success(`Đã xuất kết quả luyện tập định dạng ${format.toUpperCase()}`, 'Xuất thành công');
-    } catch (err: any) {
-      toast.error(err.message || 'Không thể xuất kết quả luyện tập.', 'Lỗi xuất dữ liệu');
-    }
-  };
-
-  // ==========================================
-  // Single-Player Practice Mode Handlers (Batch 7)
-  // ==========================================
-
-  const startPracticeCountdown = (seconds: number, sessionId: string) => {
-    stopPracticeTimer();
-    setPracticeTimeLeft(seconds);
-    practiceTimerRef.current = window.setInterval(() => {
-      setPracticeTimeLeft(prev => {
-        if (prev <= 1) {
-          stopPracticeTimer();
-          // Trigger timeout state on active question
-          setPracticeFeedback({
-            questionId: 'timeout',
-            answer: '(Hết thời gian)',
-            isCorrect: false,
-            pointsEarned: 0,
-            responseTimeMs: seconds * 1000,
-            answeredAt: new Date().toISOString(),
-            correctAnswer: 'Đã hết thời gian trả lời câu hỏi này',
-            explanation: 'Hãy bấm "Câu tiếp theo" để tiếp tục bài luyện tập.',
-          });
-          setPracticeStreak(0);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-  };
-
-  const handleStartPractice = async (specOverride?: GameSpecification, isPublicSoloPlay?: boolean) => {
+  const handleStartSoloPlay = (specOverride?: GameSpecification) => {
     const target = specOverride || generatedSpec;
-    if (!target || !validateSpecBeforeLaunch(target)) {
-      return;
-    }
+    if (!target || !validateSpecBeforeLaunch(target)) return;
 
-    const specToPlay: GameSpecification = {
-      ...target,
-      settings: {
-        ...target.settings,
-        questionCount: target.questions.length,
-        scoringMode: target.settings?.scoringMode || scoringMode,
-        timePerQuestion: target.settings?.timePerQuestion || timePerQuestion,
-      },
-    };
-
-    try {
-      const created = await createPracticeSession(
-        isPublicSoloPlay
-          ? {
-              gameId: specToPlay.gameId,
-              publicPlay: true,
-            }
-          : {
-              gameId: specToPlay.gameId,
-              gameSpecification: specToPlay,
-            }
-      );
-      const started = await startPracticeSession(created.sessionId);
-
-      setPracticeSessionId(created.sessionId);
-      setPracticeQuestion(started.question);
-      setPracticeSelectedChoice(null);
-      setPracticeAnswerInput('');
-      setPracticeError(null);
-      setPracticeFeedback(null);
-      setPracticeFinalResult(null);
-      setPracticeScore(0);
-      setPracticeStreak(0);
-      setIsPracticeOpen(true);
-      startPracticeCountdown(
-        started.question.timePerQuestion || specToPlay.settings.timePerQuestion || timePerQuestion,
-        created.sessionId
-      );
-    } catch (err: any) {
-      toast.error(err.message || 'Không thể khởi tạo chế độ luyện tập cá nhân.', 'Lỗi luyện tập');
+    if (onNavigateToSoloPlay) {
+      onNavigateToSoloPlay(target);
+    } else if (onNavigateToPlay) {
+      onNavigateToPlay(target.gameId);
+    } else {
+      window.location.search = `?play=${target.gameId}`;
     }
   };
 
-  useEffect(() => {
-    if (autoStartSoloPlay && initialSpec) {
-      handleStartPractice(initialSpec, true);
+  const handleProceedToStep5 = () => {
+    if (validateSpecBeforeLaunch(generatedSpec)) {
+      setCurrentStep(5);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
     }
-  }, [autoStartSoloPlay, initialSpec]);
-
-  const handleSubmitPracticeAnswer = async (chosenAnswer: string) => {
-    if (!practiceSessionId || !practiceQuestion || practiceFeedback || isSubmittingPractice) {
-      return;
-    }
-    const clean = chosenAnswer.trim();
-    if (!clean) {
-      setPracticeError('Vui lòng chọn hoặc nhập câu trả lời trước khi gửi.');
-      toast.warning('Vui lòng nhập hoặc chọn câu trả lời.', 'Chưa có câu trả lời');
-      return;
-    }
-    if (clean.length > MAX_ANSWER_LENGTH) {
-      setPracticeError(`Câu trả lời không được vượt quá ${MAX_ANSWER_LENGTH} ký tự.`);
-      toast.warning(`Câu trả lời vượt quá ${MAX_ANSWER_LENGTH} ký tự cho phép.`, 'Vượt giới hạn độ dài');
-      return;
-    }
-
-    setPracticeError(null);
-    setIsSubmittingPractice(true);
-
-    try {
-      const result = await submitPracticeAnswer(practiceSessionId, {
-        questionId: practiceQuestion.id,
-        answer: clean,
-      });
-
-      stopPracticeTimer();
-      setPracticeFeedback(result);
-      setPracticeScore(prev => prev + result.pointsEarned);
-      setPracticeStreak(prev => (result.isCorrect ? prev + 1 : 0));
-    } catch (err: any) {
-      if (err.code === 'ANSWER_TIMEOUT') {
-        stopPracticeTimer();
-        setPracticeFeedback({
-          questionId: practiceQuestion.id,
-          answer: clean,
-          isCorrect: false,
-          pointsEarned: 0,
-          responseTimeMs: practiceQuestion.timePerQuestion * 1000,
-          answeredAt: new Date().toISOString(),
-          correctAnswer: 'Hết giờ',
-          explanation: 'Câu trả lời được gửi sau khi hết thời gian quy định.',
-        });
-        setPracticeStreak(0);
-      } else {
-        setPracticeError(err.message || 'Không thể gửi câu trả lời. Vui lòng thử lại.');
-        toast.error(err.message || 'Không thể gửi câu trả lời.', 'Lỗi');
-      }
-    } finally {
-      setIsSubmittingPractice(false);
-    }
-  };
-
-  const handleAdvancePractice = async () => {
-    if (!practiceSessionId) return;
-
-    try {
-      const adv = await advancePracticeSession(practiceSessionId);
-      if (adv.nextQuestionAvailable && adv.question) {
-        setPracticeQuestion(adv.question);
-        setPracticeSelectedChoice(null);
-        setPracticeAnswerInput('');
-        setPracticeError(null);
-        setPracticeFeedback(null);
-        startPracticeCountdown(adv.question.timePerQuestion || timePerQuestion, practiceSessionId);
-      } else if (adv.finished && adv.result) {
-        stopPracticeTimer();
-        setPracticeQuestion(null);
-        setPracticeSelectedChoice(null);
-        setPracticeError(null);
-        setPracticeFeedback(null);
-        setPracticeFinalResult(adv.result);
-      }
-    } catch (err: any) {
-      toast.error(err.message || 'Không thể chuyển sang câu tiếp theo.', 'Lỗi');
-    }
-  };
-
-  const handleClosePractice = () => {
-    stopPracticeTimer();
-    setIsPracticeOpen(false);
-    setPracticeSessionId(null);
-    setPracticeQuestion(null);
-    setPracticeSelectedChoice(null);
-    setPracticeAnswerInput('');
-    setPracticeError(null);
-    setPracticeFeedback(null);
-    setPracticeFinalResult(null);
   };
 
   const handleCopyLink = () => {
@@ -961,12 +830,299 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     toast.success('Đã sao chép liên kết tham gia vào bộ nhớ tạm!', 'Đã sao chép');
   };
 
+  const renderMixedDistributionControl = () => {
+    const total =
+      (mixedDistribution.MULTIPLE_CHOICE || 0) +
+      (mixedDistribution.QUICK_BUTTON || 0) +
+      (mixedDistribution.FILL_IN_THE_BLANK || 0) +
+      (mixedDistribution.CROSSWORD || 0);
+    const isValid = total === 100;
+    const counts = calculateMixedTypeCounts(questionCount, mixedDistribution);
+
+    const typesConfig = [
+      {
+        key: 'MULTIPLE_CHOICE' as const,
+        label: 'Trắc nghiệm ABCD',
+        sub: '4 lựa chọn, 1 đáp án',
+        color: '#ef4444',
+        icon: '▲',
+        badge: 'ABCD',
+      },
+      {
+        key: 'QUICK_BUTTON' as const,
+        label: 'Đúng / Sai',
+        sub: 'Nhận định 2 nút bấm',
+        color: '#3b82f6',
+        icon: '◆',
+        badge: 'Đ/S',
+      },
+      {
+        key: 'FILL_IN_THE_BLANK' as const,
+        label: 'Điền vào chỗ trống',
+        sub: 'Điền từ khuyết ___',
+        color: '#f59e0b',
+        icon: '●',
+        badge: '___',
+      },
+      {
+        key: 'CROSSWORD' as const,
+        label: 'Ô chữ tiếng Việt',
+        sub: 'Gợi ý & từ khóa không dấu',
+        color: '#8b5cf6',
+        icon: '■',
+        badge: 'Ô CHỮ',
+      },
+    ];
+
+    return (
+      <div
+        style={{
+          marginTop: '1.25rem',
+          marginBottom: '1.5rem',
+          backgroundColor: 'var(--bg-card)',
+          border: `2px solid ${isValid ? 'var(--border-subtle)' : 'var(--accent-amber)'}`,
+          borderRadius: '16px',
+          padding: '1.25rem',
+          boxShadow: 'var(--card-shadow)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.75rem' }}>
+          <div>
+            <h4 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <SparklesIcon size={18} style={{ color: 'var(--accent-sky)' }} />
+              Cấu hình phân bổ tỷ lệ câu hỏi (Chế độ MIXED)
+            </h4>
+            <p style={{ margin: '0.2rem 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+              Điều chỉnh tỷ lệ % cho 4 dạng câu hỏi. Tổng tỷ lệ bắt buộc phải bằng chính xác 100%.
+            </p>
+          </div>
+          <div
+            style={{
+              padding: '0.35rem 0.75rem',
+              borderRadius: '20px',
+              fontSize: '0.82rem',
+              fontWeight: 800,
+              backgroundColor: isValid ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+              color: isValid ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+              border: `1px solid ${isValid ? 'var(--accent-emerald)' : 'var(--accent-rose)'}`,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+            }}
+          >
+            {isValid ? (
+              <>
+                <CheckIcon size={14} /> Tổng: 100% (Hợp lệ)
+              </>
+            ) : (
+              <>
+                <AlertTriangleIcon size={14} /> Tổng: {total}% (Cần {100 - total > 0 ? `+${100 - total}%` : `${100 - total}%`})
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Visual Stacked Progress Bar */}
+        <div
+          style={{
+            height: '10px',
+            borderRadius: '6px',
+            backgroundColor: 'var(--bg-input)',
+            display: 'flex',
+            overflow: 'hidden',
+            marginBottom: '1rem',
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
+          {typesConfig.map(tc => {
+            const pct = Math.max(0, Math.min(100, mixedDistribution[tc.key] || 0));
+            return (
+              <div
+                key={tc.key}
+                style={{
+                  width: `${pct}%`,
+                  backgroundColor: tc.color,
+                  transition: 'width 0.2s ease',
+                }}
+                title={`${tc.label}: ${pct}%`}
+              />
+            );
+          })}
+        </div>
+
+        {/* 4 Cards Grid */}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: '0.85rem',
+            marginBottom: '1rem',
+          }}
+        >
+          {typesConfig.map(tc => {
+            const currentVal = mixedDistribution[tc.key] || 0;
+            const countForType = counts[tc.key] || 0;
+            return (
+              <div
+                key={tc.key}
+                style={{
+                  backgroundColor: 'var(--bg-surface)',
+                  border: `1.5px solid ${tc.color}40`,
+                  borderTop: `4px solid ${tc.color}`,
+                  borderRadius: '12px',
+                  padding: '0.85rem 1rem',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+                  <span style={{ fontWeight: 800, fontSize: '0.88rem', color: tc.color, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <span>{tc.icon}</span> {tc.label}
+                  </span>
+                  <span
+                    style={{
+                      backgroundColor: `${tc.color}15`,
+                      color: tc.color,
+                      fontSize: '0.72rem',
+                      fontWeight: 800,
+                      padding: '0.15rem 0.45rem',
+                      borderRadius: '6px',
+                    }}
+                  >
+                    {tc.badge}
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.65rem' }}>
+                  {tc.sub}
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.45rem' }}>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    step="5"
+                    value={currentVal}
+                    onChange={e => {
+                      const val = parseInt(e.target.value, 10) || 0;
+                      setMixedDistribution(prev => ({ ...prev, [tc.key]: val }));
+                    }}
+                    style={{
+                      flex: 1,
+                      accentColor: tc.color,
+                      cursor: 'pointer',
+                    }}
+                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.2rem' }}>
+                    <input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={currentVal}
+                      onChange={e => {
+                        const val = Math.max(0, Math.min(100, parseInt(e.target.value, 10) || 0));
+                        setMixedDistribution(prev => ({ ...prev, [tc.key]: val }));
+                      }}
+                      style={{
+                        width: '52px',
+                        padding: '0.35rem 0.45rem',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-input)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.85rem',
+                        fontWeight: 800,
+                        textAlign: 'center',
+                      }}
+                    />
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)' }}>%</span>
+                  </div>
+                </div>
+
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                  Dự kiến: <strong style={{ color: 'var(--text-primary)' }}>{countForType} câu</strong> (trong tổng {questionCount} câu)
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Quick Presets */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap', paddingTop: '0.5rem', borderTop: '1px dashed var(--border-subtle)' }}>
+          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)' }}>
+            Mẫu tỷ lệ nhanh:
+          </span>
+          <button
+            type="button"
+            onClick={() => setMixedDistribution({ MULTIPLE_CHOICE: 25, QUICK_BUTTON: 25, FILL_IN_THE_BLANK: 25, CROSSWORD: 25 })}
+            style={{
+              padding: '0.3rem 0.65rem',
+              borderRadius: '8px',
+              backgroundColor: 'var(--bg-input)',
+              border: '1px solid var(--border-strong)',
+              color: 'var(--text-secondary)',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            Đều 4 loại (25 / 25 / 25 / 25)
+          </button>
+          <button
+            type="button"
+            onClick={() => setMixedDistribution({ MULTIPLE_CHOICE: 40, QUICK_BUTTON: 20, FILL_IN_THE_BLANK: 20, CROSSWORD: 20 })}
+            style={{
+              padding: '0.3rem 0.65rem',
+              borderRadius: '8px',
+              backgroundColor: 'var(--bg-input)',
+              border: '1px solid var(--border-strong)',
+              color: 'var(--text-secondary)',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            Ưu tiên trắc nghiệm (40 / 20 / 20 / 20)
+          </button>
+          <button
+            type="button"
+            onClick={() => setMixedDistribution({ MULTIPLE_CHOICE: 50, QUICK_BUTTON: 50, FILL_IN_THE_BLANK: 0, CROSSWORD: 0 })}
+            style={{
+              padding: '0.3rem 0.65rem',
+              borderRadius: '8px',
+              backgroundColor: 'var(--bg-input)',
+              border: '1px solid var(--border-strong)',
+              color: 'var(--text-secondary)',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            Trắc nghiệm + Đúng/Sai (50 / 50 / 0 / 0)
+          </button>
+          <button
+            type="button"
+            onClick={() => setMixedDistribution({ MULTIPLE_CHOICE: 20, QUICK_BUTTON: 20, FILL_IN_THE_BLANK: 30, CROSSWORD: 30 })}
+            style={{
+              padding: '0.3rem 0.65rem',
+              borderRadius: '8px',
+              backgroundColor: 'var(--bg-input)',
+              border: '1px solid var(--border-strong)',
+              color: 'var(--text-secondary)',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            Ngôn ngữ & Ô chữ (20 / 20 / 30 / 30)
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div style={{ maxWidth: '1080px', margin: '0 auto', padding: '0.5rem 0 2rem 0' }}>
-      {!autoStartSoloPlay && (
-        <>
-          {/* Header khu vực bảng điều khiển */}
-          <header style={{ marginBottom: '1.75rem', textAlign: 'center' }}>
+      {/* Header khu vực bảng điều khiển */}
+      <header style={{ marginBottom: '1.75rem', textAlign: 'center' }}>
             <h1
               style={{
                 margin: 0,
@@ -1025,9 +1181,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             step: 5 as const,
             title: 'Lưu & Xuất Bản',
             sub: generatedSpec?.isPublic
-              ? '🚀 Đã xuất bản công khai'
+              ? 'Đã xuất bản công khai'
               : generatedSpec
-                ? '📝 Bản nháp (Chưa xuất bản)'
+                ? 'Bản nháp (Chưa xuất bản)'
                 : 'Lưu nháp / Xuất bản',
             done: Boolean(generatedSpec?.isPublic),
           },
@@ -1073,7 +1229,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                 flexShrink: 0,
               }}
             >
-              {item.done ? '✓' : item.step}
+              {item.done ? <CheckIcon size={16} /> : item.step}
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-primary)' }}>
@@ -1095,484 +1251,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           </button>
         ))}
       </div>
-    </>
-  )}
-
-  {/* ===================== CHẾ ĐỘ LUYỆN TẬP CÁ NHÂN (BATCH 7) ===================== */}
-      {isPracticeOpen && (
-        <div
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            border: '2px solid var(--accent-sky)',
-            borderRadius: '18px',
-            padding: '1.75rem',
-            marginBottom: '2rem',
-            boxShadow: 'var(--card-shadow)',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              borderBottom: '1px solid var(--border-subtle)',
-              paddingBottom: '1rem',
-              marginBottom: '1.25rem',
-              flexWrap: 'wrap',
-              gap: '0.75rem',
-            }}
-          >
-            <div>
-              <span
-                style={{
-                  fontSize: '0.75rem',
-                  fontWeight: 800,
-                  textTransform: 'uppercase',
-                  color: 'var(--accent-sky)',
-                  letterSpacing: '0.06em',
-                }}
-              >
-                🎮 Chế Độ Luyện Tập Cá Nhân • {formatScoringModeLabel(scoringMode)}
-              </span>
-              <h2 style={{ margin: '0.2rem 0 0 0', color: 'var(--text-primary)', fontSize: '1.35rem', fontWeight: 900 }}>
-                {generatedSpec?.title}
-              </h2>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <div
-                style={{
-                  backgroundColor: 'var(--bg-input)',
-                  padding: '0.45rem 0.85rem',
-                  borderRadius: '10px',
-                  border: '1px solid var(--border-strong)',
-                  fontWeight: 800,
-                  color: 'var(--accent-emerald)',
-                  fontSize: '0.9rem',
-                }}
-              >
-                Điểm: {practiceScore} {practiceStreak > 1 ? `🔥 x${practiceStreak}` : ''}
-              </div>
-              <button
-                type="button"
-                onClick={handleClosePractice}
-                style={{
-                  backgroundColor: 'var(--bg-input)',
-                  color: 'var(--text-secondary)',
-                  border: '1px solid var(--border-strong)',
-                  borderRadius: '8px',
-                  padding: '0.45rem 0.85rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                ✕ Đóng luyện tập
-              </button>
-            </div>
-          </div>
-
-          {/* Đang làm câu hỏi */}
-          {practiceQuestion && (
-            <div>
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: '1rem',
-                  flexWrap: 'wrap',
-                  gap: '0.5rem',
-                }}
-              >
-                <span style={{ fontWeight: 800, color: 'var(--accent-sky)', fontSize: '0.95rem' }}>
-                  Câu hỏi {practiceQuestion.questionIndex + 1} / {practiceQuestion.totalQuestions}
-                </span>
-                <span
-                  style={{
-                    fontWeight: 900,
-                    fontSize: '1rem',
-                    color: practiceTimeLeft <= 5 ? 'var(--accent-rose)' : 'var(--accent-amber)',
-                    backgroundColor: 'var(--bg-input)',
-                    padding: '0.35rem 0.85rem',
-                    borderRadius: '999px',
-                    border: '1px solid var(--border-strong)',
-                  }}
-                >
-                  ⏱️ {practiceTimeLeft}s
-                </span>
-              </div>
-
-              <div
-                style={{
-                  padding: '1.25rem',
-                  backgroundColor: 'var(--bg-input)',
-                  borderRadius: '12px',
-                  border: '1px solid var(--border-subtle)',
-                  fontSize: '1.15rem',
-                  fontWeight: 800,
-                  color: 'var(--text-primary)',
-                  marginBottom: '1.25rem',
-                }}
-              >
-                {practiceQuestion.question}
-                {practiceQuestion.crosswordClue && (
-                  <div style={{ marginTop: '0.6rem', fontSize: '0.95rem', color: 'var(--accent-sky)', fontWeight: 600 }}>
-                    💡 Gợi ý ô chữ: {practiceQuestion.crosswordClue}
-                  </div>
-                )}
-              </div>
-
-              {/* Lựa chọn cho MULTIPLE_CHOICE hoặc QUICK_BUTTON */}
-              {(practiceQuestion.type === 'MULTIPLE_CHOICE' || practiceQuestion.type === 'QUICK_BUTTON') &&
-                practiceQuestion.choices && (
-                  <div style={{ marginBottom: '1.25rem' }}>
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                        gap: '0.75rem',
-                        marginBottom: '0.85rem',
-                      }}
-                    >
-                      {practiceQuestion.choices.map((choice, idx) => {
-                        const isSelected = practiceSelectedChoice === choice;
-                        const isSubmittedChoice = practiceFeedback?.answer === choice;
-                        return (
-                          <button
-                            key={idx}
-                            type="button"
-                            disabled={Boolean(practiceFeedback) || isSubmittingPractice}
-                            onClick={() => {
-                              setPracticeError(null);
-                              setPracticeSelectedChoice(prev => (prev === choice ? null : choice));
-                            }}
-                            style={{
-                              padding: '0.95rem 1.15rem',
-                              borderRadius: '12px',
-                              border: isSubmittedChoice
-                                ? `2px solid ${practiceFeedback?.isCorrect ? 'var(--accent-emerald)' : 'var(--accent-rose)'}`
-                                : isSelected
-                                  ? '2px solid var(--primary)'
-                                  : '1px solid var(--border-strong)',
-                              backgroundColor: isSelected ? 'rgba(37, 99, 235, 0.14)' : 'var(--bg-card)',
-                              color: 'var(--text-primary)',
-                              fontWeight: isSelected ? 800 : 700,
-                              fontSize: '0.95rem',
-                              textAlign: 'left',
-                              cursor: practiceFeedback || isSubmittingPractice ? 'default' : 'pointer',
-                              display: 'flex',
-                              justifyContent: 'space-between',
-                              alignItems: 'center',
-                              gap: '0.5rem',
-                              transition: 'all 0.15s ease',
-                            }}
-                          >
-                            <span>{choice}</span>
-                            {isSelected && !practiceFeedback && (
-                              <span style={{ color: 'var(--accent-sky)', fontWeight: 900 }}>✓ Đang chọn</span>
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-
-                    {!practiceFeedback && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                        <button
-                          type="button"
-                          disabled={!practiceSelectedChoice || isSubmittingPractice}
-                          onClick={() => {
-                            if (practiceSelectedChoice) {
-                              handleSubmitPracticeAnswer(practiceSelectedChoice);
-                            }
-                          }}
-                          style={{
-                            backgroundColor:
-                              !practiceSelectedChoice || isSubmittingPractice
-                                ? 'var(--border-strong)'
-                                : 'var(--primary)',
-                            color: '#ffffff',
-                            border: 'none',
-                            borderRadius: '10px',
-                            padding: '0.8rem 1.5rem',
-                            fontWeight: 800,
-                            cursor: !practiceSelectedChoice || isSubmittingPractice ? 'not-allowed' : 'pointer',
-                            opacity: !practiceSelectedChoice || isSubmittingPractice ? 0.65 : 1,
-                          }}
-                        >
-                          {isSubmittingPractice ? '⏳ Đang gửi đáp án...' : 'Gửi đáp án đã chọn'}
-                        </button>
-                        <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                          {practiceSelectedChoice
-                            ? 'Bấm lại vào đáp án đang chọn nếu muốn bỏ chọn.'
-                            : 'Hãy chọn một phương án trả lời rồi bấm Gửi đáp án.'}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-              {/* Ô nhập cho FILL_IN_THE_BLANK hoặc CROSSWORD */}
-              {(practiceQuestion.type === 'FILL_IN_THE_BLANK' || practiceQuestion.type === 'CROSSWORD') &&
-                !practiceFeedback && (
-                  <div style={{ marginBottom: '1.25rem' }}>
-                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-                      <input
-                        type="text"
-                        disabled={isSubmittingPractice}
-                        maxLength={MAX_ANSWER_LENGTH}
-                        value={practiceAnswerInput}
-                        onChange={e => {
-                          setPracticeError(null);
-                          setPracticeAnswerInput(e.target.value);
-                        }}
-                        onKeyDown={e => {
-                          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-                            e.preventDefault();
-                            handleSubmitPracticeAnswer(practiceAnswerInput);
-                          }
-                        }}
-                        placeholder={
-                          practiceQuestion.type === 'CROSSWORD'
-                            ? 'Nhập từ khóa ô chữ (hỗ trợ gõ tiếng Việt có dấu hoặc không dấu)...'
-                            : 'Nhập câu trả lời của bạn...'
-                        }
-                        style={{
-                          flex: '1 1 260px',
-                          padding: '0.85rem 1rem',
-                          backgroundColor: 'var(--bg-input)',
-                          border: '1px solid var(--border-strong)',
-                          borderRadius: '10px',
-                          color: 'var(--text-primary)',
-                          fontSize: '1rem',
-                          fontWeight: 700,
-                        }}
-                      />
-                      <button
-                        type="button"
-                        disabled={isSubmittingPractice || !practiceAnswerInput.trim()}
-                        onClick={() => handleSubmitPracticeAnswer(practiceAnswerInput)}
-                        style={{
-                          backgroundColor:
-                            isSubmittingPractice || !practiceAnswerInput.trim()
-                              ? 'var(--border-strong)'
-                              : 'var(--primary)',
-                          color: '#ffffff',
-                          border: 'none',
-                          borderRadius: '10px',
-                          padding: '0.85rem 1.5rem',
-                          fontWeight: 800,
-                          cursor: isSubmittingPractice || !practiceAnswerInput.trim() ? 'not-allowed' : 'pointer',
-                          opacity: isSubmittingPractice || !practiceAnswerInput.trim() ? 0.65 : 1,
-                        }}
-                      >
-                        {isSubmittingPractice ? '⏳ Đang gửi...' : 'Gửi đáp án'}
-                      </button>
-                    </div>
-                    {practiceQuestion.type === 'CROSSWORD' && practiceAnswerInput.trim().length > 0 && (
-                      <div style={{ marginTop: '0.45rem', fontSize: '0.82rem', color: 'var(--accent-sky)', fontWeight: 700 }}>
-                        🔠 Từ khóa chuẩn hóa: <strong>{normalizeCrosswordAscii(practiceAnswerInput)}</strong> (
-                        {normalizeCrosswordAscii(practiceAnswerInput).length} ký tự)
-                      </div>
-                    )}
-                  </div>
-                )}
-
-              {practiceError && !practiceFeedback && (
-                <div
-                  style={{
-                    marginBottom: '1rem',
-                    padding: '0.65rem 0.9rem',
-                    borderRadius: '8px',
-                    backgroundColor: 'rgba(244, 63, 94, 0.12)',
-                    border: '1px solid var(--accent-rose)',
-                    color: 'var(--accent-rose)',
-                    fontSize: '0.85rem',
-                    fontWeight: 700,
-                  }}
-                >
-                  ⚠️ {practiceError}
-                </div>
-              )}
-
-              {/* Phản hồi kết quả sau mỗi câu */}
-              {practiceFeedback && (
-                <div
-                  style={{
-                    padding: '1.15rem',
-                    borderRadius: '12px',
-                    backgroundColor: practiceFeedback.isCorrect
-                      ? 'rgba(16, 185, 129, 0.12)'
-                      : 'rgba(244, 63, 94, 0.12)',
-                    border: `1px solid ${
-                      practiceFeedback.isCorrect ? 'var(--accent-emerald)' : 'var(--accent-rose)'
-                    }`,
-                    marginTop: '0.75rem',
-                  }}
-                >
-                  <div
-                    style={{
-                      fontWeight: 900,
-                      fontSize: '1.05rem',
-                      color: practiceFeedback.isCorrect ? 'var(--accent-emerald)' : 'var(--accent-rose)',
-                      marginBottom: '0.4rem',
-                    }}
-                  >
-                    {practiceFeedback.isCorrect
-                      ? `✓ Chính xác! (+${practiceFeedback.pointsEarned} điểm)`
-                      : `✗ Chưa chính xác • Đáp án đúng: ${practiceFeedback.correctAnswer}`}
-                  </div>
-
-                  {practiceFeedback.explanation && (
-                    <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '0.45rem' }}>
-                      💡 <strong>Giải thích:</strong> {practiceFeedback.explanation}
-                    </div>
-                  )}
-
-                  {practiceFeedback.sourceReference && (
-                    <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', fontWeight: 600 }}>
-                      📌 Nguồn trích dẫn: {formatProvenanceBadge(practiceFeedback.sourceReference)}
-                    </div>
-                  )}
-
-                  <div style={{ marginTop: '1rem' }}>
-                    <button
-                      type="button"
-                      onClick={handleAdvancePractice}
-                      style={{
-                        backgroundColor: 'var(--primary)',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: '10px',
-                        padding: '0.75rem 1.5rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {practiceQuestion.questionIndex + 1 < practiceQuestion.totalQuestions
-                        ? 'Câu hỏi tiếp theo →'
-                        : 'Xem kết quả tổng kết 🏆'}
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Màn hình Tổng kết Luyện tập */}
-          {practiceFinalResult && (
-            <div style={{ textAlign: 'center', padding: '1rem 0' }}>
-              <div style={{ fontSize: '2.5rem', marginBottom: '0.4rem' }}>🎉</div>
-              <h3 style={{ margin: '0 0 0.5rem 0', fontSize: '1.6rem', color: 'var(--text-primary)', fontWeight: 900 }}>
-                Hoàn Thành Phiên Luyện Tập!
-              </h3>
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-                  gap: '0.85rem',
-                  margin: '1.25rem 0',
-                }}
-              >
-                <div style={{ backgroundColor: 'var(--bg-input)', padding: '1rem', borderRadius: '12px' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700 }}>TỔNG ĐIỂM</div>
-                  <div style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--accent-emerald)' }}>
-                    {practiceFinalResult.totalScore ?? practiceFinalResult.score ?? 0} / {practiceFinalResult.maxPossibleScore}
-                  </div>
-                </div>
-                <div style={{ backgroundColor: 'var(--bg-input)', padding: '1rem', borderRadius: '12px' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700 }}>ĐỘ CHÍNH XÁC</div>
-                  <div style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--accent-sky)' }}>
-                    {practiceFinalResult.accuracy ??
-                      (practiceFinalResult.totalQuestions > 0
-                        ? Math.round(
-                            ((practiceFinalResult.correctAnswers ?? practiceFinalResult.correctCount ?? 0) /
-                              practiceFinalResult.totalQuestions) *
-                              100
-                          )
-                        : 0)}
-                    % ({practiceFinalResult.correctAnswers ?? practiceFinalResult.correctCount ?? 0}/
-                    {practiceFinalResult.totalQuestions})
-                  </div>
-                </div>
-                <div style={{ backgroundColor: 'var(--bg-input)', padding: '1rem', borderRadius: '12px' }}>
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700 }}>CHUỖI ĐÚNG TỐI ĐA</div>
-                  <div style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--accent-amber)' }}>
-                    🔥 {practiceFinalResult.maxStreak ?? practiceFinalResult.streak ?? 0}
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={() => handleStartPractice(undefined, autoStartSoloPlay)}
-                  style={{
-                    backgroundColor: 'var(--primary)',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '10px',
-                    padding: '0.8rem 1.4rem',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                  }}
-                >
-                  🔄 Luyện tập lại
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleExportCurrentSession('csv')}
-                  style={{
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--accent-emerald)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '10px',
-                    padding: '0.8rem 1.2rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  ⬇ Xuất kết quả CSV
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleExportCurrentSession('json')}
-                  style={{
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--accent-sky)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '10px',
-                    padding: '0.8rem 1.2rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  ⬇ Xuất kết quả JSON
-                </button>
-                <button
-                  type="button"
-                  onClick={handleClosePractice}
-                  style={{
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--text-primary)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '10px',
-                    padding: '0.8rem 1.4rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Quay lại bảng điều khiển
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
 
       {/* NỘI DUNG TỪNG BƯỚC (5 BƯỚC WIZARD) */}
-      {!autoStartSoloPlay && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
           {/* ===================== BƯỚC 1: CHỌN THỂ LOẠI GAME & THÔNG SỐ CƠ BẢN ===================== */}
         {currentStep === 1 && (
           <div
@@ -1610,14 +1291,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             {/* Ô nhập tên game (Bắt buộc theo yêu cầu tinh gọn) */}
             <div style={{ marginTop: '1.25rem', marginBottom: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
-                <label style={{ color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700 }}>
-                  🏷️ Tên Game (Bắt buộc) <span style={{ color: 'var(--accent-rose)' }}>*</span>
+                <label htmlFor="demo-game-title" style={{ color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <GamepadIcon size={18} /> Tên Game (Bắt buộc) <span style={{ color: 'var(--accent-rose)' }}>*</span>
                 </label>
                 <span style={{ fontSize: '0.8rem', color: customGameTitle.trim().length > 100 ? 'var(--accent-rose)' : 'var(--text-muted)' }}>
                   {customGameTitle.trim().length}/100 ký tự
                 </span>
               </div>
               <input
+                id="demo-game-title"
                 type="text"
                 required
                 maxLength={100}
@@ -1634,6 +1316,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   fontSize: '0.95rem',
                   fontWeight: 600,
                   boxSizing: 'border-box',
+                  minHeight: '44px',
                 }}
               />
               {!customGameTitle.trim() && (
@@ -1655,6 +1338,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               }}
             >
               <label
+                htmlFor="demo-password-protected"
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -1666,12 +1350,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                 }}
               >
                 <input
+                  id="demo-password-protected"
                   type="checkbox"
                   checked={isPasswordProtected}
                   onChange={(e) => setIsPasswordProtected(e.target.checked)}
                   style={{ width: '18px', height: '18px', cursor: 'pointer' }}
                 />
-                <span>🔒 Bảo vệ bộ câu hỏi bằng mật khẩu riêng (Tùy chọn)</span>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <LockIcon size={16} /> Bảo vệ bộ câu hỏi bằng mật khẩu riêng (Tùy chọn)
+                </span>
               </label>
               <div style={{ marginTop: '0.35rem', marginLeft: '1.85rem', fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
                 Mặc định bộ câu hỏi không có mật khẩu (người chơi truy cập là chơi được ngay). Khi bật tùy chọn này, người chơi bắt buộc phải nhập đúng mật khẩu mới được mở xem nội dung câu hỏi và tham gia.
@@ -1679,10 +1366,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
               {isPasswordProtected && (
                 <div style={{ marginTop: '0.85rem', marginLeft: '1.85rem' }}>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
-                    🔑 Mật khẩu riêng cho bộ câu hỏi:
+                  <label htmlFor="demo-game-password" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                    <LockIcon size={14} /> Mật khẩu riêng cho bộ câu hỏi:
                   </label>
                   <input
+                    id="demo-game-password"
                     type="password"
                     value={gamePassword}
                     onChange={(e) => setGamePassword(e.target.value)}
@@ -1697,11 +1385,28 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       color: 'var(--text-primary)',
                       fontSize: '0.9rem',
                       outline: 'none',
+                      minHeight: '44px',
+                      boxSizing: 'border-box',
                     }}
                   />
                 </div>
               )}
             </div>
+
+            {/* Bộ chọn định dạng nhỏ gọn dạng Chip Segmented Kahoot-style */}
+            <div style={{ marginTop: '1.25rem', marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.92rem', fontWeight: 800, marginBottom: '0.65rem' }}>
+                Định dạng bộ câu hỏi (Game Type):
+              </label>
+              <GameTypeSelector
+                selectedType={gameType}
+                onSelectType={(t) => setGameType(t)}
+                compact
+                variant="chips"
+              />
+            </div>
+
+            {gameType === 'MIXED' && renderMixedDistributionControl()}
 
             <div
               style={{
@@ -1712,38 +1417,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                 marginBottom: '1.25rem',
               }}
             >
-              <div>
-                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
-                  Thể loại game:
-                </label>
-                <select
-                  value={gameType}
-                  onChange={e => setGameType(e.target.value as GameType)}
-                  style={{
-                    width: '100%',
-                    padding: '0.85rem 1rem',
-                    backgroundColor: 'var(--bg-input)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '10px',
-                    color: 'var(--text-primary)',
-                    fontSize: '0.95rem',
-                    fontWeight: 600,
-                    boxSizing: 'border-box',
-                  }}
-                >
-                  <option value="MULTIPLE_CHOICE">🎯 Trắc nghiệm ABCD</option>
-                  <option value="FILL_IN_THE_BLANK">✍️ Điền từ vào chỗ trống</option>
-                  <option value="QUICK_BUTTON">⚡ Nút bấm nhanh (Đúng/Sai hoặc tùy chỉnh)</option>
-                  <option value="CROSSWORD">🧩 Ô chữ giải đố</option>
-                  <option value="MIXED">🎲 Hỗn hợp (Trắc nghiệm + Điền từ + Nút bấm + Ô chữ)</option>
-                </select>
-              </div>
 
               <div>
-                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
+                <label htmlFor="demo-scoring-mode" style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
                   Chế độ tính điểm (Scoring Mode):
                 </label>
                 <select
+                  id="demo-scoring-mode"
                   value={scoringMode}
                   onChange={e => setScoringMode(e.target.value as ScoringMode)}
                   style={{
@@ -1756,11 +1436,12 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     fontSize: '0.95rem',
                     fontWeight: 600,
                     boxSizing: 'border-box',
+                    minHeight: '44px',
                   }}
                 >
-                  <option value="STANDARD">🏅 STANDARD — Điểm chuẩn (100đ cố định/câu)</option>
-                  <option value="SPEED_BONUS">⚡ SPEED_BONUS — Thưởng tốc độ trả lời (+50đ tối đa)</option>
-                  <option value="STREAK">🔥 STREAK — Thưởng chuỗi trả lời đúng liên tiếp</option>
+                  <option value="STANDARD">STANDARD — Điểm chuẩn (100đ cố định/câu)</option>
+                  <option value="SPEED_BONUS">SPEED_BONUS — Thưởng tốc độ trả lời (+50đ tối đa)</option>
+                  <option value="STREAK">STREAK — Thưởng chuỗi trả lời đúng liên tiếp</option>
                 </select>
               </div>
             </div>
@@ -1794,6 +1475,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         fontSize: '0.95rem',
                         cursor: 'pointer',
                         transition: 'all 0.15s ease',
+                        minHeight: '44px',
                       }}
                     >
                       {label}
@@ -1805,10 +1487,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
               <div>
-                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
+                <label htmlFor="demo-question-count" style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
                   Số lượng câu hỏi (1 - 20):
                 </label>
                 <input
+                  id="demo-question-count"
                   type="number"
                   min={1}
                   max={20}
@@ -1824,15 +1507,17 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     fontSize: '1rem',
                     fontWeight: 700,
                     boxSizing: 'border-box',
+                    minHeight: '44px',
                   }}
                 />
               </div>
               <div>
-                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
+                <label htmlFor="demo-time-per-question" style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
                   Thời gian mỗi câu (5 - 120 giây):
                 </label>
                 <div style={{ position: 'relative' }}>
                   <input
+                    id="demo-time-per-question"
                     type="number"
                     min={5}
                     max={120}
@@ -1848,6 +1533,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       fontSize: '1rem',
                       fontWeight: 700,
                       boxSizing: 'border-box',
+                      minHeight: '44px',
                     }}
                   />
                   <span
@@ -1894,9 +1580,14 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   fontSize: '1rem',
                   cursor: !customGameTitle.trim() ? 'not-allowed' : 'pointer',
                   boxShadow: !customGameTitle.trim() ? 'none' : 'var(--btn-shadow)',
+                  minHeight: '44px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
                 }}
               >
-                Tiếp tục: Nhập Nguồn Nội Dung (Bước 2) &rarr;
+                <span>Tiếp tục: Nhập Nguồn Nội Dung (Bước 2)</span>
+                <ArrowRightIcon size={16} />
               </button>
             </div>
           </div>
@@ -1939,8 +1630,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             {/* Danh sách nhiều URL */}
             <div style={{ marginBottom: '1.25rem', marginTop: '1.25rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
-                <label style={{ color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700 }}>
-                  🌐 Địa chỉ Website ({urls.filter(u => u.trim()).length}/{MAX_URLS}):
+                <label htmlFor="demo-url-0" style={{ color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <GlobeIcon size={18} /> Địa chỉ Website ({urls.filter(u => u.trim()).length}/{MAX_URLS}):
                 </label>
                 {urls.length < MAX_URLS && (
                   <button
@@ -1951,13 +1642,17 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       color: 'var(--accent-sky)',
                       border: '1px solid var(--border-strong)',
                       borderRadius: '8px',
-                      padding: '0.3rem 0.75rem',
+                      padding: '0.35rem 0.75rem',
                       fontSize: '0.8rem',
                       fontWeight: 700,
                       cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.3rem',
+                      minHeight: '36px',
                     }}
                   >
-                    + Thêm URL
+                    <PlusIcon size={14} /> Thêm URL
                   </button>
                 )}
               </div>
@@ -1966,6 +1661,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                 {urls.map((u, idx) => (
                   <div key={idx} style={{ display: 'flex', gap: '0.5rem' }}>
                     <input
+                      id={`demo-url-${idx}`}
                       type="text"
                       value={u}
                       onChange={e => handleUrlChange(idx, e.target.value)}
@@ -1979,6 +1675,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         color: 'var(--text-primary)',
                         fontSize: '0.95rem',
                         boxSizing: 'border-box',
+                        minHeight: '44px',
                       }}
                     />
                     {urls.length > 1 && (
@@ -1993,10 +1690,16 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                           padding: '0 0.9rem',
                           fontWeight: 800,
                           cursor: 'pointer',
+                          minWidth: '44px',
+                          minHeight: '44px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
                         }}
                         title="Xóa URL này"
+                        aria-label="Xóa URL này"
                       >
-                        ✕
+                        <XMarkIcon size={16} />
                       </button>
                     )}
                   </div>
@@ -2006,10 +1709,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
             {/* Tải lên nhiều tệp tài liệu (DOCX, XLSX, PDF, TXT, MD, CSV) */}
             <div style={{ marginBottom: '1.25rem' }}>
-              <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
-                📁 Hoặc tải lên tệp tài liệu (DOCX, XLSX, PDF, TXT, MD, CSV — tối đa {MAX_FILES} tệp, mỗi tệp ≤ 10MB):
+              <label htmlFor="demo-file-input" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
+                <UploadIcon size={18} /> Hoặc tải lên tệp tài liệu (DOCX, XLSX, PDF, TXT, MD, CSV — tối đa {MAX_FILES} tệp, mỗi tệp ≤ 10MB):
               </label>
               <input
+                id="demo-file-input"
                 type="file"
                 multiple
                 accept=".docx,.xlsx,.pdf,.txt,.md,.markdown,.csv"
@@ -2023,6 +1727,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   color: 'var(--text-secondary)',
                   fontSize: '0.9rem',
                   boxSizing: 'border-box',
+                  minHeight: '44px',
                 }}
               />
 
@@ -2044,7 +1749,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         fontWeight: 600,
                       }}
                     >
-                      <span>📄 {f.name}</span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <FileTextIcon size={16} /> {f.name}
+                      </span>
                       <span style={{ color: 'var(--text-muted)' }}>({(f.size / 1024).toFixed(1)} KB)</span>
                       <button
                         type="button"
@@ -2055,10 +1762,17 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                           color: 'var(--accent-rose)',
                           fontWeight: 800,
                           cursor: 'pointer',
-                          padding: 0,
+                          padding: '0.2rem',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          minWidth: '32px',
+                          minHeight: '32px',
                         }}
+                        aria-label={`Xóa tệp ${f.name}`}
+                        title={`Xóa tệp ${f.name}`}
                       >
-                        ✕
+                        <XMarkIcon size={14} />
                       </button>
                     </div>
                   ))}
@@ -2079,9 +1793,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   fontWeight: 700,
                   fontSize: '0.95rem',
                   cursor: 'pointer',
+                  minHeight: '44px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
                 }}
               >
-                &larr; Quay lại Bước 1
+                <ArrowLeftIcon size={16} /> Quay lại Bước 1
               </button>
 
               <button
@@ -2098,15 +1816,23 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   fontWeight: 800,
                   fontSize: '1rem',
                   cursor: isIngesting ? 'not-allowed' : 'pointer',
-                  display: 'flex',
+                  display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '0.5rem',
                   boxShadow: isIngesting ? 'none' : 'var(--btn-shadow)',
-                  transition: 'all 0.15s ease',
+                  minHeight: '44px',
                 }}
               >
-                {isIngesting ? '⏳ Đang trích xuất nội dung...' : 'Trích xuất nội dung ⚡'}
+                {isIngesting ? (
+                  <>
+                    <SpinnerIcon size={18} /> Đang trích xuất nội dung...
+                  </>
+                ) : (
+                  <>
+                    <SparklesIcon size={18} /> Trích xuất nội dung
+                  </>
+                )}
               </button>
 
               {ingestedSources.length > 0 && (
@@ -2122,9 +1848,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     fontWeight: 700,
                     fontSize: '0.95rem',
                     cursor: 'pointer',
+                    minHeight: '44px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
                   }}
                 >
-                  Tiếp tục (Bước 3) &rarr;
+                  Tiếp tục (Bước 3) <ArrowRightIcon size={16} />
                 </button>
               )}
             </div>
@@ -2148,8 +1878,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       gap: '0.5rem',
                     }}
                   >
-                    <div>
-                      <strong>✓ {src.sourceName}</strong>{' '}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <CheckIcon size={16} />
+                      <strong>{src.sourceName}</strong>{' '}
                       <span style={{ color: 'var(--text-secondary)' }}>
                         ({src.sourceType} • {(src.metadata?.characterCount || 0).toLocaleString('vi-VN')} ký tự
                         {src.sections?.length ? ` • ${src.sections.length} phân đoạn` : ''})
@@ -2213,8 +1944,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               }}
             >
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center' }}>
-                <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-sky)' }}>
-                  🎮 {formatGameTypeLabel(gameType)}
+                <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-sky)', display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <GamepadIcon size={16} /> {formatGameTypeLabel(gameType)}
                 </span>
                 <span style={{ color: 'var(--text-muted)' }}>•</span>
                 <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
@@ -2237,22 +1968,29 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   color: 'var(--accent-sky)',
                   border: '1px solid var(--border-strong)',
                   borderRadius: '8px',
-                  padding: '0.35rem 0.75rem',
+                  padding: '0.45rem 0.85rem',
                   fontSize: '0.8rem',
                   fontWeight: 700,
                   cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
+                  minHeight: '36px',
                 }}
               >
-                ⚙️ Đổi thể loại / cấu hình (Bước 1)
+                <PencilIcon size={14} /> Đổi thể loại / cấu hình (Bước 1)
               </button>
             </div>
 
+            {gameType === 'MIXED' && renderMixedDistributionControl()}
+
             {/* Trọng tâm nội dung / Phạm vi phân đoạn (Batch 5) */}
             <div style={{ marginBottom: '1.5rem' }}>
-              <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
-                🎯 Chủ đề hoặc phạm vi nội dung trọng tâm cho AI (Tùy chọn):
+              <label htmlFor="demo-topic-focus" style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
+                <SparklesIcon size={16} /> Chủ đề hoặc phạm vi nội dung trọng tâm cho AI (Tùy chọn):
               </label>
               <input
+                id="demo-topic-focus"
                 type="text"
                 value={topicFocus}
                 onChange={e => setTopicFocus(e.target.value)}
@@ -2266,6 +2004,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   color: 'var(--text-primary)',
                   fontSize: '0.95rem',
                   boxSizing: 'border-box',
+                  minHeight: '44px',
                 }}
               />
 
@@ -2319,9 +2058,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   fontWeight: 700,
                   fontSize: '0.95rem',
                   cursor: 'pointer',
+                  minHeight: '44px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
                 }}
               >
-                &larr; Quay lại Bước 2
+                <ArrowLeftIcon size={16} /> Quay lại Bước 2
               </button>
 
               <button
@@ -2339,15 +2082,23 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   fontWeight: 800,
                   fontSize: '1.05rem',
                   cursor: isGenerating || ingestedSources.length === 0 ? 'not-allowed' : 'pointer',
-                  display: 'flex',
+                  display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '0.5rem',
                   boxShadow: isGenerating || ingestedSources.length === 0 ? 'none' : 'var(--btn-shadow)',
-                  transition: 'all 0.15s ease',
+                  minHeight: '44px',
                 }}
               >
-                {isGenerating ? '🤖 Đang tổng hợp câu hỏi AI...' : 'AI Tạo & Phân Bổ Câu Hỏi ⚡'}
+                {isGenerating ? (
+                  <>
+                    <SpinnerIcon size={20} /> Đang tổng hợp câu hỏi AI...
+                  </>
+                ) : (
+                  <>
+                    <SparklesIcon size={20} /> AI Tạo & Phân Bổ Câu Hỏi
+                  </>
+                )}
               </button>
 
               {generatedSpec && (
@@ -2363,16 +2114,20 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     fontWeight: 700,
                     fontSize: '0.95rem',
                     cursor: 'pointer',
+                    minHeight: '44px',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
                   }}
                 >
-                  Xem Trước & Chỉnh Sửa (Bước 4) &rarr;
+                  Xem Trước & Chỉnh Sửa (Bước 4) <ArrowRightIcon size={16} />
                 </button>
               )}
             </div>
 
             {ingestedSources.length === 0 && (
-              <div style={{ marginTop: '1rem', color: 'var(--accent-amber)', fontSize: '0.85rem', fontWeight: 600 }}>
-                ⚠️ Vui lòng hoàn thành Bước 2 (Trích xuất nội dung nguồn) trước khi yêu cầu AI tạo câu hỏi.
+              <div style={{ marginTop: '1rem', color: 'var(--accent-amber)', fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <AlertTriangleIcon size={16} /> Vui lòng hoàn thành Bước 2 (Trích xuất nội dung nguồn) trước khi yêu cầu AI tạo câu hỏi.
               </div>
             )}
           </div>
@@ -2419,7 +2174,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     style={{
                       backgroundColor: 'var(--bg-input)',
                       color: 'var(--accent-sky)',
-                      padding: '0.3rem 0.75rem',
+                      padding: '0.35rem 0.75rem',
                       borderRadius: '8px',
                       fontSize: '0.8rem',
                       fontWeight: 700,
@@ -2432,14 +2187,14 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     style={{
                       backgroundColor: 'var(--bg-input)',
                       color: generatedSpec.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
-                      padding: '0.3rem 0.75rem',
+                      padding: '0.35rem 0.75rem',
                       borderRadius: '8px',
                       fontSize: '0.8rem',
                       fontWeight: 800,
                       border: '1px solid var(--border-strong)',
                     }}
                   >
-                    {generatedSpec.isPublic ? '🚀 Đã xuất bản' : '📝 Bản nháp'}
+                    {generatedSpec.isPublic ? 'Đã xuất bản' : 'Bản nháp'}
                   </span>
                   <button
                     type="button"
@@ -2449,13 +2204,17 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       color: '#ffffff',
                       border: 'none',
                       borderRadius: '8px',
-                      padding: '0.35rem 0.85rem',
-                      fontSize: '0.8rem',
+                      padding: '0.4rem 0.85rem',
+                      fontSize: '0.82rem',
                       fontWeight: 800,
                       cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      minHeight: '36px',
                     }}
                   >
-                    + Thêm câu hỏi
+                    <PlusIcon size={14} /> Thêm câu hỏi
                   </button>
                   <button
                     type="button"
@@ -2466,13 +2225,49 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       color: '#ffffff',
                       border: 'none',
                       borderRadius: '8px',
-                      padding: '0.35rem 0.85rem',
-                      fontSize: '0.8rem',
+                      padding: '0.4rem 0.85rem',
+                      fontSize: '0.82rem',
                       fontWeight: 800,
                       cursor: isSavingSpec ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      minHeight: '36px',
                     }}
                   >
-                    {isSavingSpec ? '⏳ Đang lưu...' : '💾 Lưu nhanh'}
+                    {isSavingSpec ? (
+                      <>
+                        <SpinnerIcon size={14} /> Đang lưu...
+                      </>
+                    ) : (
+                      <>
+                        <CheckIcon size={14} /> Lưu nhanh
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleProceedToStep5}
+                    style={{
+                      backgroundColor: 'var(--primary)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.45rem 1.15rem',
+                      fontSize: '0.85rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.45rem',
+                      minHeight: '44px',
+                      boxShadow: 'var(--btn-shadow)',
+                      transition: 'transform 0.12s ease, opacity 0.12s ease',
+                    }}
+                  >
+                    <span>Tiếp tục sang Bước 5: Lưu & Xuất Bản</span>
+                    <ArrowRightIcon size={16} />
                   </button>
                 </div>
               )}
@@ -2480,8 +2275,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
             {!generatedSpec ? (
               <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                <p style={{ marginBottom: '1rem', fontWeight: 700 }}>
-                  ⚠️ Chưa có bộ câu hỏi nào được tạo. Vui lòng hoàn thành Bước 2 và Bước 3 trước.
+                <p style={{ marginBottom: '1rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
+                  <AlertTriangleIcon size={18} style={{ color: 'var(--accent-amber)' }} /> Chưa có bộ câu hỏi nào được tạo. Vui lòng hoàn thành Bước 2 và Bước 3 trước.
                 </p>
                 <button
                   type="button"
@@ -2494,6 +2289,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     padding: '0.75rem 1.4rem',
                     fontWeight: 800,
                     cursor: 'pointer',
+                    minHeight: '44px',
                   }}
                 >
                   Quay lại bước tạo câu hỏi
@@ -2513,7 +2309,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       fontSize: '0.84rem',
                     }}
                   >
-                    <strong>ℹ️ Thông tin xử lý nội dung & kiểm duyệt chất lượng:</strong>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontWeight: 800 }}>
+                      <InfoIcon size={16} /> Thông tin xử lý nội dung & kiểm duyệt chất lượng:
+                    </div>
                     <ul style={{ margin: '0.35rem 0 0 1.2rem', padding: 0 }}>
                       {generatedSpec.diagnostics.map((d, i) => (
                         <li key={i}>{d}</li>
@@ -2687,16 +2485,21 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                               disabled={idx === 0}
                               onClick={() => handleMoveQuestion(idx, -1)}
                               title="Chuyển câu hỏi lên trên"
+                              aria-label="Chuyển câu hỏi lên trên"
                               style={{
                                 backgroundColor: 'var(--bg-surface)',
                                 color: idx === 0 ? 'var(--text-muted)' : 'var(--text-primary)',
                                 border: '1px solid var(--border-strong)',
                                 borderRadius: '6px',
-                                padding: '0.25rem 0.5rem',
+                                padding: '0.35rem 0.6rem',
                                 fontSize: '0.76rem',
                                 fontWeight: 800,
                                 cursor: idx === 0 ? 'not-allowed' : 'pointer',
                                 opacity: idx === 0 ? 0.5 : 1,
+                                minHeight: '32px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                               }}
                             >
                               ↑ Lên
@@ -2706,6 +2509,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                               disabled={idx === generatedSpec.questions.length - 1}
                               onClick={() => handleMoveQuestion(idx, 1)}
                               title="Chuyển câu hỏi xuống dưới"
+                              aria-label="Chuyển câu hỏi xuống dưới"
                               style={{
                                 backgroundColor: 'var(--bg-surface)',
                                 color:
@@ -2714,12 +2518,16 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                     : 'var(--text-primary)',
                                 border: '1px solid var(--border-strong)',
                                 borderRadius: '6px',
-                                padding: '0.25rem 0.5rem',
+                                padding: '0.35rem 0.6rem',
                                 fontSize: '0.76rem',
                                 fontWeight: 800,
                                 cursor:
                                   idx === generatedSpec.questions.length - 1 ? 'not-allowed' : 'pointer',
                                 opacity: idx === generatedSpec.questions.length - 1 ? 0.5 : 1,
+                                minHeight: '32px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                               }}
                             >
                               ↓ Xuống
@@ -2728,57 +2536,81 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                               type="button"
                               onClick={() => handleDuplicateQuestion(idx)}
                               title="Nhân bản câu hỏi này"
+                              aria-label="Nhân bản câu hỏi này"
                               style={{
                                 backgroundColor: 'var(--bg-surface)',
                                 color: 'var(--accent-amber)',
                                 border: '1px solid var(--border-strong)',
                                 borderRadius: '6px',
-                                padding: '0.25rem 0.55rem',
+                                padding: '0.35rem 0.65rem',
                                 fontSize: '0.76rem',
                                 fontWeight: 700,
                                 cursor: 'pointer',
+                                minHeight: '32px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
                               }}
                             >
-                              📋 Nhân bản
+                              <CopyIcon size={14} /> Nhân bản
                             </button>
                             <button
                               type="button"
                               onClick={() => setEditingQuestionIdx(isEditing ? null : idx)}
+                              aria-label={isEditing ? 'Lưu chỉnh sửa câu hỏi' : 'Chỉnh sửa câu hỏi'}
                               style={{
                                 backgroundColor: 'var(--bg-surface)',
                                 color: 'var(--accent-sky)',
                                 border: '1px solid var(--border-strong)',
                                 borderRadius: '6px',
-                                padding: '0.25rem 0.6rem',
+                                padding: '0.35rem 0.65rem',
                                 fontSize: '0.78rem',
                                 fontWeight: 700,
                                 cursor: 'pointer',
+                                minHeight: '32px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
                               }}
                             >
-                              {isEditing ? '✓ Xong' : '✏️ Sửa'}
+                              {isEditing ? (
+                                <>
+                                  <CheckIcon size={14} /> Xong
+                                </>
+                              ) : (
+                                <>
+                                  <PencilIcon size={14} /> Sửa
+                                </>
+                              )}
                             </button>
                             <button
                               type="button"
                               onClick={() => handleDeleteQuestion(idx)}
+                              title="Xóa câu hỏi này"
+                              aria-label="Xóa câu hỏi này"
                               style={{
                                 backgroundColor: 'var(--bg-surface)',
                                 color: 'var(--accent-rose)',
                                 border: '1px solid var(--border-strong)',
                                 borderRadius: '6px',
-                                padding: '0.25rem 0.6rem',
+                                padding: '0.35rem 0.65rem',
                                 fontSize: '0.78rem',
                                 fontWeight: 700,
                                 cursor: 'pointer',
+                                minHeight: '32px',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.3rem',
                               }}
                             >
-                              🗑️ Xóa
+                              <TrashIcon size={14} /> Xóa
                             </button>
                           </div>
                         </div>
 
                         {validationErr && (
-                          <div style={{ marginTop: '0.45rem', color: 'var(--accent-rose)', fontSize: '0.8rem', fontWeight: 700 }}>
-                            ⚠️ {validationErr}
+                          <div style={{ marginTop: '0.45rem', color: 'var(--accent-rose)', fontSize: '0.8rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                            <AlertTriangleIcon size={14} /> {validationErr}
                           </div>
                         )}
 
@@ -2811,7 +2643,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                           ? 'Đúng'
                                           : nextType === 'CROSSWORD'
                                             ? normalizeCrosswordAscii(prev.correctAnswer || 'TUKHOA')
-                                            : prev.correctAnswer,
+                                              : prev.correctAnswer,
                                       crosswordClue: nextType === 'CROSSWORD' ? prev.crosswordClue || prev.question : undefined,
                                       crosswordAnswer:
                                         nextType === 'CROSSWORD'
@@ -2829,10 +2661,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                     fontWeight: 700,
                                   }}
                                 >
-                                  <option value="MULTIPLE_CHOICE">🎯 Trắc nghiệm ABCD</option>
-                                  <option value="FILL_IN_THE_BLANK">✍️ Điền từ vào chỗ trống</option>
-                                  <option value="QUICK_BUTTON">⚡ Nút bấm nhanh</option>
-                                  <option value="CROSSWORD">🧩 Ô chữ</option>
+                                  <option value="MULTIPLE_CHOICE">Trắc nghiệm ABCD</option>
+                                  <option value="FILL_IN_THE_BLANK">Điền từ vào chỗ trống</option>
+                                  <option value="QUICK_BUTTON">Nút bấm nhanh</option>
+                                  <option value="CROSSWORD">Ô chữ</option>
                                 </select>
                               </div>
                             )}
@@ -2859,6 +2691,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                   color: 'var(--text-primary)',
                                   fontSize: '0.9rem',
                                   boxSizing: 'border-box',
+                                  minHeight: '40px',
                                 }}
                               />
                             </div>
@@ -2883,69 +2716,103 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                         color: 'var(--accent-sky)',
                                         border: '1px solid var(--border-strong)',
                                         borderRadius: '6px',
-                                        padding: '0.15rem 0.5rem',
+                                        padding: '0.25rem 0.6rem',
                                         fontSize: '0.74rem',
                                         fontWeight: 700,
                                         cursor: 'pointer',
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: '0.25rem',
                                       }}
                                     >
-                                      + Thêm nút lựa chọn
+                                      <PlusIcon size={12} /> Thêm nút lựa chọn
                                     </button>
                                   )}
                                 </div>
-                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem' }}>
-                                  {q.choices.map((choice, cIdx) => (
-                                    <div key={cIdx} style={{ display: 'flex', gap: '0.35rem' }}>
-                                      <input
-                                        type="text"
-                                        value={choice}
-                                        onChange={e =>
-                                          handleUpdateQuestion(idx, prev => {
-                                            const nextChoices = [...(prev.choices || [])];
-                                            nextChoices[cIdx] = e.target.value;
-                                            return { ...prev, choices: nextChoices };
-                                          })
-                                        }
-                                        style={{
-                                          flex: 1,
-                                          padding: '0.5rem 0.7rem',
-                                          backgroundColor: 'var(--bg-surface)',
-                                          border: '1px solid var(--border-strong)',
-                                          borderRadius: '8px',
-                                          color: 'var(--text-primary)',
-                                          fontSize: '0.85rem',
-                                        }}
-                                      />
-                                      {q.type === 'QUICK_BUTTON' && q.choices && q.choices.length > 2 && (
-                                        <button
-                                          type="button"
-                                          onClick={() =>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.65rem' }}>
+                                  {q.choices.map((choice, cIdx) => {
+                                    const kahootStyles = [
+                                      { bg: '#ef4444', label: 'A', icon: <TriangleIcon size={11} /> },
+                                      { bg: '#2563eb', label: 'B', icon: <DiamondIcon size={11} /> },
+                                      { bg: '#f59e0b', label: 'C', icon: <CircleShapeIcon size={11} /> },
+                                      { bg: '#10b981', label: 'D', icon: <SquareShapeIcon size={11} /> },
+                                    ];
+                                    const badge = kahootStyles[cIdx % kahootStyles.length];
+                                    return (
+                                      <div key={cIdx} style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                                        {q.type === 'MULTIPLE_CHOICE' && (
+                                          <span
+                                            style={{
+                                              width: '28px',
+                                              height: '28px',
+                                              borderRadius: '6px',
+                                              backgroundColor: badge.bg,
+                                              color: '#ffffff',
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                              fontWeight: 800,
+                                              fontSize: '0.78rem',
+                                              flexShrink: 0,
+                                            }}
+                                            title={`Đáp án ${badge.label}`}
+                                          >
+                                            {badge.icon}
+                                          </span>
+                                        )}
+                                        <input
+                                          type="text"
+                                          value={choice}
+                                          onChange={e =>
                                             handleUpdateQuestion(idx, prev => {
-                                              const nextChoices = (prev.choices || []).filter((_, i) => i !== cIdx);
-                                              return {
-                                                ...prev,
-                                                choices: nextChoices,
-                                                correctAnswer: nextChoices.includes(prev.correctAnswer)
-                                                  ? prev.correctAnswer
-                                                  : nextChoices[0] || '',
-                                              };
+                                              const nextChoices = [...(prev.choices || [])];
+                                              nextChoices[cIdx] = e.target.value;
+                                              return { ...prev, choices: nextChoices };
                                             })
                                           }
                                           style={{
+                                            flex: 1,
+                                            padding: '0.5rem 0.7rem',
                                             backgroundColor: 'var(--bg-surface)',
-                                            color: 'var(--accent-rose)',
                                             border: '1px solid var(--border-strong)',
                                             borderRadius: '8px',
-                                            padding: '0 0.55rem',
-                                            cursor: 'pointer',
-                                            fontWeight: 800,
+                                            color: 'var(--text-primary)',
+                                            fontSize: '0.85rem',
+                                            minHeight: '38px',
                                           }}
-                                        >
-                                          ✕
-                                        </button>
-                                      )}
-                                    </div>
-                                  ))}
+                                        />
+                                        {q.type === 'QUICK_BUTTON' && q.choices && q.choices.length > 2 && (
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              handleUpdateQuestion(idx, prev => {
+                                                const nextChoices = (prev.choices || []).filter((_, i) => i !== cIdx);
+                                                return {
+                                                  ...prev,
+                                                  choices: nextChoices,
+                                                  correctAnswer: nextChoices.includes(prev.correctAnswer)
+                                                    ? prev.correctAnswer
+                                                    : nextChoices[0] || '',
+                                                };
+                                              })
+                                            }
+                                            style={{
+                                              backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                                              color: 'var(--accent-rose)',
+                                              border: '1px solid var(--accent-rose)',
+                                              borderRadius: '6px',
+                                              padding: '0.4rem 0.5rem',
+                                              fontSize: '0.75rem',
+                                              cursor: 'pointer',
+                                            }}
+                                            title="Xóa lựa chọn này"
+                                          >
+                                            <TrashIcon size={14} />
+                                          </button>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
                                 </div>
                               </div>
                             )}
@@ -2969,6 +2836,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                       borderRadius: '8px',
                                       color: 'var(--accent-emerald)',
                                       fontWeight: 700,
+                                      minHeight: '40px',
                                     }}
                                   >
                                     {(q.choices && q.choices.length >= 2 ? q.choices : ['Đúng', 'Sai']).map(
@@ -3011,6 +2879,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                       color: 'var(--accent-emerald)',
                                       fontWeight: 700,
                                       boxSizing: 'border-box',
+                                      minHeight: '40px',
                                     }}
                                   />
                                 )}
@@ -3035,6 +2904,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                     color: 'var(--text-secondary)',
                                     fontSize: '0.85rem',
                                     boxSizing: 'border-box',
+                                    minHeight: '40px',
                                   }}
                                 />
                               </div>
@@ -3073,17 +2943,18 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                             )}
 
                             <div style={{ marginTop: '0.65rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.82rem' }}>
-                              <div style={{ color: 'var(--accent-emerald)', fontWeight: 700 }}>
-                                ✓ Đáp án đúng: {q.correctAnswer}
+                              <div style={{ color: 'var(--accent-emerald)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                                <CheckIcon size={16} /> Đáp án đúng: {q.correctAnswer}
                               </div>
                               {q.explanation && (
-                                <div style={{ color: 'var(--text-secondary)' }}>
-                                  💡 Giải thích: {q.explanation}
+                                <div style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'flex-start', gap: '0.35rem' }}>
+                                  <InfoIcon size={14} style={{ marginTop: '0.15rem' }} />
+                                  <span><strong>Giải thích:</strong> {q.explanation}</span>
                                 </div>
                               )}
                               {q.sourceReference && (
                                 <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem', fontWeight: 600 }}>
-                                  📌 Nguồn: {formatProvenanceBadge(q.sourceReference)}
+                                  Nguồn: {formatProvenanceBadge(q.sourceReference)}
                                 </div>
                               )}
                             </div>
@@ -3106,31 +2977,37 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       borderRadius: '10px',
                       fontWeight: 700,
                       cursor: 'pointer',
+                      minHeight: '44px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
                     }}
                   >
-                    &larr; Quay lại Bước 3
+                    <ArrowLeftIcon size={16} /> Quay lại Bước 3
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      if (validateSpecBeforeLaunch(generatedSpec)) {
-                        setCurrentStep(5);
-                      }
-                    }}
+                    onClick={handleProceedToStep5}
                     style={{
-                      padding: '0.85rem 1.6rem',
+                      padding: '0.9rem 1.85rem',
                       backgroundColor: 'var(--primary)',
                       color: '#ffffff',
                       border: 'none',
-                      borderRadius: '10px',
-                      fontWeight: 800,
-                      fontSize: '0.98rem',
+                      borderRadius: '12px',
+                      fontWeight: 900,
+                      fontSize: '1rem',
                       cursor: 'pointer',
                       boxShadow: 'var(--btn-shadow)',
+                      minHeight: '48px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      transition: 'transform 0.12s ease, opacity 0.12s ease',
                     }}
                   >
-                    Tiếp tục: Xác Nhận Lưu & Xuất Bản (Bước 5) &rarr;
+                    <span>Tiếp tục: Xác Nhận Lưu & Xuất Bản (Bước 5)</span>
+                    <ArrowRightIcon size={18} />
                   </button>
                 </div>
               </>
@@ -3185,16 +3062,20 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       : 'rgba(245, 158, 11, 0.15)',
                     color: generatedSpec.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
                     border: `1px solid ${generatedSpec.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)'}`,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
                   }}
                 >
-                  {generatedSpec.isPublic ? '🚀 ĐÃ XUẤT BẢN CÔNG KHAI' : '📝 BẢN NHÁP (CHƯA XUẤT BẢN)'}
+                  {generatedSpec.isPublic ? <CheckIcon size={14} /> : <PencilIcon size={14} />}
+                  {generatedSpec.isPublic ? 'ĐÃ XUẤT BẢN CÔNG KHAI' : 'BẢN NHÁP (CHƯA XUẤT BẢN)'}
                 </span>
               )}
             </div>
 
             {!generatedSpec ? (
-              <div style={{ padding: '1rem 0', color: 'var(--accent-amber)', fontWeight: 700 }}>
-                ⚠️ Chưa có bộ câu hỏi nào để lưu hoặc xuất bản. Vui lòng hoàn thành các bước trước.
+              <div style={{ padding: '1rem 0', color: 'var(--accent-amber)', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <AlertTriangleIcon size={16} /> Chưa có bộ câu hỏi nào để lưu hoặc xuất bản. Vui lòng hoàn thành các bước trước.
               </div>
             ) : (
               <>
@@ -3243,7 +3124,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
                     <div style={{ flex: '1 1 300px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
-                        <span style={{ fontSize: '1.5rem' }}>🚀</span>
+                        <PlayIcon size={22} style={{ color: 'var(--primary)' }} />
                         <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
                           Lựa chọn A: Bắt đầu ngay
                         </h3>
@@ -3267,12 +3148,21 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         fontSize: '1rem',
                         cursor: isSavingSpec ? 'not-allowed' : 'pointer',
                         boxShadow: 'var(--btn-shadow)',
-                        display: 'flex',
+                        display: 'inline-flex',
                         alignItems: 'center',
                         gap: '0.55rem',
+                        minHeight: '48px',
                       }}
                     >
-                      {isSavingSpec ? '⏳ Đang lưu trữ...' : '🚀 Bắt đầu ngay & Chọn chế độ'}
+                      {isSavingSpec ? (
+                        <>
+                          <SpinnerIcon size={18} /> Đang lưu trữ...
+                        </>
+                      ) : (
+                        <>
+                          <PlayIcon size={18} /> Bắt đầu ngay & Chọn chế độ
+                        </>
+                      )}
                     </button>
                   </div>
                 </div>
@@ -3288,7 +3178,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
-                    <span style={{ fontSize: '1.5rem' }}>💾</span>
+                    <BookOpenIcon size={22} style={{ color: 'var(--accent-sky)' }} />
                     <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
                       Lựa chọn B: Lưu vào kho game
                     </h3>
@@ -3312,9 +3202,22 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         fontSize: '0.94rem',
                         cursor: isSavingSpec ? 'not-allowed' : 'pointer',
                         opacity: isSavingSpec ? 0.65 : 1,
+                        minHeight: '44px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.45rem',
                       }}
                     >
-                      {isSavingSpec ? '⏳ Đang lưu...' : '📝 Lưu Bản Nháp (DRAFT)'}
+                      {isSavingSpec ? (
+                        <>
+                          <SpinnerIcon size={16} /> Đang lưu...
+                        </>
+                      ) : (
+                        <>
+                          <PencilIcon size={16} /> Lưu Bản Nháp (DRAFT)
+                        </>
+                      )}
                     </button>
 
                     <button
@@ -3332,9 +3235,22 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         cursor: isSavingSpec ? 'not-allowed' : 'pointer',
                         opacity: isSavingSpec ? 0.65 : 1,
                         boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+                        minHeight: '44px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.45rem',
                       }}
                     >
-                      {isSavingSpec ? '⏳ Đang xuất bản...' : '🚀 Lưu & Xuất Bản (PUBLISHED)'}
+                      {isSavingSpec ? (
+                        <>
+                          <SpinnerIcon size={16} /> Đang xuất bản...
+                        </>
+                      ) : (
+                        <>
+                          <CheckIcon size={16} /> Lưu & Xuất Bản (PUBLISHED)
+                        </>
+                      )}
                     </button>
                   </div>
 
@@ -3353,9 +3269,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                           fontWeight: 800,
                           fontSize: '0.88rem',
                           cursor: 'pointer',
+                          minHeight: '44px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
                         }}
                       >
-                        📚 Đi tới Kho Game
+                        <BookOpenIcon size={16} /> Đi tới Kho Game
                       </button>
                     )}
 
@@ -3374,9 +3294,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         fontWeight: 800,
                         fontSize: '0.88rem',
                         cursor: 'pointer',
+                        minHeight: '44px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
                       }}
                     >
-                      ▶️ Mở Game Chọn Chế Độ
+                      <PlayIcon size={16} /> Mở Game Chọn Chế Độ
                     </button>
 
                     <button
@@ -3391,9 +3315,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         fontWeight: 700,
                         fontSize: '0.88rem',
                         cursor: 'pointer',
+                        minHeight: '44px',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.4rem',
                       }}
                     >
-                      ✏️ Quay lại sửa câu hỏi (Bước 4)
+                      <PencilIcon size={16} /> Quay lại sửa câu hỏi (Bước 4)
                     </button>
                   </div>
                 </div>
@@ -3445,9 +3373,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                             cursor: 'pointer',
                             marginTop: '0.4rem',
                             fontWeight: 700,
+                            minHeight: '44px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.4rem',
                           }}
                         >
-                          📋 Sao chép liên kết
+                          <CopyIcon size={16} /> Sao chép liên kết
                         </button>
                       </div>
 
@@ -3493,9 +3425,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                           cursor: 'pointer',
                           boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)',
                           textAlign: 'center',
+                          minHeight: '44px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.4rem',
                         }}
                       >
-                        Màn hình Host &rarr;
+                        <span>Màn hình Host</span>
+                        <ArrowRightIcon size={16} />
                       </button>
 
                       <button
@@ -3518,9 +3456,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                           fontSize: '1rem',
                           cursor: 'pointer',
                           textAlign: 'center',
+                          minHeight: '44px',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.4rem',
                         }}
                       >
-                        Màn hình Player &rarr;
+                        <span>Màn hình Player</span>
+                        <ArrowRightIcon size={16} />
                       </button>
                     </div>
                   </div>
@@ -3530,7 +3474,6 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           </div>
         )}
       </div>
-      )}
 
       {/* MODAL CHỌN CHẾ ĐỘ CHƠI (CHƠI ĐƠN VS MULTIPLAYER) */}
       <GameModeSelectionModal
@@ -3539,7 +3482,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         gameSpec={modeModalSpec || generatedSpec}
         onStartSoloPlay={(spec) => {
           setIsModeModalOpen(false);
-          handleStartPractice(spec);
+          handleStartSoloPlay(spec);
         }}
         onCreateMultiplayerRoom={async (spec) => {
           const room = await handleCreateRoom(spec);

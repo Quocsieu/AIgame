@@ -4,6 +4,62 @@ export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 export type ScoringMode = 'STANDARD' | 'SPEED_BONUS' | 'STREAK';
 export type SourceType = 'WEBSITE' | 'DOCX' | 'XLSX' | 'PDF' | 'TXT' | 'MARKDOWN' | 'CSV';
 
+export interface MixedQuestionDistribution {
+  MULTIPLE_CHOICE: number;
+  QUICK_BUTTON: number;
+  FILL_IN_THE_BLANK: number;
+  CROSSWORD: number;
+}
+
+export function calculateMixedTypeCounts(
+  totalCount: number,
+  distribution?: MixedQuestionDistribution
+): Record<QuestionType, number> {
+  const dist = distribution || {
+    MULTIPLE_CHOICE: 40,
+    QUICK_BUTTON: 20,
+    FILL_IN_THE_BLANK: 20,
+    CROSSWORD: 20,
+  };
+
+  const types: QuestionType[] = ['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK', 'CROSSWORD'];
+
+  const rawCounts = types.map(type => {
+    const ratio = (dist[type] ?? 0) / 100;
+    const exact = totalCount * ratio;
+    const floor = Math.floor(exact);
+    const remainder = exact - floor;
+    return { type, exact, floor, remainder };
+  });
+
+  const allocated = rawCounts.reduce((sum, item) => sum + item.floor, 0);
+  const deficit = totalCount - allocated;
+
+  rawCounts.sort((a, b) => {
+    if (Math.abs(b.remainder - a.remainder) > 1e-6) {
+      return b.remainder - a.remainder;
+    }
+    return (dist[b.type] ?? 0) - (dist[a.type] ?? 0);
+  });
+
+  for (let i = 0; i < deficit; i++) {
+    rawCounts[i % rawCounts.length].floor += 1;
+  }
+
+  const result: Record<QuestionType, number> = {
+    MULTIPLE_CHOICE: 0,
+    QUICK_BUTTON: 0,
+    FILL_IN_THE_BLANK: 0,
+    CROSSWORD: 0,
+  };
+
+  for (const item of rawCounts) {
+    result[item.type] = item.floor;
+  }
+
+  return result;
+}
+
 export interface ProvenanceReference {
   sourceId: string;
   sourceType: SourceType;
@@ -44,6 +100,7 @@ export interface GameSpecification {
     questionCount: number;
     timePerQuestion: number;
     scoringMode: ScoringMode;
+    mixedDistribution?: MixedQuestionDistribution;
   };
   sourceSummary?: {
     sourceCount: number;

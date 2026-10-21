@@ -195,8 +195,16 @@ describe('PER-QUESTION-SET PASSWORD PROTECTION & ADMIN DECOUPLING TEST SUITE', (
       });
 
       const newPass = 'NewPassword456!';
+      // Creator verifies old password first to obtain access token
+      const authOld = await request(app)
+        .post(`/api/games/${updateGameId}/verify-password`)
+        .send({ password: 'OldPassword123!' });
+      assert.equal(authOld.status, 200);
+      const creatorToken = authOld.body.data.gameAccessToken;
+
       const patchRes = await request(app)
         .patch(`/api/games/${updateGameId}`)
+        .set('X-Game-Access-Token', creatorToken)
         .send({
           passwordProtected: true,
           password: newPass,
@@ -239,8 +247,16 @@ describe('PER-QUESTION-SET PASSWORD PROTECTION & ADMIN DECOUPLING TEST SUITE', (
         password: 'PasswordToBeRemoved!',
       });
 
+      // Creator verifies password first to obtain access token
+      const authRem = await request(app)
+        .post(`/api/games/${removePassGameId}/verify-password`)
+        .send({ password: 'PasswordToBeRemoved!' });
+      assert.equal(authRem.status, 200);
+      const creatorToken = authRem.body.data.gameAccessToken;
+
       const patchRes = await request(app)
         .patch(`/api/games/${removePassGameId}`)
+        .set('X-Game-Access-Token', creatorToken)
         .send({
           removePassword: true,
           questions: [
@@ -396,9 +412,10 @@ describe('PER-QUESTION-SET PASSWORD PROTECTION & ADMIN DECOUPLING TEST SUITE', (
       assert.equal(accessBefore.status, 200);
       assert.equal(accessBefore.body.data.questions.length, 2);
 
-      // Now creator updates the password
+      // Now creator updates the password (using authorized token)
       await request(app)
         .patch(`/api/games/${revokeGameId}`)
+        .set('X-Game-Access-Token', token)
         .send({
           passwordProtected: true,
           password: 'CompletelyNewPass456!',

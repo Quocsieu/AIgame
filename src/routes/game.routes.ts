@@ -139,9 +139,11 @@ gameRouter.post(
 
       // Handle password protection if requested
       let passwordOptions: { isPasswordProtected?: boolean; passwordHash?: string | null } | undefined;
+      let issuedAccessToken: { token: string; expiresAt: string } | undefined;
       if (requestData.passwordProtected && requestData.password && requestData.password.trim().length > 0) {
         const passwordHash = gamePasswordService.hashPassword(requestData.password.trim());
         passwordOptions = { isPasswordProtected: true, passwordHash };
+        issuedAccessToken = gamePasswordService.issueGameAccessToken(gameSpecification.gameId);
       } else {
         passwordOptions = { isPasswordProtected: false, passwordHash: null };
       }
@@ -156,7 +158,12 @@ gameRouter.post(
         isPublic: false,
         passwordProtected: Boolean(passwordOptions.isPasswordProtected),
       };
-      res.status(200).json(createSuccessResponse(savedSpec));
+      res.status(200).json(
+        createSuccessResponse({
+          ...savedSpec,
+          ...(issuedAccessToken ? { gameAccessToken: issuedAccessToken.token } : {}),
+        })
+      );
     } catch (err) {
       next(err);
     }
@@ -315,6 +322,29 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
       mode: 'write',
     });
 
+    // Enforce per-game password authorization before updating
+    const authData = persistenceRepo.getGamePasswordAuthData(gameId);
+    const isExistingProtected = existing.passwordProtected ?? authData?.isPasswordProtected ?? false;
+
+    if (isExistingProtected && req.user?.role !== 'ADMIN') {
+      const hasTokenAccess = gamePasswordService.hasAccess(req, gameId);
+      const directPassword =
+        (typeof req.headers['x-game-password'] === 'string' && req.headers['x-game-password'].trim()) ||
+        (typeof req.body?.password === 'string' && req.body.password.trim()) ||
+        null;
+      const hasValidPassword = directPassword
+        ? gamePasswordService.verifyPassword(directPassword, authData?.passwordHash)
+        : false;
+
+      if (!hasTokenAccess && !hasValidPassword) {
+        throw new AppError(
+          'UNAUTHORIZED',
+          'Bộ câu hỏi này được bảo vệ bằng mật khẩu. Vui lòng cung cấp mật khẩu hoặc gameAccessToken hợp lệ để chỉnh sửa.',
+          401
+        );
+      }
+    }
+
     const parseResult = UpdateGameQuestionsRequestSchema.safeParse(req.body);
     if (!parseResult.success) {
       const issues = parseResult.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
@@ -325,6 +355,7 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
 
     // Handle password update/removal
     let passwordOptions: { isPasswordProtected?: boolean; passwordHash?: string | null } | undefined;
+    let issuedAccessToken: { token: string; expiresAt: string } | undefined;
     if (removePassword === true || passwordProtected === false) {
       passwordOptions = { isPasswordProtected: false, passwordHash: null };
       gamePasswordService.revokeTokensForGame(gameId);
@@ -332,6 +363,7 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
       const newHash = gamePasswordService.hashPassword(password.trim());
       passwordOptions = { isPasswordProtected: true, passwordHash: newHash };
       gamePasswordService.revokeTokensForGame(gameId);
+      issuedAccessToken = gamePasswordService.issueGameAccessToken(gameId);
     } else if (passwordProtected === true) {
       const existingAuth = persistenceRepo.getGamePasswordAuthData(gameId);
       passwordOptions = { isPasswordProtected: true, passwordHash: existingAuth?.passwordHash ?? null };
@@ -376,12 +408,18 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
         ...existing.settings,
         ...(settings?.timePerQuestion !== undefined ? { timePerQuestion: settings.timePerQuestion } : {}),
         ...(settings?.scoringMode !== undefined ? { scoringMode: settings.scoringMode } : {}),
+        ...(settings?.mixedDistribution !== undefined ? { mixedDistribution: settings.mixedDistribution } : {}),
         questionCount: questions.length,
       },
     });
 
     gameStore.save(updatedSpec, Date.now(), ownerUserId, resolvedIsPublic, passwordOptions);
-    res.status(200).json(createSuccessResponse(updatedSpec));
+    res.status(200).json(
+      createSuccessResponse({
+        ...updatedSpec,
+        ...(issuedAccessToken ? { gameAccessToken: issuedAccessToken.token } : {}),
+      })
+    );
   } catch (err) {
     next(err);
   }
@@ -416,6 +454,29 @@ gameRouter.delete(
         mode: 'write',
       });
 
+      // Enforce per-game password authorization before deleting
+      const authData = persistenceRepo.getGamePasswordAuthData(gameId);
+      const isExistingProtected = existing.passwordProtected ?? authData?.isPasswordProtected ?? false;
+
+      if (isExistingProtected && req.user?.role !== 'ADMIN') {
+        const hasTokenAccess = gamePasswordService.hasAccess(req, gameId);
+        const directPassword =
+          (typeof req.headers['x-game-password'] === 'string' && req.headers['x-game-password'].trim()) ||
+          (typeof req.body?.password === 'string' && req.body.password.trim()) ||
+          null;
+        const hasValidPassword = directPassword
+          ? gamePasswordService.verifyPassword(directPassword, authData?.passwordHash)
+          : false;
+
+        if (!hasTokenAccess && !hasValidPassword) {
+          throw new AppError(
+            'UNAUTHORIZED',
+            'Bộ câu hỏi này được bảo vệ bằng mật khẩu. Vui lòng cung cấp mật khẩu hoặc gameAccessToken hợp lệ để xóa.',
+            401
+          );
+        }
+      }
+
       if (sessionStore.hasActiveSessionForGame(gameId) || roomStore.hasActiveRoomForGame(gameId)) {
         throw new AppError(
           'GAME_IN_USE',
@@ -425,6 +486,7 @@ gameRouter.delete(
       }
 
       gameStore.delete(gameId);
+      gamePasswordService.revokeTokensForGame(gameId);
       res.status(200).json(
         createSuccessResponse({
           deleted: true,

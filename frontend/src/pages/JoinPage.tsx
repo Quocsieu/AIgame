@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useToast } from '../components/ToastContext.js';
+import { ArrowRightIcon, LockIcon, UsersIcon } from '../components/Icons.js';
 
 interface JoinPageProps {
   initialRoomCode?: string;
@@ -46,7 +47,7 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
           padding: '2.5rem 2rem',
           width: '100%',
           maxWidth: '440px',
-          boxShadow: 'var(--card-shadow)',
+          boxShadow: 'var(--shadow-lg)',
           animation: 'popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
@@ -56,29 +57,43 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
               width: '56px',
               height: '56px',
               borderRadius: '16px',
-              background: 'linear-gradient(135deg, #2563eb, #38bdf8)',
+              background: 'linear-gradient(135deg, var(--primary), var(--accent-sky))',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '1.8rem',
               marginBottom: '1rem',
-              boxShadow: '0 8px 20px var(--primary-glow)',
+              boxShadow: 'var(--btn-shadow)',
               color: '#ffffff',
             }}
           >
-            🎮
+            <UsersIcon size={26} />
           </div>
-          <h1 style={{ margin: 0, fontSize: '1.85rem', color: 'var(--text-primary)', fontWeight: 900, letterSpacing: '-0.03em' }}>
+          <h1 style={{ margin: 0, fontSize: '1.75rem', color: 'var(--text-primary)', fontWeight: 800, letterSpacing: '-0.03em' }}>
             Tham Gia Phòng Đấu
           </h1>
+          <p style={{ margin: '0.4rem 0 0 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+            Nhập mã phòng 6 ký tự để cùng thi đấu thời gian thực
+          </p>
         </div>
 
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '1.25rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.45rem', color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              MÃ PHÒNG (6 KÝ TỰ)
+            <label
+              htmlFor="join-room-code"
+              style={{
+                display: 'block',
+                marginBottom: '0.45rem',
+                color: 'var(--text-primary)',
+                fontWeight: 700,
+                fontSize: '0.8rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+              }}
+            >
+              Mã phòng (6 ký tự) <span style={{ color: 'var(--accent-rose)' }}>*</span>
             </label>
             <input
+              id="join-room-code"
               type="text"
               maxLength={6}
               value={roomCode}
@@ -86,9 +101,11 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
               placeholder="VD: ABC123"
               required
               autoFocus
+              autoComplete="off"
+              spellCheck="false"
               style={{
                 width: '100%',
-                padding: '0.9rem',
+                padding: '0.85rem',
                 borderRadius: '12px',
                 border: '2px solid var(--border-strong)',
                 backgroundColor: 'var(--bg-input)',
@@ -97,48 +114,75 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
                 fontWeight: 900,
                 textAlign: 'center',
                 letterSpacing: '0.2em',
+                fontFamily: "'JetBrains Mono', monospace",
                 boxSizing: 'border-box',
-                outline: 'none',
-                transition: 'border-color 0.15s ease',
               }}
             />
           </div>
 
-          <div style={{ marginBottom: '1.75rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.45rem', color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              TÊN NGƯỜI CHƠI <span style={{ color: 'var(--accent-rose)' }}>*</span>
+          <div style={{ marginBottom: '1.5rem' }}>
+            <label
+              htmlFor="join-player-name"
+              style={{
+                display: 'block',
+                marginBottom: '0.45rem',
+                color: 'var(--text-primary)',
+                fontWeight: 700,
+                fontSize: '0.8rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+              }}
+            >
+              Tên người chơi <span style={{ color: 'var(--accent-rose)' }}>*</span>
             </label>
             <input
+              id="join-player-name"
               type="text"
               maxLength={30}
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="VD: Tuấn Kiệt"
               required
+              autoComplete="nickname"
               style={{
                 width: '100%',
-                padding: '0.9rem 1rem',
+                padding: '0.85rem 1rem',
                 borderRadius: '12px',
                 border: '1px solid var(--border-strong)',
                 backgroundColor: 'var(--bg-input)',
                 color: 'var(--text-primary)',
-                fontSize: '1.05rem',
-                fontWeight: 700,
+                fontSize: '1rem',
+                fontWeight: 600,
                 boxSizing: 'border-box',
-                outline: 'none',
               }}
             />
           </div>
 
           <div style={{ marginBottom: '1.75rem' }}>
-            <label style={{ display: 'block', marginBottom: '0.45rem', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              🔒 MẬT KHẨU BỘ CÂU HỎI (NẾU PHÒNG YÊU CẦU)
+            <label
+              htmlFor="join-room-password"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                marginBottom: '0.45rem',
+                color: 'var(--text-secondary)',
+                fontWeight: 700,
+                fontSize: '0.8rem',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+              }}
+            >
+              <LockIcon size={14} />
+              <span>Mật khẩu bộ câu hỏi (Nếu có)</span>
             </label>
             <input
+              id="join-room-password"
               type="password"
               value={roomPassword}
               onChange={(e) => setRoomPassword(e.target.value)}
-              placeholder="Bỏ trống nếu phòng không có mật khẩu..."
+              placeholder="Bỏ trống nếu phòng không yêu cầu..."
+              autoComplete="current-password"
               style={{
                 width: '100%',
                 padding: '0.85rem 1rem',
@@ -148,7 +192,6 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
                 color: 'var(--text-primary)',
                 fontSize: '0.95rem',
                 boxSizing: 'border-box',
-                outline: 'none',
               }}
             />
           </div>
@@ -157,28 +200,27 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
             type="submit"
             style={{
               width: '100%',
-              padding: '0.95rem 1.25rem',
+              minHeight: '48px',
+              padding: '0.9rem 1.25rem',
               backgroundColor: 'var(--primary)',
               color: '#ffffff',
               border: 'none',
               borderRadius: '12px',
-              fontSize: '1.1rem',
-              fontWeight: 900,
+              fontSize: '1.05rem',
+              fontWeight: 800,
               cursor: 'pointer',
               boxShadow: 'var(--btn-shadow)',
-              transition: 'transform 0.1s ease, box-shadow 0.15s ease',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: '0.5rem',
             }}
           >
-            <span>Vào phòng</span>
-            <span>🚀</span>
+            <span>Vào phòng thi đấu</span>
+            <ArrowRightIcon size={18} />
           </button>
         </form>
       </div>
     </div>
   );
 };
-

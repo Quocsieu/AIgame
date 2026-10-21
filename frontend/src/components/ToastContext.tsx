@@ -1,4 +1,11 @@
 import React, { createContext, useContext, useState, useCallback } from 'react';
+import {
+  AlertTriangleIcon,
+  CheckIcon,
+  InfoIcon,
+  SpinnerIcon,
+  XMarkIcon,
+} from './Icons.js';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info' | 'loading';
 
@@ -86,6 +93,9 @@ const ToastContainer: React.FC<{ toasts: ToastItem[]; onDismiss: (id: string) =>
 
   return (
     <div
+      role="region"
+      aria-live="polite"
+      aria-label="Thông báo hệ thống"
       style={{
         position: 'fixed',
         top: '1.25rem',
@@ -94,7 +104,7 @@ const ToastContainer: React.FC<{ toasts: ToastItem[]; onDismiss: (id: string) =>
         display: 'flex',
         flexDirection: 'column',
         gap: '0.75rem',
-        maxWidth: '400px',
+        maxWidth: '420px',
         width: 'calc(100% - 2.5rem)',
         pointerEvents: 'none',
       }}
@@ -111,66 +121,64 @@ const ToastCard: React.FC<{ toast: ToastItem; onDismiss: () => void }> = ({ toas
     switch (toast.type) {
       case 'success':
         return {
-          background: 'rgba(16, 185, 129, 0.95)',
-          borderColor: '#059669',
-          iconColor: '#ffffff',
-          icon: '✓',
-          shadow: '0 8px 24px rgba(16, 185, 129, 0.35)',
+          background: 'var(--accent-emerald)',
+          borderColor: 'rgba(255, 255, 255, 0.2)',
+          icon: <CheckIcon size={18} />,
+          shadow: 'var(--shadow-lg)',
         };
       case 'error':
         return {
-          background: 'rgba(239, 68, 68, 0.95)',
-          borderColor: '#dc2626',
-          iconColor: '#ffffff',
-          icon: '✕',
-          shadow: '0 8px 24px rgba(239, 68, 68, 0.35)',
+          background: 'var(--accent-rose)',
+          borderColor: 'rgba(255, 255, 255, 0.2)',
+          icon: <XMarkIcon size={18} />,
+          shadow: 'var(--shadow-lg)',
         };
       case 'warning':
         return {
-          background: 'rgba(245, 158, 11, 0.95)',
-          borderColor: '#d97706',
-          iconColor: '#ffffff',
-          icon: '⚠',
-          shadow: '0 8px 24px rgba(245, 158, 11, 0.35)',
+          background: 'var(--accent-amber)',
+          borderColor: 'rgba(255, 255, 255, 0.2)',
+          icon: <AlertTriangleIcon size={18} />,
+          shadow: 'var(--shadow-lg)',
         };
       case 'loading':
         return {
-          background: 'rgba(37, 99, 235, 0.95)',
-          borderColor: '#1d4ed8',
-          iconColor: '#ffffff',
-          icon: '⚡',
-          shadow: '0 8px 24px rgba(37, 99, 235, 0.35)',
+          background: 'var(--primary)',
+          borderColor: 'rgba(255, 255, 255, 0.2)',
+          icon: <SpinnerIcon size={18} />,
+          shadow: 'var(--shadow-lg)',
         };
       case 'info':
       default:
         return {
-          background: 'rgba(15, 23, 42, 0.95)',
-          borderColor: '#38bdf8',
-          iconColor: '#38bdf8',
-          icon: 'ℹ',
-          shadow: '0 8px 24px rgba(0, 0, 0, 0.3)',
+          background: 'var(--bg-card)',
+          borderColor: 'var(--accent-sky)',
+          color: 'var(--text-primary)',
+          icon: <InfoIcon size={18} style={{ color: 'var(--accent-sky)' }} />,
+          shadow: 'var(--shadow-lg)',
         };
     }
   };
 
   const style = getStyle();
+  const isInfo = toast.type === 'info';
 
   return (
     <div
+      role="status"
       style={{
         pointerEvents: 'auto',
         backgroundColor: style.background,
         border: `1px solid ${style.borderColor}`,
         borderRadius: '12px',
-        padding: '0.9rem 1.25rem',
-        color: '#ffffff',
+        padding: '0.9rem 1.15rem',
+        color: isInfo ? 'var(--text-primary)' : '#ffffff',
         boxShadow: style.shadow,
         display: 'flex',
         alignItems: 'flex-start',
         gap: '0.85rem',
         backdropFilter: 'blur(8px)',
         animation: 'popIn 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
-        transition: 'all 0.2s ease',
+        transition: 'all 0.15s ease',
       }}
     >
       <div
@@ -178,12 +186,10 @@ const ToastCard: React.FC<{ toast: ToastItem; onDismiss: () => void }> = ({ toas
           width: '28px',
           height: '28px',
           borderRadius: '8px',
-          backgroundColor: 'rgba(255, 255, 255, 0.2)',
+          backgroundColor: isInfo ? 'var(--accent-sky-subtle)' : 'rgba(255, 255, 255, 0.2)',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          fontWeight: 900,
-          fontSize: '1rem',
           flexShrink: 0,
         }}
       >
@@ -191,35 +197,35 @@ const ToastCard: React.FC<{ toast: ToastItem; onDismiss: () => void }> = ({ toas
       </div>
       <div style={{ flex: 1 }}>
         {toast.title && (
-          <div style={{ fontWeight: 800, fontSize: '0.95rem', marginBottom: '0.2rem', letterSpacing: '-0.01em' }}>
+          <div style={{ fontWeight: 800, fontSize: '0.92rem', marginBottom: '0.2rem', letterSpacing: '-0.01em' }}>
             {toast.title}
           </div>
         )}
-        <div style={{ fontSize: '0.875rem', color: '#f8fafc', wordBreak: 'break-word', lineHeight: 1.4 }}>
+        <div style={{ fontSize: '0.86rem', color: isInfo ? 'var(--text-secondary)' : '#f8fafc', wordBreak: 'break-word', lineHeight: 1.45 }}>
           {toast.message}
         </div>
       </div>
       <button
         type="button"
         onClick={onDismiss}
+        aria-label="Đóng thông báo"
         style={{
-          background: 'rgba(255, 255, 255, 0.15)',
+          background: isInfo ? 'transparent' : 'rgba(255, 255, 255, 0.15)',
           border: 'none',
           borderRadius: '6px',
-          color: '#ffffff',
+          color: isInfo ? 'var(--text-muted)' : '#ffffff',
           cursor: 'pointer',
-          fontSize: '1rem',
-          fontWeight: 800,
-          width: '24px',
-          height: '24px',
+          minWidth: '32px',
+          minHeight: '32px',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           marginLeft: '0.25rem',
           flexShrink: 0,
+          padding: 0,
         }}
       >
-        ×
+        <XMarkIcon size={16} />
       </button>
     </div>
   );

@@ -11,7 +11,7 @@ import { sourceStore } from '../src/storage/source.store.js';
 import { gameStore, sessionStore } from '../src/game/game.store.js';
 import { roomStore } from '../src/multiplayer/room.store.js';
 import { roomService } from '../src/multiplayer/room.service.js';
-import { aiQuestionService, AiModelProvider } from '../src/services/ai.question.service.js';
+import { aiQuestionService, AiModelProvider, calculateMixedTypeCounts } from '../src/services/ai.question.service.js';
 import { AiProviderUsageMetadata } from '../src/services/ai.observability.service.js';
 import { quotaService } from '../src/services/quota.service.js';
 import { resetAllRateLimiters } from '../src/middleware/rateLimiter.js';
@@ -645,10 +645,57 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
   it('Batch 6: Mixed Game Modes (MIXED) supports all 4 question types across AI Generation, Editor, Single-Player & Multiplayer', async () => {
     resetAllRateLimiters();
 
+    // 1. Verify Largest Remainder Method rounding algorithm for question distribution
+    const counts5 = calculateMixedTypeCounts(5, {
+      MULTIPLE_CHOICE: 40,
+      QUICK_BUTTON: 20,
+      FILL_IN_THE_BLANK: 20,
+      CROSSWORD: 20,
+    });
+    assert.deepEqual(counts5, {
+      MULTIPLE_CHOICE: 2,
+      QUICK_BUTTON: 1,
+      FILL_IN_THE_BLANK: 1,
+      CROSSWORD: 1,
+    });
+    assert.equal(counts5.MULTIPLE_CHOICE + counts5.QUICK_BUTTON + counts5.FILL_IN_THE_BLANK + counts5.CROSSWORD, 5);
+
+    const counts7 = calculateMixedTypeCounts(7, {
+      MULTIPLE_CHOICE: 40,
+      QUICK_BUTTON: 20,
+      FILL_IN_THE_BLANK: 20,
+      CROSSWORD: 20,
+    });
+    assert.deepEqual(counts7, {
+      MULTIPLE_CHOICE: 3,
+      QUICK_BUTTON: 2,
+      FILL_IN_THE_BLANK: 1,
+      CROSSWORD: 1,
+    });
+    assert.equal(counts7.MULTIPLE_CHOICE + counts7.QUICK_BUTTON + counts7.FILL_IN_THE_BLANK + counts7.CROSSWORD, 7);
+
     const ingestRes = await request(app)
       .post('/api/content/ingest')
       .attach('files', Buffer.from('Tài liệu tổng hợp về mạng máy tính: giao thức HTTP, cổng 443 HTTPS, địa chỉ IP và tường lửa.', 'utf-8'), 'networking.txt');
     const sourceId = ingestRes.body.data.sources[0].sourceId;
+
+    // 2. Verify invalid distribution (sum != 100%) is rejected with 400 VALIDATION_ERROR and friendly message
+    const invalidDistRes = await request(app)
+      .post('/api/games/generate')
+      .send({
+        sourceId,
+        gameType: 'MIXED',
+        questionCount: 4,
+        mixedDistribution: {
+          MULTIPLE_CHOICE: 50,
+          QUICK_BUTTON: 20,
+          FILL_IN_THE_BLANK: 20,
+          CROSSWORD: 0, // Sum = 90%
+        },
+      });
+    assert.equal(invalidDistRes.status, 400);
+    assert.equal(invalidDistRes.body.error.code, 'INVALID_REQUEST');
+    assert.match(invalidDistRes.body.error.message, /100%/);
 
     mockProvider.mockTitle = 'Thử Thách Mạng Máy Tính Hỗn Hợp (MIXED)';
     mockProvider.mockQuestions = [

@@ -8,6 +8,7 @@ import {
   GameSpecificationSchema,
   GameType,
   GenerateGameRequest,
+  MixedQuestionDistribution,
   QuestionType,
 } from '../contracts/game.contract.js';
 import { normalizeCrosswordWord } from '../game/handlers/crossword.handler.js';
@@ -344,6 +345,56 @@ export function sampleDocumentForPrompt(
   };
 }
 
+export function calculateMixedTypeCounts(
+  totalCount: number,
+  distribution?: MixedQuestionDistribution
+): Record<QuestionType, number> {
+  const dist = distribution || {
+    MULTIPLE_CHOICE: 40,
+    QUICK_BUTTON: 20,
+    FILL_IN_THE_BLANK: 20,
+    CROSSWORD: 20,
+  };
+
+  const types: QuestionType[] = ['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK', 'CROSSWORD'];
+
+  const rawCounts = types.map(type => {
+    const ratio = (dist[type] ?? 0) / 100;
+    const exact = totalCount * ratio;
+    const floor = Math.floor(exact);
+    const remainder = exact - floor;
+    return { type, exact, floor, remainder };
+  });
+
+  const allocated = rawCounts.reduce((sum, item) => sum + item.floor, 0);
+  const deficit = totalCount - allocated;
+
+  // Largest Remainder Method (Hamilton-Hare): sort descending by remainder, break ties with higher configured ratio
+  rawCounts.sort((a, b) => {
+    if (Math.abs(b.remainder - a.remainder) > 1e-6) {
+      return b.remainder - a.remainder;
+    }
+    return (dist[b.type] ?? 0) - (dist[a.type] ?? 0);
+  });
+
+  for (let i = 0; i < deficit; i++) {
+    rawCounts[i % rawCounts.length].floor += 1;
+  }
+
+  const result: Record<QuestionType, number> = {
+    MULTIPLE_CHOICE: 0,
+    QUICK_BUTTON: 0,
+    FILL_IN_THE_BLANK: 0,
+    CROSSWORD: 0,
+  };
+
+  for (const item of rawCounts) {
+    result[item.type] = item.floor;
+  }
+
+  return result;
+}
+
 export class AiQuestionService {
   private provider: AiModelProvider;
 
@@ -407,6 +458,7 @@ export class AiQuestionService {
     options?: {
       topicFocus?: string;
       sectionFilter?: string[];
+      mixedDistribution?: MixedQuestionDistribution;
       outDiagnostics?: string[];
     }
   ): string {
@@ -466,6 +518,7 @@ export class AiQuestionService {
 
     const isQuickButton = gameType === 'QUICK_BUTTON';
     const isMixed = gameType === 'MIXED';
+    const mixedCounts = isMixed ? calculateMixedTypeCounts(questionCount, options?.mixedDistribution) : null;
     const quickButtonInstruction = isQuickButton
       ? [
           'CRITICAL RULES FOR QUICK_BUTTON (ĐÚNG / SAI):',
@@ -474,11 +527,17 @@ export class AiQuestionService {
           '- Trường "correctAnswer" PHẢI là chính xác một trong hai chuỗi: "Đúng" hoặc "Sai".',
           '',
         ].join('\n')
-      : isMixed
+      : isMixed && mixedCounts
         ? [
-            'CRITICAL RULES FOR MIXED GAME MODE (CHẾ ĐỘ HỖN HỢP):',
-            '- Tạo sự kết hợp đa dạng giữa các dạng câu hỏi: "MULTIPLE_CHOICE" (4 lựa chọn A/B/C/D), "QUICK_BUTTON" (choices đúng bằng ["Đúng", "Sai"]), "FILL_IN_THE_BLANK" (điền từ), và "CROSSWORD" (ô chữ có crosswordClue và crosswordAnswer chữ in hoa không dấu).',
+            'CRITICAL RULES FOR MIXED GAME MODE (CHẾ ĐỘ HỖN HỢP CÓ PHÂN BỔ TỶ LỆ):',
+            `- Bạn PHẢI tạo chính xác tổng cộng ${questionCount} câu hỏi được phân chia cụ thể như sau:`,
+            `  + MULTIPLE_CHOICE (Trắc nghiệm ABCD - đúng 4 lựa chọn): ${mixedCounts.MULTIPLE_CHOICE} câu`,
+            `  + QUICK_BUTTON (Đúng / Sai - choices đúng bằng ["Đúng", "Sai"]): ${mixedCounts.QUICK_BUTTON} câu`,
+            `  + FILL_IN_THE_BLANK (Điền từ vào ô trống "___"): ${mixedCounts.FILL_IN_THE_BLANK} câu`,
+            `  + CROSSWORD (Ô chữ - kèm crosswordClue và crosswordAnswer viết hoa không dấu): ${mixedCounts.CROSSWORD} câu`,
             '- Mỗi câu hỏi PHẢI khai báo trường "type" là một trong 4 giá trị cụ thể: "MULTIPLE_CHOICE", "QUICK_BUTTON", "FILL_IN_THE_BLANK", hoặc "CROSSWORD" (TUYỆT ĐỐI KHÔNG ghi type là "MIXED" trong từng câu hỏi).',
+            '- Đối với QUICK_BUTTON: choices PHẢI là ["Đúng", "Sai"], correctAnswer PHẢI là "Đúng" hoặc "Sai".',
+            '- Đối với MULTIPLE_CHOICE: choices PHẢI có đúng 4 phương án, correctAnswer PHẢI khớp với một trong các phương án.',
             '',
           ].join('\n')
         : '';
@@ -594,6 +653,7 @@ export class AiQuestionService {
     const prompt = this.buildBoundedPrompt(documents, gameType, questionCount, effectiveDifficulty, {
       topicFocus: request.topicFocus,
       sectionFilter: request.sectionFilter,
+      mixedDistribution: request.mixedDistribution,
       outDiagnostics: generationDiagnostics,
     });
 
@@ -918,6 +978,7 @@ export class AiQuestionService {
         questionCount: validatedQuestions.length,
         timePerQuestion: request.timePerQuestion || 20,
         scoringMode: request.scoringMode || 'STANDARD',
+        ...(request.mixedDistribution ? { mixedDistribution: request.mixedDistribution } : {}),
       },
       sourceSummary: {
         sourceCount: documents.length,

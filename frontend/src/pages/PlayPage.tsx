@@ -2,6 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from '../components/ToastContext.js';
 import { GameSocketClient, ConnectionStatus } from '../services/socket.js';
 import type { LeaderboardEntry, SanitizedQuestion } from '../types/index.js';
+import {
+  AlertTriangleIcon,
+  CheckIcon,
+  ClockIcon,
+  GamepadIcon,
+  SparklesIcon,
+  SpinnerIcon,
+  StarIcon,
+  TrophyIcon,
+  XMarkIcon,
+} from '../components/Icons.js';
 
 interface PlayPageProps {
   roomCode: string;
@@ -284,8 +295,22 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
   if (roomError) {
     return (
-      <div style={{ maxWidth: '520px', margin: '3rem auto', padding: '2rem', textAlign: 'center', backgroundColor: 'var(--bg-surface)', border: '1px solid var(--accent-rose)', borderRadius: '16px', boxShadow: 'var(--card-shadow)' }}>
-        <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>⚠️</div>
+      <div
+        role="alert"
+        style={{
+          maxWidth: '520px',
+          margin: '3rem auto',
+          padding: '2rem',
+          textAlign: 'center',
+          backgroundColor: 'var(--bg-surface)',
+          border: '1px solid var(--accent-rose)',
+          borderRadius: '16px',
+          boxShadow: 'var(--card-shadow)',
+        }}
+      >
+        <div style={{ color: 'var(--accent-rose)', marginBottom: '0.75rem', display: 'flex', justifyContent: 'center' }}>
+          <AlertTriangleIcon size={44} />
+        </div>
         <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.25rem', fontWeight: 900, color: 'var(--accent-rose)' }}>
           Không Thể Tham Gia Phòng Chơi
         </h2>
@@ -302,7 +327,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             color: '#ffffff',
             border: 'none',
             borderRadius: '10px',
-            padding: '0.65rem 1.25rem',
+            padding: '0.75rem 1.25rem',
+            minHeight: '44px',
             fontWeight: 800,
             fontSize: '0.9rem',
             cursor: 'pointer',
@@ -319,32 +345,35 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       {/* Reconnecting Status Banner */}
       {connectionStatus === 'reconnecting' && (
         <div
+          role="status"
+          aria-live="polite"
           style={{
             backgroundColor: 'rgba(245, 158, 11, 0.15)',
             border: '1px solid var(--accent-amber)',
             color: 'var(--accent-amber)',
-            padding: '0.6rem 1rem',
+            padding: '0.65rem 1rem',
             borderRadius: '10px',
             marginBottom: '1rem',
             fontWeight: 800,
             fontSize: '0.86rem',
             display: 'flex',
             alignItems: 'center',
-            gap: '0.45rem',
+            gap: '0.5rem',
           }}
         >
-          <span>⏳</span>
+          <SpinnerIcon size={16} />
           <span>Đang kết nối lại tới máy chủ phòng chơi...</span>
         </div>
       )}
 
       {connectionStatus === 'disconnected' && (
         <div
+          role="alert"
           style={{
             backgroundColor: 'rgba(244, 63, 94, 0.15)',
             border: '1px solid var(--accent-rose)',
             color: 'var(--accent-rose)',
-            padding: '0.6rem 1rem',
+            padding: '0.65rem 1rem',
             borderRadius: '10px',
             marginBottom: '1rem',
             fontWeight: 800,
@@ -352,10 +381,14 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            gap: '0.45rem',
+            gap: '0.5rem',
+            flexWrap: 'wrap',
           }}
         >
-          <span>⚠️ Mất kết nối tới máy chủ phòng chơi.</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+            <AlertTriangleIcon size={16} />
+            <span>Mất kết nối tới máy chủ phòng chơi.</span>
+          </div>
           <button
             type="button"
             onClick={() => socketRef.current?.connect()}
@@ -364,9 +397,10 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               color: '#ffffff',
               border: 'none',
               borderRadius: '6px',
-              padding: '0.3rem 0.7rem',
+              padding: '0.4rem 0.85rem',
+              minHeight: '36px',
               fontWeight: 800,
-              fontSize: '0.78rem',
+              fontSize: '0.8rem',
               cursor: 'pointer',
             }}
           >
@@ -387,7 +421,6 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           padding: '0.85rem 1.25rem',
           marginBottom: '1.25rem',
           boxShadow: 'var(--card-shadow)',
-          backdropFilter: 'blur(8px)',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -401,11 +434,10 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               alignItems: 'center',
               justifyContent: 'center',
               color: '#ffffff',
-              fontSize: '1.25rem',
               boxShadow: '0 4px 10px rgba(37, 99, 235, 0.3)',
             }}
           >
-            🎮
+            <GamepadIcon size={22} />
           </div>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
@@ -437,7 +469,9 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             ĐIỂM SỐ
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', justifyContent: 'flex-end' }}>
-            <span style={{ color: '#facc15', fontSize: '1.1rem' }}>⭐</span>
+            <span style={{ color: '#facc15', display: 'flex', alignItems: 'center' }}>
+              <StarIcon size={18} />
+            </span>
             <strong style={{ color: 'var(--accent-emerald)', fontSize: '1.45rem', fontWeight: 900 }}>
               {playerScore}
             </strong>
@@ -463,16 +497,15 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               height: '80px',
               margin: '0 auto 1.25rem auto',
               borderRadius: '24px',
-              background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.2), rgba(56, 189, 248, 0.2))',
-              border: '2px solid var(--primary-glow)',
+              background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.15), rgba(56, 189, 248, 0.15))',
+              border: '1px solid var(--border-strong)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontSize: '2.75rem',
-              animation: 'pulseGlow 2.5s infinite',
+              color: 'var(--primary)',
             }}
           >
-            ⏳
+            <ClockIcon size={38} />
           </div>
 
           <h2 style={{ color: 'var(--text-primary)', fontSize: '1.5rem', margin: '0 0 0.5rem 0', fontWeight: 900, letterSpacing: '-0.02em' }}>
@@ -543,10 +576,9 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 color: isUrgentTime ? '#ef4444' : 'var(--accent-sky)',
                 fontWeight: 900,
                 fontSize: '1.15rem',
-                animation: isUrgentTime ? 'countdownTick 1s infinite' : 'none',
               }}
             >
-              <span>⏱️</span>
+              <ClockIcon size={18} />
               <span>{timeRemaining}s</span>
             </div>
           </div>
@@ -614,6 +646,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                     <button
                       key={idx}
                       type="button"
+                      aria-pressed={isSelected}
                       disabled={isAnswerSubmitted || isSubmittingAnswer}
                       onClick={() => {
                         setAnswerError(null);
@@ -625,20 +658,22 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                         padding: '1rem 1.15rem',
                         backgroundColor: isSelected ? config.bg : 'var(--bg-card)',
                         color: isSelected ? '#ffffff' : 'var(--text-primary)',
-                        border: isSelected ? `2px solid #ffffff` : `2px solid ${config.bg}`,
+                        border: isSelected ? '2px solid #ffffff' : `2px solid ${config.bg}`,
+                        outline: isSelected ? `2px solid ${config.bg}` : 'none',
+                        outlineOffset: '2px',
                         borderRadius: '14px',
                         fontSize: '1rem',
                         fontWeight: isSelected ? 800 : 700,
                         cursor: isAnswerSubmitted || isSubmittingAnswer ? 'not-allowed' : 'pointer',
                         opacity: (isAnswerSubmitted || isSubmittingAnswer) && !isSelected ? 0.45 : 1,
-                        transform: isSelected ? 'scale(1.02)' : 'none',
-                        transition: 'all 0.15s ease',
+                        transition: 'background-color 0.15s ease, border-color 0.15s ease',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '0.85rem',
+                        minHeight: '52px',
                         boxShadow: isSelected
-                          ? `0 0 20px ${config.bg}80, 0 6px 16px rgba(0,0,0,0.3)`
-                          : '0 4px 10px rgba(0,0,0,0.15)',
+                          ? `0 0 16px ${config.bg}80, 0 4px 12px rgba(0,0,0,0.25)`
+                          : '0 2px 8px rgba(0,0,0,0.08)',
                       }}
                     >
                       <span
@@ -660,7 +695,11 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                         {config.icon}
                       </span>
                       <span style={{ flex: 1, wordBreak: 'break-word', lineHeight: 1.35 }}>{choice}</span>
-                      {isSelected && <span style={{ fontSize: '1.25rem', fontWeight: 900 }}>✓</span>}
+                      {isSelected && (
+                        <span style={{ display: 'flex', alignItems: 'center' }}>
+                          <CheckIcon size={20} />
+                        </span>
+                      )}
                     </button>
                   );
                 })}
@@ -679,6 +718,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                     width: '100%',
                     marginTop: '1rem',
                     padding: '0.95rem',
+                    minHeight: '48px',
                     backgroundColor: !selectedAnswer || isSubmittingAnswer ? 'var(--border-strong)' : 'var(--primary)',
                     color: '#ffffff',
                     border: 'none',
@@ -689,13 +729,22 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                     opacity: !selectedAnswer || isSubmittingAnswer ? 0.65 : 1,
                     boxShadow: !selectedAnswer || isSubmittingAnswer ? 'none' : 'var(--btn-shadow)',
                     transition: 'all 0.15s ease',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
                   }}
                 >
-                  {isSubmittingAnswer
-                    ? '⏳ Đang gửi đáp án...'
-                    : selectedAnswer
-                      ? 'Xác nhận gửi đáp án →'
-                      : 'Hãy chọn một đáp án ở trên'}
+                  {isSubmittingAnswer ? (
+                    <>
+                      <SpinnerIcon size={18} />
+                      <span>Đang gửi đáp án...</span>
+                    </>
+                  ) : selectedAnswer ? (
+                    'Xác nhận gửi đáp án →'
+                  ) : (
+                    'Hãy chọn một đáp án ở trên'
+                  )}
                 </button>
               )}
             </div>
@@ -704,7 +753,11 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           {/* Fill in the blank */}
           {currentQuestion.type === 'FILL_IN_THE_BLANK' && (
             <div>
+              <label htmlFor="play-blank-input" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                Nhập câu trả lời của bạn:
+              </label>
               <input
+                id="play-blank-input"
                 type="text"
                 disabled={isAnswerSubmitted || isSubmittingAnswer}
                 maxLength={MAX_ANSWER_LENGTH}
@@ -719,7 +772,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                     submitAnswer(textInputAnswer);
                   }
                 }}
-                placeholder="Nhập câu trả lời của bạn..."
+                placeholder="Gõ đáp án tại đây..."
                 style={{
                   width: '100%',
                   padding: '1rem 1.15rem',
@@ -740,6 +793,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   width: '100%',
                   marginTop: '1rem',
                   padding: '0.95rem',
+                  minHeight: '48px',
                   backgroundColor: 'var(--primary)',
                   color: '#ffffff',
                   border: 'none',
@@ -750,9 +804,20 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   opacity: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 0.6 : 1,
                   boxShadow: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'none' : 'var(--btn-shadow)',
                   transition: 'all 0.15s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
                 }}
               >
-                {isSubmittingAnswer ? '⏳ Đang gửi câu trả lời...' : 'Gửi câu trả lời →'}
+                {isSubmittingAnswer ? (
+                  <>
+                    <SpinnerIcon size={18} />
+                    <span>Đang gửi câu trả lời...</span>
+                  </>
+                ) : (
+                  'Gửi câu trả lời →'
+                )}
               </button>
             </div>
           )}
@@ -770,12 +835,20 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                     color: 'var(--accent-sky)',
                     marginBottom: '1rem',
                     fontSize: '0.95rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
                   }}
                 >
-                  💡 Gợi ý: <strong style={{ color: 'var(--text-primary)' }}>{currentQuestion.crosswordClue}</strong>
+                  <SparklesIcon size={18} />
+                  <span>Gợi ý: <strong style={{ color: 'var(--text-primary)' }}>{currentQuestion.crosswordClue}</strong></span>
                 </div>
               )}
+              <label htmlFor="play-crossword-input" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                Nhập từ khóa ô chữ:
+              </label>
               <input
+                id="play-crossword-input"
                 type="text"
                 disabled={isAnswerSubmitted || isSubmittingAnswer}
                 maxLength={MAX_ANSWER_LENGTH}
@@ -790,7 +863,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                     submitAnswer(textInputAnswer);
                   }
                 }}
-                placeholder="Nhập từ khóa ô chữ (hỗ trợ gõ tiếng Việt có dấu hoặc không dấu)..."
+                placeholder="Nhập từ khóa ô chữ (hỗ trợ tiếng Việt có dấu hoặc không dấu)..."
                 style={{
                   width: '100%',
                   padding: '1rem 1.15rem',
@@ -805,7 +878,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               />
               {textInputAnswer.trim().length > 0 && (
                 <div style={{ marginTop: '0.5rem', fontSize: '0.82rem', color: 'var(--accent-sky)', fontWeight: 700 }}>
-                  🔠 Từ khóa chuẩn hóa: <strong>{normalizeCrosswordPreview(textInputAnswer)}</strong> (
+                  Từ khóa chuẩn hóa: <strong>{normalizeCrosswordPreview(textInputAnswer)}</strong> (
                   {normalizeCrosswordPreview(textInputAnswer).length} ký tự)
                 </div>
               )}
@@ -817,6 +890,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   width: '100%',
                   marginTop: '1rem',
                   padding: '0.95rem',
+                  minHeight: '48px',
                   backgroundColor: 'var(--primary)',
                   color: '#ffffff',
                   border: 'none',
@@ -827,15 +901,27 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   opacity: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 0.6 : 1,
                   boxShadow: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'none' : 'var(--btn-shadow)',
                   transition: 'all 0.15s ease',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.5rem',
                 }}
               >
-                {isSubmittingAnswer ? '⏳ Đang gửi từ khóa...' : 'Gửi từ khóa →'}
+                {isSubmittingAnswer ? (
+                  <>
+                    <SpinnerIcon size={18} />
+                    <span>Đang gửi từ khóa...</span>
+                  </>
+                ) : (
+                  'Gửi từ khóa →'
+                )}
               </button>
             </div>
           )}
 
           {answerError && !isAnswerSubmitted && (
             <div
+              role="alert"
               style={{
                 marginTop: '1rem',
                 padding: '0.75rem 1rem',
@@ -846,15 +932,21 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 fontSize: '0.88rem',
                 fontWeight: 700,
                 textAlign: 'center',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.45rem',
               }}
             >
-              ⚠️ {answerError}
+              <AlertTriangleIcon size={16} />
+              <span>{answerError}</span>
             </div>
           )}
 
           {/* Feedback banner after answer submission */}
           {isAnswerSubmitted && (
             <div
+              role="status"
               style={{
                 marginTop: '1.5rem',
                 textAlign: 'center',
@@ -864,10 +956,14 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 backgroundColor: 'rgba(56, 189, 248, 0.1)',
                 borderRadius: '12px',
                 border: '1px solid rgba(56, 189, 248, 0.3)',
-                animation: 'popIn 0.3s ease-out',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.45rem',
               }}
             >
-              ✓ Đã ghi nhận câu trả lời! Đang đợi công bố kết quả...
+              <CheckIcon size={18} />
+              <span>Đã ghi nhận câu trả lời! Đang đợi công bố kết quả...</span>
             </div>
           )}
         </div>
@@ -902,7 +998,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   boxShadow: personalResult.isCorrect ? '0 0 20px rgba(16, 185, 129, 0.25)' : 'none',
                 }}
               >
-                <span>{personalResult.isCorrect ? '🎉' : '❌'}</span>
+                {personalResult.isCorrect ? <CheckIcon size={22} /> : <XMarkIcon size={22} />}
                 <span>{personalResult.isCorrect ? 'CHÍNH XÁC!' : 'CHƯA ĐÚNG!'}</span>
               </div>
 
@@ -933,7 +1029,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   color: 'var(--accent-amber)',
                 }}
               >
-                <span>⌛</span>
+                <ClockIcon size={20} />
                 <span>CHƯA TRẢ LỜI / HẾT GIỜ</span>
               </div>
               <div style={{ marginTop: '0.65rem', fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-muted)' }}>
@@ -969,9 +1065,14 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   lineHeight: '1.45',
                   paddingTop: '0.75rem',
                   borderTop: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.45rem',
                 }}
               >
-                💡 {explanation}
+                <SparklesIcon size={16} />
+                <span>{explanation}</span>
               </p>
             )}
           </div>
@@ -988,8 +1089,9 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em' }}>
-                🏆 BẢNG XẾP HẠNG (TOP 10)
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <TrophyIcon size={16} />
+                <span>BẢNG XẾP HẠNG (TOP 10)</span>
               </span>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>
                 Tổng {leaderboard.length} thí sinh
@@ -1017,8 +1119,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                           fontWeight: isMe ? 800 : 500,
                         }}
                       >
-                        <td style={{ padding: '0.6rem 0.5rem', color: entry.rank === 1 ? '#facc15' : entry.rank === 2 ? '#cbd5e1' : entry.rank === 3 ? '#d97706' : 'var(--text-muted)' }}>
-                          {entry.rank === 1 ? '🥇 1' : entry.rank === 2 ? '🥈 2' : entry.rank === 3 ? '🥉 3' : `#${entry.rank}`}
+                        <td style={{ padding: '0.6rem 0.5rem', color: entry.rank === 1 ? '#facc15' : entry.rank === 2 ? '#cbd5e1' : entry.rank === 3 ? '#d97706' : 'var(--text-muted)', fontWeight: entry.rank <= 3 ? 800 : 600 }}>
+                          #{entry.rank}
                         </td>
                         <td style={{ padding: '0.6rem 0.5rem', color: isMe ? 'var(--accent-sky)' : 'var(--text-primary)' }}>
                           {entry.displayName} {isMe ? ' (Bạn)' : ''}
@@ -1048,8 +1150,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             boxShadow: 'var(--card-shadow)',
           }}
         >
-          <div style={{ fontSize: '4rem', marginBottom: '0.5rem', animation: 'popIn 0.5s ease-out' }}>
-            🏆
+          <div style={{ color: '#facc15', marginBottom: '1rem', display: 'flex', justifyContent: 'center' }}>
+            <TrophyIcon size={64} />
           </div>
           <h2 style={{ color: '#facc15', fontSize: '2rem', margin: '0 0 0.5rem 0', fontWeight: 900 }}>
             Trận Đấu Kết Thúc!
@@ -1076,8 +1178,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '0.4rem',
-                  padding: '0.4rem 1rem',
+                  gap: '0.45rem',
+                  padding: '0.45rem 1rem',
                   borderRadius: '20px',
                   backgroundColor: 'rgba(56, 189, 248, 0.15)',
                   color: 'var(--accent-sky)',
@@ -1086,7 +1188,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   marginTop: '0.5rem',
                 }}
               >
-                <span>🎯</span>
+                <TrophyIcon size={16} />
                 <span>Vị trí thứ #{finalRank} / {leaderboard.length} người chơi</span>
               </div>
             )}
@@ -1105,6 +1207,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               style={{
                 width: '100%',
                 padding: '0.95rem',
+                minHeight: '48px',
                 backgroundColor: 'var(--primary)',
                 color: '#ffffff',
                 border: 'none',

@@ -165,10 +165,24 @@ export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => 
 });
 export type GameQuestion = z.infer<typeof GameQuestionSchema>;
 
+export const MixedQuestionDistributionSchema = z.object({
+  MULTIPLE_CHOICE: z.number().int().min(0).max(100).default(40),
+  QUICK_BUTTON: z.number().int().min(0).max(100).default(20),
+  FILL_IN_THE_BLANK: z.number().int().min(0).max(100).default(20),
+  CROSSWORD: z.number().int().min(0).max(100).default(20),
+}).refine(
+  (data) => (data.MULTIPLE_CHOICE ?? 0) + (data.QUICK_BUTTON ?? 0) + (data.FILL_IN_THE_BLANK ?? 0) + (data.CROSSWORD ?? 0) === 100,
+  {
+    message: 'Tổng tỷ lệ các loại câu hỏi cho chế độ MIXED phải bằng chính xác 100%.',
+  }
+);
+export type MixedQuestionDistribution = z.infer<typeof MixedQuestionDistributionSchema>;
+
 export const GameSettingsSchema = z.object({
   questionCount: z.number().int().min(1).max(20).default(5),
   timePerQuestion: z.number().int().min(5).max(120).default(20),
   scoringMode: ScoringModeEnum.default('STANDARD'),
+  mixedDistribution: MixedQuestionDistributionSchema.optional(),
 });
 export type GameSettings = z.infer<typeof GameSettingsSchema>;
 
@@ -213,6 +227,7 @@ export const GenerateGameRequestSchema = z.object({
   password: z.string().trim().max(100).optional(),
   topicFocus: z.string().trim().max(300).optional(),
   sectionFilter: z.array(z.string().trim().min(1)).optional(),
+  mixedDistribution: MixedQuestionDistributionSchema.optional(),
 }).refine(data => data.sourceId || (data.sourceIds && data.sourceIds.length > 0) || (data.sources && data.sources.length > 0), {
   message: 'Either "sourceId", "sourceIds", or "sources" must be provided.',
   path: ['sourceId'],
@@ -227,6 +242,7 @@ export const UpdateGameQuestionsRequestSchema = z.object({
     .object({
       timePerQuestion: z.number().int().min(5).max(120).optional(),
       scoringMode: ScoringModeEnum.optional(),
+      mixedDistribution: MixedQuestionDistributionSchema.optional(),
     })
     .optional(),
   isPublic: z.boolean().optional(),

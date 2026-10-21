@@ -1,4 +1,22 @@
 import React, { useEffect, useState } from 'react';
+import {
+  AlertTriangleIcon,
+  ArrowLeftIcon,
+  BarChartIcon,
+  BookOpenIcon,
+  CpuIcon,
+  FileTextIcon,
+  FlameIcon,
+  GamepadIcon,
+  GlobeIcon,
+  RefreshIcon,
+  SearchIcon,
+  ShieldIcon,
+  SpinnerIcon,
+  TargetIcon,
+  TrashIcon,
+  UsersIcon,
+} from '../components/Icons.js';
 import { useToast } from '../components/ToastContext.js';
 import {
   deleteAdminGame,
@@ -19,7 +37,7 @@ import type {
 
 interface AdminPageProps {
   currentUser: AuthenticatedUser | null;
-  onOpenAuthModal: () => void;
+  onOpenAuthModal?: () => void;
   onNavigateHome: () => void;
 }
 
@@ -27,7 +45,6 @@ type AdminTab = 'overview' | 'users' | 'games' | 'ops';
 
 export const AdminPage: React.FC<AdminPageProps> = ({
   currentUser,
-  onOpenAuthModal,
   onNavigateHome,
 }) => {
   const toast = useToast();
@@ -46,13 +63,25 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [gameSearch, setGameSearch] = useState('');
   const [gameStatusFilter, setGameStatusFilter] = useState('ALL');
   const [processingGameId, setProcessingGameId] = useState<string | null>(null);
+  const [deleteConfirmGame, setDeleteConfirmGame] = useState<PersistedGameSummary | null>(null);
 
   // Operations: Rooms & AI logs
-  const [activeRooms, setActiveRooms] = useState<any[]>([]);
-  const [historicalRooms, setHistoricalRooms] = useState<any[]>([]);
+  const [, setActiveRooms] = useState<any[]>([]);
+  const [, setHistoricalRooms] = useState<any[]>([]);
   const [aiLogs, setAiLogs] = useState<AdminAiLogRecord[]>([]);
 
   const isUserAdmin = currentUser?.role === 'ADMIN';
+
+  // Handle ESC key for modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && deleteConfirmGame && !processingGameId) {
+        setDeleteConfirmGame(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [deleteConfirmGame, processingGameId]);
 
   useEffect(() => {
     if (!currentUser || !isUserAdmin) return;
@@ -146,14 +175,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
   };
 
-  const handleDeleteGame = async (game: PersistedGameSummary) => {
-    if (!window.confirm(`Bạn có chắc muốn xóa vĩnh viễn bộ câu hỏi "${game.title}"?`)) {
-      return;
-    }
+  const executeDeleteGame = async (game: PersistedGameSummary) => {
     setProcessingGameId(game.gameId);
     try {
       await deleteAdminGame(game.gameId);
       toast.success(`Đã xóa thành công game "${game.title}".`, 'Xóa thành công');
+      setDeleteConfirmGame(null);
       loadGames();
     } catch (err: any) {
       toast.error(err.message || 'Không thể xóa game.', 'Lỗi xóa');
@@ -162,12 +189,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
   };
 
-  // 1. Trường hợp chưa đăng nhập
+  // 1. Trường hợp chưa đăng nhập / chưa có phiên Admin
   if (!currentUser) {
     return (
       <div
         style={{
-          maxWidth: '520px',
+          maxWidth: '560px',
           margin: '3rem auto',
           padding: '2.5rem',
           borderRadius: '16px',
@@ -177,18 +204,41 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           boxShadow: 'var(--card-shadow)',
         }}
       >
-        <div style={{ fontSize: '3rem', marginBottom: '0.85rem' }}>🛡️</div>
-        <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.4rem', fontWeight: 900 }}>
+        <div
+          style={{
+            width: '64px',
+            height: '64px',
+            borderRadius: '50%',
+            backgroundColor: 'rgba(56, 189, 248, 0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1.25rem',
+            color: 'var(--accent-sky)',
+          }}
+        >
+          <ShieldIcon size={32} />
+        </div>
+        <h2 style={{ margin: '0 0 0.75rem 0', fontSize: '1.4rem', fontWeight: 900, color: 'var(--text-primary)' }}>
           Khu Vực Quản Trị Hệ Thống
         </h2>
-        <p style={{ margin: '0 0 1.5rem 0', color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: 1.5 }}>
-          Trang quản trị chỉ dành riêng cho tài khoản có quyền Quản trị viên (Admin). Vui lòng đăng nhập để tiếp tục.
+        <p style={{ margin: '0 0 1rem 0', color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: 1.6 }}>
+          Hệ thống hiện tại đã chuyển sang cơ chế quản lý phi tập trung: <strong>Mật khẩu bảo vệ riêng cho từng Bộ câu hỏi</strong> trực tiếp tại <strong>Kho Game</strong> và <strong>Tạo Game</strong>. Người tạo có toàn quyền chỉnh sửa và xóa game của mình mà không cần tài khoản Quản trị viên chung.
         </p>
-        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
+        <p style={{ margin: '0 0 1.75rem 0', color: 'var(--text-muted)', fontSize: '0.85rem', lineHeight: 1.5 }}>
+          Bảng điều khiển Quản trị viên Trung tâm này chỉ mở khi có phiên làm việc Quản trị viên được cấp từ hệ thống máy chủ.
+        </p>
+        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
           <button
             type="button"
-            onClick={onOpenAuthModal}
+            onClick={() => {
+              window.location.search = '?tab=analytics';
+            }}
             style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              minHeight: '44px',
               padding: '0.75rem 1.5rem',
               borderRadius: '10px',
               border: 'none',
@@ -200,12 +250,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               boxShadow: 'var(--btn-shadow)',
             }}
           >
-            🔑 Đăng Nhập Admin
+            <BookOpenIcon size={18} />
+            Đến Kho Game Quản Lý
           </button>
           <button
             type="button"
             onClick={onNavigateHome}
             style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              minHeight: '44px',
               padding: '0.75rem 1.25rem',
               borderRadius: '10px',
               border: '1px solid var(--border-strong)',
@@ -216,6 +271,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               cursor: 'pointer',
             }}
           >
+            <ArrowLeftIcon size={18} />
             Về Trang Chủ
           </button>
         </div>
@@ -238,7 +294,21 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           boxShadow: 'var(--card-shadow)',
         }}
       >
-        <div style={{ fontSize: '3.2rem', marginBottom: '0.85rem' }}>⛔</div>
+        <div
+          style={{
+            width: '64px',
+            height: '64px',
+            borderRadius: '50%',
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            margin: '0 auto 1.25rem',
+            color: 'var(--accent-rose)',
+          }}
+        >
+          <AlertTriangleIcon size={32} />
+        </div>
         <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.4rem', fontWeight: 900, color: 'var(--accent-rose)' }}>
           Truy Cập Bị Từ Chối (403 ACCESS_DENIED)
         </h2>
@@ -249,6 +319,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           type="button"
           onClick={onNavigateHome}
           style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            minHeight: '44px',
             padding: '0.75rem 1.5rem',
             borderRadius: '10px',
             border: 'none',
@@ -259,6 +333,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             cursor: 'pointer',
           }}
         >
+          <ArrowLeftIcon size={18} />
           Quay lại Trang Chủ
         </button>
       </div>
@@ -282,8 +357,19 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         }}
       >
         <div>
-          <h1 style={{ margin: '0 0 0.25rem 0', fontSize: '1.6rem', fontWeight: 900, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span>🛡️</span> Quản Trị Hệ Thống (Admin Panel)
+          <h1
+            style={{
+              margin: '0 0 0.35rem 0',
+              fontSize: '1.6rem',
+              fontWeight: 900,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.6rem',
+              color: 'var(--text-primary)',
+            }}
+          >
+            <ShieldIcon size={24} style={{ color: 'var(--primary)' }} />
+            <span>Quản Trị Hệ Thống (Admin Panel)</span>
           </h1>
           <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
             Quản lý người dùng, kiểm duyệt bộ câu hỏi và theo dõi hạ tầng thời gian thực.
@@ -292,64 +378,85 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
         {/* Tab Menu */}
         <div
+          role="tablist"
           style={{
             display: 'flex',
             gap: '0.35rem',
             backgroundColor: 'var(--bg-input)',
-            padding: '0.25rem',
+            padding: '0.3rem',
             borderRadius: '10px',
             border: '1px solid var(--border-subtle)',
+            flexWrap: 'wrap',
           }}
         >
           {[
-            { id: 'overview', label: '📊 Tổng Quan' },
-            { id: 'users', label: '👥 Người Dùng' },
-            { id: 'games', label: '🎮 Kiểm Duyệt Game' },
-            { id: 'ops', label: '⚙️ Vận Hành & AI' },
-          ].map((tab) => (
-            <button
-              key={tab.id}
-              type="button"
-              onClick={() => setActiveTab(tab.id as AdminTab)}
-              style={{
-                padding: '0.55rem 0.95rem',
-                borderRadius: '8px',
-                border: 'none',
-                backgroundColor: activeTab === tab.id ? 'var(--primary)' : 'transparent',
-                color: activeTab === tab.id ? '#ffffff' : 'var(--text-secondary)',
-                fontWeight: 700,
-                fontSize: '0.85rem',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
+            { id: 'overview', label: 'Tổng Quan', icon: <BarChartIcon size={15} /> },
+            { id: 'users', label: 'Người Dùng', icon: <UsersIcon size={15} /> },
+            { id: 'games', label: 'Kiểm Duyệt Game', icon: <GamepadIcon size={15} /> },
+            { id: 'ops', label: 'Vận Hành & AI', icon: <CpuIcon size={15} /> },
+          ].map((tab) => {
+            const isCurrent = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                role="tab"
+                aria-selected={isCurrent}
+                onClick={() => setActiveTab(tab.id as AdminTab)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  minHeight: '40px',
+                  padding: '0.55rem 0.95rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: isCurrent ? 'var(--primary)' : 'transparent',
+                  color: isCurrent ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  transition: 'background-color 0.15s ease, color 0.15s ease',
+                }}
+              >
+                {tab.icon}
+                {tab.label}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       {/* Thông báo lỗi nếu có */}
       {errorMessage && (
         <div
+          role="alert"
           style={{
-            backgroundColor: 'rgba(239, 68, 68, 0.15)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
             border: '1px solid var(--accent-rose)',
             borderRadius: '10px',
             padding: '1rem',
             color: 'var(--accent-rose)',
             marginBottom: '1.5rem',
+            fontSize: '0.9rem',
+            fontWeight: 600,
           }}
         >
-          ⚠️ {errorMessage}
+          <AlertTriangleIcon size={20} />
+          <span>{errorMessage}</span>
         </div>
       )}
 
       {/* Loading state */}
       {isLoading && (
-        <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-secondary)' }}>
-          <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⏳</div>
-          <div>Đang tải dữ liệu quản trị...</div>
+        <div style={{ textAlign: 'center', padding: '3.5rem 1rem', color: 'var(--text-secondary)' }}>
+          <div style={{ marginBottom: '0.75rem', color: 'var(--primary)' }}>
+            <SpinnerIcon size={32} />
+          </div>
+          <div style={{ fontWeight: 600, fontSize: '0.95rem' }}>Đang tải dữ liệu quản trị...</div>
         </div>
       )}
 
@@ -365,12 +472,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             }}
           >
             {[
-              { label: 'Tổng Người Dùng', val: overview.totalUsers, icon: '👥', color: '#38bdf8' },
-              { label: 'Tổng Bộ Câu Hỏi', val: overview.totalGames, icon: '🎮', color: '#818cf8' },
-              { label: 'Game Đã Xuất Bản', val: overview.publishedGames, icon: '🌐', color: '#34d399' },
-              { label: 'Bản Nháp (Draft)', val: overview.draftGames, icon: '📝', color: '#fbbf24' },
-              { label: 'Lượt Chơi Đơn', val: overview.totalSessions, icon: '🎯', color: '#f472b6' },
-              { label: 'Phòng Multiplayer Đang Mở', val: overview.activeRoomsCount, icon: '🔥', color: '#fb7185' },
+              { label: 'Tổng Người Dùng', val: overview.totalUsers, icon: <UsersIcon size={20} />, color: '#38bdf8' },
+              { label: 'Tổng Bộ Câu Hỏi', val: overview.totalGames, icon: <GamepadIcon size={20} />, color: '#818cf8' },
+              { label: 'Game Đã Xuất Bản', val: overview.publishedGames, icon: <GlobeIcon size={20} />, color: '#34d399' },
+              { label: 'Bản Nháp (Draft)', val: overview.draftGames, icon: <FileTextIcon size={20} />, color: '#fbbf24' },
+              { label: 'Lượt Chơi Đơn', val: overview.totalSessions, icon: <TargetIcon size={20} />, color: '#f472b6' },
+              { label: 'Phòng Multiplayer Đang Mở', val: overview.activeRoomsCount, icon: <FlameIcon size={20} />, color: '#fb7185' },
             ].map((card, i) => (
               <div
                 key={i}
@@ -384,7 +491,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
                   <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', fontWeight: 600 }}>{card.label}</span>
-                  <span style={{ fontSize: '1.4rem' }}>{card.icon}</span>
+                  <span style={{ color: card.color }}>{card.icon}</span>
                 </div>
                 <div style={{ fontSize: '1.8rem', fontWeight: 900, color: card.color }}>
                   {card.val}
@@ -402,14 +509,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               padding: '1.5rem',
             }}
           >
-            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', fontWeight: 800 }}>
-              🔥 Phòng Multiplayer Đang Hoạt Động
+            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.1rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <FlameIcon size={20} style={{ color: 'var(--accent-rose)' }} />
+              <span>Phòng Multiplayer Đang Hoạt Động</span>
             </h3>
             {overview.activeRooms && overview.activeRooms.length > 0 ? (
-              <div style={{ overflowX: 'auto' }}>
+              <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
                   <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-secondary)' }}>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                       <th style={{ padding: '0.75rem' }}>Mã Phòng</th>
                       <th style={{ padding: '0.75rem' }}>Tên Trò Chơi</th>
                       <th style={{ padding: '0.75rem' }}>Trạng Thái</th>
@@ -420,15 +528,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   <tbody>
                     {overview.activeRooms.map((room) => (
                       <tr key={room.roomId} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                        <td style={{ padding: '0.75rem', fontWeight: 800, color: 'var(--accent-sky)' }}>{room.roomCode}</td>
+                        <td style={{ padding: '0.75rem', fontWeight: 800, color: 'var(--accent-sky)', whiteSpace: 'nowrap' }}>{room.roomCode}</td>
                         <td style={{ padding: '0.75rem' }}>{room.title}</td>
-                        <td style={{ padding: '0.75rem' }}>
+                        <td style={{ padding: '0.75rem', whiteSpace: 'nowrap' }}>
                           <span style={{ padding: '0.2rem 0.6rem', borderRadius: '6px', fontSize: '0.78rem', fontWeight: 700, backgroundColor: 'rgba(56, 189, 248, 0.15)', color: 'var(--accent-sky)' }}>
                             {room.state}
                           </span>
                         </td>
-                        <td style={{ padding: '0.75rem', fontWeight: 700 }}>{room.playerCount} người</td>
-                        <td style={{ padding: '0.75rem' }}>{room.currentQuestionIndex + 1} / {room.totalQuestions}</td>
+                        <td style={{ padding: '0.75rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{room.playerCount} người</td>
+                        <td style={{ padding: '0.75rem', whiteSpace: 'nowrap' }}>{room.currentQuestionIndex + 1} / {room.totalQuestions}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -453,31 +561,38 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             padding: '1.5rem',
           }}
         >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
-            <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>
-              Danh Sách Tài Khoản ({users.length})
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+            <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <UsersIcon size={20} style={{ color: 'var(--accent-sky)' }} />
+              <span>Danh Sách Tài Khoản ({users.length})</span>
             </h3>
             <button
               type="button"
               onClick={loadUsers}
               style={{
-                padding: '0.45rem 0.85rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                minHeight: '40px',
+                padding: '0.5rem 0.95rem',
                 borderRadius: '8px',
                 border: '1px solid var(--border-strong)',
                 backgroundColor: 'var(--bg-input)',
                 color: 'var(--text-secondary)',
                 fontSize: '0.82rem',
+                fontWeight: 600,
                 cursor: 'pointer',
               }}
             >
-              🔄 Làm mới
+              <RefreshIcon size={14} />
+              <span>Làm mới</span>
             </button>
           </div>
 
-          <div style={{ overflowX: 'auto' }}>
+          <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-secondary)' }}>
+                <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                   <th style={{ padding: '0.75rem' }}>Tên hiển thị</th>
                   <th style={{ padding: '0.75rem' }}>Email</th>
                   <th style={{ padding: '0.75rem' }}>Vai trò</th>
@@ -488,9 +603,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               <tbody>
                 {users.map((u) => (
                   <tr key={u.userId} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                    <td style={{ padding: '0.75rem', fontWeight: 700 }}>{u.displayName}</td>
-                    <td style={{ padding: '0.75rem', color: 'var(--text-secondary)' }}>{u.email}</td>
-                    <td style={{ padding: '0.75rem' }}>
+                    <td style={{ padding: '0.75rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{u.displayName}</td>
+                    <td style={{ padding: '0.75rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{u.email}</td>
+                    <td style={{ padding: '0.75rem', whiteSpace: 'nowrap' }}>
                       <span
                         style={{
                           padding: '0.2rem 0.6rem',
@@ -504,8 +619,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                         {u.role}
                       </span>
                     </td>
-                    <td style={{ padding: '0.75rem', fontWeight: 700 }}>{u.gameCount}</td>
-                    <td style={{ padding: '0.75rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                    <td style={{ padding: '0.75rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{u.gameCount}</td>
+                    <td style={{ padding: '0.75rem', color: 'var(--text-muted)', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
                       {new Date(u.createdAt).toLocaleString('vi-VN')}
                     </td>
                   </tr>
@@ -527,27 +642,43 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           }}
         >
           {/* Bộ lọc tìm kiếm */}
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem' }}>
-            <input
-              type="text"
-              value={gameSearch}
-              onChange={(e) => setGameSearch(e.target.value)}
-              placeholder="🔍 Tìm theo tiêu đề game..."
-              style={{
-                flex: 1,
-                minWidth: '220px',
-                padding: '0.6rem 0.85rem',
-                borderRadius: '8px',
-                backgroundColor: 'var(--bg-input)',
-                border: '1px solid var(--border-strong)',
-                color: 'var(--text-primary)',
-                fontSize: '0.88rem',
-              }}
-            />
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginBottom: '1.25rem', alignItems: 'center' }}>
+            <label htmlFor="admin-game-search" className="sr-only">
+              Tìm theo tiêu đề game
+            </label>
+            <div style={{ position: 'relative', flex: 1, minWidth: '220px' }}>
+              <input
+                id="admin-game-search"
+                type="text"
+                value={gameSearch}
+                onChange={(e) => setGameSearch(e.target.value)}
+                placeholder="Tìm theo tiêu đề game..."
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  minHeight: '44px',
+                  padding: '0.6rem 0.85rem 0.6rem 2.25rem',
+                  borderRadius: '8px',
+                  backgroundColor: 'var(--bg-input)',
+                  border: '1px solid var(--border-strong)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.88rem',
+                }}
+              />
+              <span style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}>
+                <SearchIcon size={16} />
+              </span>
+            </div>
+
+            <label htmlFor="admin-game-status" className="sr-only">
+              Lọc theo trạng thái game
+            </label>
             <select
+              id="admin-game-status"
               value={gameStatusFilter}
               onChange={(e) => setGameStatusFilter(e.target.value)}
               style={{
+                minHeight: '44px',
                 padding: '0.6rem 0.85rem',
                 borderRadius: '8px',
                 backgroundColor: 'var(--bg-input)',
@@ -560,11 +691,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               <option value="PUBLISHED">Chỉ đã xuất bản</option>
               <option value="DRAFT">Chỉ bản nháp</option>
             </select>
+
             <button
               type="button"
               onClick={() => loadGames(gameSearch, gameStatusFilter)}
               style={{
-                padding: '0.6rem 1rem',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                minHeight: '44px',
+                padding: '0.6rem 1.25rem',
                 borderRadius: '8px',
                 border: 'none',
                 backgroundColor: 'var(--primary)',
@@ -574,15 +710,16 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 cursor: 'pointer',
               }}
             >
-              Lọc
+              <SearchIcon size={16} />
+              <span>Lọc</span>
             </button>
           </div>
 
           {/* Bảng game */}
-          <div style={{ overflowX: 'auto' }}>
+          <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.88rem' }}>
               <thead>
-                <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-secondary)' }}>
+                <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                   <th style={{ padding: '0.75rem' }}>Tiêu Đề Game</th>
                   <th style={{ padding: '0.75rem' }}>Thể Loại</th>
                   <th style={{ padding: '0.75rem' }}>Số Câu</th>
@@ -595,15 +732,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 {games.map((g) => (
                   <tr key={g.gameId} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
                     <td style={{ padding: '0.75rem', fontWeight: 700 }}>
-                      <div>{g.title}</div>
+                      <div style={{ color: 'var(--text-primary)' }}>{g.title}</div>
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>ID: {g.gameId}</div>
                     </td>
-                    <td style={{ padding: '0.75rem', color: 'var(--text-secondary)' }}>{g.gameType}</td>
-                    <td style={{ padding: '0.75rem', fontWeight: 700 }}>{g.questionCount} câu</td>
-                    <td style={{ padding: '0.75rem' }}>
+                    <td style={{ padding: '0.75rem', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>{g.gameType}</td>
+                    <td style={{ padding: '0.75rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{g.questionCount} câu</td>
+                    <td style={{ padding: '0.75rem', whiteSpace: 'nowrap' }}>
                       <span
                         style={{
-                          padding: '0.2rem 0.6rem',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          padding: '0.25rem 0.65rem',
                           borderRadius: '6px',
                           fontSize: '0.75rem',
                           fontWeight: 800,
@@ -611,21 +751,23 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                           color: g.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
                         }}
                       >
-                        {g.isPublic ? '🌐 ĐÃ XUẤT BẢN' : '📝 BẢN NHÁP'}
+                        {g.isPublic ? <GlobeIcon size={12} /> : <FileTextIcon size={12} />}
+                        {g.isPublic ? 'ĐÃ XUẤT BẢN' : 'BẢN NHÁP'}
                       </span>
                     </td>
-                    <td style={{ padding: '0.75rem', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                    <td style={{ padding: '0.75rem', color: 'var(--text-muted)', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
                       {new Date(g.createdAt).toLocaleDateString('vi-VN')}
                     </td>
-                    <td style={{ padding: '0.75rem', textAlign: 'right' }}>
-                      <div style={{ display: 'inline-flex', gap: '0.4rem' }}>
+                    <td style={{ padding: '0.75rem', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <div style={{ display: 'inline-flex', gap: '0.5rem' }}>
                         <button
                           type="button"
                           disabled={processingGameId === g.gameId}
                           onClick={() => handleToggleStatus(g)}
                           style={{
-                            padding: '0.4rem 0.75rem',
-                            borderRadius: '6px',
+                            minHeight: '40px',
+                            padding: '0.45rem 0.85rem',
+                            borderRadius: '8px',
                             border: '1px solid var(--border-strong)',
                             backgroundColor: 'var(--bg-input)',
                             color: g.isPublic ? 'var(--accent-amber)' : 'var(--accent-emerald)',
@@ -639,10 +781,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                         <button
                           type="button"
                           disabled={processingGameId === g.gameId}
-                          onClick={() => handleDeleteGame(g)}
+                          onClick={() => setDeleteConfirmGame(g)}
                           style={{
-                            padding: '0.4rem 0.65rem',
-                            borderRadius: '6px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
+                            minHeight: '40px',
+                            padding: '0.45rem 0.75rem',
+                            borderRadius: '8px',
                             border: '1px solid rgba(239, 68, 68, 0.3)',
                             backgroundColor: 'rgba(239, 68, 68, 0.1)',
                             color: 'var(--accent-rose)',
@@ -651,7 +797,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                             cursor: 'pointer',
                           }}
                         >
-                          Xóa
+                          <TrashIcon size={14} />
+                          <span>Xóa</span>
                         </button>
                       </div>
                     </td>
@@ -675,14 +822,15 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               padding: '1.5rem',
             }}
           >
-            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.15rem', fontWeight: 800 }}>
-              🧠 Nhật Ký Hoạt Động AI Gần Đây ({aiLogs.length})
+            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.15rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <CpuIcon size={20} style={{ color: 'var(--accent-sky)' }} />
+              <span>Nhật Ký Hoạt Động AI Gần Đây ({aiLogs.length})</span>
             </h3>
             {aiLogs.length > 0 ? (
-              <div style={{ overflowX: 'auto' }}>
+              <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
                 <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
                   <thead>
-                    <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-secondary)' }}>
+                    <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                       <th style={{ padding: '0.6rem' }}>Thời Gian</th>
                       <th style={{ padding: '0.6rem' }}>Model / Provider</th>
                       <th style={{ padding: '0.6rem' }}>Thao Tác</th>
@@ -694,12 +842,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   <tbody>
                     {aiLogs.map((log) => (
                       <tr key={log.log_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                        <td style={{ padding: '0.6rem', color: 'var(--text-muted)' }}>
+                        <td style={{ padding: '0.6rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                           {new Date(log.created_at).toLocaleTimeString('vi-VN')}
                         </td>
-                        <td style={{ padding: '0.6rem', fontWeight: 700 }}>{log.model}</td>
-                        <td style={{ padding: '0.6rem' }}>{log.operation}</td>
-                        <td style={{ padding: '0.6rem' }}>
+                        <td style={{ padding: '0.6rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{log.model}</td>
+                        <td style={{ padding: '0.6rem', whiteSpace: 'nowrap' }}>{log.operation}</td>
+                        <td style={{ padding: '0.6rem', whiteSpace: 'nowrap' }}>
                           <span
                             style={{
                               padding: '0.15rem 0.5rem',
@@ -713,8 +861,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                             {log.status}
                           </span>
                         </td>
-                        <td style={{ padding: '0.6rem' }}>{log.latency_ms} ms</td>
-                        <td style={{ padding: '0.6rem', fontWeight: 700 }}>{log.generated_questions}</td>
+                        <td style={{ padding: '0.6rem', whiteSpace: 'nowrap' }}>{log.latency_ms} ms</td>
+                        <td style={{ padding: '0.6rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{log.generated_questions}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -725,6 +873,109 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                 Chưa có nhật ký AI được ghi nhận.
               </p>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* MODAL XÁC NHẬN XÓA GAME (Thay thế window.confirm - Issue UX-03) */}
+      {deleteConfirmGame && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-delete-title"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !processingGameId) {
+              setDeleteConfirmGame(null);
+            }
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '16px',
+              maxWidth: '460px',
+              width: '100%',
+              padding: '1.75rem',
+              boxShadow: 'var(--card-shadow)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div
+                style={{
+                  width: '44px',
+                  height: '44px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--accent-rose)',
+                  flexShrink: 0,
+                }}
+              >
+                <TrashIcon size={22} />
+              </div>
+              <h3 id="confirm-delete-title" style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                Xác Nhận Xóa Bộ Câu Hỏi
+              </h3>
+            </div>
+            <p style={{ margin: '0 0 1.25rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem', lineHeight: 1.5 }}>
+              Bạn có chắc chắn muốn xóa vĩnh viễn bộ câu hỏi <strong>"{deleteConfirmGame.title}"</strong> (ID: {deleteConfirmGame.gameId}) không? Thao tác này không thể hoàn tác.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                disabled={Boolean(processingGameId)}
+                onClick={() => setDeleteConfirmGame(null)}
+                style={{
+                  minHeight: '44px',
+                  padding: '0.65rem 1.25rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  fontWeight: 700,
+                  fontSize: '0.88rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Hủy Bỏ
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(processingGameId)}
+                onClick={() => executeDeleteGame(deleteConfirmGame)}
+                style={{
+                  minHeight: '44px',
+                  padding: '0.65rem 1.25rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: 'var(--accent-rose)',
+                  color: '#ffffff',
+                  fontWeight: 800,
+                  fontSize: '0.88rem',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                }}
+              >
+                {processingGameId ? <SpinnerIcon size={16} /> : <TrashIcon size={16} />}
+                {processingGameId ? 'Đang Xóa...' : 'Xác Nhận Xóa'}
+              </button>
+            </div>
           </div>
         </div>
       )}

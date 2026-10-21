@@ -2,6 +2,26 @@ import React, { useEffect, useState } from 'react';
 import { GameModeSelectionModal } from '../components/GameModeSelectionModal.js';
 import { useToast } from '../components/ToastContext.js';
 import {
+  AlertTriangleIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  BookOpenIcon,
+  CheckIcon,
+  CopyIcon,
+  EyeIcon,
+  GamepadIcon,
+  LockIcon,
+  PencilIcon,
+  PlusIcon,
+  QrCodeIcon,
+  RefreshIcon,
+  SearchIcon,
+  SpinnerIcon,
+  TrashIcon,
+  UsersIcon,
+  XMarkIcon,
+} from '../components/Icons.js';
+import {
   createRoom,
   deleteSavedGame,
   downloadGameExport,
@@ -77,6 +97,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTypeFilter, setSelectedTypeFilter] = useState<string>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'PUBLISHED' | 'DRAFT'>('ALL');
+  const [viewLayout, setViewLayout] = useState<'grid' | 'list'>('grid');
 
   // Chi tiết & chỉnh sửa bộ câu hỏi đang mở
   const [activeGameSpec, setActiveGameSpec] = useState<GameSpecification | null>(null);
@@ -302,17 +323,29 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
 
   const handleConfirmDelete = async () => {
     if (!confirmDeleteGame) return;
+    const targetGame = confirmDeleteGame;
     setIsDeleting(true);
+
+    // Optimistic UI update: Immediately remove from savedGames list & clear active spec
+    setSavedGames(prev => prev.filter(g => g.gameId !== targetGame.gameId));
+    setTotalCount(prev => Math.max(0, prev - 1));
+    if (activeGameSpec?.gameId === targetGame.gameId) {
+      setActiveGameSpec(null);
+    }
+    setConfirmDeleteGame(null);
+
     try {
-      await deleteSavedGame(confirmDeleteGame.gameId);
-      toast.success(`Đã xóa bộ câu hỏi "${confirmDeleteGame.title}".`, 'Đã xóa');
-      if (activeGameSpec?.gameId === confirmDeleteGame.gameId) {
-        setActiveGameSpec(null);
-      }
-      setConfirmDeleteGame(null);
-      await loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter);
+      await deleteSavedGame(targetGame.gameId);
+      toast.success(`Đã xóa bộ câu hỏi "${targetGame.title}" thành công.`, 'Xóa thành công');
+      // Background sync to ensure consistency
+      loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter).catch(() => {});
     } catch (err: any) {
-      toast.error(err.message || 'Không thể xóa bộ câu hỏi.', 'Lỗi xóa');
+      // Revert if error
+      toast.error(
+        err.message || 'Không thể xóa bộ câu hỏi. Có thể bộ câu hỏi đang có phòng chơi trực tuyến đang diễn ra hoặc bạn không có quyền xóa.',
+        'Lỗi xóa bộ câu hỏi'
+      );
+      await loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter);
     } finally {
       setIsDeleting(false);
     }
@@ -457,8 +490,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         }}
       >
         <div>
-          <h1 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-            📚 Kho Game & Bộ Câu Hỏi Dùng Chung
+          <h1 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 900, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+            <BookOpenIcon size={28} />
+            <span>Kho Game & Bộ Câu Hỏi Dùng Chung</span>
           </h1>
           <p style={{ margin: '0.35rem 0 0 0', color: 'var(--text-secondary)', fontSize: '0.92rem' }}>
             Quản lý, tìm kiếm, lọc theo trạng thái/thể loại, chỉnh sửa câu hỏi, chia sẻ Link/QR chơi đơn và mở phòng Multiplayer.
@@ -475,12 +509,26 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
             border: '1px solid var(--border-strong)',
             borderRadius: '10px',
             padding: '0.6rem 1.1rem',
+            minHeight: '44px',
             fontWeight: 700,
             fontSize: '0.88rem',
             cursor: isLoading ? 'not-allowed' : 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.45rem',
           }}
         >
-          {isLoading ? '⏳ Đang tải...' : '🔄 Làm mới kho game'}
+          {isLoading ? (
+            <>
+              <SpinnerIcon size={16} />
+              <span>Đang tải...</span>
+            </>
+          ) : (
+            <>
+              <RefreshIcon size={16} />
+              <span>Làm mới kho game</span>
+            </>
+          )}
         </button>
       </div>
 
@@ -502,13 +550,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       >
         <form
           onSubmit={handleSearchSubmit}
-          style={{ display: 'flex', gap: '0.6rem', flex: '1 1 320px' }}
+          style={{ display: 'flex', gap: '0.6rem', flex: '1 1 320px', alignItems: 'center' }}
         >
+          <label htmlFor="analytics-search-input" className="sr-only">
+            Tìm kiếm theo tiêu đề hoặc mô tả bộ câu hỏi
+          </label>
           <input
+            id="analytics-search-input"
             type="text"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="🔍 Tìm kiếm theo tiêu đề hoặc mô tả bộ câu hỏi..."
+            placeholder="Tìm kiếm theo tiêu đề hoặc mô tả bộ câu hỏi..."
             style={{
               flex: 1,
               padding: '0.65rem 0.9rem',
@@ -517,6 +569,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               backgroundColor: 'var(--bg-input)',
               color: 'var(--text-primary)',
               fontSize: '0.88rem',
+              minHeight: '40px',
             }}
           />
           <button
@@ -527,12 +580,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               border: 'none',
               borderRadius: '8px',
               padding: '0.65rem 1rem',
+              minHeight: '40px',
               fontWeight: 800,
               fontSize: '0.86rem',
               cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
             }}
           >
-            Tìm kiếm
+            <SearchIcon size={15} />
+            <span>Tìm kiếm</span>
           </button>
           {searchQuery && (
             <button
@@ -548,22 +606,28 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                 border: '1px solid var(--border-strong)',
                 borderRadius: '8px',
                 padding: '0.65rem 0.85rem',
+                minHeight: '40px',
                 fontWeight: 700,
                 fontSize: '0.84rem',
                 cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
               }}
             >
-              Xóa lọc
+              <XMarkIcon size={14} />
+              <span>Xóa lọc</span>
             </button>
           )}
         </form>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+            <label htmlFor="analytics-status-filter" style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
               Trạng thái:
-            </span>
+            </label>
             <select
+              id="analytics-status-filter"
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as 'ALL' | 'PUBLISHED' | 'DRAFT')}
               style={{
@@ -575,19 +639,21 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                 fontWeight: 700,
                 fontSize: '0.85rem',
                 cursor: 'pointer',
+                minHeight: '40px',
               }}
             >
               <option value="ALL">Tất cả trạng thái</option>
-              <option value="PUBLISHED">🚀 Đã xuất bản</option>
-              <option value="DRAFT">📝 Bản nháp</option>
+              <option value="PUBLISHED">Đã xuất bản</option>
+              <option value="DRAFT">Bản nháp</option>
             </select>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-            <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+            <label htmlFor="analytics-type-filter" style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
               Thể loại:
-            </span>
+            </label>
             <select
+              id="analytics-type-filter"
               value={selectedTypeFilter}
               onChange={(e) => setSelectedTypeFilter(e.target.value)}
               style={{
@@ -599,6 +665,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                 fontWeight: 700,
                 fontSize: '0.85rem',
                 cursor: 'pointer',
+                minHeight: '40px',
               }}
             >
               <option value="ALL">Tất cả ({totalCount})</option>
@@ -614,6 +681,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
 
       {errorMessage && (
         <div
+          role="alert"
           style={{
             padding: '1rem 1.25rem',
             borderRadius: '12px',
@@ -622,9 +690,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
             color: 'var(--accent-rose)',
             marginBottom: '1.5rem',
             fontWeight: 700,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
           }}
         >
-          ⚠️ {errorMessage}
+          <AlertTriangleIcon size={18} />
+          <span>{errorMessage}</span>
         </div>
       )}
 
@@ -657,10 +729,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.75rem' }}>
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                      <label htmlFor="edit-spec-title" style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
                         Tiêu đề bộ câu hỏi:
                       </label>
                       <input
+                        id="edit-spec-title"
                         type="text"
                         value={editTitle}
                         onChange={(e) => setEditTitle(e.target.value)}
@@ -674,14 +747,16 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           fontWeight: 800,
                           fontSize: '0.95rem',
                           boxSizing: 'border-box',
+                          minHeight: '40px',
                         }}
                       />
                     </div>
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
+                      <label htmlFor="edit-spec-desc" style={{ display: 'block', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.25rem' }}>
                         Mô tả:
                       </label>
                       <input
+                        id="edit-spec-desc"
                         type="text"
                         value={editDescription}
                         onChange={(e) => setEditDescription(e.target.value)}
@@ -694,6 +769,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           color: 'var(--text-primary)',
                           fontSize: '0.88rem',
                           boxSizing: 'border-box',
+                          minHeight: '40px',
                         }}
                       />
                     </div>
@@ -702,10 +778,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   {/* Cấu hình thời gian, điểm số & trạng thái xuất bản */}
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.75rem' }}>
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                      <label htmlFor="edit-spec-time" style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
                         Thời gian mỗi câu (5-60 giây):
                       </label>
                       <input
+                        id="edit-spec-time"
                         type="number"
                         min={5}
                         max={60}
@@ -720,15 +797,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           color: 'var(--text-primary)',
                           fontWeight: 700,
                           boxSizing: 'border-box',
+                          minHeight: '40px',
                         }}
                       />
                     </div>
 
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                      <label htmlFor="edit-spec-score" style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
                         Chế độ tính điểm:
                       </label>
                       <select
+                        id="edit-spec-score"
                         value={editScoringMode}
                         onChange={(e) => setEditScoringMode(e.target.value as ScoringMode)}
                         style={{
@@ -739,6 +818,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           backgroundColor: 'var(--bg-input)',
                           color: 'var(--text-primary)',
                           fontWeight: 700,
+                          minHeight: '40px',
                         }}
                       >
                         <option value="SPEED_BONUS">Thưởng tốc độ (Speed Bonus)</option>
@@ -748,10 +828,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     </div>
 
                     <div>
-                      <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                      <label htmlFor="edit-spec-status" style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
                         Trạng thái xuất bản:
                       </label>
                       <select
+                        id="edit-spec-status"
                         value={editIsPublic ? 'PUBLISHED' : 'DRAFT'}
                         onChange={(e) => setEditIsPublic(e.target.value === 'PUBLISHED')}
                         style={{
@@ -762,10 +843,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           backgroundColor: 'var(--bg-input)',
                           color: editIsPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
                           fontWeight: 800,
+                          minHeight: '40px',
                         }}
                       >
-                        <option value="PUBLISHED">🚀 Đã xuất bản (Cho phép chơi & mở phòng)</option>
-                        <option value="DRAFT">📝 Bản nháp (Ẩn khỏi người chơi)</option>
+                        <option value="PUBLISHED">Đã xuất bản (Cho phép chơi & mở phòng)</option>
+                        <option value="DRAFT">Bản nháp (Ẩn khỏi người chơi)</option>
                       </select>
                     </div>
                   </div>
@@ -795,9 +877,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         borderRadius: '6px',
                         fontSize: '0.75rem',
                         fontWeight: 800,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.3rem',
                       }}
                     >
-                      {activeGameSpec.isPublic ? '🚀 Đã xuất bản' : '📝 Bản nháp'}
+                      {activeGameSpec.isPublic ? <CheckIcon size={12} /> : <PencilIcon size={12} />}
+                      <span>{activeGameSpec.isPublic ? 'Đã xuất bản' : 'Bản nháp'}</span>
                     </span>
                     <span style={{ fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
                       • {activeGameSpec.questions.length} câu hỏi • {activeGameSpec.settings.timePerQuestion}s/câu • Điểm: {formatScoringModeName(activeGameSpec.settings.scoringMode)}
@@ -826,12 +912,26 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       border: 'none',
                       borderRadius: '8px',
                       padding: '0.55rem 1rem',
+                      minHeight: '40px',
                       fontWeight: 800,
                       fontSize: '0.84rem',
                       cursor: isSavingEdits ? 'not-allowed' : 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
                     }}
                   >
-                    {isSavingEdits ? '⏳ Đang lưu...' : '💾 Lưu Thay Đổi'}
+                    {isSavingEdits ? (
+                      <>
+                        <SpinnerIcon size={16} />
+                        <span>Đang lưu...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckIcon size={16} />
+                        <span>Lưu Thay Đổi</span>
+                      </>
+                    )}
                   </button>
                   <button
                     type="button"
@@ -842,12 +942,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       border: '1px solid var(--border-strong)',
                       borderRadius: '8px',
                       padding: '0.55rem 0.9rem',
+                      minHeight: '40px',
                       fontWeight: 800,
                       fontSize: '0.84rem',
                       cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
                     }}
                   >
-                    ➕ Thêm câu hỏi
+                    <PlusIcon size={15} />
+                    <span>Thêm câu hỏi</span>
                   </button>
                   <button
                     type="button"
@@ -861,6 +966,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       border: '1px solid var(--border-strong)',
                       borderRadius: '8px',
                       padding: '0.55rem 0.9rem',
+                      minHeight: '40px',
                       fontWeight: 700,
                       fontSize: '0.84rem',
                       cursor: 'pointer',
@@ -880,12 +986,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       border: 'none',
                       borderRadius: '8px',
                       padding: '0.55rem 0.95rem',
+                      minHeight: '40px',
                       fontWeight: 800,
                       fontSize: '0.83rem',
                       cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.4rem',
                     }}
                   >
-                    🎯 Chơi đơn
+                    <GamepadIcon size={16} />
+                    <span>Chơi đơn</span>
                   </button>
                   {activeGameSpec.isPublic && (
                     <>
@@ -905,12 +1016,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           border: '1px solid var(--accent-sky)',
                           borderRadius: '8px',
                           padding: '0.55rem 0.9rem',
+                          minHeight: '40px',
                           fontWeight: 800,
                           fontSize: '0.83rem',
                           cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
                         }}
                       >
-                        🔗 Link / QR Chơi đơn
+                        <QrCodeIcon size={16} />
+                        <span>Link / QR Chơi đơn</span>
                       </button>
                       <button
                         type="button"
@@ -928,14 +1044,26 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           border: 'none',
                           borderRadius: '8px',
                           padding: '0.55rem 0.95rem',
+                          minHeight: '40px',
                           fontWeight: 800,
                           fontSize: '0.83rem',
                           cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.4rem',
                         }}
                       >
-                        {isOpeningRoomGameId === activeGameSpec.gameId
-                          ? '⏳ Đang mở phòng...'
-                          : '🏟️ Mở phòng Multiplayer'}
+                        {isOpeningRoomGameId === activeGameSpec.gameId ? (
+                          <>
+                            <SpinnerIcon size={16} />
+                            <span>Đang mở phòng...</span>
+                          </>
+                        ) : (
+                          <>
+                            <UsersIcon size={16} />
+                            <span>Mở phòng Multiplayer</span>
+                          </>
+                        )}
                       </button>
                     </>
                   )}
@@ -948,12 +1076,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       border: '1px solid var(--border-strong)',
                       borderRadius: '8px',
                       padding: '0.55rem 0.9rem',
+                      minHeight: '40px',
                       fontWeight: 800,
                       fontSize: '0.84rem',
                       cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
                     }}
                   >
-                    ✏️ Sửa game
+                    <PencilIcon size={15} />
+                    <span>Sửa game</span>
                   </button>
                   <button
                     type="button"
@@ -964,12 +1097,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       border: '1px solid var(--border-strong)',
                       borderRadius: '8px',
                       padding: '0.55rem 0.85rem',
+                      minHeight: '40px',
                       fontWeight: 800,
                       fontSize: '0.82rem',
                       cursor: 'pointer',
                     }}
                   >
-                    📥 Xuất CSV
+                    Xuất CSV
                   </button>
                   <button
                     type="button"
@@ -980,12 +1114,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       border: '1px solid var(--border-strong)',
                       borderRadius: '8px',
                       padding: '0.55rem 0.85rem',
+                      minHeight: '40px',
                       fontWeight: 800,
                       fontSize: '0.82rem',
                       cursor: 'pointer',
                     }}
                   >
-                    📄 Xuất JSON
+                    Xuất JSON
                   </button>
                 </>
               )}
@@ -999,12 +1134,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   border: '1px solid var(--border-subtle)',
                   borderRadius: '8px',
                   padding: '0.55rem 0.8rem',
+                  minHeight: '40px',
                   fontWeight: 700,
                   fontSize: '0.82rem',
                   cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.3rem',
                 }}
               >
-                ✕ Đóng
+                <XMarkIcon size={14} />
+                <span>Đóng</span>
               </button>
             </div>
           </div>
@@ -1080,7 +1220,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         type="button"
                         onClick={() => handleDuplicateEditQuestion(idx)}
                         style={{
-                          padding: '0.25rem 0.55rem',
+                          padding: '0.35rem 0.65rem',
                           borderRadius: '6px',
                           border: '1px solid var(--border-strong)',
                           backgroundColor: 'var(--bg-surface)',
@@ -1088,9 +1228,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           fontSize: '0.75rem',
                           fontWeight: 800,
                           cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
                         }}
                       >
-                        📋 Nhân bản
+                        <CopyIcon size={14} />
+                        <span>Nhân bản</span>
                       </button>
                       {activeGameSpec.gameType === 'MIXED' && (
                         <select
@@ -1122,13 +1266,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           color: 'var(--accent-rose)',
                           border: '1px solid var(--accent-rose)',
                           borderRadius: '6px',
-                          padding: '0.25rem 0.6rem',
+                          padding: '0.35rem 0.65rem',
                           fontSize: '0.76rem',
                           fontWeight: 800,
                           cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
                         }}
                       >
-                        🗑️ Xóa câu
+                        <TrashIcon size={14} />
+                        <span>Xóa câu</span>
                       </button>
                     </div>
                   )}
@@ -1292,17 +1440,18 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         })}
                       </div>
                     )}
-                    <div style={{ fontSize: '0.82rem', color: 'var(--accent-emerald)', fontWeight: 800 }}>
-                      ✓ Đáp án đúng: {q.correctAnswer}
+                    <div style={{ fontSize: '0.82rem', color: 'var(--accent-emerald)', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                      <CheckIcon size={14} />
+                      <span>Đáp án đúng: {q.correctAnswer}</span>
                     </div>
                     {q.explanation && (
                       <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                        💡 Giải thích: {q.explanation}
+                        Giải thích: {q.explanation}
                       </div>
                     )}
                     {q.sourceReference && (
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                        📌 Nguồn: {q.sourceReference.sourceLocation}
+                        Nguồn: {q.sourceReference.sourceLocation}
                         {q.sourceReference.section ? ` — ${q.sourceReference.section}` : ''}
                         {q.sourceReference.page ? ` (Trang ${q.sourceReference.page})` : ''}
                       </div>
@@ -1335,20 +1484,58 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
             gap: '0.5rem',
           }}
         >
-          <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-            🗂️ Kho Game Dùng Chung ({totalCount} bộ câu hỏi)
+          <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+            <BookOpenIcon size={20} />
+            <span>Kho Game Dùng Chung ({totalCount} bộ câu hỏi)</span>
           </h2>
-          {isDetailLoading && (
-            <span style={{ fontSize: '0.84rem', color: 'var(--accent-sky)', fontWeight: 700 }}>
-              ⏳ Đang tải chi tiết bộ câu hỏi...
-            </span>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            {isDetailLoading && (
+              <span style={{ fontSize: '0.84rem', color: 'var(--accent-sky)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                <SpinnerIcon size={15} />
+                <span>Đang tải chi tiết...</span>
+              </span>
+            )}
+            <div style={{ display: 'inline-flex', backgroundColor: 'var(--bg-input)', padding: '0.2rem', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
+              <button
+                type="button"
+                onClick={() => setViewLayout('grid')}
+                style={{
+                  padding: '0.35rem 0.65rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: viewLayout === 'grid' ? 'var(--primary)' : 'transparent',
+                  color: viewLayout === 'grid' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: 700,
+                  fontSize: '0.78rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Dạng Thẻ (Grid)
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewLayout('list')}
+                style={{
+                  padding: '0.35rem 0.65rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: viewLayout === 'list' ? 'var(--primary)' : 'transparent',
+                  color: viewLayout === 'list' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: 700,
+                  fontSize: '0.78rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Danh Sách (List)
+              </button>
+            </div>
+          </div>
         </div>
 
         {savedGames.length === 0 ? (
           <div
             style={{
-              padding: '2rem 1.25rem',
+              padding: '2.5rem 1.25rem',
               borderRadius: '12px',
               backgroundColor: 'var(--bg-input)',
               border: '1px dashed var(--border-strong)',
@@ -1356,13 +1543,252 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               color: 'var(--text-secondary)',
             }}
           >
-            <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📭</div>
+            <div style={{ color: 'var(--text-muted)', marginBottom: '0.5rem', display: 'flex', justifyContent: 'center' }}>
+              <BookOpenIcon size={36} />
+            </div>
             <div style={{ fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.3rem', fontSize: '1rem' }}>
               Chưa tìm thấy bộ câu hỏi nào
             </div>
             <div style={{ fontSize: '0.88rem' }}>
-              Hãy chuyển sang tab <strong>📋 Tạo Game</strong> để trích xuất tài liệu/URL và tạo bộ câu hỏi mới bằng AI.
+              Hãy chuyển sang tab <strong>Tạo Game</strong> để trích xuất tài liệu/URL và tạo bộ câu hỏi mới bằng AI.
             </div>
+          </div>
+        ) : viewLayout === 'grid' ? (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+              gap: '1.25rem',
+            }}
+          >
+            {savedGames.map((g) => {
+              const isSelected = activeGameSpec?.gameId === g.gameId;
+              const typeColorMap: Record<string, string> = {
+                MULTIPLE_CHOICE: '#6366f1',
+                QUICK_BUTTON: '#10b981',
+                FILL_IN_THE_BLANK: '#0ea5e9',
+                CROSSWORD: '#f59e0b',
+                MIXED: '#ec4899',
+              };
+              const accentColor = typeColorMap[g.gameType] || 'var(--primary)';
+
+              return (
+                <div
+                  key={g.gameId}
+                  style={{
+                    borderRadius: '16px',
+                    backgroundColor: 'var(--bg-surface)',
+                    border: isSelected ? `2px solid ${accentColor}` : '1px solid var(--border-subtle)',
+                    boxShadow: isSelected ? `0 0 0 1px ${accentColor}, var(--card-shadow)` : 'var(--card-shadow)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                  }}
+                >
+                  <div style={{ height: '4px', backgroundColor: accentColor, width: '100%' }} />
+
+                  <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', flex: 1 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.35rem' }}>
+                      <span
+                        style={{
+                          backgroundColor: `${accentColor}18`,
+                          color: accentColor,
+                          padding: '0.2rem 0.55rem',
+                          borderRadius: '6px',
+                          fontWeight: 800,
+                          fontSize: '0.72rem',
+                        }}
+                      >
+                        {formatGameTypeName(g.gameType)}
+                      </span>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <span
+                          style={{
+                            backgroundColor: g.isPublic ? 'rgba(16, 185, 129, 0.14)' : 'rgba(245, 158, 11, 0.15)',
+                            color: g.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+                            padding: '0.15rem 0.5rem',
+                            borderRadius: '6px',
+                            fontSize: '0.7rem',
+                            fontWeight: 800,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                          }}
+                        >
+                          {g.isPublic ? <CheckIcon size={11} /> : <PencilIcon size={11} />}
+                          <span>{g.isPublic ? 'Đã xuất bản' : 'Bản nháp'}</span>
+                        </span>
+
+                        {g.passwordProtected && (
+                          <span
+                            title="Có mật khẩu bảo vệ"
+                            style={{
+                              backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                              color: 'var(--accent-rose)',
+                              padding: '0.15rem 0.45rem',
+                              borderRadius: '6px',
+                              fontSize: '0.7rem',
+                              fontWeight: 800,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '0.25rem',
+                            }}
+                          >
+                            <LockIcon size={11} />
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <h3
+                      style={{
+                        margin: '0 0 0.4rem 0',
+                        fontSize: '1.05rem',
+                        fontWeight: 900,
+                        color: 'var(--text-primary)',
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      {g.title}
+                    </h3>
+
+                    {g.description && (
+                      <p
+                        style={{
+                          margin: '0 0 0.85rem 0',
+                          fontSize: '0.82rem',
+                          color: 'var(--text-secondary)',
+                          lineHeight: 1.45,
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        {g.description}
+                      </p>
+                    )}
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: '0.45rem',
+                        fontSize: '0.75rem',
+                        color: 'var(--text-muted)',
+                        marginBottom: '1.15rem',
+                        marginTop: 'auto',
+                      }}
+                    >
+                      <span style={{ padding: '0.15rem 0.45rem', backgroundColor: 'var(--bg-input)', borderRadius: '4px' }}>
+                        {g.questionCount} câu hỏi
+                      </span>
+                      <span style={{ padding: '0.15rem 0.45rem', backgroundColor: 'var(--bg-input)', borderRadius: '4px' }}>
+                        {g.timePerQuestion}s/câu
+                      </span>
+                      <span style={{ padding: '0.15rem 0.45rem', backgroundColor: 'var(--bg-input)', borderRadius: '4px' }}>
+                        {formatScoringModeName(g.scoringMode)}
+                      </span>
+                    </div>
+
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.85rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => handleOpenModeModal(g.gameId)}
+                        style={{
+                          flex: 1,
+                          backgroundColor: 'var(--primary)',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: '8px',
+                          padding: '0.55rem 0.75rem',
+                          minHeight: '40px',
+                          fontWeight: 800,
+                          fontSize: '0.84rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.35rem',
+                          boxShadow: 'var(--btn-shadow)',
+                        }}
+                      >
+                        <GamepadIcon size={15} />
+                        <span>Mở Game</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleViewOrEditGame(g.gameId, false)}
+                        style={{
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border-strong)',
+                          borderRadius: '8px',
+                          padding: '0.55rem 0.65rem',
+                          minHeight: '40px',
+                          fontWeight: 700,
+                          fontSize: '0.8rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                        }}
+                        title="Xem chi tiết & Chỉnh sửa câu hỏi"
+                      >
+                        <PencilIcon size={14} />
+                        <span>Sửa</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSoloShareModal(g)}
+                        style={{
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-secondary)',
+                          border: '1px solid var(--border-strong)',
+                          borderRadius: '8px',
+                          padding: '0.55rem 0.65rem',
+                          minHeight: '40px',
+                          fontWeight: 700,
+                          fontSize: '0.8rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                        }}
+                        title="Mã QR & Link Chơi Đơn"
+                      >
+                        <QrCodeIcon size={14} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setConfirmDeleteGame(g)}
+                        style={{
+                          backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                          color: 'var(--accent-rose)',
+                          border: '1px solid rgba(239, 68, 68, 0.25)',
+                          borderRadius: '8px',
+                          padding: '0.55rem 0.65rem',
+                          minHeight: '40px',
+                          fontWeight: 700,
+                          fontSize: '0.8rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                        }}
+                        title="Xóa bộ câu hỏi"
+                      >
+                        <TrashIcon size={14} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
@@ -1398,9 +1824,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           borderRadius: '6px',
                           fontSize: '0.73rem',
                           fontWeight: 800,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
                         }}
                       >
-                        {g.isPublic ? '🚀 Đã xuất bản' : '📝 Bản nháp'}
+                        {g.isPublic ? <CheckIcon size={12} /> : <PencilIcon size={12} />}
+                        <span>{g.isPublic ? 'Đã xuất bản' : 'Bản nháp'}</span>
                       </span>
                       {g.passwordProtected && (
                         <span
@@ -1412,9 +1842,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             borderRadius: '6px',
                             fontSize: '0.73rem',
                             fontWeight: 800,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
                           }}
                         >
-                          🔒 Có mật khẩu
+                          <LockIcon size={12} />
+                          <span>Có mật khẩu</span>
                         </span>
                       )}
                     </div>
@@ -1463,6 +1897,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         border: 'none',
                         borderRadius: '8px',
                         padding: '0.48rem 0.95rem',
+                        minHeight: '40px',
                         fontWeight: 800,
                         fontSize: '0.82rem',
                         cursor: 'pointer',
@@ -1472,7 +1907,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         boxShadow: 'var(--btn-shadow)',
                       }}
                     >
-                      ▶️ Mở Game
+                      <GamepadIcon size={15} />
+                      <span>Mở Game</span>
                     </button>
 
                     <button
@@ -1484,12 +1920,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         border: '1px solid var(--border-strong)',
                         borderRadius: '8px',
                         padding: '0.48rem 0.8rem',
+                        minHeight: '40px',
                         fontWeight: 700,
                         fontSize: '0.8rem',
                         cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
                       }}
                     >
-                      👁️ Chi tiết
+                      <EyeIcon size={14} />
+                      <span>Chi tiết</span>
                     </button>
 
                     <button
@@ -1501,12 +1942,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         border: '1px solid var(--border-strong)',
                         borderRadius: '8px',
                         padding: '0.48rem 0.8rem',
+                        minHeight: '40px',
                         fontWeight: 800,
                         fontSize: '0.8rem',
                         cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
                       }}
                     >
-                      ✏️ Sửa
+                      <PencilIcon size={14} />
+                      <span>Sửa</span>
                     </button>
 
                     <button
@@ -1518,12 +1964,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         border: '1px solid var(--accent-rose)',
                         borderRadius: '8px',
                         padding: '0.48rem 0.75rem',
+                        minHeight: '40px',
                         fontWeight: 800,
                         fontSize: '0.8rem',
                         cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
                       }}
                     >
-                      🗑️ Xóa
+                      <TrashIcon size={14} />
+                      <span>Xóa</span>
                     </button>
 
                     <button
@@ -1535,12 +1986,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         border: '1px solid var(--border-strong)',
                         borderRadius: '8px',
                         padding: '0.48rem 0.75rem',
+                        minHeight: '40px',
                         fontWeight: 800,
                         fontSize: '0.8rem',
                         cursor: 'pointer',
                       }}
                     >
-                      📥 CSV
+                      CSV
                     </button>
 
                     <button
@@ -1552,12 +2004,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         border: '1px solid var(--border-strong)',
                         borderRadius: '8px',
                         padding: '0.48rem 0.75rem',
+                        minHeight: '40px',
                         fontWeight: 800,
                         fontSize: '0.8rem',
                         cursor: 'pointer',
                       }}
                     >
-                      📄 JSON
+                      JSON
                     </button>
                   </div>
                 </div>
@@ -1590,6 +2043,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                 onClick={() => handlePageChange(page - 1)}
                 style={{
                   padding: '0.5rem 0.95rem',
+                  minHeight: '40px',
                   borderRadius: '8px',
                   border: '1px solid var(--border-strong)',
                   backgroundColor: 'var(--bg-input)',
@@ -1597,9 +2051,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   fontWeight: 800,
                   fontSize: '0.84rem',
                   cursor: page <= 1 ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
                 }}
               >
-                ← Trang trước
+                <ArrowLeftIcon size={14} />
+                <span>Trang trước</span>
               </button>
               <button
                 type="button"
@@ -1607,6 +2065,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                 onClick={() => handlePageChange(page + 1)}
                 style={{
                   padding: '0.5rem 0.95rem',
+                  minHeight: '40px',
                   borderRadius: '8px',
                   border: '1px solid var(--border-strong)',
                   backgroundColor: 'var(--bg-input)',
@@ -1614,9 +2073,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   fontWeight: 800,
                   fontSize: '0.84rem',
                   cursor: !hasMore ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
                 }}
               >
-                Trang tiếp →
+                <span>Trang tiếp</span>
+                <ArrowRightIcon size={14} />
               </button>
             </div>
           </div>
@@ -1626,6 +2089,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       {/* Modal Chia Sẻ Link / QR Chơi Đơn */}
       {soloShareData && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="solo-share-title"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1635,6 +2101,12 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
             justifyContent: 'center',
             zIndex: 300,
             padding: '1rem',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSoloShareData(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setSoloShareData(null);
           }}
         >
           <div
@@ -1649,8 +2121,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               textAlign: 'center',
             }}
           >
-            <h3 style={{ margin: '0 0 0.4rem 0', fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-              🔗 Chia Sẻ Chơi Đơn (Link & QR)
+            <h3 id="solo-share-title" style={{ margin: '0 0 0.4rem 0', fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem' }}>
+              <QrCodeIcon size={20} />
+              <span>Chia Sẻ Chơi Đơn (Link & QR)</span>
             </h3>
             <p style={{ margin: '0 0 1rem 0', fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
               Người chơi có thể quét mã QR hoặc mở đường dẫn dưới đây để tự chơi độc lập game{' '}
@@ -1684,6 +2157,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               <input
                 type="text"
                 readOnly
+                aria-label="Đường dẫn chơi đơn"
                 value={soloShareData.playUrl}
                 style={{
                   flex: 1,
@@ -1693,6 +2167,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   backgroundColor: 'var(--bg-input)',
                   color: 'var(--text-primary)',
                   fontSize: '0.82rem',
+                  minHeight: '40px',
                 }}
               />
               <button
@@ -1707,12 +2182,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   border: 'none',
                   borderRadius: '8px',
                   padding: '0.55rem 0.9rem',
+                  minHeight: '40px',
                   fontWeight: 800,
                   fontSize: '0.82rem',
                   cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
                 }}
               >
-                📋 Copy Link
+                <CopyIcon size={14} />
+                <span>Copy Link</span>
               </button>
             </div>
 
@@ -1730,12 +2210,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   border: 'none',
                   borderRadius: '8px',
                   padding: '0.55rem 1rem',
+                  minHeight: '44px',
                   fontWeight: 800,
                   fontSize: '0.85rem',
                   cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
                 }}
               >
-                🎯 Chơi đơn ngay
+                <GamepadIcon size={16} />
+                <span>Chơi đơn ngay</span>
               </button>
               <button
                 type="button"
@@ -1746,6 +2231,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   border: '1px solid var(--border-strong)',
                   borderRadius: '8px',
                   padding: '0.55rem 1rem',
+                  minHeight: '44px',
                   fontWeight: 700,
                   fontSize: '0.85rem',
                   cursor: 'pointer',
@@ -1761,6 +2247,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       {/* Modal Mở Phòng Multiplayer */}
       {multiplayerShareData && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="multi-share-title"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1770,6 +2259,12 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
             justifyContent: 'center',
             zIndex: 300,
             padding: '1rem',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setMultiplayerShareData(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape') setMultiplayerShareData(null);
           }}
         >
           <div
@@ -1784,8 +2279,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               textAlign: 'center',
             }}
           >
-            <h3 style={{ margin: '0 0 0.4rem 0', fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-              🏟️ Phòng Chơi Multiplayer Đã Mở!
+            <h3 id="multi-share-title" style={{ margin: '0 0 0.4rem 0', fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.45rem' }}>
+              <UsersIcon size={20} />
+              <span>Phòng Chơi Multiplayer Đã Mở!</span>
             </h3>
             <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
               Game: <strong style={{ color: 'var(--text-primary)' }}>"{multiplayerShareData.title}"</strong>
@@ -1838,6 +2334,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               <input
                 type="text"
                 readOnly
+                aria-label="Đường dẫn tham gia phòng"
                 value={multiplayerShareData.joinUrl}
                 style={{
                   flex: 1,
@@ -1847,6 +2344,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   backgroundColor: 'var(--bg-input)',
                   color: 'var(--text-primary)',
                   fontSize: '0.82rem',
+                  minHeight: '40px',
                 }}
               />
               <button
@@ -1861,12 +2359,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   border: 'none',
                   borderRadius: '8px',
                   padding: '0.55rem 0.9rem',
+                  minHeight: '40px',
                   fontWeight: 800,
                   fontSize: '0.82rem',
                   cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.35rem',
                 }}
               >
-                📋 Copy Link
+                <CopyIcon size={14} />
+                <span>Copy Link</span>
               </button>
             </div>
 
@@ -1885,12 +2388,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     border: 'none',
                     borderRadius: '8px',
                     padding: '0.55rem 1.05rem',
+                    minHeight: '44px',
                     fontWeight: 800,
                     fontSize: '0.86rem',
                     cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
                   }}
                 >
-                  🚀 Vào Màn Hình Điều Khiển (Host)
+                  <GamepadIcon size={16} />
+                  <span>Vào Màn Hình Điều Khiển (Host)</span>
                 </button>
               )}
               <button
@@ -1902,6 +2410,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   border: '1px solid var(--border-strong)',
                   borderRadius: '8px',
                   padding: '0.55rem 1rem',
+                  minHeight: '44px',
                   fontWeight: 700,
                   fontSize: '0.85rem',
                   cursor: 'pointer',
@@ -1917,6 +2426,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       {/* Modal xác nhận xóa bộ câu hỏi */}
       {confirmDeleteGame && (
         <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-confirm-title"
           style={{
             position: 'fixed',
             inset: 0,
@@ -1927,43 +2439,92 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
             zIndex: 300,
             padding: '1rem',
           }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isDeleting) setConfirmDeleteGame(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Escape' && !isDeleting) setConfirmDeleteGame(null);
+          }}
         >
           <div
             style={{
               backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-strong)',
-              borderRadius: '16px',
-              padding: '1.5rem',
+              border: '2px solid var(--accent-rose)',
+              borderRadius: '20px',
+              padding: '1.75rem',
               width: '100%',
-              maxWidth: '420px',
-              boxShadow: 'var(--card-shadow)',
+              maxWidth: '460px',
+              boxShadow: 'var(--shadow-modal)',
+              animation: 'popIn 0.2s ease',
             }}
           >
-            <h3 style={{ margin: '0 0 0.65rem 0', fontSize: '1.15rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-              🗑️ Xác Nhận Xóa Bộ Câu Hỏi
-            </h3>
-            <p style={{ margin: '0 0 1.25rem 0', fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              Bạn có chắc chắn muốn xóa vĩnh viễn bộ câu hỏi{' '}
-              <strong style={{ color: 'var(--text-primary)' }}>"{confirmDeleteGame.title}"</strong> ({confirmDeleteGame.questionCount} câu hỏi)?
-              Thao tác này không thể hoàn tác.
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', marginBottom: '0.85rem' }}>
+              <div
+                style={{
+                  width: '38px',
+                  height: '38px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                  color: 'var(--accent-rose)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <TrashIcon size={20} />
+              </div>
+              <div>
+                <h3 id="delete-confirm-title" style={{ margin: 0, fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                  Xác Nhận Xóa Bộ Câu Hỏi
+                </h3>
+                <span style={{ fontSize: '0.78rem', color: 'var(--accent-rose)', fontWeight: 700 }}>
+                  Hành động này không thể hoàn tác
+                </span>
+              </div>
+            </div>
+
+            <div
+              style={{
+                backgroundColor: 'var(--bg-input)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '12px',
+                padding: '0.9rem 1rem',
+                marginBottom: '1.25rem',
+              }}
+            >
+              <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.35rem' }}>
+                "{confirmDeleteGame.title}"
+              </div>
+              <div style={{ display: 'flex', gap: '0.85rem', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                <span>Định dạng: <strong>{confirmDeleteGame.gameType}</strong></span>
+                <span>•</span>
+                <span>Số lượng: <strong>{confirmDeleteGame.questionCount} câu hỏi</strong></span>
+              </div>
+            </div>
+
+            <p style={{ margin: '0 0 1.5rem 0', fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Toàn bộ nội dung câu hỏi, phương án trả lời và cài đặt của bộ câu hỏi này sẽ bị xóa hoàn toàn khỏi cơ sở dữ liệu.
             </p>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.65rem' }}>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
               <button
                 type="button"
                 disabled={isDeleting}
                 onClick={() => setConfirmDeleteGame(null)}
                 style={{
-                  backgroundColor: 'var(--bg-input)',
+                  backgroundColor: 'var(--bg-card)',
                   color: 'var(--text-primary)',
                   border: '1px solid var(--border-strong)',
-                  borderRadius: '8px',
-                  padding: '0.55rem 1rem',
+                  borderRadius: '10px',
+                  padding: '0.65rem 1.25rem',
+                  minHeight: '44px',
                   fontWeight: 700,
-                  fontSize: '0.86rem',
+                  fontSize: '0.9rem',
                   cursor: 'pointer',
                 }}
               >
-                Hủy
+                Hủy bỏ
               </button>
               <button
                 type="button"
@@ -1973,14 +2534,29 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   backgroundColor: 'var(--accent-rose)',
                   color: '#ffffff',
                   border: 'none',
-                  borderRadius: '8px',
-                  padding: '0.55rem 1rem',
+                  borderRadius: '10px',
+                  padding: '0.65rem 1.35rem',
+                  minHeight: '44px',
                   fontWeight: 800,
-                  fontSize: '0.86rem',
+                  fontSize: '0.9rem',
                   cursor: isDeleting ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
                 }}
               >
-                {isDeleting ? '⏳ Đang xóa...' : 'Xác nhận xóa'}
+                {isDeleting ? (
+                  <>
+                    <SpinnerIcon size={16} />
+                    <span>Đang xóa...</span>
+                  </>
+                ) : (
+                  <>
+                    <TrashIcon size={16} />
+                    <span>Xác nhận xóa vĩnh viễn</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

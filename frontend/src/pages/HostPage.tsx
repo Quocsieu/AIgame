@@ -2,18 +2,36 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from '../components/ToastContext.js';
 import { GameSocketClient, ConnectionStatus } from '../services/socket.js';
 import { createRoom, fetchRoomQr } from '../services/api.js';
+import {
+  AlertTriangleIcon,
+  ArrowLeftIcon,
+  ArrowRightIcon,
+  CheckIcon,
+  FlameIcon,
+  GamepadIcon,
+  InfoIcon,
+  LockIcon,
+  PlayIcon,
+  QrCodeIcon,
+  RefreshIcon,
+  TrophyIcon,
+  UnlockIcon,
+  UsersIcon,
+} from '../components/Icons.js';
 import type { LeaderboardEntry, SanitizedQuestion } from '../types/index.js';
 
 interface HostPageProps {
   initialRoomCode?: string;
   initialHostToken?: string;
   initialGameId?: string;
+  onBackToSetup?: () => void;
 }
 
 export const HostPage: React.FC<HostPageProps> = ({
   initialRoomCode,
   initialHostToken,
   initialGameId,
+  onBackToSetup,
 }) => {
   const toast = useToast();
 
@@ -321,7 +339,6 @@ export const HostPage: React.FC<HostPageProps> = ({
     try {
       sessionStorage.removeItem('active_host_room');
       sessionStorage.removeItem('active_host_token');
-      window.history.replaceState({}, '', '/?tab=host');
     } catch {}
     setIsPresentationMode(false);
     setRoomCode('');
@@ -330,7 +347,16 @@ export const HostPage: React.FC<HostPageProps> = ({
     setCurrentQuestion(null);
     setRevealData(null);
     setFinishData(null);
-    setViewState('setup');
+    if (onBackToSetup) {
+      onBackToSetup();
+    } else {
+      window.history.replaceState({}, '', '/?tab=analytics');
+      window.location.href = '/?tab=analytics';
+    }
+  };
+
+  const handleCancelRoom = () => {
+    handleRestart();
   };
 
   // Kahoot color config for 4 choices (A: Red, B: Blue, C: Amber, D: Emerald)
@@ -383,7 +409,9 @@ export const HostPage: React.FC<HostPageProps> = ({
             gap: '0.5rem',
           }}
         >
-          <span>⚠️ Mất kết nối tới máy chủ phòng chơi.</span>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+            <AlertTriangleIcon size={16} /> Mất kết nối tới máy chủ phòng chơi.
+          </span>
           <button
             type="button"
             onClick={() => connectToSocket(roomCode, hostToken)}
@@ -396,9 +424,13 @@ export const HostPage: React.FC<HostPageProps> = ({
               fontWeight: 800,
               fontSize: '0.8rem',
               cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              minHeight: '36px',
             }}
           >
-            🔄 Kết nối lại
+            <RefreshIcon size={14} /> Kết nối lại
           </button>
         </div>
       )}
@@ -443,9 +475,18 @@ export const HostPage: React.FC<HostPageProps> = ({
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '0.4rem',
+                  minHeight: '44px',
                 }}
               >
-                {isLocked ? '🔒 Phòng đang khóa' : '🔓 Khóa phòng'}
+                {isLocked ? (
+                  <>
+                    <LockIcon size={16} /> Phòng đang khóa
+                  </>
+                ) : (
+                  <>
+                    <UnlockIcon size={16} /> Khóa phòng
+                  </>
+                )}
               </button>
 
               <button
@@ -465,9 +506,10 @@ export const HostPage: React.FC<HostPageProps> = ({
                   gap: '0.4rem',
                   boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
                   transition: 'all 0.15s ease',
+                  minHeight: '44px',
                 }}
               >
-                📺 Chế độ trình chiếu
+                <GamepadIcon size={16} /> Chế độ trình chiếu
               </button>
 
               <button
@@ -485,9 +527,14 @@ export const HostPage: React.FC<HostPageProps> = ({
                   cursor: players.length === 0 ? 'not-allowed' : 'pointer',
                   boxShadow: players.length === 0 ? 'none' : '0 4px 14px rgba(22, 163, 74, 0.4)',
                   transition: 'all 0.15s ease',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  minHeight: '44px',
                 }}
               >
-                🚀 Bắt đầu trận đấu &rarr;
+                <span>Bắt đầu trận đấu</span>
+                <ArrowRightIcon size={16} />
               </button>
             </div>
           )}
@@ -505,28 +552,53 @@ export const HostPage: React.FC<HostPageProps> = ({
             boxShadow: 'var(--card-shadow)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-            <span style={{ fontSize: '1.75rem' }}>🎯</span>
-            <h2 style={{ color: 'var(--text-primary)', fontSize: '1.45rem', fontWeight: 800, margin: 0 }}>
-              Khởi Tạo Phòng Chơi Trực Tuyến
-            </h2>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+              <GamepadIcon size={26} style={{ color: 'var(--primary)' }} />
+              <h2 style={{ color: 'var(--text-primary)', fontSize: '1.45rem', fontWeight: 800, margin: 0 }}>
+                Khởi Tạo Phòng Chơi Trực Tuyến
+              </h2>
+            </div>
+            {onBackToSetup && (
+              <button
+                type="button"
+                onClick={onBackToSetup}
+                style={{
+                  backgroundColor: 'var(--bg-card)',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '10px',
+                  padding: '0.5rem 1rem',
+                  fontSize: '0.85rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  minHeight: '40px',
+                }}
+              >
+                <ArrowLeftIcon size={14} /> Quay về Kho Game
+              </button>
+            )}
           </div>
           <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', margin: '0 0 1.75rem 0', lineHeight: 1.5 }}>
             Nhập mã trò chơi (Game ID) hoặc để trống để sử dụng bộ câu hỏi mẫu. Phòng thi đấu hỗ trợ tối đa 300 người tham gia đồng thời.
           </p>
 
           <div style={{ maxWidth: '540px' }}>
-            <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.875rem', fontWeight: 700, marginBottom: '0.45rem' }}>
+            <label htmlFor="host-game-id" style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.875rem', fontWeight: 700, marginBottom: '0.45rem' }}>
               Mã trò chơi (Game ID):
             </label>
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
               <input
+                id="host-game-id"
                 type="text"
                 value={gameId}
                 onChange={(e) => setGameId(e.target.value)}
                 placeholder="game_... (hoặc để trống)"
                 style={{
-                  flex: 1,
+                  flex: '1 1 240px',
                   padding: '0.85rem 1rem',
                   backgroundColor: 'var(--bg-input)',
                   border: '1px solid var(--border-strong)',
@@ -534,6 +606,8 @@ export const HostPage: React.FC<HostPageProps> = ({
                   color: 'var(--text-primary)',
                   fontSize: '0.95rem',
                   outline: 'none',
+                  minHeight: '44px',
+                  boxSizing: 'border-box',
                 }}
               />
               <button
@@ -552,6 +626,7 @@ export const HostPage: React.FC<HostPageProps> = ({
                   boxShadow: 'var(--btn-shadow)',
                   opacity: isCreatingRoom ? 0.7 : 1,
                   transition: 'all 0.15s ease',
+                  minHeight: '44px',
                 }}
               >
                 {isCreatingRoom ? 'Đang tạo...' : 'Tạo phòng ngay'}
@@ -601,9 +676,10 @@ export const HostPage: React.FC<HostPageProps> = ({
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '0.4rem',
+                minHeight: '44px',
               }}
             >
-              ← Bảng điều khiển
+              <ArrowLeftIcon size={16} /> Bảng điều khiển
             </button>
 
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
@@ -619,9 +695,10 @@ export const HostPage: React.FC<HostPageProps> = ({
                   fontWeight: 700,
                   fontSize: '0.9rem',
                   cursor: 'pointer',
+                  minHeight: '44px',
                 }}
               >
-                ⛶ Toàn màn hình
+                Toàn màn hình
               </button>
 
               <button
@@ -639,9 +716,14 @@ export const HostPage: React.FC<HostPageProps> = ({
                   cursor: players.length === 0 ? 'not-allowed' : 'pointer',
                   boxShadow: players.length === 0 ? 'none' : '0 4px 18px rgba(22, 163, 74, 0.45)',
                   transition: 'all 0.15s ease',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  minHeight: '44px',
                 }}
               >
-                🚀 Bắt đầu trò chơi &rarr;
+                <span>Bắt đầu trò chơi</span>
+                <ArrowRightIcon size={16} />
               </button>
             </div>
           </div>
@@ -721,8 +803,8 @@ export const HostPage: React.FC<HostPageProps> = ({
                     style={{ width: 'clamp(220px, 28vw, 280px)', height: 'clamp(220px, 28vw, 280px)', display: 'block' }}
                   />
                 </div>
-                <div style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '1.05rem', marginTop: '1rem' }}>
-                  📱 Quét mã bằng camera điện thoại
+                <div style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '1.05rem', marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
+                  <QrCodeIcon size={20} /> Quét mã bằng camera điện thoại
                 </div>
               </div>
             )}
@@ -741,13 +823,13 @@ export const HostPage: React.FC<HostPageProps> = ({
                 gap: '0.65rem',
               }}
             >
-              <span style={{ fontSize: '1.25rem' }}>👥</span>
+              <UsersIcon size={20} style={{ color: 'var(--accent-sky)' }} />
               <span style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--accent-sky)' }}>{players.length}</span>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>/ 300 người chơi</span>
             </div>
 
             <div style={{ color: players.length === 0 ? 'var(--text-muted)' : 'var(--accent-emerald)', fontSize: '1.05rem', fontWeight: 700 }}>
-              {players.length === 0 ? '⏳ Đang chờ người chơi tham gia...' : '✨ Đang chờ người chủ trì bấm bắt đầu...'}
+              {players.length === 0 ? 'Đang chờ người chơi tham gia...' : 'Đang chờ người chủ trì bấm bắt đầu...'}
             </div>
           </div>
 
@@ -790,7 +872,7 @@ export const HostPage: React.FC<HostPageProps> = ({
                     animation: 'popIn 0.25s ease-out',
                   }}
                 >
-                  <span>👤</span>
+                  <UsersIcon size={14} style={{ color: 'var(--text-muted)' }} />
                   <span>{p.displayName}</span>
                 </span>
               ))
@@ -882,8 +964,8 @@ export const HostPage: React.FC<HostPageProps> = ({
                   <div style={{ padding: '8px', backgroundColor: 'white', borderRadius: '12px', display: 'inline-block', flexShrink: 0 }}>
                     <img src={qrDataUrl} alt="Mã QR tham gia phòng" style={{ width: '100px', height: '100px', display: 'block' }} />
                   </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.45' }}>
-                    📱 Quét mã bằng camera điện thoại để tham gia ngay
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.45', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <QrCodeIcon size={18} /> Quét mã bằng camera điện thoại để tham gia ngay
                   </div>
                 </div>
               )}
@@ -910,8 +992,8 @@ export const HostPage: React.FC<HostPageProps> = ({
             >
               <div>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                  <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)', fontWeight: 700 }}>
-                    👥 Danh sách người chơi ({players.length}):
+                  <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
+                    <UsersIcon size={16} /> Danh sách người chơi ({players.length}):
                   </span>
                   <span style={{ fontSize: '0.8rem', color: players.length === 0 ? 'var(--text-muted)' : 'var(--accent-emerald)', fontWeight: 600 }}>
                     {players.length === 0 ? 'Chưa có ai tham gia' : 'Đang trực tuyến'}
@@ -953,7 +1035,7 @@ export const HostPage: React.FC<HostPageProps> = ({
                           color: 'var(--text-primary)',
                         }}
                       >
-                        <span>👤</span>
+                        <UsersIcon size={14} style={{ color: 'var(--text-muted)' }} />
                         <span>{p.displayName}</span>
                       </span>
                     ))
@@ -975,6 +1057,7 @@ export const HostPage: React.FC<HostPageProps> = ({
                     cursor: 'pointer',
                     fontWeight: 700,
                     transition: 'all 0.15s ease',
+                    minHeight: '44px',
                   }}
                 >
                   Hủy / Tạo phòng khác
@@ -1100,9 +1183,12 @@ export const HostPage: React.FC<HostPageProps> = ({
                   color: 'var(--accent-sky)',
                   fontSize: '1.1rem',
                   border: '1px solid rgba(56, 189, 248, 0.3)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
                 }}
               >
-                💡 Gợi ý từ khóa: <strong style={{ color: 'var(--text-primary)' }}>{currentQuestion.crosswordClue}</strong>
+                <InfoIcon size={18} /> Gợi ý từ khóa: <strong style={{ color: 'var(--text-primary)' }}>{currentQuestion.crosswordClue}</strong>
               </div>
             )}
           </div>
@@ -1143,7 +1229,7 @@ export const HostPage: React.FC<HostPageProps> = ({
         >
           <div style={{ borderBottom: '1px solid var(--border-subtle)', paddingBottom: '1.5rem', marginBottom: '1.5rem' }}>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-emerald)', fontSize: '1.15rem', fontWeight: 800, marginBottom: '0.75rem' }}>
-              <span>✓</span>
+              <CheckIcon size={20} />
               <span>ĐÁP ÁN CHÍNH XÁC:</span>
             </div>
             <div>
@@ -1173,16 +1259,20 @@ export const HostPage: React.FC<HostPageProps> = ({
                   padding: '0.85rem 1.25rem',
                   borderRadius: '10px',
                   border: '1px solid var(--border-subtle)',
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  gap: '0.4rem',
                 }}
               >
-                💡 Giải thích: {revealData.explanation}
+                <InfoIcon size={16} style={{ marginTop: '0.2rem', flexShrink: 0 }} />
+                <span><strong>Giải thích:</strong> {revealData.explanation}</span>
               </p>
             )}
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h3 style={{ color: 'var(--text-primary)', fontSize: '1.35rem', margin: 0, fontWeight: 900 }}>
-              🏆 Bảng Xếp Hạng Hiện Tại
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <h3 style={{ color: 'var(--text-primary)', fontSize: '1.35rem', margin: 0, fontWeight: 900, display: 'inline-flex', alignItems: 'center', gap: '0.45rem' }}>
+              <TrophyIcon size={22} style={{ color: 'var(--accent-amber)' }} /> Bảng Xếp Hạng Hiện Tại
             </h3>
             <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
               Cập nhật điểm theo thời gian thực
@@ -1204,7 +1294,7 @@ export const HostPage: React.FC<HostPageProps> = ({
                 {revealData.leaderboard.map((entry) => (
                   <tr key={entry.playerId} style={{ borderBottom: '1px solid var(--border-subtle)', fontSize: '0.95rem' }}>
                     <td style={{ padding: '0.85rem 1rem', fontWeight: 900, color: entry.rank === 1 ? '#facc15' : entry.rank === 2 ? '#cbd5e1' : entry.rank === 3 ? '#d97706' : 'var(--text-muted)' }}>
-                      {entry.rank === 1 ? '🥇 1' : entry.rank === 2 ? '🥈 2' : entry.rank === 3 ? '🥉 3' : `#${entry.rank}`}
+                      {entry.rank === 1 ? '1' : entry.rank === 2 ? '2' : entry.rank === 3 ? '3' : `#${entry.rank}`}
                     </td>
                     <td style={{ padding: '0.85rem 1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                       {entry.displayName}
@@ -1216,7 +1306,13 @@ export const HostPage: React.FC<HostPageProps> = ({
                       {entry.correctCount}
                     </td>
                     <td style={{ padding: '0.85rem 1rem', color: entry.streak > 1 ? '#f97316' : 'var(--text-muted)', fontWeight: entry.streak > 1 ? 800 : 500 }}>
-                      {entry.streak > 1 ? `🔥 ${entry.streak}` : entry.streak}
+                      {entry.streak > 1 ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.2rem' }}>
+                          <FlameIcon size={14} /> {entry.streak}
+                        </span>
+                      ) : (
+                        entry.streak
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -1239,9 +1335,14 @@ export const HostPage: React.FC<HostPageProps> = ({
                 cursor: 'pointer',
                 boxShadow: 'var(--btn-shadow)',
                 transition: 'all 0.15s ease',
+                minHeight: '44px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
               }}
             >
-              Câu hỏi tiếp theo &rarr;
+              <span>Câu hỏi tiếp theo</span>
+              <ArrowRightIcon size={16} />
             </button>
           </div>
         </div>
@@ -1259,9 +1360,7 @@ export const HostPage: React.FC<HostPageProps> = ({
             boxShadow: 'var(--card-shadow)',
           }}
         >
-          <div style={{ fontSize: '3.5rem', marginBottom: '0.5rem', animation: 'popIn 0.5s ease-out' }}>
-            🏆
-          </div>
+          <TrophyIcon size={56} style={{ color: '#facc15', margin: '0 auto 0.5rem auto', display: 'block', animation: 'popIn 0.5s ease-out' }} />
           <h2 style={{ color: '#facc15', fontSize: '2.4rem', fontWeight: 900, margin: '0 0 1rem 0' }}>
             Trận Đấu Kết Thúc!
           </h2>
@@ -1281,7 +1380,7 @@ export const HostPage: React.FC<HostPageProps> = ({
               }}
             >
               <div style={{ fontSize: '0.85rem', color: '#facc15', textTransform: 'uppercase', fontWeight: 900, letterSpacing: '0.1em' }}>
-                👑 NHÀ VÔ ĐỊCH 👑
+                NHÀ VÔ ĐỊCH
               </div>
               <div style={{ fontSize: '2.4rem', fontWeight: 900, color: 'var(--accent-sky)', margin: '0.5rem 0' }}>
                 {finishData.winner.displayName}
@@ -1310,7 +1409,7 @@ export const HostPage: React.FC<HostPageProps> = ({
                 {finishData.leaderboard.map((entry) => (
                   <tr key={entry.playerId} style={{ borderBottom: '1px solid var(--border-subtle)', fontSize: '0.95rem' }}>
                     <td style={{ padding: '0.85rem 1rem', fontWeight: 900, color: entry.rank === 1 ? '#facc15' : entry.rank === 2 ? '#cbd5e1' : entry.rank === 3 ? '#d97706' : 'var(--text-muted)' }}>
-                      {entry.rank === 1 ? '🥇 1' : entry.rank === 2 ? '🥈 2' : entry.rank === 3 ? '🥉 3' : `#${entry.rank}`}
+                      {entry.rank === 1 ? '1' : entry.rank === 2 ? '2' : entry.rank === 3 ? '3' : `#${entry.rank}`}
                     </td>
                     <td style={{ padding: '0.85rem 1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                       {entry.displayName}
@@ -1342,9 +1441,14 @@ export const HostPage: React.FC<HostPageProps> = ({
                 cursor: 'pointer',
                 boxShadow: 'var(--btn-shadow)',
                 transition: 'all 0.15s ease',
+                minHeight: '44px',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
               }}
             >
-              Tạo phòng chơi mới &rarr;
+              <span>Tạo phòng chơi mới</span>
+              <ArrowRightIcon size={16} />
             </button>
           </div>
         </div>
