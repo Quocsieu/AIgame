@@ -140,3 +140,30 @@ export function requireAuthMiddleware(
   }
 }
 
+/**
+ * Strictly rejects callers with X-Player-Token, X-Guest-Token, or synthetic guest accounts.
+ * Ensures only authenticated organizers (USER/ADMIN) or unauthenticated callers in test/demo mode
+ * can access game management and creation features.
+ */
+export function rejectGuestOrPlayerWrite(req: Request, action: string = 'quản lý game'): void {
+  if (req.headers['x-player-token']) {
+    throw new AppError(
+      'ACCESS_DENIED',
+      `Người chơi trong phòng không có quyền ${action}.`,
+      403
+    );
+  }
+
+  if (
+    req.headers['x-guest-token'] ||
+    req.isGuest ||
+    (req.user && req.user.userId && req.user.userId.startsWith('guest_'))
+  ) {
+    throw new AppError(
+      'ACCESS_DENIED',
+      `Tài khoản khách (Guest) chỉ có quyền tham gia chơi game. Vui lòng đăng nhập tài khoản người tổ chức hoặc Admin để ${action}.`,
+      403
+    );
+  }
+}
+

@@ -7,6 +7,7 @@ import {
 } from '../contracts/game.contract.js';
 import { gameStore, sessionStore } from '../game/game.store.js';
 import { generateRateLimiter } from '../middleware/rateLimiter.js';
+import { rejectGuestOrPlayerWrite } from '../middleware/auth.middleware.js';
 import { roomStore } from '../multiplayer/room.store.js';
 import { aiQuestionService } from '../services/ai.question.service.js';
 import { authService } from '../services/auth.service.js';
@@ -21,16 +22,6 @@ export const gameRouter = Router();
 
 // Mount Day 3 Game Session Router
 gameRouter.use('/sessions', sessionRouter);
-
-function rejectPlayerClientWrite(req: Request): void {
-  if (req.headers['x-player-token']) {
-    throw new AppError(
-      'ACCESS_DENIED',
-      'Người chơi trong phòng không có quyền tạo, chỉnh sửa, xuất bản hoặc xóa game.',
-      403
-    );
-  }
-}
 
 function buildSoloPlayUrl(req: Request, gameId: string): string {
   const frontendUrl = (process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
@@ -93,7 +84,7 @@ gameRouter.post(
   generateRateLimiter.middleware,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      rejectPlayerClientWrite(req);
+      rejectGuestOrPlayerWrite(req, 'tạo game bằng AI');
 
       // 1. Validate request body against Zod schema
       const parseResult = GenerateGameRequestSchema.safeParse(req.body);
@@ -204,7 +195,7 @@ gameRouter.get(
 
 function handleUpdateGameSpecification(req: Request, res: Response, next: NextFunction): void {
   try {
-    rejectPlayerClientWrite(req);
+    rejectGuestOrPlayerWrite(req, 'chỉnh sửa hoặc xuất bản game');
 
     const gameId = String(req.params.gameId || '');
     const existing = gameStore.get(gameId);
@@ -284,7 +275,7 @@ gameRouter.delete(
   '/:gameId',
   (req: Request, res: Response, next: NextFunction) => {
     try {
-      rejectPlayerClientWrite(req);
+      rejectGuestOrPlayerWrite(req, 'xóa game');
 
       const gameId = String(req.params.gameId || '');
       const existing = gameStore.get(gameId);

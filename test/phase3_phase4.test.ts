@@ -839,26 +839,49 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
     const guestTokenA = 'gt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     const guestTokenB = 'gt_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
-    // 1. Guest A ingests content and generates a question set without registering/logging in
+    // 1. Guest A attempts to ingest content -> strictly rejected with 403 ACCESS_DENIED
     const ingestARes = await request(app)
       .post('/api/content/ingest')
       .set('X-Guest-Token', guestTokenA)
       .attach('files', Buffer.from('Tài liệu lịch sử Việt Nam của Khách A về chiến thắng Bạch Đằng.', 'utf-8'), 'guest_a_history.txt');
-    assert.equal(ingestARes.status, 200);
-    const sourceIdA = ingestARes.body.data.sources[0].sourceId;
+    assert.equal(ingestARes.status, 403);
+    assert.equal(ingestARes.body.error.code, 'ACCESS_DENIED');
 
-    // Guest B cannot generate a game from Guest A's ingested source
-    const crossGuestGen = await request(app)
+    // 2. Guest A attempts to generate a game -> strictly rejected with 403 ACCESS_DENIED before AI runs
+    const genARes = await request(app)
       .post('/api/games/generate')
-      .set('X-Guest-Token', guestTokenB)
-      .send({ sourceId: sourceIdA, gameType: 'MULTIPLE_CHOICE', questionCount: 1 });
-    assert.equal(crossGuestGen.status, 403);
-    assert.equal(crossGuestGen.body.error.code, 'ACCESS_DENIED');
+      .set('X-Guest-Token', guestTokenA)
+      .send({
+        sourceId: 'src_any',
+        title: 'Bộ Câu Hỏi Lịch Sử Bạch Đằng',
+        gameType: 'MULTIPLE_CHOICE',
+        questionCount: 1,
+      });
+    assert.equal(genARes.status, 403);
+    assert.equal(genARes.body.error.code, 'ACCESS_DENIED');
+
+    // 3. Register a verified organizer account to create a sample game for isolation tests
+    const regOrganizer = await request(app)
+      .post('/api/auth/register')
+      .send({
+        email: `organizer_batch8_${Date.now()}@example.com`,
+        password: 'Password123!',
+        displayName: 'Người Tổ Chức B8',
+      });
+    assert.equal(regOrganizer.status, 201);
+    const organizerToken = regOrganizer.body.data.token;
+
+    const ingestOrgRes = await request(app)
+      .post('/api/content/ingest')
+      .set('Authorization', `Bearer ${organizerToken}`)
+      .attach('files', Buffer.from('Tài liệu lịch sử Việt Nam về chiến thắng Bạch Đằng năm 938.', 'utf-8'), 'history_bach_dang.txt');
+    assert.equal(ingestOrgRes.status, 200);
+    const sourceIdOrg = ingestOrgRes.body.data.sources[0].sourceId;
 
     mockProvider.mockTitle = 'Bộ Câu Hỏi Lịch Sử Bạch Đằng';
     mockProvider.mockQuestions = [
       {
-        id: 'q_guest_1',
+        id: 'q_batch8_1',
         type: 'MULTIPLE_CHOICE',
         question: 'Ai chỉ huy trận Bạch Đằng năm 938?',
         choices: ['Ngô Quyền', 'Lý Thường Kiệt', 'Trần Hưng Đạo', 'Lê Lợi'],
@@ -868,39 +891,19 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
       },
     ];
 
-    const genARes = await request(app)
+    const genOrgRes = await request(app)
       .post('/api/games/generate')
-      .set('X-Guest-Token', guestTokenA)
+      .set('Authorization', `Bearer ${organizerToken}`)
       .send({
-        sourceId: sourceIdA,
+        sourceId: sourceIdOrg,
         title: 'Bộ Câu Hỏi Lịch Sử Bạch Đằng',
         gameType: 'MULTIPLE_CHOICE',
         questionCount: 1,
       });
-    assert.equal(genARes.status, 200);
-    const gameIdA = genARes.body.data.gameId;
+    assert.equal(genOrgRes.status, 200);
+    const gameIdA = genOrgRes.body.data.gameId;
 
-    // 2. Guest A lists saved question sets with search & gameType filter
-    const listAllARes = await request(app)
-      .get('/api/games')
-      .set('X-Guest-Token', guestTokenA);
-    assert.equal(listAllARes.status, 200);
-    assert.ok(listAllARes.body.data.games.some((g: any) => g.gameId === gameIdA));
-
-    const searchMatchARes = await request(app)
-      .get('/api/games?search=B%E1%BA%A1ch%20%C4%90%E1%BA%B1ng&gameType=MULTIPLE_CHOICE')
-      .set('X-Guest-Token', guestTokenA);
-    assert.equal(searchMatchARes.status, 200);
-    assert.equal(searchMatchARes.body.data.games.length, 1);
-    assert.equal(searchMatchARes.body.data.games[0].gameId, gameIdA);
-
-    const searchNoMatchARes = await request(app)
-      .get('/api/games?search=KhongTonTaiTuKhoaNay')
-      .set('X-Guest-Token', guestTokenA);
-    assert.equal(searchNoMatchARes.status, 200);
-    assert.equal(searchNoMatchARes.body.data.games.length, 0);
-
-    // 3. Guest B cannot see Guest A's question set in list, detail, edit, export, or delete
+    // 4. Guest cannot see Organizer draft game in list, detail, edit, export, or delete
     const listBRes = await request(app)
       .get('/api/games')
       .set('X-Guest-Token', guestTokenB);
@@ -915,7 +918,7 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
     const patchBRes = await request(app)
       .patch(`/api/games/${gameIdA}/questions`)
       .set('X-Guest-Token', guestTokenB)
-      .send({ questions: genARes.body.data.questions });
+      .send({ questions: genOrgRes.body.data.questions });
     assert.equal(patchBRes.status, 403);
 
     const exportBRes = await request(app)
@@ -928,46 +931,46 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
       .set('X-Guest-Token', guestTokenB);
     assert.equal(deleteBRes.status, 403);
 
-    // 3b. Missing token (no Authorization, no X-Guest-Token) also cannot access Guest A's game
+    // 4b. Missing token (no Authorization, no X-Guest-Token) also cannot access Organizer draft game
     assert.equal((await request(app).get(`/api/games/${gameIdA}`)).status, 403);
     assert.equal(
-      (await request(app).patch(`/api/games/${gameIdA}/questions`).send({ questions: genARes.body.data.questions })).status,
+      (await request(app).patch(`/api/games/${gameIdA}/questions`).send({ questions: genOrgRes.body.data.questions })).status,
       403
     );
     assert.equal((await request(app).get(`/api/games/${gameIdA}/export?format=json`)).status, 403);
     assert.equal((await request(app).delete(`/api/games/${gameIdA}`)).status, 403);
 
-    // 3c. Invalid X-Guest-Token format is rejected with 400 INVALID_GUEST_TOKEN
+    // 4c. Invalid X-Guest-Token format is rejected with 400 INVALID_GUEST_TOKEN
     const badGuestTokenRes = await request(app)
       .get('/api/games')
       .set('X-Guest-Token', 'invalid_token_not_hex');
     assert.equal(badGuestTokenRes.status, 400);
     assert.equal(badGuestTokenRes.body.error.code, 'INVALID_GUEST_TOKEN');
 
-    // 4. Guest A can edit and export their question set
+    // 5. Organizer can edit and export their question set
     const updatedQuestions = [
       {
-        ...genARes.body.data.questions[0],
+        ...genOrgRes.body.data.questions[0],
         question: 'Vị tướng nào đã chỉ huy chiến thắng Bạch Đằng năm 938?',
       },
     ];
-    const patchARes = await request(app)
+    const patchOrgRes = await request(app)
       .patch(`/api/games/${gameIdA}/questions`)
-      .set('X-Guest-Token', guestTokenA)
+      .set('Authorization', `Bearer ${organizerToken}`)
       .send({ questions: updatedQuestions });
-    assert.equal(patchARes.status, 200);
-    assert.equal(patchARes.body.data.questions[0].question, 'Vị tướng nào đã chỉ huy chiến thắng Bạch Đằng năm 938?');
+    assert.equal(patchOrgRes.status, 200);
+    assert.equal(patchOrgRes.body.data.questions[0].question, 'Vị tướng nào đã chỉ huy chiến thắng Bạch Đằng năm 938?');
 
-    const exportARes = await request(app)
+    const exportOrgRes = await request(app)
       .get(`/api/games/${gameIdA}/export?format=csv`)
-      .set('X-Guest-Token', guestTokenA);
-    assert.equal(exportARes.status, 200);
-    assert.ok(exportARes.text.includes('Ngô Quyền'));
+      .set('Authorization', `Bearer ${organizerToken}`);
+    assert.equal(exportOrgRes.status, 200);
+    assert.ok(exportOrgRes.text.includes('Ngô Quyền'));
 
-    // 5. Cannot delete a game while an active room is using it (409 GAME_IN_USE)
+    // 6. Cannot delete a game while an active room is using it (409 GAME_IN_USE)
     const activeRoomRes = await request(app)
       .post('/api/rooms')
-      .set('X-Guest-Token', guestTokenA)
+      .set('Authorization', `Bearer ${organizerToken}`)
       .send({ gameId: gameIdA });
     assert.equal(activeRoomRes.status, 200);
     const activeRoomCode = activeRoomRes.body.data.roomCode;
@@ -975,7 +978,7 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
 
     const conflictDeleteRes = await request(app)
       .delete(`/api/games/${gameIdA}`)
-      .set('X-Guest-Token', guestTokenA);
+      .set('Authorization', `Bearer ${organizerToken}`);
     assert.equal(conflictDeleteRes.status, 409);
     assert.equal(conflictDeleteRes.body.error.code, 'GAME_IN_USE');
 
@@ -987,16 +990,16 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
     roomInstance.nextQuestion(activeHostToken);
     assert.equal(roomInstance.state, 'FINISHED');
 
-    // 6. Guest A deletes the question set and verifies removal from memory and SQLite
-    const deleteARes = await request(app)
+    // 7. Organizer deletes the question set and verifies removal from memory and SQLite
+    const deleteOrgRes = await request(app)
       .delete(`/api/games/${gameIdA}`)
-      .set('X-Guest-Token', guestTokenA);
-    assert.equal(deleteARes.status, 200);
-    assert.equal(deleteARes.body.data.deleted, true);
+      .set('Authorization', `Bearer ${organizerToken}`);
+    assert.equal(deleteOrgRes.status, 200);
+    assert.equal(deleteOrgRes.body.data.deleted, true);
 
     const getAfterDeleteRes = await request(app)
       .get(`/api/games/${gameIdA}`)
-      .set('X-Guest-Token', guestTokenA);
+      .set('Authorization', `Bearer ${organizerToken}`);
     assert.equal(getAfterDeleteRes.status, 404);
 
     assert.equal(gameStore.get(gameIdA), undefined);

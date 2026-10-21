@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import multer from 'multer';
 import { LIMITS } from '../config/limits.js';
 import { ingestRateLimiter } from '../middleware/rateLimiter.js';
+import { rejectGuestOrPlayerWrite } from '../middleware/auth.middleware.js';
 import { ingestionService, UploadedFilePayload } from '../services/ingestion.service.js';
 import { quotaService } from '../services/quota.service.js';
 import { AppError, createSuccessResponse } from '../utils/errors.js';
@@ -16,23 +17,13 @@ const upload = multer({
 
 export const contentRouter = Router();
 
-function rejectPlayerClientWrite(req: Request): void {
-  if (req.headers['x-player-token']) {
-    throw new AppError(
-      'ACCESS_DENIED',
-      'Người chơi trong phòng không có quyền nạp tài liệu hoặc tạo game.',
-      403
-    );
-  }
-}
-
 contentRouter.post(
   '/ingest',
   ingestRateLimiter.middleware,
   upload.array('files', LIMITS.MAX_FILES_PER_REQUEST),
   async (req: Request, res: Response, next: NextFunction) => {
     try {
-      rejectPlayerClientWrite(req);
+      rejectGuestOrPlayerWrite(req, 'nạp tài liệu để tạo game');
 
       if (req.user) {
         quotaService.consumeUserQuota(req.user.userId, 'DAILY_INGESTIONS', 1);

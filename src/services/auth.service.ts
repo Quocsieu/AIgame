@@ -285,6 +285,21 @@ export class AuthService {
       return;
     }
 
+    // Guests are strictly forbidden from writing/managing persistent resources (games, sources, etc.)
+    // Even if ownerUserId was historically set to a guest ID, guest ownership does NOT confer management rights.
+    if (
+      options.mode === 'write' &&
+      options.resourceType !== 'phiên luyện tập' &&
+      currentUserId &&
+      currentUserId.startsWith('guest_')
+    ) {
+      throw new AppError(
+        'ACCESS_DENIED',
+        `Tài khoản khách (Guest) không có quyền chỉnh sửa, lưu thay đổi, xuất bản hoặc xóa ${options.resourceType}. Vui lòng đăng nhập tài khoản người tổ chức hoặc Admin.`,
+        403
+      );
+    }
+
     if (options.mode === 'read' && options.isPublic) {
       return;
     }
