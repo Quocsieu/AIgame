@@ -1,6 +1,7 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import QRCode from 'qrcode';
 import { gameStore } from '../game/game.store.js';
+import { rejectGuestOrPlayerWrite } from '../middleware/auth.middleware.js';
 import { roomCreateRateLimiter } from '../middleware/rateLimiter.js';
 import { roomService } from '../multiplayer/room.service.js';
 import { CreateRoomRequestSchema } from '../multiplayer/room.types.js';
@@ -32,9 +33,7 @@ function buildJoinUrl(req: Request, roomCode: string): string {
  */
 roomRouter.post('/', roomCreateRateLimiter.middleware, async (req: Request, res: Response, next: NextFunction) => {
   try {
-    if (req.headers['x-player-token']) {
-      throw new AppError('ACCESS_DENIED', 'Người chơi trong phòng không có quyền tạo phòng mới.', 403);
-    }
+    rejectGuestOrPlayerWrite(req, 'mở phòng multiplayer');
 
     const parseResult = CreateRoomRequestSchema.safeParse(req.body);
     if (!parseResult.success) {

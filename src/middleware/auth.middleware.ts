@@ -141,6 +141,50 @@ export function requireAuthMiddleware(
 }
 
 /**
+ * Strictly requires an authenticated user with ADMIN role.
+ */
+export function requireAdminMiddleware(
+  req: Request,
+  _res: Response,
+  next: NextFunction
+): void {
+  try {
+    const token = extractBearerToken(req);
+    if (!token) {
+      throw new AppError(
+        'UNAUTHORIZED',
+        'Yêu cầu đăng nhập tài khoản Quản trị viên (Admin) để thực hiện thao tác này.',
+        401
+      );
+    }
+
+    const user = authService.verifySessionToken(token);
+    if (!user) {
+      throw new AppError(
+        'UNAUTHORIZED',
+        'Phiên đăng nhập không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập lại.',
+        401
+      );
+    }
+
+    if (user.role !== 'ADMIN') {
+      throw new AppError(
+        'ACCESS_DENIED',
+        'Chỉ tài khoản Quản trị viên (Admin) mới có quyền truy cập khu vực này.',
+        403
+      );
+    }
+
+    req.user = user;
+    req.authToken = token;
+    req.isGuest = false;
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * Strictly rejects callers with X-Player-Token, X-Guest-Token, or synthetic guest accounts.
  * Ensures only authenticated organizers (USER/ADMIN) or unauthenticated callers in test/demo mode
  * can access game management and creation features.

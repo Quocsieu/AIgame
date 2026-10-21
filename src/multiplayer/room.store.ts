@@ -149,6 +149,10 @@ export class MultiplayerRoomStore {
     return this.roomsById.size;
   }
 
+  public getAll(): MultiplayerRoom[] {
+    return Array.from(this.roomsById.values());
+  }
+
   /**
    * Cleans up expired rooms based on configured ROOM_TTL_MS.
    */

@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
+import { AuthModal } from './components/AuthModal.js';
 import { ToastProvider } from './components/ToastContext.js';
+import { AdminPage } from './pages/AdminPage.js';
 import { AnalyticsPage } from './pages/AnalyticsPage.js';
 import { DemoPage } from './pages/DemoPage.js';
 import { HostPage } from './pages/HostPage.js';
@@ -8,7 +10,7 @@ import { PlayPage } from './pages/PlayPage.js';
 import { fetchCurrentUser, fetchGameById, getOrCreateGuestToken, logoutUser } from './services/api.js';
 import type { AuthenticatedUser, GameSpecification } from './types/index.js';
 
-type Tab = 'demo' | 'analytics' | 'host' | 'join' | 'play';
+type Tab = 'demo' | 'analytics' | 'host' | 'join' | 'play' | 'admin';
 
 export const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('demo');
@@ -20,6 +22,7 @@ export const AppContent: React.FC = () => {
   const [soloPlayLoading, setSoloPlayLoading] = useState(false);
   const [soloPlayError, setSoloPlayError] = useState<string | null>(null);
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
@@ -118,8 +121,10 @@ export const AppContent: React.FC = () => {
     } else if (room) {
       setRoomCode(room);
       setActiveTab('join');
-    } else if (tab && ['demo', 'analytics', 'host', 'join', 'play'].includes(tab)) {
+    } else if (tab && ['demo', 'analytics', 'host', 'join', 'play', 'admin'].includes(tab)) {
       setActiveTab(tab);
+    } else if (window.location.pathname.startsWith('/admin')) {
+      setActiveTab('admin');
     }
   }, []);
 
@@ -278,11 +283,35 @@ export const AppContent: React.FC = () => {
             {theme === 'dark' ? '☀️ Sáng' : '🌙 Tối'}
           </button>
 
+          {/* Nút Đăng nhập cho Guest */}
+          {!currentUser && !autoStartSoloPlay && (
+            <button
+              type="button"
+              onClick={() => setIsAuthModalOpen(true)}
+              style={{
+                padding: '0.5rem 0.85rem',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: 'var(--primary)',
+                color: '#ffffff',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                boxShadow: 'var(--btn-shadow)',
+              }}
+            >
+              🔑 Đăng nhập / Đăng ký
+            </button>
+          )}
+
           {/* Thông tin tài khoản đăng nhập (nếu có) */}
           {currentUser && !autoStartSoloPlay && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem' }}>
               <span style={{ fontWeight: 700, color: 'var(--accent-sky)' }}>
-                👤 {currentUser.displayName} ({currentUser.role})
+                👤 {currentUser.displayName} ({currentUser.role === 'ADMIN' ? 'Admin' : 'Creator'})
               </span>
               <button
                 type="button"
@@ -421,6 +450,30 @@ export const AppContent: React.FC = () => {
               >
                 🎮 Người Chơi
               </button>
+
+              {currentUser?.role === 'ADMIN' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSoloPlayError(null);
+                    setActiveTab('admin');
+                  }}
+                  style={{
+                    padding: '0.55rem 1rem',
+                    borderRadius: '8px',
+                    border: 'none',
+                    backgroundColor: activeTab === 'admin' ? 'var(--accent-rose)' : 'transparent',
+                    color: activeTab === 'admin' ? '#ffffff' : 'var(--accent-rose)',
+                    fontWeight: 800,
+                    fontSize: '0.85rem',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    boxShadow: activeTab === 'admin' ? 'var(--btn-shadow)' : 'none',
+                  }}
+                >
+                  🛡️ Quản Trị
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -510,6 +563,8 @@ export const AppContent: React.FC = () => {
                   setActiveTab('demo');
                 }}
                 onNavigateToLibrary={() => setActiveTab('analytics')}
+                currentUser={currentUser}
+                onOpenAuthModal={() => setIsAuthModalOpen(true)}
               />
             )}
 
@@ -541,9 +596,25 @@ export const AppContent: React.FC = () => {
                 onLeave={handleLeaveGame}
               />
             )}
+
+            {activeTab === 'admin' && (
+              <AdminPage
+                currentUser={currentUser}
+                onOpenAuthModal={() => setIsAuthModalOpen(true)}
+                onNavigateHome={() => setActiveTab('demo')}
+              />
+            )}
           </>
         )}
       </main>
+
+      <AuthModal
+        isOpen={isAuthModalOpen}
+        onClose={() => setIsAuthModalOpen(false)}
+        onSuccess={(user) => {
+          setCurrentUser(user);
+        }}
+      />
 
       {/* Chân trang */}
       <footer

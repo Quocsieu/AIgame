@@ -9,6 +9,7 @@ import {
   quotaRouter,
 } from './routes/analytics.routes.js';
 import { authRouter } from './routes/auth.routes.js';
+import { adminRouter } from './routes/admin.routes.js';
 import { contentRouter } from './routes/content.routes.js';
 import { gameRouter } from './routes/game.routes.js';
 import { roomRouter } from './routes/room.routes.js';
@@ -71,6 +72,9 @@ export function createApp(): express.Application {
 
   // Authentication & Account API (Phase 4)
   app.use('/api/auth', authRouter);
+
+  // Administrative API
+  app.use('/api/admin', adminRouter);
 
   // Quotas, Learning Analytics, AI Observability & History APIs (Phase 3 & 4)
   app.use('/api/quotas', quotaRouter);

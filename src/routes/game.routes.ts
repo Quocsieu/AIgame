@@ -59,7 +59,7 @@ gameRouter.get(
           : undefined;
       const rawScope =
         typeof req.query.scope === 'string' ? req.query.scope.trim().toLowerCase() : undefined;
-      const scope = rawScope === 'public' ? 'public' : 'manage';
+      const scope = rawScope === 'public' ? 'public' : rawScope === 'mine' ? 'mine' : 'manage';
 
       const result = persistenceRepo.listGames({
         userId: req.user?.userId ?? null,

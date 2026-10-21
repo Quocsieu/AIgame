@@ -28,8 +28,8 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
     const { gameId, gameSpecification, publicPlay } = parseResult.data;
 
     // Verify draft access: public play MUST be on a published game
-    const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
     const storedSpec = gameStore.get(gameId);
+    const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
     const resolvedIsPublic = storedSpec?.isPublic ?? ownerInfo?.isPublic ?? gameSpecification?.isPublic ?? false;
     const resolvedOwnerUserId = storedSpec?.ownerUserId ?? ownerInfo?.ownerUserId ?? gameSpecification?.ownerUserId ?? null;
 
@@ -41,13 +41,14 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
       );
     }
 
-    if (!publicPlay) {
+    // If game is draft (unpublished), caller MUST be owner or Admin to preview/play
+    if (!resolvedIsPublic) {
       authService.assertResourceAccess({
         resourceType: 'bộ câu hỏi',
         ownerUserId: resolvedOwnerUserId,
         currentUser: req.user,
         mode: 'read',
-        isPublic: resolvedIsPublic,
+        isPublic: false,
       });
     }
 
@@ -55,7 +56,9 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
       quotaService.enforceActiveSessionLimit(req.user.userId);
     }
 
-    const session = gameEngine.createSession(gameId, gameSpecification, req.user?.userId ?? null);
+    // Do not allow client-supplied custom specification to overwrite stored game
+    const customSpecToUse = storedSpec ? undefined : gameSpecification;
+    const session = gameEngine.createSession(gameId, customSpecToUse, req.user?.userId ?? null);
 
     res.status(200).json(
       createSuccessResponse({
@@ -63,6 +66,7 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
         gameId: session.specification.gameId,
         state: session.state,
         totalQuestions: session.specification.questions.length,
+        isPreview: !resolvedIsPublic,
       })
     );
   } catch (err) {

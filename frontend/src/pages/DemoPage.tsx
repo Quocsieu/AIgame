@@ -15,6 +15,7 @@ import {
   submitPracticeAnswer,
 } from '../services/api.js';
 import type {
+  AuthenticatedUser,
   Difficulty,
   GameQuestion,
   GameSpecification,
@@ -35,6 +36,8 @@ interface DemoPageProps {
   autoStartSoloPlay?: boolean;
   onExitSoloPlay?: () => void;
   onNavigateToLibrary?: () => void;
+  currentUser?: AuthenticatedUser | null;
+  onOpenAuthModal?: () => void;
 }
 
 const MAX_URLS = 5;
@@ -186,6 +189,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   autoStartSoloPlay,
   onExitSoloPlay,
   onNavigateToLibrary,
+  currentUser,
+  onOpenAuthModal,
 }) => {
   const toast = useToast();
 
@@ -352,6 +357,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
     if (files.length > MAX_FILES) {
       toast.error(`Tối đa ${MAX_FILES} tệp tài liệu mỗi lần trích xuất.`, 'Vượt giới hạn tệp');
+      return null;
+    }
+
+    if (!currentUser) {
+      toast.error(
+        'Tài khoản khách (Guest) chỉ có quyền tham gia chơi game. Vui lòng đăng nhập để nạp tài liệu và tạo game.',
+        'Yêu cầu đăng nhập'
+      );
+      onOpenAuthModal?.();
       return null;
     }
 
@@ -1563,6 +1577,45 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               animation: 'popIn 0.2s ease',
             }}
           >
+            {!currentUser && (
+              <div
+                style={{
+                  backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                  borderRadius: '12px',
+                  padding: '1rem 1.25rem',
+                  marginBottom: '1.5rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '0.85rem',
+                }}
+              >
+                <div style={{ fontSize: '0.88rem', color: 'var(--text-primary)', lineHeight: 1.4 }}>
+                  💡 <strong>Chế độ Khách (Guest)</strong>: Bạn có thể trải nghiệm xem và chơi thử game công khai. Để tự tạo game AI và lưu trữ vào kho của riêng mình, vui lòng đăng nhập tài khoản Creator.
+                </div>
+                <button
+                  type="button"
+                  onClick={onOpenAuthModal}
+                  style={{
+                    padding: '0.5rem 1rem',
+                    borderRadius: '8px',
+                    border: 'none',
+                    backgroundColor: 'var(--primary)',
+                    color: '#ffffff',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    boxShadow: 'var(--btn-shadow)',
+                  }}
+                >
+                  🔑 Đăng Nhập / Đăng Ký
+                </button>
+              </div>
+            )}
+
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
               <div
                 style={{

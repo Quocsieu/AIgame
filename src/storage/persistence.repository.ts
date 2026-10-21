@@ -289,10 +289,10 @@ export class PersistenceRepository {
         spec.title,
         spec.description,
         spec.gameType,
-        JSON.stringify(spec.settings),
-        JSON.stringify(spec.sourceSummary),
+        JSON.stringify(spec.settings ?? { questionCount: 5, timePerQuestion: 20, scoringMode: 'STANDARD' }),
+        JSON.stringify(spec.sourceSummary ?? { sourceCount: 0, sources: [] }),
         spec.diagnostics ? JSON.stringify(spec.diagnostics) : null,
-        spec.generatedAt,
+        spec.generatedAt ?? nowIso,
         createdAt,
         nowIso
       );
@@ -319,7 +319,7 @@ export class PersistenceRepository {
           q.acceptedAlternatives ? JSON.stringify(q.acceptedAlternatives) : null,
           q.explanation ?? null,
           q.difficulty ?? 'MEDIUM',
-          JSON.stringify(q.sourceReference),
+          q.sourceReference ? JSON.stringify(q.sourceReference) : null,
           q.crosswordClue ?? null,
           q.crosswordAnswer ?? null
         );
@@ -408,7 +408,7 @@ export class PersistenceRepository {
   public listGames(options: {
     userId?: string | null;
     isAdmin?: boolean;
-    scope?: 'manage' | 'public';
+    scope?: 'manage' | 'public' | 'mine';
     status?: 'ALL' | 'PUBLISHED' | 'DRAFT';
     gameType?: string;
     search?: string;
@@ -430,6 +430,19 @@ export class PersistenceRepository {
 
     if (options.scope === 'public') {
       conditions.push('is_public = 1');
+    } else if (options.scope === 'mine') {
+      if (options.userId) {
+        conditions.push('owner_user_id = ?');
+        params.push(options.userId);
+      } else {
+        conditions.push('0 = 1');
+      }
+
+      if (options.status === 'PUBLISHED') {
+        conditions.push('is_public = 1');
+      } else if (options.status === 'DRAFT') {
+        conditions.push('is_public = 0');
+      }
     } else {
       if (!options.isAdmin) {
         if (options.userId) {
@@ -789,6 +802,83 @@ export class PersistenceRepository {
       .all(...params, limit, offset) as Record<string, any>[];
 
     return rows.map(r => this.mapRoomHistoryRow(r));
+  }
+
+  public getAdminOverview(): {
+    totalUsers: number;
+    totalGames: number;
+    publishedGames: number;
+    draftGames: number;
+    totalSessions: number;
+    totalRooms: number;
+  } {
+    const db = getDatabase();
+    const userRow = db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number };
+    const gameRow = db.prepare('SELECT COUNT(*) as count FROM games').get() as { count: number };
+    const pubRow = db.prepare('SELECT COUNT(*) as count FROM games WHERE is_public = 1').get() as { count: number };
+    const draftRow = db.prepare('SELECT COUNT(*) as count FROM games WHERE is_public = 0').get() as { count: number };
+    const sessRow = db.prepare('SELECT COUNT(*) as count FROM practice_sessions').get() as { count: number };
+    const roomRow = db.prepare('SELECT COUNT(*) as count FROM room_history').get() as { count: number };
+
+    return {
+      totalUsers: userRow?.count ?? 0,
+      totalGames: gameRow?.count ?? 0,
+      publishedGames: pubRow?.count ?? 0,
+      draftGames: draftRow?.count ?? 0,
+      totalSessions: sessRow?.count ?? 0,
+      totalRooms: roomRow?.count ?? 0,
+    };
+  }
+
+  public getAdminUsers(): {
+    userId: string;
+    email: string;
+    displayName: string;
+    role: string;
+    createdAt: string;
+    gameCount: number;
+  }[] {
+    const db = getDatabase();
+    const rows = db.prepare(`
+      SELECT 
+        u.user_id, u.email, u.display_name, u.role, u.created_at,
+        COUNT(g.game_id) as game_count
+      FROM users u
+      LEFT JOIN games g ON g.owner_user_id = u.user_id
+      GROUP BY u.user_id
+      ORDER BY u.created_at DESC
+    `).all() as Record<string, any>[];
+
+    return rows.map(r => ({
+      userId: String(r.user_id),
+      email: String(r.email),
+      displayName: String(r.display_name),
+      role: String(r.role),
+      createdAt: String(r.created_at),
+      gameCount: Number(r.game_count || 0),
+    }));
+  }
+
+  public getAdminAiLogs(limit: number = 50): Record<string, any>[] {
+    const db = getDatabase();
+    const rows = db.prepare(`
+      SELECT log_id, user_id, provider, model, operation, status, error_code, latency_ms,
+             total_tokens, generated_questions, created_at
+      FROM ai_usage_logs
+      ORDER BY created_at DESC
+      LIMIT ?
+    `).all(limit) as Record<string, any>[];
+    return rows;
+  }
+
+  public setGamePublicStatus(gameId: string, isPublic: boolean): boolean {
+    const db = getDatabase();
+    const result = db.prepare('UPDATE games SET is_public = ?, updated_at = ? WHERE game_id = ?').run(
+      isPublic ? 1 : 0,
+      new Date().toISOString(),
+      gameId
+    );
+    return result.changes > 0;
   }
 
   private mapRoomHistoryRow(row: Record<string, any>): PersistedRoomHistoryRecord {

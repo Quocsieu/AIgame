@@ -1,5 +1,8 @@
 /// <reference types="vite/client" />
 import type {
+  AdminAiLogRecord,
+  AdminOverviewStats,
+  AdminUserRecord,
   AiObservabilitySummary,
   AuthenticatedUser,
   CreateRoomResponse,
@@ -271,7 +274,7 @@ export async function fetchSavedGames(
         gameType?: string;
         search?: string;
         status?: 'ALL' | 'PUBLISHED' | 'DRAFT';
-        scope?: 'manage' | 'public';
+        scope?: 'manage' | 'public' | 'mine';
       } = 30
 ): Promise<{
   games: PersistedGameSummary[];
@@ -643,4 +646,122 @@ export async function runAiBenchmark(): Promise<{
     throw new Error(data.error?.message || 'Không thể chạy kiểm chuẩn chất lượng AI.');
   }
   return data.data;
+}
+
+// ==========================================
+// Administrative APIs (/api/admin)
+// ==========================================
+
+export async function fetchAdminOverview(): Promise<AdminOverviewStats> {
+  const res = await fetch(`${API_BASE_URL}/admin/overview`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải thống kê quản trị.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function fetchAdminUsers(): Promise<AdminUserRecord[]> {
+  const res = await fetch(`${API_BASE_URL}/admin/users`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải danh sách người dùng.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data.users || [];
+}
+
+export async function fetchAdminGames(options?: {
+  limit?: number;
+  offset?: number;
+  search?: string;
+  status?: string;
+}): Promise<{
+  games: PersistedGameSummary[];
+  total: number;
+  hasMore?: boolean;
+}> {
+  const query = new URLSearchParams();
+  if (options?.limit) query.set('limit', String(options.limit));
+  if (options?.offset) query.set('offset', String(options.offset));
+  if (options?.search) query.set('search', options.search);
+  if (options?.status) query.set('status', options.status);
+
+  const res = await fetch(`${API_BASE_URL}/admin/games?${query.toString()}`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải danh sách bộ câu hỏi quản trị.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function updateAdminGameStatus(
+  gameId: string,
+  isPublic: boolean
+): Promise<{ gameId: string; isPublic: boolean; message: string }> {
+  const res = await fetch(`${API_BASE_URL}/admin/games/${encodeURIComponent(gameId)}/status`, {
+    method: 'PATCH',
+    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ isPublic }),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể cập nhật trạng thái game.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function deleteAdminGame(gameId: string): Promise<void> {
+  const res = await fetch(`${API_BASE_URL}/admin/games/${encodeURIComponent(gameId)}`, {
+    method: 'DELETE',
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể xóa game.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+}
+
+export async function fetchAdminRooms(): Promise<{
+  activeRooms: any[];
+  historicalRooms: any[];
+}> {
+  const res = await fetch(`${API_BASE_URL}/admin/rooms`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải danh sách phòng chơi.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function fetchAdminAiLogs(): Promise<AdminAiLogRecord[]> {
+  const res = await fetch(`${API_BASE_URL}/admin/ai-logs`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải nhật ký AI.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data.logs || [];
 }

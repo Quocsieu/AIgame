@@ -314,3 +314,45 @@ export interface AiObservabilitySummary {
     acceptanceRatePercent: number | null;
   };
 }
+
+export interface AdminOverviewStats {
+  totalUsers: number;
+  totalGames: number;
+  publishedGames: number;
+  draftGames: number;
+  totalSessions: number;
+  totalRooms: number;
+  activeRoomsCount: number;
+  activeRooms?: Array<{
+    roomCode: string;
+    roomId: string;
+    title: string;
+    state: string;
+    playerCount: number;
+    currentQuestionIndex: number;
+    totalQuestions: number;
+  }>;
+}
+
+export interface AdminUserRecord {
+  userId: string;
+  email: string;
+  displayName: string;
+  role: 'USER' | 'ADMIN';
+  createdAt: string;
+  gameCount: number;
+}
+
+export interface AdminAiLogRecord {
+  log_id: string;
+  user_id: string | null;
+  provider: string;
+  model: string;
+  operation: string;
+  status: string;
+  error_code: string | null;
+  latency_ms: number;
+  total_tokens: number | null;
+  generated_questions: number;
+  created_at: string;
+}
