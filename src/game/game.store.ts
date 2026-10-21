@@ -236,10 +236,15 @@ export class GameSpecificationStore {
       }
     }
 
+    const resolvedOwner =
+      ownerUserId !== undefined ? ownerUserId : spec.ownerUserId !== undefined ? spec.ownerUserId : null;
+    const resolvedPublic =
+      isPublic !== undefined ? isPublic : spec.isPublic !== undefined ? Boolean(spec.isPublic) : false;
+
     const storedSpec: GameSpecification = {
       ...spec,
-      ...(ownerUserId !== undefined ? { ownerUserId } : {}),
-      ...(isPublic !== undefined ? { isPublic } : {}),
+      ownerUserId: resolvedOwner,
+      isPublic: resolvedPublic,
     };
 
     this.entries.set(spec.gameId, {
@@ -248,7 +253,7 @@ export class GameSpecificationStore {
       lastAccessedAt: now,
     });
 
-    persistenceRepo.saveGameSpecification(storedSpec, ownerUserId, isPublic);
+    persistenceRepo.saveGameSpecification(storedSpec, resolvedOwner, resolvedPublic);
   }
 
   public get(gameId: string, now: number = Date.now()): GameSpecification | undefined {

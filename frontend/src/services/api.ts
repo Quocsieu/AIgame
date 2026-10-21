@@ -247,19 +247,40 @@ export async function generateGame(params: {
 }
 
 export async function fetchSavedGames(
-  options: number | { limit?: number; gameType?: string; search?: string } = 30
+  options:
+    | number
+    | {
+        limit?: number;
+        offset?: number;
+        gameType?: string;
+        search?: string;
+        status?: 'ALL' | 'PUBLISHED' | 'DRAFT';
+        scope?: 'manage' | 'public';
+      } = 30
 ): Promise<{
   games: PersistedGameSummary[];
   total: number;
+  limit?: number;
+  offset?: number;
+  hasMore?: boolean;
 }> {
   const opts = typeof options === 'number' ? { limit: options } : options;
   const query = new URLSearchParams();
   query.set('limit', String(opts.limit ?? 30));
+  if (typeof opts.offset === 'number' && opts.offset > 0) {
+    query.set('offset', String(opts.offset));
+  }
   if (opts.gameType && opts.gameType !== 'ALL') {
     query.set('gameType', opts.gameType);
   }
   if (opts.search && opts.search.trim()) {
     query.set('search', opts.search.trim());
+  }
+  if (opts.status && opts.status !== 'ALL') {
+    query.set('status', opts.status);
+  }
+  if (opts.scope) {
+    query.set('scope', opts.scope);
   }
 
   const res = await fetch(`${API_BASE_URL}/games?${query.toString()}`, {
@@ -283,13 +304,19 @@ export async function deleteSavedGame(gameId: string): Promise<void> {
   }
 }
 
-export async function fetchGameById(gameId: string): Promise<GameSpecification> {
-  const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}`, {
+export async function fetchGameById(
+  gameId: string,
+  options?: { mode?: 'public' | 'manage' }
+): Promise<GameSpecification> {
+  const query = options?.mode ? `?mode=${encodeURIComponent(options.mode)}` : '';
+  const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}${query}`, {
     headers: buildAuthHeaders(),
   });
   const data = await res.json();
   if (!data.success) {
-    throw new Error(data.error?.message || 'Không tìm thấy bộ câu hỏi.');
+    const err = new Error(data.error?.message || 'Không tìm thấy bộ câu hỏi.');
+    (err as any).code = data.error?.code;
+    throw err;
   }
   return data.data;
 }
@@ -300,6 +327,11 @@ export async function saveEditedQuestions(
     title?: string;
     description?: string;
     questions: GameQuestion[];
+    settings?: {
+      timePerQuestion?: number;
+      scoringMode?: ScoringMode;
+    };
+    isPublic?: boolean;
   }
 ): Promise<GameSpecification> {
   const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/questions`, {
@@ -405,6 +437,7 @@ export async function fetchRoomQr(roomCode: string): Promise<QrResponse> {
 export async function createPracticeSession(params: {
   gameId: string;
   gameSpecification?: GameSpecification;
+  publicPlay?: boolean;
 }): Promise<{
   sessionId: string;
   gameId: string;

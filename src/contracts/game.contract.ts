@@ -218,8 +218,15 @@ export type GenerateGameRequest = z.infer<typeof GenerateGameRequestSchema>;
 
 export const UpdateGameQuestionsRequestSchema = z.object({
   title: z.string().trim().min(1).max(200).optional(),
-  description: z.string().trim().min(1).max(1000).optional(),
+  description: z.string().trim().max(1000).optional(),
   questions: z.array(GameQuestionSchema).min(1).max(20),
+  settings: z
+    .object({
+      timePerQuestion: z.number().int().min(5).max(120).optional(),
+      scoringMode: ScoringModeEnum.optional(),
+    })
+    .optional(),
+  isPublic: z.boolean().optional(),
 });
 export type UpdateGameQuestionsRequest = z.infer<typeof UpdateGameQuestionsRequestSchema>;
 

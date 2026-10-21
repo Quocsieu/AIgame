@@ -407,11 +407,20 @@ export class PersistenceRepository {
 
   public listGames(options: {
     userId?: string | null;
+    isAdmin?: boolean;
+    scope?: 'manage' | 'public';
+    status?: 'ALL' | 'PUBLISHED' | 'DRAFT';
     gameType?: string;
     search?: string;
     limit?: number;
     offset?: number;
-  } = {}): { games: PersistedGameSummary[]; total: number } {
+  } = {}): {
+    games: PersistedGameSummary[];
+    total: number;
+    limit: number;
+    offset: number;
+    hasMore: boolean;
+  } {
     const db = getDatabase();
     const limit = Math.min(100, Math.max(1, options.limit ?? 25));
     const offset = Math.max(0, options.offset ?? 0);
@@ -419,14 +428,26 @@ export class PersistenceRepository {
     const conditions: string[] = [];
     const params: any[] = [];
 
-    if (options.userId) {
-      conditions.push('(owner_user_id = ? OR is_public = 1)');
-      params.push(options.userId);
+    if (options.scope === 'public') {
+      conditions.push('is_public = 1');
     } else {
-      conditions.push('(owner_user_id IS NULL OR is_public = 1)');
+      if (!options.isAdmin) {
+        if (options.userId) {
+          conditions.push('(owner_user_id = ? OR is_public = 1)');
+          params.push(options.userId);
+        } else {
+          conditions.push('(owner_user_id IS NULL OR is_public = 1)');
+        }
+      }
+
+      if (options.status === 'PUBLISHED') {
+        conditions.push('is_public = 1');
+      } else if (options.status === 'DRAFT') {
+        conditions.push('is_public = 0');
+      }
     }
 
-    if (options.gameType) {
+    if (options.gameType && options.gameType !== 'ALL') {
       conditions.push('game_type = ?');
       params.push(options.gameType);
     }
@@ -469,9 +490,13 @@ export class PersistenceRepository {
       };
     });
 
+    const total = Number(countRow?.cnt || 0);
     return {
       games,
-      total: Number(countRow?.cnt || 0),
+      total,
+      limit,
+      offset,
+      hasMore: offset + games.length < total,
     };
   }
 

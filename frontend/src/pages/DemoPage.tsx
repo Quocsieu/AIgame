@@ -31,6 +31,8 @@ interface DemoPageProps {
   onNavigateToHost?: (roomCode: string, hostToken: string) => void;
   onNavigateToPlay?: (roomCode: string) => void;
   initialSpec?: GameSpecification | null;
+  autoStartSoloPlay?: boolean;
+  onExitSoloPlay?: () => void;
 }
 
 const MAX_URLS = 5;
@@ -179,6 +181,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   onNavigateToHost,
   onNavigateToPlay,
   initialSpec,
+  autoStartSoloPlay,
+  onExitSoloPlay,
 }) => {
   const toast = useToast();
 
@@ -199,7 +203,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [generatedSpec, setGeneratedSpec] = useState<GameSpecification | null>(null);
   const [editingQuestionIdx, setEditingQuestionIdx] = useState<number | null>(null);
 
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
 
   const [roomCode, setRoomCode] = useState('');
   const [hostToken, setHostToken] = useState('');
@@ -208,6 +212,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
   const [isIngesting, setIsIngesting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSavingSpec, setIsSavingSpec] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
 
   // Single-Player Practice Mode state (Batch 7)
@@ -247,7 +252,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       setQuestionCount(initialSpec.questions.length);
       setEditingQuestionIdx(null);
       setRoomCode('');
-      setCurrentStep(3);
+      setCurrentStep(4);
     }
   }, [initialSpec]);
 
@@ -320,6 +325,19 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       return null;
     }
 
+    for (const u of cleanUrls) {
+      try {
+        const parsedUrl = new URL(u);
+        if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+          toast.error(`Địa chỉ URL "${u}" phải bắt đầu bằng http:// hoặc https://.`, 'URL không hợp lệ');
+          return null;
+        }
+      } catch {
+        toast.error(`Địa chỉ URL "${u}" không đúng định dạng hợp lệ.`, 'URL không hợp lệ');
+        return null;
+      }
+    }
+
     if (cleanUrls.length > MAX_URLS) {
       toast.error(`Tối đa ${MAX_URLS} URL mỗi lần trích xuất.`, 'Vượt giới hạn URL');
       return null;
@@ -349,7 +367,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         `Đã nạp thành công ${sources.length} nguồn tài liệu (${totalChars.toLocaleString('vi-VN')} ký tự).`,
         'Trích xuất thành công'
       );
-      setCurrentStep(2);
+      setCurrentStep(3);
       return firstSource.sourceId;
     } catch (err: any) {
       toast.removeToast(toastId);
@@ -364,7 +382,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     const sIds = ingestedSources.map(s => s.sourceId);
     const primaryId = targetSourceId || sIds[0] || null;
     if (!primaryId) {
-      toast.error('Vui lòng hoàn thành bước 1 (Nhập nội dung nguồn) trước.', 'Chưa có nội dung');
+      toast.error('Vui lòng hoàn thành Bước 2 (Nhập nội dung nguồn) trước.', 'Chưa có nội dung');
       return null;
     }
 
@@ -390,10 +408,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       setEditingQuestionIdx(null);
       setRoomCode('');
       toast.success(
-        `Đã tạo thành công bộ câu hỏi "${spec.title}" (${spec.questions.length} câu).`,
+        `Đã tạo thành công bộ câu hỏi "${spec.title}" (${spec.questions.length} câu). Vui lòng xem trước và chỉnh sửa ở Bước 4.`,
         'Tạo trò chơi thành công'
       );
-      setCurrentStep(3);
+      setCurrentStep(4);
       return spec;
     } catch (err: any) {
       toast.removeToast(toastId);
@@ -531,7 +549,66 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     });
     if (editingQuestionIdx === index) {
       setEditingQuestionIdx(null);
+    } else if (editingQuestionIdx !== null && editingQuestionIdx > index) {
+      setEditingQuestionIdx(editingQuestionIdx - 1);
     }
+  };
+
+  const handleMoveQuestion = (index: number, direction: -1 | 1) => {
+    if (!generatedSpec) return;
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= generatedSpec.questions.length) return;
+
+    const nextQuestions = [...generatedSpec.questions];
+    const temp = nextQuestions[index];
+    nextQuestions[index] = nextQuestions[targetIndex];
+    nextQuestions[targetIndex] = temp;
+
+    setGeneratedSpec({
+      ...generatedSpec,
+      questions: nextQuestions,
+    });
+
+    if (editingQuestionIdx === index) {
+      setEditingQuestionIdx(targetIndex);
+    } else if (editingQuestionIdx === targetIndex) {
+      setEditingQuestionIdx(index);
+    }
+  };
+
+  const handleDuplicateQuestion = (index: number) => {
+    if (!generatedSpec) return;
+    if (generatedSpec.questions.length >= 20) {
+      toast.warning('Bộ câu hỏi hỗ trợ tối đa 20 câu hỏi.', 'Đã đạt giới hạn');
+      return;
+    }
+
+    const sourceQ = generatedSpec.questions[index];
+    const copyId = `q_copy_${Date.now()}_${index + 1}`;
+    const duplicated: GameQuestion = {
+      ...sourceQ,
+      id: copyId,
+      question: `${sourceQ.question} (Bản sao)`,
+      choices: sourceQ.choices ? [...sourceQ.choices] : undefined,
+      acceptedAlternatives: sourceQ.acceptedAlternatives ? [...sourceQ.acceptedAlternatives] : undefined,
+      sourceReference: { ...sourceQ.sourceReference },
+    };
+
+    const nextQuestions = [
+      ...generatedSpec.questions.slice(0, index + 1),
+      duplicated,
+      ...generatedSpec.questions.slice(index + 1),
+    ];
+
+    setGeneratedSpec({
+      ...generatedSpec,
+      questions: nextQuestions,
+      settings: {
+        ...generatedSpec.settings,
+        questionCount: nextQuestions.length,
+      },
+    });
+    setEditingQuestionIdx(index + 1);
   };
 
   const handleAddQuestion = () => {
@@ -595,21 +672,48 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     setEditingQuestionIdx(nextQuestions.length - 1);
   };
 
-  const handleSaveSpecEdits = async () => {
+  const handleSaveSpecEdits = async (publishFlag?: boolean): Promise<GameSpecification | null> => {
+    if (isSavingSpec) return null;
     if (!generatedSpec || !validateSpecBeforeLaunch(generatedSpec)) {
-      return;
+      return null;
     }
+
+    const nextIsPublic =
+      publishFlag !== undefined ? publishFlag : Boolean(generatedSpec.isPublic);
+
+    setIsSavingSpec(true);
     try {
       const saved = await saveEditedQuestions(generatedSpec.gameId, {
         title: generatedSpec.title,
         description: generatedSpec.description,
         questions: generatedSpec.questions,
+        settings: {
+          timePerQuestion,
+          scoringMode,
+        },
+        isPublic: nextIsPublic,
       });
       setGeneratedSpec(saved);
       setEditingQuestionIdx(null);
-      toast.success('Đã lưu bộ câu hỏi vào cơ sở dữ liệu thành công!', 'Đã lưu');
+      if (publishFlag === true) {
+        toast.success(
+          'Đã lưu và xuất bản game công khai thành công! Bạn có thể chia sẻ Link/QR hoặc mở phòng chơi ngay.',
+          'Xuất bản thành công'
+        );
+      } else if (publishFlag === false) {
+        toast.success(
+          'Đã lưu game ở trạng thái Bản nháp (chưa xuất bản công khai).',
+          'Đã lưu bản nháp'
+        );
+      } else {
+        toast.success('Đã lưu bộ câu hỏi vào cơ sở dữ liệu thành công!', 'Đã lưu');
+      }
+      return saved;
     } catch (err: any) {
       toast.error(err.message || 'Không thể lưu chỉnh sửa câu hỏi.', 'Lỗi lưu');
+      return null;
+    } finally {
+      setIsSavingSpec(false);
     }
   };
 
@@ -664,26 +768,34 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }, 1000);
   };
 
-  const handleStartPractice = async () => {
-    if (!generatedSpec || !validateSpecBeforeLaunch(generatedSpec)) {
+  const handleStartPractice = async (specOverride?: GameSpecification, isPublicSoloPlay?: boolean) => {
+    const target = specOverride || generatedSpec;
+    if (!target || !validateSpecBeforeLaunch(target)) {
       return;
     }
 
     const specToPlay: GameSpecification = {
-      ...generatedSpec,
+      ...target,
       settings: {
-        ...generatedSpec.settings,
-        questionCount: generatedSpec.questions.length,
-        scoringMode,
-        timePerQuestion,
+        ...target.settings,
+        questionCount: target.questions.length,
+        scoringMode: target.settings?.scoringMode || scoringMode,
+        timePerQuestion: target.settings?.timePerQuestion || timePerQuestion,
       },
     };
 
     try {
-      const created = await createPracticeSession({
-        gameId: specToPlay.gameId,
-        gameSpecification: specToPlay,
-      });
+      const created = await createPracticeSession(
+        isPublicSoloPlay
+          ? {
+              gameId: specToPlay.gameId,
+              publicPlay: true,
+            }
+          : {
+              gameId: specToPlay.gameId,
+              gameSpecification: specToPlay,
+            }
+      );
       const started = await startPracticeSession(created.sessionId);
 
       setPracticeSessionId(created.sessionId);
@@ -696,11 +808,20 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       setPracticeScore(0);
       setPracticeStreak(0);
       setIsPracticeOpen(true);
-      startPracticeCountdown(started.question.timePerQuestion || timePerQuestion, created.sessionId);
+      startPracticeCountdown(
+        started.question.timePerQuestion || specToPlay.settings.timePerQuestion || timePerQuestion,
+        created.sessionId
+      );
     } catch (err: any) {
       toast.error(err.message || 'Không thể khởi tạo chế độ luyện tập cá nhân.', 'Lỗi luyện tập');
     }
   };
+
+  useEffect(() => {
+    if (autoStartSoloPlay && initialSpec) {
+      handleStartPractice(initialSpec, true);
+    }
+  }, [autoStartSoloPlay, initialSpec]);
 
   const handleSubmitPracticeAnswer = async (chosenAnswer: string) => {
     if (!practiceSessionId || !practiceQuestion || practiceFeedback || isSubmittingPractice) {
@@ -814,180 +935,120 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         </h1>
       </header>
 
-      {/* THANH TIẾN TRÌNH STEPPER 3 BƯỚC */}
+      {/* THANH TIẾN TRÌNH STEPPER 5 BƯỚC */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-          gap: '0.85rem',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
+          gap: '0.65rem',
           marginBottom: '2rem',
         }}
       >
-        {/* Bước 1 Stepper Button */}
-        <button
-          type="button"
-          onClick={() => setCurrentStep(1)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.85rem',
-            padding: '0.9rem 1.1rem',
-            borderRadius: '12px',
-            border: currentStep === 1 ? '2px solid var(--primary)' : '1px solid var(--border-subtle)',
-            backgroundColor: currentStep === 1 ? 'var(--bg-card-hover)' : 'var(--bg-surface)',
-            boxShadow: currentStep === 1 ? 'var(--card-shadow)' : 'none',
-            cursor: 'pointer',
-            textAlign: 'left',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          <div
+        {[
+          {
+            step: 1 as const,
+            title: 'Thể Loại Game',
+            sub: formatGameTypeLabel(gameType),
+            done: currentStep > 1 || ingestedSources.length > 0 || Boolean(generatedSpec),
+          },
+          {
+            step: 2 as const,
+            title: 'Nguồn Nội Dung',
+            sub:
+              ingestedSources.length > 0
+                ? `Đã nạp ${ingestedSources.length} nguồn`
+                : 'Nhập URL / Tải tệp',
+            done: ingestedSources.length > 0,
+          },
+          {
+            step: 3 as const,
+            title: 'AI Tạo Câu Hỏi',
+            sub: generatedSpec
+              ? `Đã tạo ${generatedSpec.questions.length} câu`
+              : `${questionCount} câu • ${timePerQuestion}s`,
+            done: Boolean(generatedSpec),
+          },
+          {
+            step: 4 as const,
+            title: 'Xem Trước & Sửa',
+            sub: generatedSpec
+              ? `${generatedSpec.questions.length} câu hỏi sẵn sàng`
+              : 'Chưa có câu hỏi',
+            done: Boolean(generatedSpec) && currentStep > 4,
+          },
+          {
+            step: 5 as const,
+            title: 'Lưu & Xuất Bản',
+            sub: generatedSpec?.isPublic
+              ? '🚀 Đã xuất bản công khai'
+              : generatedSpec
+                ? '📝 Bản nháp (Chưa xuất bản)'
+                : 'Lưu nháp / Xuất bản',
+            done: Boolean(generatedSpec?.isPublic),
+          },
+        ].map(item => (
+          <button
+            key={item.step}
+            type="button"
+            onClick={() => setCurrentStep(item.step)}
             style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '10px',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.7rem',
+              padding: '0.75rem 0.9rem',
+              borderRadius: '12px',
+              border:
+                currentStep === item.step
+                  ? '2px solid var(--primary)'
+                  : '1px solid var(--border-subtle)',
               backgroundColor:
-                ingestedSources.length > 0
+                currentStep === item.step ? 'var(--bg-card-hover)' : 'var(--bg-surface)',
+              boxShadow: currentStep === item.step ? 'var(--card-shadow)' : 'none',
+              cursor: 'pointer',
+              textAlign: 'left',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <div
+              style={{
+                width: '32px',
+                height: '32px',
+                borderRadius: '9px',
+                backgroundColor: item.done
                   ? 'var(--accent-emerald)'
-                  : currentStep === 1
+                  : currentStep === item.step
                     ? 'var(--primary)'
                     : 'var(--border-strong)',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '1rem',
-              fontWeight: 900,
-              flexShrink: 0,
-            }}
-          >
-            {ingestedSources.length > 0 ? '✓' : '1'}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-              Nguồn Nội Dung
-            </div>
-            <div
-              style={{
-                fontSize: '0.75rem',
-                color: ingestedSources.length > 0 ? 'var(--accent-emerald)' : 'var(--text-secondary)',
-                fontWeight: 600,
+                color: '#ffffff',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.9rem',
+                fontWeight: 900,
+                flexShrink: 0,
               }}
             >
-              {ingestedSources.length > 0 ? `Đã nạp ${ingestedSources.length} nguồn` : 'Chưa có dữ liệu'}
+              {item.done ? '✓' : item.step}
             </div>
-          </div>
-        </button>
-
-        {/* Bước 2 Stepper Button */}
-        <button
-          type="button"
-          onClick={() => setCurrentStep(2)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.85rem',
-            padding: '0.9rem 1.1rem',
-            borderRadius: '12px',
-            border: currentStep === 2 ? '2px solid var(--primary)' : '1px solid var(--border-subtle)',
-            backgroundColor: currentStep === 2 ? 'var(--bg-card-hover)' : 'var(--bg-surface)',
-            boxShadow: currentStep === 2 ? 'var(--card-shadow)' : 'none',
-            cursor: 'pointer',
-            textAlign: 'left',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          <div
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '10px',
-              backgroundColor: generatedSpec
-                ? 'var(--accent-emerald)'
-                : currentStep === 2
-                  ? 'var(--primary)'
-                  : 'var(--border-strong)',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '1rem',
-              fontWeight: 900,
-              flexShrink: 0,
-            }}
-          >
-            {generatedSpec ? '✓' : '2'}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-              Cấu Hình AI
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                {item.title}
+              </div>
+              <div
+                style={{
+                  fontSize: '0.72rem',
+                  color: item.done ? 'var(--accent-emerald)' : 'var(--text-secondary)',
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {item.sub}
+              </div>
             </div>
-            <div
-              style={{
-                fontSize: '0.75rem',
-                color: generatedSpec ? 'var(--accent-emerald)' : 'var(--text-secondary)',
-                fontWeight: 600,
-              }}
-            >
-              {generatedSpec ? `${generatedSpec.questions.length} câu hỏi sẵn sàng` : 'Chưa tạo câu hỏi'}
-            </div>
-          </div>
-        </button>
-
-        {/* Bước 3 Stepper Button */}
-        <button
-          type="button"
-          onClick={() => setCurrentStep(3)}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.85rem',
-            padding: '0.9rem 1.1rem',
-            borderRadius: '12px',
-            border: currentStep === 3 ? '2px solid var(--primary)' : '1px solid var(--border-subtle)',
-            backgroundColor: currentStep === 3 ? 'var(--bg-card-hover)' : 'var(--bg-surface)',
-            boxShadow: currentStep === 3 ? 'var(--card-shadow)' : 'none',
-            cursor: 'pointer',
-            textAlign: 'left',
-            transition: 'all 0.15s ease',
-          }}
-        >
-          <div
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '10px',
-              backgroundColor: roomCode
-                ? 'var(--accent-emerald)'
-                : currentStep === 3
-                  ? 'var(--primary)'
-                  : 'var(--border-strong)',
-              color: '#ffffff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '1rem',
-              fontWeight: 900,
-              flexShrink: 0,
-            }}
-          >
-            {roomCode ? '✓' : '3'}
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-              Thi Đấu & Luyện Tập
-            </div>
-            <div
-              style={{
-                fontSize: '0.75rem',
-                color: roomCode ? 'var(--accent-emerald)' : 'var(--text-secondary)',
-                fontWeight: 600,
-              }}
-            >
-              {roomCode ? `Phòng [${roomCode}]` : 'Tạo phòng QR hoặc Chơi thử'}
-            </div>
-          </div>
-        </button>
+          </button>
+        ))}
       </div>
 
       {/* ===================== CHẾ ĐỘ LUYỆN TẬP CÁ NHÂN (BATCH 7) ===================== */}
@@ -1398,7 +1459,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               <div style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
                 <button
                   type="button"
-                  onClick={handleStartPractice}
+                  onClick={() => handleStartPractice(undefined, autoStartSoloPlay)}
                   style={{
                     backgroundColor: 'var(--primary)',
                     color: '#ffffff',
@@ -1462,9 +1523,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         </div>
       )}
 
-      {/* NỘI DUNG TỪNG BƯỚC */}
+      {/* NỘI DUNG TỪNG BƯỚC (5 BƯỚC WIZARD) */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-        {/* ===================== BƯỚC 1: NGUỒN NỘI DUNG (MULTI-URL & MULTI-FILE) ===================== */}
+        {/* ===================== BƯỚC 1: CHỌN THỂ LOẠI GAME & THÔNG SỐ CƠ BẢN ===================== */}
         {currentStep === 1 && (
           <div
             style={{
@@ -1494,7 +1555,228 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                 1
               </div>
               <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.35rem', fontWeight: 800 }}>
-                Nguồn nội dung (Hỗ trợ tối đa {MAX_URLS} URL & {MAX_FILES} tệp)
+                Bước 1: Chọn thể loại game & thông số cơ bản
+              </h2>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+                gap: '1rem',
+                marginTop: '1.25rem',
+                marginBottom: '1.25rem',
+              }}
+            >
+              <div>
+                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
+                  Thể loại game:
+                </label>
+                <select
+                  value={gameType}
+                  onChange={e => setGameType(e.target.value as GameType)}
+                  style={{
+                    width: '100%',
+                    padding: '0.85rem 1rem',
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1px solid var(--border-strong)',
+                    borderRadius: '10px',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.95rem',
+                    fontWeight: 600,
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <option value="MULTIPLE_CHOICE">🎯 Trắc nghiệm ABCD</option>
+                  <option value="FILL_IN_THE_BLANK">✍️ Điền từ vào chỗ trống</option>
+                  <option value="QUICK_BUTTON">⚡ Nút bấm nhanh (Đúng/Sai hoặc tùy chỉnh)</option>
+                  <option value="CROSSWORD">🧩 Ô chữ giải đố</option>
+                  <option value="MIXED">🎲 Hỗn hợp (Trắc nghiệm + Điền từ + Nút bấm + Ô chữ)</option>
+                </select>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
+                  Chế độ tính điểm (Scoring Mode):
+                </label>
+                <select
+                  value={scoringMode}
+                  onChange={e => setScoringMode(e.target.value as ScoringMode)}
+                  style={{
+                    width: '100%',
+                    padding: '0.85rem 1rem',
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1px solid var(--border-strong)',
+                    borderRadius: '10px',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.95rem',
+                    fontWeight: 600,
+                    boxSizing: 'border-box',
+                  }}
+                >
+                  <option value="STANDARD">🏅 STANDARD — Điểm chuẩn (100đ cố định/câu)</option>
+                  <option value="SPEED_BONUS">⚡ SPEED_BONUS — Thưởng tốc độ trả lời (+50đ tối đa)</option>
+                  <option value="STREAK">🔥 STREAK — Thưởng chuỗi trả lời đúng liên tiếp</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: '1.25rem' }}>
+              <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.5rem' }}>
+                Độ khó câu hỏi:
+              </label>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
+                {(['EASY', 'MEDIUM', 'HARD'] as Difficulty[]).map(lvl => {
+                  const label = lvl === 'EASY' ? 'Dễ' : lvl === 'MEDIUM' ? 'Trung bình' : 'Khó';
+                  const isSelected = difficulty === lvl;
+                  const activeColor =
+                    lvl === 'EASY'
+                      ? 'var(--accent-emerald)'
+                      : lvl === 'MEDIUM'
+                        ? 'var(--accent-amber)'
+                        : 'var(--accent-rose)';
+                  return (
+                    <button
+                      key={lvl}
+                      type="button"
+                      onClick={() => setDifficulty(lvl)}
+                      style={{
+                        padding: '0.75rem 0.5rem',
+                        borderRadius: '10px',
+                        border: isSelected ? `2px solid ${activeColor}` : '1px solid var(--border-strong)',
+                        backgroundColor: isSelected ? activeColor : 'var(--bg-input)',
+                        color: isSelected ? '#ffffff' : 'var(--text-secondary)',
+                        fontWeight: 800,
+                        fontSize: '0.95rem',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+              <div>
+                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
+                  Số lượng câu hỏi (1 - 20):
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={20}
+                  value={questionCount}
+                  onChange={e => setQuestionCount(Math.min(20, Math.max(1, parseInt(e.target.value, 10) || 5)))}
+                  style={{
+                    width: '100%',
+                    padding: '0.8rem 1rem',
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1px solid var(--border-strong)',
+                    borderRadius: '10px',
+                    color: 'var(--text-primary)',
+                    fontSize: '1rem',
+                    fontWeight: 700,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
+                  Thời gian mỗi câu (5 - 120 giây):
+                </label>
+                <div style={{ position: 'relative' }}>
+                  <input
+                    type="number"
+                    min={5}
+                    max={120}
+                    value={timePerQuestion}
+                    onChange={e => setTimePerQuestion(Math.min(120, Math.max(5, parseInt(e.target.value, 10) || 20)))}
+                    style={{
+                      width: '100%',
+                      padding: '0.8rem 2.5rem 0.8rem 1rem',
+                      backgroundColor: 'var(--bg-input)',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: '10px',
+                      color: 'var(--text-primary)',
+                      fontSize: '1rem',
+                      fontWeight: 700,
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <span
+                    style={{
+                      position: 'absolute',
+                      right: '0.85rem',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      color: 'var(--text-muted)',
+                      fontSize: '0.85rem',
+                      fontWeight: 700,
+                      pointerEvents: 'none',
+                    }}
+                  >
+                    giây
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.85rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => setCurrentStep(2)}
+                style={{
+                  backgroundColor: 'var(--primary)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '10px',
+                  padding: '0.85rem 1.6rem',
+                  fontWeight: 800,
+                  fontSize: '1rem',
+                  cursor: 'pointer',
+                  boxShadow: 'var(--btn-shadow)',
+                }}
+              >
+                Tiếp tục: Nhập Nguồn Nội Dung (Bước 2) &rarr;
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ===================== BƯỚC 2: NHẬP NGUỒN NỘI DUNG (MULTI-URL & MULTI-FILE) ===================== */}
+        {currentStep === 2 && (
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '16px',
+              padding: '2rem',
+              boxShadow: 'var(--card-shadow)',
+              animation: 'popIn 0.2s ease',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+              <div
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '8px',
+                  backgroundColor: 'var(--primary)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '1rem',
+                  fontWeight: 800,
+                }}
+              >
+                2
+              </div>
+              <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.35rem', fontWeight: 800 }}>
+                Bước 2: Nhập nguồn nội dung (Hỗ trợ tối đa {MAX_URLS} URL & {MAX_FILES} tệp)
               </h2>
             </div>
 
@@ -1631,6 +1913,23 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             <div style={{ display: 'flex', gap: '0.85rem', flexWrap: 'wrap' }}>
               <button
                 type="button"
+                onClick={() => setCurrentStep(1)}
+                style={{
+                  padding: '0.85rem 1.3rem',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '10px',
+                  fontWeight: 700,
+                  fontSize: '0.95rem',
+                  cursor: 'pointer',
+                }}
+              >
+                &larr; Quay lại Bước 1
+              </button>
+
+              <button
+                type="button"
                 onClick={() => handleIngest()}
                 disabled={isIngesting}
                 style={{
@@ -1657,7 +1956,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               {ingestedSources.length > 0 && (
                 <button
                   type="button"
-                  onClick={() => setCurrentStep(2)}
+                  onClick={() => setCurrentStep(3)}
                   style={{
                     padding: '0.85rem 1.5rem',
                     backgroundColor: 'var(--bg-input)',
@@ -1669,7 +1968,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     cursor: 'pointer',
                   }}
                 >
-                  Tiếp tục (Bước 2) &rarr;
+                  Tiếp tục (Bước 3) &rarr;
                 </button>
               )}
             </div>
@@ -1708,8 +2007,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           </div>
         )}
 
-        {/* ===================== BƯỚC 2: CẤU HÌNH & TẠO GAME AI ===================== */}
-        {currentStep === 2 && (
+        {/* ===================== BƯỚC 3: AI TẠO VÀ PHÂN BỔ CÂU HỎI ===================== */}
+        {currentStep === 3 && (
           <div
             style={{
               backgroundColor: 'var(--bg-surface)',
@@ -1735,174 +2034,67 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   fontWeight: 800,
                 }}
               >
-                2
+                3
               </div>
               <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.35rem', fontWeight: 800 }}>
-                Cấu hình câu hỏi & chế độ tính điểm AI
+                Bước 3: AI tạo và phân bổ câu hỏi từ nội dung nguồn
               </h2>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '1rem', marginTop: '1.25rem', marginBottom: '1.25rem' }}>
-              <div>
-                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
-                  Hình thức thi đấu:
-                </label>
-                <select
-                  value={gameType}
-                  onChange={e => setGameType(e.target.value as GameType)}
-                  style={{
-                    width: '100%',
-                    padding: '0.85rem 1rem',
-                    backgroundColor: 'var(--bg-input)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '10px',
-                    color: 'var(--text-primary)',
-                    fontSize: '0.95rem',
-                    fontWeight: 600,
-                    boxSizing: 'border-box',
-                  }}
-                >
-                  <option value="MULTIPLE_CHOICE">🎯 Trắc nghiệm ABCD</option>
-                  <option value="FILL_IN_THE_BLANK">✍️ Điền từ vào chỗ trống</option>
-                  <option value="QUICK_BUTTON">⚡ Nút bấm nhanh Đúng / Sai</option>
-                  <option value="CROSSWORD">🧩 Ô chữ giải đố</option>
-                  <option value="MIXED">🎲 Hỗn hợp (Trắc nghiệm + Điền từ + Đúng/Sai + Ô chữ)</option>
-                </select>
+            <div
+              style={{
+                marginTop: '1rem',
+                marginBottom: '1.25rem',
+                padding: '1rem 1.25rem',
+                backgroundColor: 'var(--bg-input)',
+                borderRadius: '12px',
+                border: '1px solid var(--border-subtle)',
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '0.85rem',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.6rem', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.85rem', fontWeight: 800, color: 'var(--accent-sky)' }}>
+                  🎮 {formatGameTypeLabel(gameType)}
+                </span>
+                <span style={{ color: 'var(--text-muted)' }}>•</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Số câu: {questionCount} câu
+                </span>
+                <span style={{ color: 'var(--text-muted)' }}>•</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text-primary)' }}>
+                  Thời gian: {timePerQuestion}s/câu
+                </span>
+                <span style={{ color: 'var(--text-muted)' }}>•</span>
+                <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--accent-amber)' }}>
+                  {formatScoringModeLabel(scoringMode)}
+                </span>
               </div>
-
-              <div>
-                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
-                  Chế độ tính điểm (Scoring Mode):
-                </label>
-                <select
-                  value={scoringMode}
-                  onChange={e => setScoringMode(e.target.value as ScoringMode)}
-                  style={{
-                    width: '100%',
-                    padding: '0.85rem 1rem',
-                    backgroundColor: 'var(--bg-input)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '10px',
-                    color: 'var(--text-primary)',
-                    fontSize: '0.95rem',
-                    fontWeight: 600,
-                    boxSizing: 'border-box',
-                  }}
-                >
-                  <option value="STANDARD">🏅 STANDARD — Điểm chuẩn (100đ cố định/câu)</option>
-                  <option value="SPEED_BONUS">⚡ SPEED_BONUS — Thưởng tốc độ trả lời (+50đ tối đa)</option>
-                  <option value="STREAK">🔥 STREAK — Thưởng chuỗi trả lời đúng liên tiếp</option>
-                </select>
-              </div>
-            </div>
-
-            <div style={{ marginBottom: '1.25rem' }}>
-              <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.5rem' }}>
-                Độ khó câu hỏi:
-              </label>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
-                {(['EASY', 'MEDIUM', 'HARD'] as Difficulty[]).map(lvl => {
-                  const label = lvl === 'EASY' ? 'Dễ' : lvl === 'MEDIUM' ? 'Trung bình' : 'Khó';
-                  const isSelected = difficulty === lvl;
-                  const activeColor =
-                    lvl === 'EASY'
-                      ? 'var(--accent-emerald)'
-                      : lvl === 'MEDIUM'
-                        ? 'var(--accent-amber)'
-                        : 'var(--accent-rose)';
-                  return (
-                    <button
-                      key={lvl}
-                      type="button"
-                      onClick={() => setDifficulty(lvl)}
-                      style={{
-                        padding: '0.75rem 0.5rem',
-                        borderRadius: '10px',
-                        border: isSelected ? `2px solid ${activeColor}` : '1px solid var(--border-strong)',
-                        backgroundColor: isSelected ? activeColor : 'var(--bg-input)',
-                        color: isSelected ? '#ffffff' : 'var(--text-secondary)',
-                        fontWeight: 800,
-                        fontSize: '0.95rem',
-                        cursor: 'pointer',
-                        transition: 'all 0.15s ease',
-                      }}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
-              <div>
-                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
-                  Số lượng câu hỏi (1 - 20):
-                </label>
-                <input
-                  type="number"
-                  min={1}
-                  max={20}
-                  value={questionCount}
-                  onChange={e => setQuestionCount(Math.min(20, Math.max(1, parseInt(e.target.value, 10) || 5)))}
-                  style={{
-                    width: '100%',
-                    padding: '0.8rem 1rem',
-                    backgroundColor: 'var(--bg-input)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '10px',
-                    color: 'var(--text-primary)',
-                    fontSize: '1rem',
-                    fontWeight: 700,
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-              <div>
-                <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
-                  Thời gian mỗi câu (5 - 120 giây):
-                </label>
-                <div style={{ position: 'relative' }}>
-                  <input
-                    type="number"
-                    min={5}
-                    max={120}
-                    value={timePerQuestion}
-                    onChange={e => setTimePerQuestion(Math.min(120, Math.max(5, parseInt(e.target.value, 10) || 20)))}
-                    style={{
-                      width: '100%',
-                      padding: '0.8rem 2.5rem 0.8rem 1rem',
-                      backgroundColor: 'var(--bg-input)',
-                      border: '1px solid var(--border-strong)',
-                      borderRadius: '10px',
-                      color: 'var(--text-primary)',
-                      fontSize: '1rem',
-                      fontWeight: 700,
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                  <span
-                    style={{
-                      position: 'absolute',
-                      right: '0.85rem',
-                      top: '50%',
-                      transform: 'translateY(-50%)',
-                      color: 'var(--text-muted)',
-                      fontSize: '0.85rem',
-                      fontWeight: 700,
-                      pointerEvents: 'none',
-                    }}
-                  >
-                    giây
-                  </span>
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={() => setCurrentStep(1)}
+                style={{
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--accent-sky)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '8px',
+                  padding: '0.35rem 0.75rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                ⚙️ Đổi thể loại / cấu hình (Bước 1)
+              </button>
             </div>
 
             {/* Trọng tâm nội dung / Phạm vi phân đoạn (Batch 5) */}
             <div style={{ marginBottom: '1.5rem' }}>
               <label style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700, marginBottom: '0.45rem' }}>
-                🎯 Chủ đề hoặc phạm vi nội dung trọng tâm (Tùy chọn):
+                🎯 Chủ đề hoặc phạm vi nội dung trọng tâm cho AI (Tùy chọn):
               </label>
               <input
                 type="text"
@@ -1961,6 +2153,23 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             <div style={{ display: 'flex', gap: '0.85rem', flexWrap: 'wrap' }}>
               <button
                 type="button"
+                onClick={() => setCurrentStep(2)}
+                style={{
+                  padding: '0.9rem 1.3rem',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '10px',
+                  fontWeight: 700,
+                  fontSize: '0.95rem',
+                  cursor: 'pointer',
+                }}
+              >
+                &larr; Quay lại Bước 2
+              </button>
+
+              <button
+                type="button"
                 onClick={() => handleGenerate()}
                 disabled={isGenerating || ingestedSources.length === 0}
                 style={{
@@ -1982,13 +2191,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   transition: 'all 0.15s ease',
                 }}
               >
-                {isGenerating ? '🤖 Đang tổng hợp câu hỏi AI...' : 'Tạo trò chơi AI ⚡'}
+                {isGenerating ? '🤖 Đang tổng hợp câu hỏi AI...' : 'AI Tạo & Phân Bổ Câu Hỏi ⚡'}
               </button>
 
               {generatedSpec && (
                 <button
                   type="button"
-                  onClick={() => setCurrentStep(3)}
+                  onClick={() => setCurrentStep(4)}
                   style={{
                     padding: '0.9rem 1.5rem',
                     backgroundColor: 'var(--bg-input)',
@@ -2000,21 +2209,778 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     cursor: 'pointer',
                   }}
                 >
-                  Tiếp tục (Bước 3) &rarr;
+                  Xem Trước & Chỉnh Sửa (Bước 4) &rarr;
                 </button>
               )}
             </div>
 
             {ingestedSources.length === 0 && (
               <div style={{ marginTop: '1rem', color: 'var(--accent-amber)', fontSize: '0.85rem', fontWeight: 600 }}>
-                ⚠️ Vui lòng hoàn thành Bước 1 (Trích xuất nội dung nguồn) trước khi tạo câu hỏi.
+                ⚠️ Vui lòng hoàn thành Bước 2 (Trích xuất nội dung nguồn) trước khi yêu cầu AI tạo câu hỏi.
               </div>
             )}
           </div>
         )}
 
-        {/* ===================== BƯỚC 3: PHÒNG ĐẤU QR & LUYỆN TẬP CÁ NHÂN ===================== */}
-        {currentStep === 3 && (
+        {/* ===================== BƯỚC 4: XEM TRƯỚC VÀ CHỈNH SỬA CÂU HỎI ===================== */}
+        {currentStep === 4 && (
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '16px',
+              padding: '1.75rem',
+              boxShadow: 'var(--card-shadow)',
+              animation: 'popIn 0.2s ease',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--primary)',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '1rem',
+                    fontWeight: 800,
+                  }}
+                >
+                  4
+                </div>
+                <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.25rem', fontWeight: 800 }}>
+                  Bước 4: Xem trước & chỉnh sửa nội dung câu hỏi
+                </h2>
+              </div>
+
+              {generatedSpec && (
+                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                  <span
+                    style={{
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--accent-sky)',
+                      padding: '0.3rem 0.75rem',
+                      borderRadius: '8px',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                      border: '1px solid var(--border-strong)',
+                    }}
+                  >
+                    {formatGameTypeLabel(generatedSpec.gameType)}
+                  </span>
+                  <span
+                    style={{
+                      backgroundColor: 'var(--bg-input)',
+                      color: generatedSpec.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+                      padding: '0.3rem 0.75rem',
+                      borderRadius: '8px',
+                      fontSize: '0.8rem',
+                      fontWeight: 800,
+                      border: '1px solid var(--border-strong)',
+                    }}
+                  >
+                    {generatedSpec.isPublic ? '🚀 Đã xuất bản' : '📝 Bản nháp'}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleAddQuestion}
+                    style={{
+                      backgroundColor: 'var(--primary)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.35rem 0.85rem',
+                      fontSize: '0.8rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    + Thêm câu hỏi
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isSavingSpec}
+                    onClick={() => handleSaveSpecEdits()}
+                    style={{
+                      backgroundColor: 'var(--accent-emerald)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.35rem 0.85rem',
+                      fontSize: '0.8rem',
+                      fontWeight: 800,
+                      cursor: isSavingSpec ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {isSavingSpec ? '⏳ Đang lưu...' : '💾 Lưu nhanh'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {!generatedSpec ? (
+              <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                <p style={{ marginBottom: '1rem', fontWeight: 700 }}>
+                  ⚠️ Chưa có bộ câu hỏi nào được tạo. Vui lòng hoàn thành Bước 2 và Bước 3 trước.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setCurrentStep(ingestedSources.length > 0 ? 3 : 2)}
+                  style={{
+                    backgroundColor: 'var(--primary)',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '10px',
+                    padding: '0.75rem 1.4rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Quay lại bước tạo câu hỏi
+                </button>
+              </div>
+            ) : (
+              <>
+                {generatedSpec.diagnostics && generatedSpec.diagnostics.length > 0 && (
+                  <div
+                    style={{
+                      marginBottom: '1rem',
+                      padding: '0.75rem 1rem',
+                      backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                      border: '1px solid rgba(245, 158, 11, 0.35)',
+                      borderRadius: '10px',
+                      color: 'var(--accent-amber)',
+                      fontSize: '0.84rem',
+                    }}
+                  >
+                    <strong>ℹ️ Thông tin xử lý nội dung & kiểm duyệt chất lượng:</strong>
+                    <ul style={{ margin: '0.35rem 0 0 1.2rem', padding: 0 }}>
+                      {generatedSpec.diagnostics.map((d, i) => (
+                        <li key={i}>{d}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Chỉnh sửa tiêu đề, mô tả & cài đặt */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: '0.75rem',
+                    marginBottom: '1rem',
+                  }}
+                >
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
+                      Tên trò chơi / bộ câu hỏi:
+                    </label>
+                    <input
+                      type="text"
+                      value={generatedSpec.title}
+                      onChange={e => setGeneratedSpec({ ...generatedSpec, title: e.target.value })}
+                      style={{
+                        width: '100%',
+                        padding: '0.6rem 0.85rem',
+                        backgroundColor: 'var(--bg-input)',
+                        border: '1px solid var(--border-strong)',
+                        borderRadius: '8px',
+                        color: 'var(--accent-sky)',
+                        fontSize: '1.05rem',
+                        fontWeight: 800,
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
+                      Mô tả ngắn:
+                    </label>
+                    <input
+                      type="text"
+                      value={generatedSpec.description}
+                      onChange={e => setGeneratedSpec({ ...generatedSpec, description: e.target.value })}
+                      style={{
+                        width: '100%',
+                        padding: '0.55rem 0.85rem',
+                        backgroundColor: 'var(--bg-input)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '8px',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.9rem',
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
+                      Thời gian mỗi câu (giây):
+                    </label>
+                    <input
+                      type="number"
+                      min={5}
+                      max={120}
+                      value={timePerQuestion}
+                      onChange={e => {
+                        const val = Math.min(120, Math.max(5, parseInt(e.target.value, 10) || 20));
+                        setTimePerQuestion(val);
+                        setGeneratedSpec({
+                          ...generatedSpec,
+                          settings: { ...generatedSpec.settings, timePerQuestion: val },
+                        });
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '0.55rem 0.85rem',
+                        backgroundColor: 'var(--bg-input)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '8px',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.9rem',
+                        fontWeight: 700,
+                        boxSizing: 'border-box',
+                      }}
+                    />
+                  </div>
+
+                  <div>
+                    <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
+                      Chế độ tính điểm:
+                    </label>
+                    <select
+                      value={scoringMode}
+                      onChange={e => {
+                        const mode = e.target.value as ScoringMode;
+                        setScoringMode(mode);
+                        setGeneratedSpec({
+                          ...generatedSpec,
+                          settings: { ...generatedSpec.settings, scoringMode: mode },
+                        });
+                      }}
+                      style={{
+                        width: '100%',
+                        padding: '0.55rem 0.85rem',
+                        backgroundColor: 'var(--bg-input)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '8px',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.9rem',
+                        fontWeight: 700,
+                        boxSizing: 'border-box',
+                      }}
+                    >
+                      <option value="STANDARD">STANDARD (100đ/câu)</option>
+                      <option value="SPEED_BONUS">SPEED_BONUS (+Thưởng tốc độ)</option>
+                      <option value="STREAK">STREAK (+Thưởng chuỗi đúng)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Danh sách câu hỏi (thêm, xóa, nhân bản, đổi thứ tự, sửa trực tiếp) */}
+                <div style={{ maxHeight: '560px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.85rem', paddingRight: '0.25rem' }}>
+                  {generatedSpec.questions.map((q, idx) => {
+                    const isEditing = editingQuestionIdx === idx;
+                    const validationErr = validateQuestionItem(q);
+
+                    return (
+                      <div
+                        key={q.id || idx}
+                        style={{
+                          padding: '1rem 1.15rem',
+                          backgroundColor: 'var(--bg-input)',
+                          borderRadius: '12px',
+                          border: validationErr
+                            ? '1px solid var(--accent-rose)'
+                            : isEditing
+                              ? '1px solid var(--accent-sky)'
+                              : '1px solid var(--border-subtle)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
+                          <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text-primary)', display: 'flex', gap: '0.5rem', flex: 1, flexWrap: 'wrap', alignItems: 'center' }}>
+                            <span style={{ color: 'var(--accent-sky)' }}>{idx + 1}.</span>
+                            {generatedSpec.gameType === 'MIXED' && (
+                              <span
+                                style={{
+                                  fontSize: '0.72rem',
+                                  padding: '0.15rem 0.5rem',
+                                  borderRadius: '6px',
+                                  backgroundColor: 'var(--bg-surface)',
+                                  color: 'var(--accent-amber)',
+                                  border: '1px solid var(--border-strong)',
+                                  fontWeight: 800,
+                                }}
+                              >
+                                {formatGameTypeLabel(q.type)}
+                              </span>
+                            )}
+                            <span>{q.question}</span>
+                          </div>
+                          <div style={{ display: 'flex', gap: '0.35rem', flexShrink: 0, flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              disabled={idx === 0}
+                              onClick={() => handleMoveQuestion(idx, -1)}
+                              title="Chuyển câu hỏi lên trên"
+                              style={{
+                                backgroundColor: 'var(--bg-surface)',
+                                color: idx === 0 ? 'var(--text-muted)' : 'var(--text-primary)',
+                                border: '1px solid var(--border-strong)',
+                                borderRadius: '6px',
+                                padding: '0.25rem 0.5rem',
+                                fontSize: '0.76rem',
+                                fontWeight: 800,
+                                cursor: idx === 0 ? 'not-allowed' : 'pointer',
+                                opacity: idx === 0 ? 0.5 : 1,
+                              }}
+                            >
+                              ↑ Lên
+                            </button>
+                            <button
+                              type="button"
+                              disabled={idx === generatedSpec.questions.length - 1}
+                              onClick={() => handleMoveQuestion(idx, 1)}
+                              title="Chuyển câu hỏi xuống dưới"
+                              style={{
+                                backgroundColor: 'var(--bg-surface)',
+                                color:
+                                  idx === generatedSpec.questions.length - 1
+                                    ? 'var(--text-muted)'
+                                    : 'var(--text-primary)',
+                                border: '1px solid var(--border-strong)',
+                                borderRadius: '6px',
+                                padding: '0.25rem 0.5rem',
+                                fontSize: '0.76rem',
+                                fontWeight: 800,
+                                cursor:
+                                  idx === generatedSpec.questions.length - 1 ? 'not-allowed' : 'pointer',
+                                opacity: idx === generatedSpec.questions.length - 1 ? 0.5 : 1,
+                              }}
+                            >
+                              ↓ Xuống
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDuplicateQuestion(idx)}
+                              title="Nhân bản câu hỏi này"
+                              style={{
+                                backgroundColor: 'var(--bg-surface)',
+                                color: 'var(--accent-amber)',
+                                border: '1px solid var(--border-strong)',
+                                borderRadius: '6px',
+                                padding: '0.25rem 0.55rem',
+                                fontSize: '0.76rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              📋 Nhân bản
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setEditingQuestionIdx(isEditing ? null : idx)}
+                              style={{
+                                backgroundColor: 'var(--bg-surface)',
+                                color: 'var(--accent-sky)',
+                                border: '1px solid var(--border-strong)',
+                                borderRadius: '6px',
+                                padding: '0.25rem 0.6rem',
+                                fontSize: '0.78rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {isEditing ? '✓ Xong' : '✏️ Sửa'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteQuestion(idx)}
+                              style={{
+                                backgroundColor: 'var(--bg-surface)',
+                                color: 'var(--accent-rose)',
+                                border: '1px solid var(--border-strong)',
+                                borderRadius: '6px',
+                                padding: '0.25rem 0.6rem',
+                                fontSize: '0.78rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              🗑️ Xóa
+                            </button>
+                          </div>
+                        </div>
+
+                        {validationErr && (
+                          <div style={{ marginTop: '0.45rem', color: 'var(--accent-rose)', fontSize: '0.8rem', fontWeight: 700 }}>
+                            ⚠️ {validationErr}
+                          </div>
+                        )}
+
+                        {isEditing ? (
+                          <div style={{ marginTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                            {generatedSpec.gameType === 'MIXED' && (
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
+                                  Loại câu hỏi (chế độ Hỗn hợp):
+                                </label>
+                                <select
+                                  value={q.type}
+                                  onChange={e => {
+                                    const nextType = e.target.value as QuestionType;
+                                    handleUpdateQuestion(idx, prev => ({
+                                      ...prev,
+                                      type: nextType,
+                                      choices:
+                                        nextType === 'MULTIPLE_CHOICE'
+                                          ? prev.choices && prev.choices.length === 4
+                                            ? prev.choices
+                                            : ['A. Phương án 1', 'B. Phương án 2', 'C. Phương án 3', 'D. Phương án 4']
+                                          : nextType === 'QUICK_BUTTON'
+                                            ? prev.choices && prev.choices.length >= 2 && prev.choices.length <= 4
+                                              ? prev.choices
+                                              : ['Đúng', 'Sai']
+                                            : undefined,
+                                      correctAnswer:
+                                        nextType === 'QUICK_BUTTON'
+                                          ? 'Đúng'
+                                          : nextType === 'CROSSWORD'
+                                            ? normalizeCrosswordAscii(prev.correctAnswer || 'TUKHOA')
+                                            : prev.correctAnswer,
+                                      crosswordClue: nextType === 'CROSSWORD' ? prev.crosswordClue || prev.question : undefined,
+                                      crosswordAnswer:
+                                        nextType === 'CROSSWORD'
+                                          ? normalizeCrosswordAscii(prev.correctAnswer || 'TUKHOA')
+                                          : undefined,
+                                    }));
+                                  }}
+                                  style={{
+                                    width: '100%',
+                                    padding: '0.5rem 0.7rem',
+                                    backgroundColor: 'var(--bg-surface)',
+                                    border: '1px solid var(--border-strong)',
+                                    borderRadius: '8px',
+                                    color: 'var(--accent-sky)',
+                                    fontWeight: 700,
+                                  }}
+                                >
+                                  <option value="MULTIPLE_CHOICE">🎯 Trắc nghiệm ABCD</option>
+                                  <option value="FILL_IN_THE_BLANK">✍️ Điền từ vào chỗ trống</option>
+                                  <option value="QUICK_BUTTON">⚡ Nút bấm nhanh</option>
+                                  <option value="CROSSWORD">🧩 Ô chữ</option>
+                                </select>
+                              </div>
+                            )}
+                            <div>
+                              <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
+                                Nội dung câu hỏi:
+                              </label>
+                              <input
+                                type="text"
+                                value={q.question}
+                                onChange={e =>
+                                  handleUpdateQuestion(idx, prev => ({
+                                    ...prev,
+                                    question: e.target.value,
+                                    crosswordClue: prev.type === 'CROSSWORD' ? e.target.value : prev.crosswordClue,
+                                  }))
+                                }
+                                style={{
+                                  width: '100%',
+                                  padding: '0.55rem 0.75rem',
+                                  backgroundColor: 'var(--bg-surface)',
+                                  border: '1px solid var(--border-strong)',
+                                  borderRadius: '8px',
+                                  color: 'var(--text-primary)',
+                                  fontSize: '0.9rem',
+                                  boxSizing: 'border-box',
+                                }}
+                              />
+                            </div>
+
+                            {(q.type === 'MULTIPLE_CHOICE' || q.type === 'QUICK_BUTTON') && q.choices && (
+                              <div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                                  <label style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700 }}>
+                                    Các lựa chọn ({q.choices.length}):
+                                  </label>
+                                  {q.type === 'QUICK_BUTTON' && q.choices.length < 4 && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleUpdateQuestion(idx, prev => ({
+                                          ...prev,
+                                          choices: [...(prev.choices || ['Đúng', 'Sai']), `Lựa chọn ${(prev.choices?.length || 2) + 1}`],
+                                        }))
+                                      }
+                                      style={{
+                                        backgroundColor: 'var(--bg-surface)',
+                                        color: 'var(--accent-sky)',
+                                        border: '1px solid var(--border-strong)',
+                                        borderRadius: '6px',
+                                        padding: '0.15rem 0.5rem',
+                                        fontSize: '0.74rem',
+                                        fontWeight: 700,
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      + Thêm nút lựa chọn
+                                    </button>
+                                  )}
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem' }}>
+                                  {q.choices.map((choice, cIdx) => (
+                                    <div key={cIdx} style={{ display: 'flex', gap: '0.35rem' }}>
+                                      <input
+                                        type="text"
+                                        value={choice}
+                                        onChange={e =>
+                                          handleUpdateQuestion(idx, prev => {
+                                            const nextChoices = [...(prev.choices || [])];
+                                            nextChoices[cIdx] = e.target.value;
+                                            return { ...prev, choices: nextChoices };
+                                          })
+                                        }
+                                        style={{
+                                          flex: 1,
+                                          padding: '0.5rem 0.7rem',
+                                          backgroundColor: 'var(--bg-surface)',
+                                          border: '1px solid var(--border-strong)',
+                                          borderRadius: '8px',
+                                          color: 'var(--text-primary)',
+                                          fontSize: '0.85rem',
+                                        }}
+                                      />
+                                      {q.type === 'QUICK_BUTTON' && q.choices && q.choices.length > 2 && (
+                                        <button
+                                          type="button"
+                                          onClick={() =>
+                                            handleUpdateQuestion(idx, prev => {
+                                              const nextChoices = (prev.choices || []).filter((_, i) => i !== cIdx);
+                                              return {
+                                                ...prev,
+                                                choices: nextChoices,
+                                                correctAnswer: nextChoices.includes(prev.correctAnswer)
+                                                  ? prev.correctAnswer
+                                                  : nextChoices[0] || '',
+                                              };
+                                            })
+                                          }
+                                          style={{
+                                            backgroundColor: 'var(--bg-surface)',
+                                            color: 'var(--accent-rose)',
+                                            border: '1px solid var(--border-strong)',
+                                            borderRadius: '8px',
+                                            padding: '0 0.55rem',
+                                            cursor: 'pointer',
+                                            fontWeight: 800,
+                                          }}
+                                        >
+                                          ✕
+                                        </button>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.6rem' }}>
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
+                                  Đáp án đúng:
+                                </label>
+                                {q.type === 'QUICK_BUTTON' ? (
+                                  <select
+                                    value={q.correctAnswer}
+                                    onChange={e =>
+                                      handleUpdateQuestion(idx, prev => ({ ...prev, correctAnswer: e.target.value }))
+                                    }
+                                    style={{
+                                      width: '100%',
+                                      padding: '0.5rem 0.7rem',
+                                      backgroundColor: 'var(--bg-surface)',
+                                      border: '1px solid var(--border-strong)',
+                                      borderRadius: '8px',
+                                      color: 'var(--accent-emerald)',
+                                      fontWeight: 700,
+                                    }}
+                                  >
+                                    {(q.choices && q.choices.length >= 2 ? q.choices : ['Đúng', 'Sai']).map(
+                                      (opt, optIdx) => (
+                                        <option key={optIdx} value={opt}>
+                                          {opt}
+                                        </option>
+                                      )
+                                    )}
+                                  </select>
+                                ) : (
+                                  <input
+                                    type="text"
+                                    value={q.correctAnswer}
+                                    onChange={e => {
+                                      const val = e.target.value;
+                                      handleUpdateQuestion(idx, prev => ({
+                                        ...prev,
+                                        correctAnswer: val,
+                                        crosswordAnswer:
+                                          prev.type === 'CROSSWORD' ? normalizeCrosswordAscii(val) : prev.crosswordAnswer,
+                                      }));
+                                    }}
+                                    onBlur={e => {
+                                      if (q.type === 'CROSSWORD') {
+                                        const val = normalizeCrosswordAscii(e.target.value);
+                                        handleUpdateQuestion(idx, prev => ({
+                                          ...prev,
+                                          correctAnswer: val,
+                                          crosswordAnswer: val,
+                                        }));
+                                      }
+                                    }}
+                                    style={{
+                                      width: '100%',
+                                      padding: '0.5rem 0.7rem',
+                                      backgroundColor: 'var(--bg-surface)',
+                                      border: '1px solid var(--border-strong)',
+                                      borderRadius: '8px',
+                                      color: 'var(--accent-emerald)',
+                                      fontWeight: 700,
+                                      boxSizing: 'border-box',
+                                    }}
+                                  />
+                                )}
+                              </div>
+
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
+                                  Giải thích đáp án:
+                                </label>
+                                <input
+                                  type="text"
+                                  value={q.explanation || ''}
+                                  onChange={e =>
+                                    handleUpdateQuestion(idx, prev => ({ ...prev, explanation: e.target.value }))
+                                  }
+                                  style={{
+                                    width: '100%',
+                                    padding: '0.5rem 0.7rem',
+                                    backgroundColor: 'var(--bg-surface)',
+                                    border: '1px solid var(--border-strong)',
+                                    borderRadius: '8px',
+                                    color: 'var(--text-secondary)',
+                                    fontSize: '0.85rem',
+                                    boxSizing: 'border-box',
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {q.choices && (
+                              <div style={{ marginTop: '0.6rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.5rem' }}>
+                                {q.choices.map((c, cIdx) => {
+                                  const isCorrectChoice =
+                                    normalizeChoiceCompare(c) === normalizeChoiceCompare(q.correctAnswer) ||
+                                    stripOptionLetterPrefix(c) === stripOptionLetterPrefix(q.correctAnswer);
+                                  return (
+                                    <div
+                                      key={cIdx}
+                                      style={{
+                                        padding: '0.45rem 0.75rem',
+                                        backgroundColor: isCorrectChoice
+                                          ? 'rgba(16, 185, 129, 0.14)'
+                                          : 'var(--bg-surface)',
+                                        borderRadius: '8px',
+                                        border: isCorrectChoice
+                                          ? '1px solid var(--accent-emerald)'
+                                          : '1px solid var(--border-subtle)',
+                                        color: isCorrectChoice ? 'var(--accent-emerald)' : 'var(--text-secondary)',
+                                        fontSize: '0.85rem',
+                                        fontWeight: isCorrectChoice ? 800 : 600,
+                                      }}
+                                    >
+                                      {c}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+
+                            <div style={{ marginTop: '0.65rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.82rem' }}>
+                              <div style={{ color: 'var(--accent-emerald)', fontWeight: 700 }}>
+                                ✓ Đáp án đúng: {q.correctAnswer}
+                              </div>
+                              {q.explanation && (
+                                <div style={{ color: 'var(--text-secondary)' }}>
+                                  💡 Giải thích: {q.explanation}
+                                </div>
+                              )}
+                              {q.sourceReference && (
+                                <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem', fontWeight: 600 }}>
+                                  📌 Nguồn: {formatProvenanceBadge(q.sourceReference)}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '1.35rem', flexWrap: 'wrap', gap: '0.75rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setCurrentStep(3)}
+                    style={{
+                      padding: '0.8rem 1.25rem',
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--text-secondary)',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: '10px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    &larr; Quay lại Bước 3
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (validateSpecBeforeLaunch(generatedSpec)) {
+                        setCurrentStep(5);
+                      }
+                    }}
+                    style={{
+                      padding: '0.85rem 1.6rem',
+                      backgroundColor: 'var(--primary)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '10px',
+                      fontWeight: 800,
+                      fontSize: '0.98rem',
+                      cursor: 'pointer',
+                      boxShadow: 'var(--btn-shadow)',
+                    }}
+                  >
+                    Tiếp tục: Xác Nhận Lưu & Xuất Bản (Bước 5) &rarr;
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ===================== BƯỚC 5: XÁC NHẬN LƯU, XUẤT BẢN & TỔ CHỨC CHƠI ===================== */}
+        {currentStep === 5 && (
           <div
             style={{
               backgroundColor: 'var(--bg-surface)',
@@ -2025,706 +2991,311 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               animation: 'popIn 0.2s ease',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-              <div
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '8px',
-                  backgroundColor: 'var(--primary)',
-                  color: '#ffffff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '1rem',
-                  fontWeight: 800,
-                }}
-              >
-                3
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '1rem', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div
+                  style={{
+                    width: '32px',
+                    height: '32px',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--primary)',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '1rem',
+                    fontWeight: 800,
+                  }}
+                >
+                  5
+                </div>
+                <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.35rem', fontWeight: 800 }}>
+                  Bước 5: Xác nhận lưu, xuất bản & tổ chức chơi
+                </h2>
               </div>
-              <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.35rem', fontWeight: 800 }}>
-                Tổ Chức Phòng Đấu Hoặc Luyện Tập Cá Nhân
-              </h2>
+
+              {generatedSpec && (
+                <span
+                  style={{
+                    padding: '0.4rem 0.9rem',
+                    borderRadius: '999px',
+                    fontSize: '0.82rem',
+                    fontWeight: 800,
+                    backgroundColor: generatedSpec.isPublic
+                      ? 'rgba(16, 185, 129, 0.15)'
+                      : 'rgba(245, 158, 11, 0.15)',
+                    color: generatedSpec.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+                    border: `1px solid ${generatedSpec.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)'}`,
+                  }}
+                >
+                  {generatedSpec.isPublic ? '🚀 ĐÃ XUẤT BẢN CÔNG KHAI' : '📝 BẢN NHÁP (CHƯA XUẤT BẢN)'}
+                </span>
+              )}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.85rem', marginTop: '1.25rem' }}>
-              <button
-                type="button"
-                onClick={() => handleCreateRoom()}
-                disabled={isCreatingRoom || !generatedSpec}
-                style={{
-                  backgroundColor: isCreatingRoom || !generatedSpec ? 'var(--border-strong)' : 'var(--primary)',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '12px',
-                  padding: '0.95rem 1.5rem',
-                  fontWeight: 900,
-                  fontSize: '1rem',
-                  cursor: isCreatingRoom || !generatedSpec ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.5rem',
-                  boxShadow: isCreatingRoom || !generatedSpec ? 'none' : 'var(--btn-shadow)',
-                }}
-              >
-                {isCreatingRoom ? '⏳ Đang khởi tạo phòng chơi...' : 'Tạo phòng đấu nhiều người (QR) 🚀'}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleStartPractice}
-                disabled={!generatedSpec}
-                style={{
-                  backgroundColor: !generatedSpec ? 'var(--border-strong)' : 'var(--accent-emerald)',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '12px',
-                  padding: '0.95rem 1.5rem',
-                  fontWeight: 900,
-                  fontSize: '1rem',
-                  cursor: !generatedSpec ? 'not-allowed' : 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.5rem',
-                }}
-              >
-                🎮 Luyện tập cá nhân (Chơi thử ngay)
-              </button>
-            </div>
-
-            {!generatedSpec && (
-              <div style={{ marginTop: '1rem', color: 'var(--accent-amber)', fontSize: '0.85rem', fontWeight: 600 }}>
-                ⚠️ Vui lòng hoàn thành Bước 2 (Tạo trò chơi bằng AI) trước khi khởi tạo phòng.
+            {!generatedSpec ? (
+              <div style={{ padding: '1rem 0', color: 'var(--accent-amber)', fontWeight: 700 }}>
+                ⚠️ Chưa có bộ câu hỏi nào để lưu hoặc xuất bản. Vui lòng hoàn thành các bước trước.
               </div>
-            )}
-
-            {roomCode && (
-              <div
-                style={{
-                  marginTop: '1.75rem',
-                  padding: '1.5rem',
-                  backgroundColor: 'var(--bg-input)',
-                  borderRadius: '14px',
-                  border: '1px solid var(--border-subtle)',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.5rem' }}>
-                  <div style={{ flex: '1 1 220px' }}>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.08em', marginBottom: '0.35rem' }}>
-                      MÃ PHÒNG THI ĐẤU
-                    </div>
-                    <div
-                      style={{
-                        fontSize: '2.5rem',
-                        fontWeight: 900,
-                        letterSpacing: '0.15em',
-                        color: 'var(--accent-sky)',
-                        padding: '0.4rem 1.25rem',
-                        borderRadius: '10px',
-                        display: 'inline-block',
-                        border: '2px dashed var(--accent-sky)',
-                        backgroundColor: 'var(--bg-surface)',
-                      }}
-                    >
-                      {roomCode}
-                    </div>
-                    <div style={{ margin: '1rem 0 0.5rem 0', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
-                      Đường dẫn tham gia:<br />
-                      <span style={{ color: 'var(--accent-sky)', wordBreak: 'break-all', fontWeight: 700, fontSize: '0.95rem' }}>{joinUrl}</span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleCopyLink}
-                      style={{
-                        backgroundColor: 'var(--bg-surface)',
-                        color: 'var(--text-primary)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: '8px',
-                        padding: '0.5rem 1rem',
-                        fontSize: '0.85rem',
-                        cursor: 'pointer',
-                        marginTop: '0.4rem',
-                        fontWeight: 700,
-                      }}
-                    >
-                      📋 Sao chép liên kết
-                    </button>
+            ) : (
+              <>
+                <div
+                  style={{
+                    padding: '1.25rem',
+                    backgroundColor: 'var(--bg-input)',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-subtle)',
+                    marginBottom: '1.35rem',
+                  }}
+                >
+                  <div style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--text-primary)', marginBottom: '0.35rem' }}>
+                    {generatedSpec.title}
                   </div>
-
-                  {qrDataUrl && (
-                    <div style={{ textAlign: 'center' }}>
-                      <div
-                        style={{
-                          padding: '10px',
-                          backgroundColor: '#ffffff',
-                          borderRadius: '12px',
-                          display: 'inline-block',
-                          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
-                        }}
-                      >
-                        <img src={qrDataUrl} alt="QR Tham Gia Phòng" style={{ width: '140px', height: '140px', display: 'block' }} />
-                      </div>
-                      <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem', fontWeight: 700 }}>
-                        Quét mã QR để vào phòng
-                      </div>
-                    </div>
-                  )}
+                  <div style={{ fontSize: '0.88rem', color: 'var(--text-secondary)', marginBottom: '0.85rem' }}>
+                    {generatedSpec.description}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap' }}>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, padding: '0.3rem 0.7rem', borderRadius: '8px', backgroundColor: 'var(--bg-surface)', color: 'var(--accent-sky)', border: '1px solid var(--border-strong)' }}>
+                      Thể loại: {formatGameTypeLabel(generatedSpec.gameType)}
+                    </span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, padding: '0.3rem 0.7rem', borderRadius: '8px', backgroundColor: 'var(--bg-surface)', color: 'var(--accent-emerald)', border: '1px solid var(--border-strong)' }}>
+                      Số câu hỏi: {generatedSpec.questions.length} câu
+                    </span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, padding: '0.3rem 0.7rem', borderRadius: '8px', backgroundColor: 'var(--bg-surface)', color: 'var(--text-primary)', border: '1px solid var(--border-strong)' }}>
+                      Thời gian: {timePerQuestion}s / câu
+                    </span>
+                    <span style={{ fontSize: '0.8rem', fontWeight: 700, padding: '0.3rem 0.7rem', borderRadius: '8px', backgroundColor: 'var(--bg-surface)', color: 'var(--accent-amber)', border: '1px solid var(--border-strong)' }}>
+                      {formatScoringModeLabel(scoringMode)}
+                    </span>
+                  </div>
                 </div>
 
-                <div style={{ display: 'flex', gap: '0.85rem', marginTop: '1.75rem', flexWrap: 'wrap' }}>
+                {/* Nút Lưu Bản Nháp & Xuất Bản Công Khai */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '0.85rem', marginBottom: '1.25rem' }}>
                   <button
                     type="button"
-                    onClick={() => {
-                      if (onNavigateToHost) {
-                        onNavigateToHost(roomCode, hostToken);
-                      } else {
-                        window.open(`/?room=${roomCode}&token=${hostToken}`, '_blank');
-                      }
-                    }}
+                    disabled={isSavingSpec}
+                    onClick={() => handleSaveSpecEdits(false)}
                     style={{
-                      flex: '1 1 200px',
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: '12px',
+                      padding: '0.95rem 1.25rem',
+                      fontWeight: 800,
+                      fontSize: '0.96rem',
+                      cursor: isSavingSpec ? 'not-allowed' : 'pointer',
+                      opacity: isSavingSpec ? 0.65 : 1,
+                    }}
+                  >
+                    {isSavingSpec ? '⏳ Đang lưu...' : '💾 Lưu bản nháp (Chưa xuất bản)'}
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={isSavingSpec}
+                    onClick={() => handleSaveSpecEdits(true)}
+                    style={{
                       backgroundColor: 'var(--accent-emerald)',
                       color: '#ffffff',
                       border: 'none',
-                      borderRadius: '10px',
-                      padding: '0.85rem 1.25rem',
-                      fontWeight: 800,
-                      fontSize: '1rem',
-                      cursor: 'pointer',
-                      boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)',
-                      textAlign: 'center',
+                      borderRadius: '12px',
+                      padding: '0.95rem 1.25rem',
+                      fontWeight: 900,
+                      fontSize: '0.98rem',
+                      cursor: isSavingSpec ? 'not-allowed' : 'pointer',
+                      opacity: isSavingSpec ? 0.65 : 1,
+                      boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
                     }}
                   >
-                    Màn hình Host &rarr;
+                    {isSavingSpec ? '⏳ Đang xuất bản...' : '🚀 Lưu & Xuất bản Game (Công khai)'}
+                  </button>
+                </div>
+
+                {/* Tổ chức phòng đấu hoặc Chơi thử */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.85rem', paddingTop: '1rem', borderTop: '1px solid var(--border-subtle)' }}>
+                  <button
+                    type="button"
+                    onClick={() => handleCreateRoom()}
+                    disabled={isCreatingRoom}
+                    style={{
+                      backgroundColor: isCreatingRoom ? 'var(--border-strong)' : 'var(--primary)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '12px',
+                      padding: '0.9rem 1.35rem',
+                      fontWeight: 900,
+                      fontSize: '0.96rem',
+                      cursor: isCreatingRoom ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {isCreatingRoom ? '⏳ Đang khởi tạo phòng chơi...' : '🏟️ Mở phòng đấu Multiplayer (QR)'}
                   </button>
 
                   <button
                     type="button"
-                    onClick={() => {
-                      if (onNavigateToPlay) {
-                        onNavigateToPlay(roomCode);
-                      } else {
-                        window.open(`/?room=${roomCode}`, '_blank');
-                      }
-                    }}
+                    onClick={() => handleStartPractice()}
                     style={{
-                      flex: '1 1 180px',
-                      backgroundColor: 'var(--bg-surface)',
-                      color: 'var(--text-primary)',
-                      border: '1px solid var(--border-strong)',
-                      borderRadius: '10px',
-                      padding: '0.85rem 1.25rem',
-                      fontWeight: 700,
-                      fontSize: '1rem',
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--accent-sky)',
+                      border: '1px solid var(--accent-sky)',
+                      borderRadius: '12px',
+                      padding: '0.9rem 1.35rem',
+                      fontWeight: 800,
+                      fontSize: '0.96rem',
                       cursor: 'pointer',
-                      textAlign: 'center',
                     }}
                   >
-                    Màn hình Player &rarr;
+                    🎮 Chơi đơn (Luyện tập ngay)
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setCurrentStep(4)}
+                    style={{
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--text-secondary)',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: '12px',
+                      padding: '0.9rem 1.2rem',
+                      fontWeight: 700,
+                      fontSize: '0.92rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✏️ Quay lại sửa câu hỏi (Bước 4)
                   </button>
                 </div>
-              </div>
-            )}
-          </div>
-        )}
 
-        {/* ===================== TRÌNH BIÊN TẬP & CHI TIẾT BỘ CÂU HỎI (BATCH 5 & BATCH 6) ===================== */}
-        {generatedSpec && (
-          <div
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-subtle)',
-              borderRadius: '16px',
-              padding: '1.75rem',
-              boxShadow: 'var(--card-shadow)',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.85rem', flexWrap: 'wrap', gap: '0.5rem' }}>
-              <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.25rem', fontWeight: 800 }}>
-                📋 Bộ Câu Hỏi & Trình Biên Tập Trước Khi Chơi
-              </h2>
-              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                <span
-                  style={{
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--accent-sky)',
-                    padding: '0.3rem 0.75rem',
-                    borderRadius: '8px',
-                    fontSize: '0.8rem',
-                    fontWeight: 700,
-                    border: '1px solid var(--border-strong)',
-                  }}
-                >
-                  {formatGameTypeLabel(generatedSpec.gameType)}
-                </span>
-                <span
-                  style={{
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--accent-amber)',
-                    padding: '0.3rem 0.75rem',
-                    borderRadius: '8px',
-                    fontSize: '0.8rem',
-                    fontWeight: 700,
-                    border: '1px solid var(--border-strong)',
-                  }}
-                >
-                  {formatScoringModeLabel(scoringMode)}
-                </span>
-                <span
-                  style={{
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--accent-emerald)',
-                    padding: '0.3rem 0.75rem',
-                    borderRadius: '8px',
-                    fontSize: '0.8rem',
-                    fontWeight: 700,
-                    border: '1px solid var(--border-strong)',
-                  }}
-                >
-                  {generatedSpec.questions.length} câu hỏi
-                </span>
-                <button
-                  type="button"
-                  onClick={handleAddQuestion}
-                  style={{
-                    backgroundColor: 'var(--primary)',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '8px',
-                    padding: '0.35rem 0.85rem',
-                    fontSize: '0.8rem',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                  }}
-                >
-                  + Thêm câu hỏi
-                </button>
-                <button
-                  type="button"
-                  onClick={handleSaveSpecEdits}
-                  style={{
-                    backgroundColor: 'var(--accent-emerald)',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '8px',
-                    padding: '0.35rem 0.85rem',
-                    fontSize: '0.8rem',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                  }}
-                >
-                  💾 Lưu chỉnh sửa
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleExportCurrentGame('csv')}
-                  style={{
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--accent-emerald)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '8px',
-                    padding: '0.35rem 0.75rem',
-                    fontSize: '0.8rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  ⬇ CSV
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleExportCurrentGame('json')}
-                  style={{
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--accent-sky)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '8px',
-                    padding: '0.35rem 0.75rem',
-                    fontSize: '0.8rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  ⬇ JSON
-                </button>
-              </div>
-            </div>
-
-            {/* Thông báo lấy mẫu tài liệu dài hoặc lọc câu hỏi trùng/lỗi (Batch 5) */}
-            {generatedSpec.diagnostics && generatedSpec.diagnostics.length > 0 && (
-              <div
-                style={{
-                  marginBottom: '1rem',
-                  padding: '0.75rem 1rem',
-                  backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                  border: '1px solid rgba(245, 158, 11, 0.35)',
-                  borderRadius: '10px',
-                  color: 'var(--accent-amber)',
-                  fontSize: '0.84rem',
-                }}
-              >
-                <strong>ℹ️ Thông tin xử lý nội dung & kiểm duyệt chất lượng:</strong>
-                <ul style={{ margin: '0.35rem 0 0 1.2rem', padding: 0 }}>
-                  {generatedSpec.diagnostics.map((d, i) => (
-                    <li key={i}>{d}</li>
-                  ))}
-                </ul>
-              </div>
-            )}
-
-            {/* Chỉnh sửa tiêu đề bộ câu hỏi */}
-            <div style={{ marginBottom: '1rem' }}>
-              <input
-                type="text"
-                value={generatedSpec.title}
-                onChange={e => setGeneratedSpec({ ...generatedSpec, title: e.target.value })}
-                style={{
-                  width: '100%',
-                  padding: '0.55rem 0.85rem',
-                  backgroundColor: 'var(--bg-input)',
-                  border: '1px solid var(--border-subtle)',
-                  borderRadius: '8px',
-                  color: 'var(--accent-sky)',
-                  fontSize: '1.05rem',
-                  fontWeight: 800,
-                  boxSizing: 'border-box',
-                }}
-              />
-            </div>
-
-            <div style={{ maxHeight: '540px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '0.85rem', paddingRight: '0.25rem' }}>
-              {generatedSpec.questions.map((q, idx) => {
-                const isEditing = editingQuestionIdx === idx;
-                const validationErr = validateQuestionItem(q);
-
-                return (
+                {roomCode && (
                   <div
-                    key={q.id || idx}
                     style={{
-                      padding: '1rem 1.15rem',
+                      marginTop: '1.75rem',
+                      padding: '1.5rem',
                       backgroundColor: 'var(--bg-input)',
-                      borderRadius: '12px',
-                      border: validationErr
-                        ? '1px solid var(--accent-rose)'
-                        : isEditing
-                          ? '1px solid var(--accent-sky)'
-                          : '1px solid var(--border-subtle)',
+                      borderRadius: '14px',
+                      border: '1px solid var(--border-subtle)',
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.75rem' }}>
-                      <div style={{ fontWeight: 800, fontSize: '0.95rem', color: 'var(--text-primary)', display: 'flex', gap: '0.5rem', flex: 1, flexWrap: 'wrap', alignItems: 'center' }}>
-                        <span style={{ color: 'var(--accent-sky)' }}>{idx + 1}.</span>
-                        {generatedSpec.gameType === 'MIXED' && (
-                          <span
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1.5rem' }}>
+                      <div style={{ flex: '1 1 220px' }}>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.08em', marginBottom: '0.35rem' }}>
+                          MÃ PHÒNG THI ĐẤU
+                        </div>
+                        <div
+                          style={{
+                            fontSize: '2.5rem',
+                            fontWeight: 900,
+                            letterSpacing: '0.15em',
+                            color: 'var(--accent-sky)',
+                            padding: '0.4rem 1.25rem',
+                            borderRadius: '10px',
+                            display: 'inline-block',
+                            border: '2px dashed var(--accent-sky)',
+                            backgroundColor: 'var(--bg-surface)',
+                          }}
+                        >
+                          {roomCode}
+                        </div>
+                        <div style={{ margin: '1rem 0 0.5rem 0', fontSize: '0.875rem', color: 'var(--text-secondary)' }}>
+                          Đường dẫn tham gia:<br />
+                          <span style={{ color: 'var(--accent-sky)', wordBreak: 'break-all', fontWeight: 700, fontSize: '0.95rem' }}>{joinUrl}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleCopyLink}
+                          style={{
+                            backgroundColor: 'var(--bg-surface)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '8px',
+                            padding: '0.5rem 1rem',
+                            fontSize: '0.85rem',
+                            cursor: 'pointer',
+                            marginTop: '0.4rem',
+                            fontWeight: 700,
+                          }}
+                        >
+                          📋 Sao chép liên kết
+                        </button>
+                      </div>
+
+                      {qrDataUrl && (
+                        <div style={{ textAlign: 'center' }}>
+                          <div
                             style={{
-                              fontSize: '0.72rem',
-                              padding: '0.15rem 0.5rem',
-                              borderRadius: '6px',
-                              backgroundColor: 'var(--bg-surface)',
-                              color: 'var(--accent-amber)',
-                              border: '1px solid var(--border-strong)',
-                              fontWeight: 800,
+                              padding: '10px',
+                              backgroundColor: '#ffffff',
+                              borderRadius: '12px',
+                              display: 'inline-block',
+                              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.25)',
                             }}
                           >
-                            {formatGameTypeLabel(q.type)}
-                          </span>
-                        )}
-                        <span>{q.question}</span>
-                      </div>
-                      <div style={{ display: 'flex', gap: '0.4rem', flexShrink: 0 }}>
-                        <button
-                          type="button"
-                          onClick={() => setEditingQuestionIdx(isEditing ? null : idx)}
-                          style={{
-                            backgroundColor: 'var(--bg-surface)',
-                            color: 'var(--accent-sky)',
-                            border: '1px solid var(--border-strong)',
-                            borderRadius: '6px',
-                            padding: '0.25rem 0.6rem',
-                            fontSize: '0.78rem',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          {isEditing ? '✓ Xong' : '✏️ Sửa'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteQuestion(idx)}
-                          style={{
-                            backgroundColor: 'var(--bg-surface)',
-                            color: 'var(--accent-rose)',
-                            border: '1px solid var(--border-strong)',
-                            borderRadius: '6px',
-                            padding: '0.25rem 0.6rem',
-                            fontSize: '0.78rem',
-                            fontWeight: 700,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          🗑️ Xóa
-                        </button>
-                      </div>
+                            <img src={qrDataUrl} alt="QR Tham Gia Phòng" style={{ width: '140px', height: '140px', display: 'block' }} />
+                          </div>
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.5rem', fontWeight: 700 }}>
+                            Quét mã QR để vào phòng
+                          </div>
+                        </div>
+                      )}
                     </div>
 
-                    {validationErr && (
-                      <div style={{ marginTop: '0.45rem', color: 'var(--accent-rose)', fontSize: '0.8rem', fontWeight: 700 }}>
-                        ⚠️ {validationErr}
-                      </div>
-                    )}
+                    <div style={{ display: 'flex', gap: '0.85rem', marginTop: '1.75rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onNavigateToHost) {
+                            onNavigateToHost(roomCode, hostToken);
+                          } else {
+                            window.open(`/?room=${roomCode}&token=${hostToken}`, '_blank');
+                          }
+                        }}
+                        style={{
+                          flex: '1 1 200px',
+                          backgroundColor: 'var(--accent-emerald)',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: '10px',
+                          padding: '0.85rem 1.25rem',
+                          fontWeight: 800,
+                          fontSize: '1rem',
+                          cursor: 'pointer',
+                          boxShadow: '0 4px 14px rgba(16, 185, 129, 0.4)',
+                          textAlign: 'center',
+                        }}
+                      >
+                        Màn hình Host &rarr;
+                      </button>
 
-                    {/* Form biên tập trực tiếp (Batch 6) */}
-                    {isEditing ? (
-                      <div style={{ marginTop: '0.85rem', display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-                        {generatedSpec.gameType === 'MIXED' && (
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
-                              Loại câu hỏi (chế độ Hỗn hợp):
-                            </label>
-                            <select
-                              value={q.type}
-                              onChange={e => {
-                                const nextType = e.target.value as QuestionType;
-                                handleUpdateQuestion(idx, prev => ({
-                                  ...prev,
-                                  type: nextType,
-                                  choices:
-                                    nextType === 'MULTIPLE_CHOICE'
-                                      ? prev.choices && prev.choices.length === 4
-                                        ? prev.choices
-                                        : ['A. Phương án 1', 'B. Phương án 2', 'C. Phương án 3', 'D. Phương án 4']
-                                      : nextType === 'QUICK_BUTTON'
-                                        ? ['Đúng', 'Sai']
-                                        : undefined,
-                                  correctAnswer:
-                                    nextType === 'QUICK_BUTTON'
-                                      ? 'Đúng'
-                                      : nextType === 'CROSSWORD'
-                                        ? normalizeCrosswordAscii(prev.correctAnswer || 'TUKHOA')
-                                        : prev.correctAnswer,
-                                  crosswordClue: nextType === 'CROSSWORD' ? prev.crosswordClue || prev.question : undefined,
-                                  crosswordAnswer:
-                                    nextType === 'CROSSWORD'
-                                      ? normalizeCrosswordAscii(prev.correctAnswer || 'TUKHOA')
-                                      : undefined,
-                                }));
-                              }}
-                              style={{
-                                width: '100%',
-                                padding: '0.5rem 0.7rem',
-                                backgroundColor: 'var(--bg-surface)',
-                                border: '1px solid var(--border-strong)',
-                                borderRadius: '8px',
-                                color: 'var(--accent-sky)',
-                                fontWeight: 700,
-                              }}
-                            >
-                              <option value="MULTIPLE_CHOICE">🎯 Trắc nghiệm ABCD</option>
-                              <option value="FILL_IN_THE_BLANK">✍️ Điền từ vào chỗ trống</option>
-                              <option value="QUICK_BUTTON">⚡ Đúng / Sai</option>
-                              <option value="CROSSWORD">🧩 Ô chữ</option>
-                            </select>
-                          </div>
-                        )}
-                        <div>
-                          <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
-                            Nội dung câu hỏi:
-                          </label>
-                          <input
-                            type="text"
-                            value={q.question}
-                            onChange={e =>
-                              handleUpdateQuestion(idx, prev => ({
-                                ...prev,
-                                question: e.target.value,
-                                crosswordClue: prev.type === 'CROSSWORD' ? e.target.value : prev.crosswordClue,
-                              }))
-                            }
-                            style={{
-                              width: '100%',
-                              padding: '0.55rem 0.75rem',
-                              backgroundColor: 'var(--bg-surface)',
-                              border: '1px solid var(--border-strong)',
-                              borderRadius: '8px',
-                              color: 'var(--text-primary)',
-                              fontSize: '0.9rem',
-                              boxSizing: 'border-box',
-                            }}
-                          />
-                        </div>
-
-                        {q.type === 'MULTIPLE_CHOICE' && q.choices && (
-                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.5rem' }}>
-                            {q.choices.map((choice, cIdx) => (
-                              <input
-                                key={cIdx}
-                                type="text"
-                                value={choice}
-                                onChange={e =>
-                                  handleUpdateQuestion(idx, prev => {
-                                    const nextChoices = [...(prev.choices || [])];
-                                    nextChoices[cIdx] = e.target.value;
-                                    return { ...prev, choices: nextChoices };
-                                  })
-                                }
-                                style={{
-                                  padding: '0.5rem 0.7rem',
-                                  backgroundColor: 'var(--bg-surface)',
-                                  border: '1px solid var(--border-strong)',
-                                  borderRadius: '8px',
-                                  color: 'var(--text-primary)',
-                                  fontSize: '0.85rem',
-                                }}
-                              />
-                            ))}
-                          </div>
-                        )}
-
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.6rem' }}>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
-                              Đáp án đúng:
-                            </label>
-                            {q.type === 'QUICK_BUTTON' ? (
-                              <select
-                                value={q.correctAnswer}
-                                onChange={e =>
-                                  handleUpdateQuestion(idx, prev => ({ ...prev, correctAnswer: e.target.value }))
-                                }
-                                style={{
-                                  width: '100%',
-                                  padding: '0.5rem 0.7rem',
-                                  backgroundColor: 'var(--bg-surface)',
-                                  border: '1px solid var(--border-strong)',
-                                  borderRadius: '8px',
-                                  color: 'var(--accent-emerald)',
-                                  fontWeight: 700,
-                                }}
-                              >
-                                {(q.choices && q.choices.length >= 2 ? q.choices : ['Đúng', 'Sai']).map(
-                                  (opt, optIdx) => (
-                                    <option key={optIdx} value={opt}>
-                                      {opt}
-                                    </option>
-                                  )
-                                )}
-                              </select>
-                            ) : (
-                              <input
-                                type="text"
-                                value={q.correctAnswer}
-                                onChange={e => {
-                                  const val = e.target.value;
-                                  handleUpdateQuestion(idx, prev => ({
-                                    ...prev,
-                                    correctAnswer: val,
-                                    crosswordAnswer:
-                                      prev.type === 'CROSSWORD' ? normalizeCrosswordAscii(val) : prev.crosswordAnswer,
-                                  }));
-                                }}
-                                onBlur={e => {
-                                  if (q.type === 'CROSSWORD') {
-                                    const val = normalizeCrosswordAscii(e.target.value);
-                                    handleUpdateQuestion(idx, prev => ({
-                                      ...prev,
-                                      correctAnswer: val,
-                                      crosswordAnswer: val,
-                                    }));
-                                  }
-                                }}
-                                style={{
-                                  width: '100%',
-                                  padding: '0.5rem 0.7rem',
-                                  backgroundColor: 'var(--bg-surface)',
-                                  border: '1px solid var(--border-strong)',
-                                  borderRadius: '8px',
-                                  color: 'var(--accent-emerald)',
-                                  fontWeight: 700,
-                                  boxSizing: 'border-box',
-                                }}
-                              />
-                            )}
-                          </div>
-
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
-                              Giải thích đáp án:
-                            </label>
-                            <input
-                              type="text"
-                              value={q.explanation || ''}
-                              onChange={e =>
-                                handleUpdateQuestion(idx, prev => ({ ...prev, explanation: e.target.value }))
-                              }
-                              style={{
-                                width: '100%',
-                                padding: '0.5rem 0.7rem',
-                                backgroundColor: 'var(--bg-surface)',
-                                border: '1px solid var(--border-strong)',
-                                borderRadius: '8px',
-                                color: 'var(--text-secondary)',
-                                fontSize: '0.85rem',
-                                boxSizing: 'border-box',
-                              }}
-                            />
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        {q.choices && (
-                          <div style={{ marginTop: '0.6rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '0.5rem' }}>
-                            {q.choices.map((c, cIdx) => {
-                              const isCorrectChoice =
-                                c.trim().toLowerCase() === q.correctAnswer.trim().toLowerCase() ||
-                                c.trim().toLowerCase().startsWith(`${q.correctAnswer.trim().toLowerCase()}.`);
-                              return (
-                                <div
-                                  key={cIdx}
-                                  style={{
-                                    padding: '0.45rem 0.75rem',
-                                    backgroundColor: isCorrectChoice
-                                      ? 'rgba(16, 185, 129, 0.14)'
-                                      : 'var(--bg-surface)',
-                                    borderRadius: '8px',
-                                    border: isCorrectChoice
-                                      ? '1px solid var(--accent-emerald)'
-                                      : '1px solid var(--border-subtle)',
-                                    color: isCorrectChoice ? 'var(--accent-emerald)' : 'var(--text-secondary)',
-                                    fontSize: '0.85rem',
-                                    fontWeight: isCorrectChoice ? 800 : 600,
-                                  }}
-                                >
-                                  {c}
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-
-                        <div style={{ marginTop: '0.65rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', fontSize: '0.82rem' }}>
-                          <div style={{ color: 'var(--accent-emerald)', fontWeight: 700 }}>
-                            ✓ Đáp án đúng: {q.correctAnswer}
-                          </div>
-                          {q.explanation && (
-                            <div style={{ color: 'var(--text-secondary)' }}>
-                              💡 Giải thích: {q.explanation}
-                            </div>
-                          )}
-                          {q.sourceReference && (
-                            <div style={{ color: 'var(--text-muted)', fontSize: '0.76rem', fontWeight: 600 }}>
-                              📌 Nguồn: {formatProvenanceBadge(q.sourceReference)}
-                            </div>
-                          )}
-                        </div>
-                      </>
-                    )}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (onNavigateToPlay) {
+                            onNavigateToPlay(roomCode);
+                          } else {
+                            window.open(`/?room=${roomCode}`, '_blank');
+                          }
+                        }}
+                        style={{
+                          flex: '1 1 180px',
+                          backgroundColor: 'var(--bg-surface)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border-strong)',
+                          borderRadius: '10px',
+                          padding: '0.85rem 1.25rem',
+                          fontWeight: 700,
+                          fontSize: '1rem',
+                          cursor: 'pointer',
+                          textAlign: 'center',
+                        }}
+                      >
+                        Màn hình Player &rarr;
+                      </button>
+                    </div>
                   </div>
-                );
-              })}
-            </div>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>

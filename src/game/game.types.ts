@@ -94,6 +94,7 @@ export interface GameSessionSummary {
 export const CreateSessionRequestSchema = z.object({
   gameId: z.string().min(1),
   gameSpecification: GameSpecificationSchema.optional(),
+  publicPlay: z.boolean().optional(),
 });
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>;
 

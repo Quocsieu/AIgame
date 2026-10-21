@@ -21,9 +21,19 @@ export const gameRouter = Router();
 // Mount Day 3 Game Session Router
 gameRouter.use('/sessions', sessionRouter);
 
+function rejectPlayerClientWrite(req: Request): void {
+  if (req.headers['x-player-token']) {
+    throw new AppError(
+      'ACCESS_DENIED',
+      'Người chơi trong phòng không có quyền tạo, chỉnh sửa, xuất bản hoặc xóa game.',
+      403
+    );
+  }
+}
+
 /**
  * GET /api/games
- * List saved game specifications scoped to the authenticated user (or guest/demo scope).
+ * List saved game specifications scoped to the authenticated user (or guest/demo/public scope).
  */
 gameRouter.get(
   '/',
@@ -31,11 +41,29 @@ gameRouter.get(
     try {
       const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
       const offset = Math.max(0, Number(req.query.offset) || 0);
-      const gameType = typeof req.query.gameType === 'string' && req.query.gameType.trim() ? req.query.gameType.trim() : undefined;
-      const search = typeof req.query.search === 'string' && req.query.search.trim() ? req.query.search.trim() : undefined;
+      const gameType =
+        typeof req.query.gameType === 'string' && req.query.gameType.trim()
+          ? req.query.gameType.trim()
+          : undefined;
+      const search =
+        typeof req.query.search === 'string' && req.query.search.trim()
+          ? req.query.search.trim()
+          : undefined;
+      const rawStatus =
+        typeof req.query.status === 'string' ? req.query.status.trim().toUpperCase() : undefined;
+      const status =
+        rawStatus === 'PUBLISHED' || rawStatus === 'DRAFT' || rawStatus === 'ALL'
+          ? rawStatus
+          : undefined;
+      const rawScope =
+        typeof req.query.scope === 'string' ? req.query.scope.trim().toLowerCase() : undefined;
+      const scope = rawScope === 'public' ? 'public' : 'manage';
 
       const result = persistenceRepo.listGames({
         userId: req.user?.userId ?? null,
+        isAdmin: req.user?.role === 'ADMIN',
+        scope,
+        status,
         gameType,
         search,
         limit,
@@ -54,6 +82,8 @@ gameRouter.post(
   generateRateLimiter.middleware,
   async (req: Request, res: Response, next: NextFunction) => {
     try {
+      rejectPlayerClientWrite(req);
+
       // 1. Validate request body against Zod schema
       const parseResult = GenerateGameRequestSchema.safeParse(req.body);
       if (!parseResult.success) {
@@ -103,11 +133,15 @@ gameRouter.post(
         userId: req.user?.userId ?? null,
       });
 
-      // Save generated specification in store and SQLite persistence
-      gameStore.save(gameSpecification, Date.now(), req.user?.userId ?? null);
+      // Save generated specification in store and SQLite persistence as draft (isPublic = false)
+      gameStore.save(gameSpecification, Date.now(), req.user?.userId ?? null, false);
 
       // 6. Return validated GameSpecification
-      const savedSpec = gameStore.get(gameSpecification.gameId) || gameSpecification;
+      const savedSpec = gameStore.get(gameSpecification.gameId) || {
+        ...gameSpecification,
+        ownerUserId: req.user?.userId ?? null,
+        isPublic: false,
+      };
       res.status(200).json(createSuccessResponse(savedSpec));
     } catch (err) {
       next(err);
@@ -128,6 +162,14 @@ gameRouter.get(
       const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
       const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
 
+      if (String(req.query.mode || '').toLowerCase() === 'public' && !isPublic) {
+        throw new AppError(
+          'GAME_NOT_PUBLISHED',
+          'Game này chưa được xuất bản nên không thể mở ở chế độ chơi công khai.',
+          403
+        );
+      }
+
       authService.assertResourceAccess({
         resourceType: 'bộ câu hỏi',
         ownerUserId,
@@ -136,72 +178,92 @@ gameRouter.get(
         isPublic,
       });
 
-      res.status(200).json(createSuccessResponse(spec));
+      res.status(200).json(
+        createSuccessResponse({
+          ...spec,
+          ownerUserId,
+          isPublic,
+        })
+      );
     } catch (err) {
       next(err);
     }
   }
 );
 
-gameRouter.patch(
-  '/:gameId/questions',
-  (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const gameId = String(req.params.gameId || '');
-      const existing = gameStore.get(gameId);
-      if (!existing) {
-        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
-      }
+function handleUpdateGameSpecification(req: Request, res: Response, next: NextFunction): void {
+  try {
+    rejectPlayerClientWrite(req);
 
-      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
-      const ownerUserId = existing.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+    const gameId = String(req.params.gameId || '');
+    const existing = gameStore.get(gameId);
+    if (!existing) {
+      throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+    }
 
-      authService.assertResourceAccess({
-        resourceType: 'bộ câu hỏi',
-        ownerUserId,
-        currentUser: req.user,
-        mode: 'write',
-      });
+    const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+    const ownerUserId = existing.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+    const existingIsPublic = existing.isPublic ?? ownerInfo?.isPublic ?? false;
 
-      const parseResult = UpdateGameQuestionsRequestSchema.safeParse(req.body);
-      if (!parseResult.success) {
-        const issues = parseResult.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
-        throw new AppError('INVALID_REQUEST', `Question validation failed: ${issues}`, 400);
-      }
+    authService.assertResourceAccess({
+      resourceType: 'bộ câu hỏi',
+      ownerUserId,
+      currentUser: req.user,
+      mode: 'write',
+    });
 
-      const { title, description, questions } = parseResult.data;
+    const parseResult = UpdateGameQuestionsRequestSchema.safeParse(req.body);
+    if (!parseResult.success) {
+      const issues = parseResult.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
+      throw new AppError('INVALID_REQUEST', `Question validation failed: ${issues}`, 400);
+    }
 
-      // Ensure all edited questions match the game's type unless gameType is MIXED
-      if (existing.gameType !== 'MIXED') {
-        for (let i = 0; i < questions.length; i++) {
-          if (questions[i].type !== existing.gameType) {
-            throw new AppError(
-              'INVALID_REQUEST',
-              `Question #${i + 1} type "${questions[i].type}" does not match gameType "${existing.gameType}".`,
-              400
-            );
-          }
+    const { title, description, questions, settings, isPublic } = parseResult.data;
+
+    // Ensure all edited questions match the game's type unless gameType is MIXED
+    if (existing.gameType !== 'MIXED') {
+      for (let i = 0; i < questions.length; i++) {
+        if (questions[i].type !== existing.gameType) {
+          throw new AppError(
+            'INVALID_REQUEST',
+            `Question #${i + 1} type "${questions[i].type}" does not match gameType "${existing.gameType}".`,
+            400
+          );
         }
       }
-
-      const updatedSpec = GameSpecificationSchema.parse({
-        ...existing,
-        title: title !== undefined ? title : existing.title,
-        description: description !== undefined ? description : existing.description,
-        questions,
-        settings: {
-          ...existing.settings,
-          questionCount: questions.length,
-        },
-      });
-
-      gameStore.save(updatedSpec, Date.now(), ownerUserId);
-      res.status(200).json(createSuccessResponse(updatedSpec));
-    } catch (err) {
-      next(err);
     }
+
+    const resolvedIsPublic = isPublic !== undefined ? isPublic : existingIsPublic;
+
+    const updatedSpec = GameSpecificationSchema.parse({
+      ...existing,
+      ownerUserId,
+      isPublic: resolvedIsPublic,
+      title: title !== undefined ? title : existing.title,
+      description:
+        description !== undefined
+          ? description.length > 0
+            ? description
+            : existing.description
+          : existing.description,
+      questions,
+      settings: {
+        ...existing.settings,
+        ...(settings?.timePerQuestion !== undefined ? { timePerQuestion: settings.timePerQuestion } : {}),
+        ...(settings?.scoringMode !== undefined ? { scoringMode: settings.scoringMode } : {}),
+        questionCount: questions.length,
+      },
+    });
+
+    gameStore.save(updatedSpec, Date.now(), ownerUserId, resolvedIsPublic);
+    res.status(200).json(createSuccessResponse(updatedSpec));
+  } catch (err) {
+    next(err);
   }
-);
+}
+
+gameRouter.patch('/:gameId/questions', handleUpdateGameSpecification);
+gameRouter.patch('/:gameId', handleUpdateGameSpecification);
 
 /**
  * DELETE /api/games/:gameId
@@ -211,6 +273,8 @@ gameRouter.delete(
   '/:gameId',
   (req: Request, res: Response, next: NextFunction) => {
     try {
+      rejectPlayerClientWrite(req);
+
       const gameId = String(req.params.gameId || '');
       const existing = gameStore.get(gameId);
       if (!existing) {

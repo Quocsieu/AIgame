@@ -25,7 +25,7 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
       throw new AppError('INVALID_REQUEST', `Invalid session creation request: ${issues}`, 400);
     }
 
-    const { gameId, gameSpecification } = parseResult.data;
+    const { gameId, gameSpecification, publicPlay } = parseResult.data;
 
     if (!gameSpecification) {
       const storedSpec = gameStore.get(gameId);
@@ -33,6 +33,13 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
         const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
         const ownerUserId = storedSpec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
         const isPublic = storedSpec.isPublic ?? ownerInfo?.isPublic ?? false;
+        if (publicPlay && !isPublic) {
+          throw new AppError(
+            'GAME_NOT_PUBLISHED',
+            'Game này chưa được xuất bản nên không thể bắt đầu phiên chơi công khai.',
+            403
+          );
+        }
         authService.assertResourceAccess({
           resourceType: 'bộ câu hỏi',
           ownerUserId,
