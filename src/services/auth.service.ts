@@ -104,16 +104,20 @@ export class AuthService {
     const passwordHash = hashPassword(password);
     const nowIso = new Date().toISOString();
 
+    const configuredAdminEmail = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+    const initialRole: 'USER' | 'ADMIN' =
+      configuredAdminEmail && email.trim().toLowerCase() === configuredAdminEmail ? 'ADMIN' : 'USER';
+
     db.prepare(
       `INSERT INTO users (user_id, email, display_name, password_hash, role, created_at, updated_at)
-       VALUES (?, ?, ?, ?, 'USER', ?, ?)`
-    ).run(userId, email, displayName, passwordHash, nowIso, nowIso);
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(userId, email, displayName, passwordHash, initialRole, nowIso, nowIso);
 
     const user: AuthenticatedUser = {
       userId,
       email,
       displayName,
-      role: 'USER',
+      role: initialRole,
       createdAt: nowIso,
     };
 
@@ -169,11 +173,18 @@ export class AuthService {
       );
     }
 
+    let userRole = (row.role || 'USER') as 'USER' | 'ADMIN';
+    const configuredAdminEmail = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+    if (configuredAdminEmail && email.trim().toLowerCase() === configuredAdminEmail && userRole !== 'ADMIN') {
+      db.prepare("UPDATE users SET role = 'ADMIN' WHERE user_id = ?").run(row.user_id);
+      userRole = 'ADMIN';
+    }
+
     const user: AuthenticatedUser = {
       userId: String(row.user_id),
       email: String(row.email),
       displayName: String(row.display_name),
-      role: (row.role || 'USER') as 'USER' | 'ADMIN',
+      role: userRole,
       createdAt: String(row.created_at),
     };
 

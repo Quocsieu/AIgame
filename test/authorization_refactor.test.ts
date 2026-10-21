@@ -436,6 +436,44 @@ describe('REFACTOR UX & AUTHORIZATION — Comprehensive 22-Scenario Security & R
     assert.equal(res.body.success, true);
     assert.ok(typeof res.body.data.totalUsers === 'number');
     assert.ok(typeof res.body.data.totalGames === 'number');
+
+    // Verify ADMIN_EMAIL bootstrap functionality on register and login
+    const prevAdminEnv = process.env.ADMIN_EMAIL;
+    try {
+      const bootstrapEmail = `bootstrap_admin_${Date.now()}@test.local`;
+      process.env.ADMIN_EMAIL = bootstrapEmail;
+
+      // 1. Register with matching ADMIN_EMAIL -> role is ADMIN
+      const regBootstrap = await request(app)
+        .post('/api/auth/register')
+        .send({
+          email: bootstrapEmail,
+          password: 'Password123!',
+          displayName: 'Bootstrap Admin',
+        });
+      assert.equal(regBootstrap.status, 201);
+      assert.equal(regBootstrap.body.data.user.role, 'ADMIN');
+
+      // 2. Verify access to admin overview with bootstrap admin token
+      const bootstrapAccess = await request(app)
+        .get('/api/admin/overview')
+        .set('Authorization', `Bearer ${regBootstrap.body.data.token}`);
+      assert.equal(bootstrapAccess.status, 200);
+
+      // 3. Register with non-matching email -> role remains USER
+      const normalEmail = `normal_user_${Date.now()}@test.local`;
+      const regNormal = await request(app)
+        .post('/api/auth/register')
+        .send({
+          email: normalEmail,
+          password: 'Password123!',
+          displayName: 'Normal User',
+        });
+      assert.equal(regNormal.status, 201);
+      assert.equal(regNormal.body.data.user.role, 'USER');
+    } finally {
+      process.env.ADMIN_EMAIL = prevAdminEnv;
+    }
   });
 
   // 18. Creator/Guest vào API Admin: bị từ chối
