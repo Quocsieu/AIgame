@@ -283,7 +283,7 @@ export const AppContent: React.FC = () => {
             {theme === 'dark' ? '☀️ Sáng' : '🌙 Tối'}
           </button>
 
-          {/* Nút Đăng nhập cho Guest */}
+          {/* Nút Đăng nhập cho Admin */}
           {!currentUser && !autoStartSoloPlay && (
             <button
               type="button"
@@ -303,7 +303,7 @@ export const AppContent: React.FC = () => {
                 boxShadow: 'var(--btn-shadow)',
               }}
             >
-              🔑 Đăng nhập / Đăng ký
+              🔒 Đăng nhập Admin
             </button>
           )}
 
@@ -311,7 +311,7 @@ export const AppContent: React.FC = () => {
           {currentUser && !autoStartSoloPlay && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem' }}>
               <span style={{ fontWeight: 700, color: 'var(--accent-sky)' }}>
-                👤 {currentUser.displayName} ({currentUser.role === 'ADMIN' ? 'Admin' : 'Creator'})
+                👤 {currentUser.displayName} ({currentUser.role === 'ADMIN' ? 'Admin' : 'Quản trị'})
               </span>
               <button
                 type="button"
@@ -427,28 +427,6 @@ export const AppContent: React.FC = () => {
                 }}
               >
                 📚 Kho Game
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setSoloPlayError(null);
-                  setActiveTab(roomCode && displayName ? 'play' : 'join');
-                }}
-                style={{
-                  padding: '0.55rem 1rem',
-                  borderRadius: '8px',
-                  border: 'none',
-                  backgroundColor: activeTab === 'join' || activeTab === 'play' ? 'var(--primary)' : 'transparent',
-                  color: activeTab === 'join' || activeTab === 'play' ? '#ffffff' : 'var(--text-secondary)',
-                  fontWeight: 700,
-                  fontSize: '0.85rem',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  boxShadow: activeTab === 'join' || activeTab === 'play' ? 'var(--btn-shadow)' : 'none',
-                }}
-              >
-                🎮 Người Chơi
               </button>
 
               {currentUser?.role === 'ADMIN' && (

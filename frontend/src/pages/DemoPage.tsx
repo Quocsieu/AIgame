@@ -198,6 +198,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [urls, setUrls] = useState<string[]>(['']);
   const [files, setFiles] = useState<File[]>([]);
 
+  // Tên game bắt buộc
+  const [customGameTitle, setCustomGameTitle] = useState('');
+
   // AI configuration state (Batch 4 & Batch 5)
   const [gameType, setGameType] = useState<GameType>('MULTIPLE_CHOICE');
   const [difficulty, setDifficulty] = useState<Difficulty>('MEDIUM');
@@ -258,6 +261,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   useEffect(() => {
     if (initialSpec) {
       setGeneratedSpec(initialSpec);
+      setCustomGameTitle(initialSpec.title || '');
       setGameType(initialSpec.gameType);
       setScoringMode(initialSpec.settings.scoringMode);
       setTimePerQuestion(initialSpec.settings.timePerQuestion);
@@ -362,8 +366,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
     if (!currentUser) {
       toast.error(
-        'Tài khoản khách (Guest) chỉ có quyền tham gia chơi game. Vui lòng đăng nhập để nạp tài liệu và tạo game.',
-        'Yêu cầu đăng nhập'
+        'Tính năng tạo game AI chỉ dành cho Quản trị viên (Admin). Vui lòng đăng nhập Admin để tiếp tục.',
+        'Yêu cầu đăng nhập Admin'
       );
       onOpenAuthModal?.();
       return null;
@@ -422,10 +426,12 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         timePerQuestion,
         topicFocus: topicFocus.trim() || undefined,
         sectionFilter: selectedSections.length > 0 ? selectedSections : undefined,
+        title: customGameTitle.trim() || undefined,
       });
 
       toast.removeToast(toastId);
       setGeneratedSpec(spec);
+      setCustomGameTitle(spec.title);
       setEditingQuestionIdx(null);
       setRoomCode('');
       toast.success(
@@ -458,6 +464,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }
     if (!spec.title || spec.title.trim().length === 0) {
       toast.error('Tiêu đề bộ câu hỏi không được để trống.', 'Lỗi kiểm tra câu hỏi');
+      return false;
+    }
+    if (spec.title.trim().length > 100) {
+      toast.error('Tên game không được vượt quá 100 ký tự.', 'Lỗi kiểm tra câu hỏi');
       return false;
     }
     if (!spec.questions || spec.questions.length === 0) {
@@ -1593,7 +1603,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                 }}
               >
                 <div style={{ fontSize: '0.88rem', color: 'var(--text-primary)', lineHeight: 1.4 }}>
-                  💡 <strong>Chế độ Khách (Guest)</strong>: Bạn có thể trải nghiệm xem và chơi thử game công khai. Để tự tạo game AI và lưu trữ vào kho của riêng mình, vui lòng đăng nhập tài khoản Creator.
+                  🛡️ <strong>Khu vực Quản trị</strong>: Tính năng tạo game bằng AI dành riêng cho Quản trị viên (Admin). Người chơi không cần tài khoản, chỉ cần quét mã QR hoặc truy cập link chia sẻ để tham gia trực tiếp.
                 </div>
                 <button
                   type="button"
@@ -1611,7 +1621,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     boxShadow: 'var(--btn-shadow)',
                   }}
                 >
-                  🔑 Đăng Nhập / Đăng Ký
+                  🔒 Đăng Nhập Admin
                 </button>
               </div>
             )}
@@ -1636,6 +1646,42 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.35rem', fontWeight: 800 }}>
                 Bước 1: Chọn thể loại game & thông số cơ bản
               </h2>
+            </div>
+
+            {/* Ô nhập tên game (Bắt buộc theo yêu cầu tinh gọn) */}
+            <div style={{ marginTop: '1.25rem', marginBottom: '1.25rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem' }}>
+                <label style={{ color: 'var(--text-primary)', fontSize: '0.9rem', fontWeight: 700 }}>
+                  🏷️ Tên Game (Bắt buộc) <span style={{ color: 'var(--accent-rose)' }}>*</span>
+                </label>
+                <span style={{ fontSize: '0.8rem', color: customGameTitle.trim().length > 100 ? 'var(--accent-rose)' : 'var(--text-muted)' }}>
+                  {customGameTitle.trim().length}/100 ký tự
+                </span>
+              </div>
+              <input
+                type="text"
+                required
+                maxLength={100}
+                value={customGameTitle}
+                onChange={e => setCustomGameTitle(e.target.value)}
+                placeholder="VD: Kiểm tra Lịch sử 12, Đố vui An toàn Thông tin, Thử thách Khoa học..."
+                style={{
+                  width: '100%',
+                  padding: '0.85rem 1rem',
+                  backgroundColor: 'var(--bg-input)',
+                  border: !customGameTitle.trim() ? '1px solid var(--accent-rose)' : '1px solid var(--border-strong)',
+                  borderRadius: '10px',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.95rem',
+                  fontWeight: 600,
+                  boxSizing: 'border-box',
+                }}
+              />
+              {!customGameTitle.trim() && (
+                <div style={{ fontSize: '0.78rem', color: 'var(--accent-rose)', marginTop: '0.35rem' }}>
+                  * Vui lòng đặt tên game để định danh khi lưu vào kho và chia sẻ cho người chơi.
+                </div>
+              )}
             </div>
 
             <div
@@ -1806,17 +1852,29 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.85rem', flexWrap: 'wrap' }}>
               <button
                 type="button"
-                onClick={() => setCurrentStep(2)}
+                onClick={() => {
+                  const trimmed = customGameTitle.trim();
+                  if (!trimmed) {
+                    toast.error('Vui lòng nhập tên game trước khi tiếp tục.', 'Thiếu tên game');
+                    return;
+                  }
+                  if (trimmed.length > 100) {
+                    toast.error('Tên game không được vượt quá 100 ký tự.', 'Tên game quá dài');
+                    return;
+                  }
+                  setCurrentStep(2);
+                }}
+                disabled={!customGameTitle.trim()}
                 style={{
-                  backgroundColor: 'var(--primary)',
-                  color: '#ffffff',
+                  backgroundColor: !customGameTitle.trim() ? 'var(--border-subtle)' : 'var(--primary)',
+                  color: !customGameTitle.trim() ? 'var(--text-muted)' : '#ffffff',
                   border: 'none',
                   borderRadius: '10px',
                   padding: '0.85rem 1.6rem',
                   fontWeight: 800,
                   fontSize: '1rem',
-                  cursor: 'pointer',
-                  boxShadow: 'var(--btn-shadow)',
+                  cursor: !customGameTitle.trim() ? 'not-allowed' : 'pointer',
+                  boxShadow: !customGameTitle.trim() ? 'none' : 'var(--btn-shadow)',
                 }}
               >
                 Tiếp tục: Nhập Nguồn Nội Dung (Bước 2) &rarr;
@@ -2461,7 +2519,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     <input
                       type="text"
                       value={generatedSpec.title}
-                      onChange={e => setGeneratedSpec({ ...generatedSpec, title: e.target.value })}
+                      onChange={e => {
+                        setGeneratedSpec({ ...generatedSpec, title: e.target.value });
+                        setCustomGameTitle(e.target.value);
+                      }}
                       style={{
                         width: '100%',
                         padding: '0.6rem 0.85rem',

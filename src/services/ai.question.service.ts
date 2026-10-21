@@ -584,7 +584,9 @@ export class AiQuestionService {
         default: return type;
       }
     };
-    const title = request.title || `Trò chơi ${getGameTypeLabelVi(gameType)} từ ${documents[0].title}`;
+    const title = (request.title && request.title.trim().length > 0)
+      ? request.title.trim()
+      : `Trò chơi ${getGameTypeLabelVi(gameType)} từ ${documents[0].title}`;
     const description = `Bộ trò chơi tương tác ${getGameTypeLabelVi(gameType)} được tạo từ ${documents.length} nguồn tài liệu.`;
 
     const generationDiagnostics: string[] = [];

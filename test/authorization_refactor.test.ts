@@ -589,4 +589,139 @@ describe('REFACTOR UX & AUTHORIZATION — Comprehensive 22-Scenario Security & R
     assert.equal(fakeSessionRes.status, 404);
     assert.equal(fakeSessionRes.body.error.code, 'SESSION_NOT_FOUND');
   });
+
+  // 23. Title validation: trimmed, 1-100 characters, mandatory
+  it('23. Validates game title strictly (trim, min 1, max 100 chars) on generate and update', async () => {
+    const pubGame = createTestGameSpec('game_title_val', creatorIdA, true);
+    gameStore.save(pubGame, Date.now(), creatorIdA, true);
+
+    // Reject empty title on update
+    const emptyTitleRes = await request(app)
+      .patch(`/api/games/${pubGame.gameId}/questions`)
+      .set('Authorization', `Bearer ${creatorTokenA}`)
+      .send({
+        title: '   ',
+        questions: pubGame.questions,
+      });
+    assert.equal(emptyTitleRes.status, 400);
+
+    // Reject title longer than 100 characters on update
+    const longTitle = 'A'.repeat(101);
+    const longTitleRes = await request(app)
+      .patch(`/api/games/${pubGame.gameId}/questions`)
+      .set('Authorization', `Bearer ${creatorTokenA}`)
+      .send({
+        title: longTitle,
+        questions: pubGame.questions,
+      });
+    assert.equal(longTitleRes.status, 400);
+
+    // Accept valid trimmed title on update
+    const validTitleRes = await request(app)
+      .patch(`/api/games/${pubGame.gameId}/questions`)
+      .set('Authorization', `Bearer ${creatorTokenA}`)
+      .send({
+        title: '   Đố vui Công Nghệ Mới   ',
+        questions: pubGame.questions,
+      });
+    assert.equal(validTitleRes.status, 200);
+    assert.equal(validTitleRes.body.data.title, 'Đố vui Công Nghệ Mới');
+
+    // Reject empty title on generate endpoint
+    const emptyGenRes = await request(app)
+      .post('/api/games/generate')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        title: '   ',
+        gameType: 'MULTIPLE_CHOICE',
+        questionCount: 3,
+        timePerQuestion: 15,
+        sources: [{ sourceId: 'src_1', title: 'Doc', url: 'https://example.com', rawContent: 'Sample content for AI processing.' }],
+      });
+    assert.equal(emptyGenRes.status, 400);
+
+    // Reject title > 100 chars on generate endpoint
+    const longGenRes = await request(app)
+      .post('/api/games/generate')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        title: 'T'.repeat(101),
+        gameType: 'MULTIPLE_CHOICE',
+        questionCount: 3,
+        timePerQuestion: 15,
+        sources: [{ sourceId: 'src_1', title: 'Doc', url: 'https://example.com', rawContent: 'Sample content for AI processing.' }],
+      });
+    assert.equal(longGenRes.status, 400);
+  });
+
+  // 24. Kho Game Admin deletion: successfully deletes game and cascades to persistence
+  it('24. Admin can delete a saved game from Kho Game and cascade to SQLite & cache', async () => {
+    const delGame = createTestGameSpec('game_admin_del_test', creatorIdA, true);
+    delGame.title = 'Game chuẩn bị xóa';
+    gameStore.save(delGame, Date.now(), creatorIdA, true);
+
+    // Confirm game exists before deletion
+    const getBeforeRes = await request(app).get(`/api/games/${delGame.gameId}`);
+    assert.equal(getBeforeRes.status, 200);
+
+    // Admin executes DELETE /api/games/:gameId
+    const delRes = await request(app)
+      .delete(`/api/games/${delGame.gameId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    assert.equal(delRes.status, 200);
+    assert.equal(delRes.body.data.deleted, true);
+    assert.equal(delRes.body.data.gameId, delGame.gameId);
+
+    // Verify game is no longer in store or DB
+    const getAfterRes = await request(app).get(`/api/games/${delGame.gameId}`);
+    assert.equal(getAfterRes.status, 404);
+    assert.equal(getAfterRes.body.error.code, 'GAME_NOT_FOUND');
+
+    // Creating a room with deleted game returns 404
+    const roomRes = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ gameId: delGame.gameId });
+    assert.equal(roomRes.status, 404);
+
+    // Starting a practice session with deleted game returns 404
+    const sessionRes = await request(app)
+      .post('/api/games/sessions')
+      .send({ gameId: delGame.gameId });
+    assert.equal(sessionRes.status, 404);
+  });
+
+  // 25. Deletion authorization guards: Guest rejection, ownership isolation, and active game lock
+  it('25. Rejects game deletion by Guests (403), non-admin non-owners (403), and active games (409)', async () => {
+    const protectedGame = createTestGameSpec('game_guard_test', creatorIdA, true);
+    gameStore.save(protectedGame, Date.now(), creatorIdA, true);
+
+    // 1. Guest attempting delete is rejected with 403 ACCESS_DENIED
+    const guestDelRes = await request(app)
+      .delete(`/api/games/${protectedGame.gameId}`)
+      .set('X-Guest-Token', guestToken);
+    assert.equal(guestDelRes.status, 403);
+    assert.equal(guestDelRes.body.error.code, 'ACCESS_DENIED');
+
+    // 2. Creator B attempting delete on Creator A's game is rejected with 403 ACCESS_DENIED
+    const userBDelRes = await request(app)
+      .delete(`/api/games/${protectedGame.gameId}`)
+      .set('Authorization', `Bearer ${creatorTokenB}`);
+    assert.equal(userBDelRes.status, 403);
+    assert.equal(userBDelRes.body.error.code, 'ACCESS_DENIED');
+
+    // 3. Create an active live room for this game
+    const activeRoomRes = await request(app)
+      .post('/api/rooms')
+      .set('Authorization', `Bearer ${creatorTokenA}`)
+      .send({ gameId: protectedGame.gameId });
+    assert.equal(activeRoomRes.status, 200);
+
+    // 4. Attempting to delete while room is active returns 409 GAME_IN_USE
+    const inUseDelRes = await request(app)
+      .delete(`/api/games/${protectedGame.gameId}`)
+      .set('Authorization', `Bearer ${adminToken}`);
+    assert.equal(inUseDelRes.status, 409);
+    assert.equal(inUseDelRes.body.error.code, 'GAME_IN_USE');
+  });
 });

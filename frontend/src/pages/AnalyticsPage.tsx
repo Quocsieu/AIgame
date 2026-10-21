@@ -1470,8 +1470,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       👁️ Chi tiết
                     </button>
 
-                    {/* CHỈ CHỦ SỞ HỮU HOẶC ADMIN ĐƯỢC PHÉP SỬA & XÓA (LUỒNG 3 & PHÂN QUYỀN) */}
-                    {(currentUser?.role === 'ADMIN' || (Boolean(currentUser?.userId) && g.ownerUserId === currentUser?.userId)) && (
+                    {/* CHỈ ADMIN ĐƯỢC PHÉP SỬA & XÓA TRONG KHO GAME */}
+                    {currentUser?.role === 'ADMIN' && (
                       <>
                         <button
                           type="button"
@@ -2008,7 +2008,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           }
         }}
         onNavigateToHost={onNavigateToHost}
-        isOwner={currentUser?.role === 'ADMIN' || (Boolean(currentUser?.userId) && modeModalSpec?.ownerUserId === currentUser?.userId)}
+        isOwner={currentUser?.role === 'ADMIN'}
       />
     </div>
   );

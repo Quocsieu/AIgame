@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useToast } from './ToastContext.js';
-import { loginUser, registerUser } from '../services/api.js';
+import { loginUser } from '../services/api.js';
 import type { AuthenticatedUser } from '../types/index.js';
 
 interface AuthModalProps {
@@ -16,15 +16,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   isOpen,
   onClose,
   onSuccess,
-  initialMode = 'login',
   title,
   subtitle,
 }) => {
   const toast = useToast();
-  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [displayName, setDisplayName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -36,22 +33,12 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     setIsLoading(true);
 
     try {
-      if (mode === 'login') {
-        const res = await loginUser({ email, password });
-        toast.success(`Chào mừng trở lại, ${res.user.displayName}!`, 'Đăng nhập thành công');
-        onSuccess(res.user);
-        onClose();
-      } else {
-        if (!displayName.trim()) {
-          throw new Error('Vui lòng nhập tên hiển thị của bạn.');
-        }
-        const res = await registerUser({ email, password, displayName });
-        toast.success(`Tài khoản ${res.user.displayName} đã sẵn sàng!`, 'Đăng ký thành công');
-        onSuccess(res.user);
-        onClose();
-      }
+      const res = await loginUser({ email, password });
+      toast.success(`Chào mừng trở lại, ${res.user.displayName}!`, 'Đăng nhập thành công');
+      onSuccess(res.user);
+      onClose();
     } catch (err: any) {
-      setErrorMessage(err.message || 'Đã có lỗi xảy ra. Vui lòng thử lại.');
+      setErrorMessage(err.message || 'Đăng nhập thất bại. Vui lòng kiểm tra lại thông tin.');
     } finally {
       setIsLoading(false);
     }
@@ -112,72 +99,15 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* Tiêu đề */}
         <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
           <div style={{ fontSize: '2.4rem', marginBottom: '0.4rem' }}>
-            {mode === 'login' ? '🔐' : '✨'}
+            🔒
           </div>
-          <h2 style={{ margin: '0 0 0.35rem 0', fontSize: '1.4rem', fontWeight: 900 }}>
-            {title || (mode === 'login' ? 'Đăng Nhập Tài Khoản' : 'Tạo Tài Khoản Mới')}
+          <h2 style={{ margin: '0 0 0.35rem 0', fontSize: '1.35rem', fontWeight: 900 }}>
+            {title || 'Đăng Nhập Quản Trị Viên (Admin)'}
           </h2>
-          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+          <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.85rem', lineHeight: 1.45 }}>
             {subtitle ||
-              (mode === 'login'
-                ? 'Đăng nhập để tạo, quản lý và tổ chức các trận đấu game AI.'
-                : 'Trở thành Người tổ chức (Creator) để tạo game bằng AI.')}
+              'Dành riêng cho Quản trị viên để tạo và quản lý game. Người chơi chỉ cần quét mã QR hoặc mở link để tham gia trực tiếp, không cần đăng ký hay đăng nhập.'}
           </p>
-        </div>
-
-        {/* Chuyển đổi Tab Login / Register */}
-        <div
-          style={{
-            display: 'flex',
-            backgroundColor: 'var(--bg-input)',
-            borderRadius: '10px',
-            padding: '0.25rem',
-            marginBottom: '1.5rem',
-            border: '1px solid var(--border-subtle)',
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => {
-              setMode('login');
-              setErrorMessage(null);
-            }}
-            style={{
-              flex: 1,
-              padding: '0.55rem',
-              borderRadius: '8px',
-              border: 'none',
-              backgroundColor: mode === 'login' ? 'var(--primary)' : 'transparent',
-              color: mode === 'login' ? '#ffffff' : 'var(--text-secondary)',
-              fontWeight: 700,
-              fontSize: '0.85rem',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            Đăng Nhập
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMode('register');
-              setErrorMessage(null);
-            }}
-            style={{
-              flex: 1,
-              padding: '0.55rem',
-              borderRadius: '8px',
-              border: 'none',
-              backgroundColor: mode === 'register' ? 'var(--primary)' : 'transparent',
-              color: mode === 'register' ? '#ffffff' : 'var(--text-secondary)',
-              fontWeight: 700,
-              fontSize: '0.85rem',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-            }}
-          >
-            Đăng Ký
-          </button>
         </div>
 
         {/* Thông báo lỗi nếu có */}
@@ -198,41 +128,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           </div>
         )}
 
-        {/* Form nhập liệu */}
+        {/* Form đăng nhập Admin */}
         <form onSubmit={handleSubmit}>
-          {mode === 'register' && (
-            <div style={{ marginBottom: '1rem' }}>
-              <label
-                style={{
-                  display: 'block',
-                  fontSize: '0.82rem',
-                  fontWeight: 700,
-                  marginBottom: '0.35rem',
-                  color: 'var(--text-secondary)',
-                }}
-              >
-                Tên hiển thị / Tổ chức
-              </label>
-              <input
-                type="text"
-                required
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="VD: Thầy Nam, Ban Giáo Vụ..."
-                style={{
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  padding: '0.7rem 0.85rem',
-                  borderRadius: '8px',
-                  backgroundColor: 'var(--bg-input)',
-                  border: '1px solid var(--border-strong)',
-                  color: 'var(--text-primary)',
-                  fontSize: '0.9rem',
-                }}
-              />
-            </div>
-          )}
-
           <div style={{ marginBottom: '1rem' }}>
             <label
               style={{
@@ -243,14 +140,14 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 color: 'var(--text-secondary)',
               }}
             >
-              Email đăng nhập
+              Email Admin
             </label>
             <input
               type="email"
               required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              placeholder="name@example.com"
+              placeholder="admin@example.com"
               style={{
                 width: '100%',
                 boxSizing: 'border-box',
@@ -279,10 +176,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <input
               type="password"
               required
-              minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Tối thiểu 8 ký tự"
+              placeholder="Nhập mật khẩu quản trị"
               style={{
                 width: '100%',
                 boxSizing: 'border-box',
@@ -314,13 +210,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               transition: 'all 0.15s ease',
             }}
           >
-            {isLoading
-              ? 'Đang xử lý...'
-              : mode === 'login'
-              ? 'Đăng Nhập Ngay'
-              : 'Đăng Ký Tài Khoản'}
+            {isLoading ? 'Đang xác thực...' : 'Đăng Nhập Admin'}
           </button>
         </form>
+
+        <div
+          style={{
+            marginTop: '1.25rem',
+            paddingTop: '1rem',
+            borderTop: '1px solid var(--border-subtle)',
+            fontSize: '0.78rem',
+            color: 'var(--text-muted)',
+            textAlign: 'center',
+            lineHeight: 1.4,
+          }}
+        >
+          💡 Bạn là người chơi? Hãy quét mã QR do Quản trị viên cung cấp hoặc bấm vào link chia sẻ để bắt đầu chơi ngay lập tức mà không cần tài khoản.
+        </div>
       </div>
     </div>
   );
