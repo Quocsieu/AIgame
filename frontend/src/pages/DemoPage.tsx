@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { GameModeSelectionModal } from '../components/GameModeSelectionModal.js';
 import { useToast } from '../components/ToastContext.js';
 import {
   advancePracticeSession,
@@ -33,6 +34,7 @@ interface DemoPageProps {
   initialSpec?: GameSpecification | null;
   autoStartSoloPlay?: boolean;
   onExitSoloPlay?: () => void;
+  onNavigateToLibrary?: () => void;
 }
 
 const MAX_URLS = 5;
@@ -183,6 +185,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   initialSpec,
   autoStartSoloPlay,
   onExitSoloPlay,
+  onNavigateToLibrary,
 }) => {
   const toast = useToast();
 
@@ -214,6 +217,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSavingSpec, setIsSavingSpec] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
+
+  // Modal Chọn chế độ chơi (Luồng 1 & Luồng 2)
+  const [isModeModalOpen, setIsModeModalOpen] = useState(false);
+  const [modeModalSpec, setModeModalSpec] = useState<GameSpecification | null>(null);
 
   // Single-Player Practice Mode state (Batch 7)
   const [isPracticeOpen, setIsPracticeOpen] = useState(false);
@@ -717,6 +724,20 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }
   };
 
+  const handleStartImmediately = async () => {
+    if (!generatedSpec) {
+      toast.error('Vui lòng tạo bộ câu hỏi trước.', 'Chưa có bộ câu hỏi');
+      return;
+    }
+    if (!validateSpecBeforeLaunch(generatedSpec)) {
+      return;
+    }
+    const saved = await handleSaveSpecEdits(generatedSpec.isPublic);
+    const target = saved || generatedSpec;
+    setModeModalSpec(target);
+    setIsModeModalOpen(true);
+  };
+
   const handleExportCurrentGame = async (format: 'csv' | 'json') => {
     if (!generatedSpec) return;
     try {
@@ -920,30 +941,32 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
   return (
     <div style={{ maxWidth: '1080px', margin: '0 auto', padding: '0.5rem 0 2rem 0' }}>
-      {/* Header khu vực bảng điều khiển */}
-      <header style={{ marginBottom: '1.75rem', textAlign: 'center' }}>
-        <h1
-          style={{
-            margin: 0,
-            color: 'var(--text-primary)',
-            fontSize: '2.25rem',
-            fontWeight: 900,
-            letterSpacing: '-0.03em',
-          }}
-        >
-          Biến Nội Dung Thành Trò Chơi Tương Tác
-        </h1>
-      </header>
+      {!autoStartSoloPlay && (
+        <>
+          {/* Header khu vực bảng điều khiển */}
+          <header style={{ marginBottom: '1.75rem', textAlign: 'center' }}>
+            <h1
+              style={{
+                margin: 0,
+                color: 'var(--text-primary)',
+                fontSize: '2.25rem',
+                fontWeight: 900,
+                letterSpacing: '-0.03em',
+              }}
+            >
+              Biến Nội Dung Thành Trò Chơi Tương Tác
+            </h1>
+          </header>
 
-      {/* THANH TIẾN TRÌNH STEPPER 5 BƯỚC */}
-      <div
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
-          gap: '0.65rem',
-          marginBottom: '2rem',
-        }}
-      >
+          {/* THANH TIẾN TRÌNH STEPPER 5 BƯỚC */}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
+              gap: '0.65rem',
+              marginBottom: '2rem',
+            }}
+          >
         {[
           {
             step: 1 as const,
@@ -1050,8 +1073,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           </button>
         ))}
       </div>
+    </>
+  )}
 
-      {/* ===================== CHẾ ĐỘ LUYỆN TẬP CÁ NHÂN (BATCH 7) ===================== */}
+  {/* ===================== CHẾ ĐỘ LUYỆN TẬP CÁ NHÂN (BATCH 7) ===================== */}
       {isPracticeOpen && (
         <div
           style={{
@@ -1524,8 +1549,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       )}
 
       {/* NỘI DUNG TỪNG BƯỚC (5 BƯỚC WIZARD) */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
-        {/* ===================== BƯỚC 1: CHỌN THỂ LOẠI GAME & THÔNG SỐ CƠ BẢN ===================== */}
+      {!autoStartSoloPlay && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+          {/* ===================== BƯỚC 1: CHỌN THỂ LOẠI GAME & THÔNG SỐ CƠ BẢN ===================== */}
         {currentStep === 1 && (
           <div
             style={{
@@ -3070,101 +3096,173 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   </div>
                 </div>
 
-                {/* Nút Lưu Bản Nháp & Xuất Bản Công Khai */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '0.85rem', marginBottom: '1.25rem' }}>
-                  <button
-                    type="button"
-                    disabled={isSavingSpec}
-                    onClick={() => handleSaveSpecEdits(false)}
-                    style={{
-                      backgroundColor: 'var(--bg-input)',
-                      color: 'var(--text-primary)',
-                      border: '1px solid var(--border-strong)',
-                      borderRadius: '12px',
-                      padding: '0.95rem 1.25rem',
-                      fontWeight: 800,
-                      fontSize: '0.96rem',
-                      cursor: isSavingSpec ? 'not-allowed' : 'pointer',
-                      opacity: isSavingSpec ? 0.65 : 1,
-                    }}
-                  >
-                    {isSavingSpec ? '⏳ Đang lưu...' : '💾 Lưu bản nháp (Chưa xuất bản)'}
-                  </button>
+                {/* ===================== LỰA CHỌN A: BẮT ĐẦU NGAY ===================== */}
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-input)',
+                    border: '2px solid var(--primary)',
+                    borderRadius: '16px',
+                    padding: '1.4rem',
+                    marginBottom: '1.35rem',
+                    boxShadow: 'var(--card-shadow)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '1rem' }}>
+                    <div style={{ flex: '1 1 300px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                        <span style={{ fontSize: '1.5rem' }}>🚀</span>
+                        <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                          Lựa chọn A: Bắt đầu ngay
+                        </h3>
+                      </div>
+                      <p style={{ margin: 0, fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                        Lưu trữ dữ liệu game an toàn vào hệ thống và chuyển ngay sang bước <strong>Chọn chế độ chơi</strong> (Chơi đơn hoặc Chơi nhóm Multiplayer).
+                      </p>
+                    </div>
 
-                  <button
-                    type="button"
-                    disabled={isSavingSpec}
-                    onClick={() => handleSaveSpecEdits(true)}
-                    style={{
-                      backgroundColor: 'var(--accent-emerald)',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: '12px',
-                      padding: '0.95rem 1.25rem',
-                      fontWeight: 900,
-                      fontSize: '0.98rem',
-                      cursor: isSavingSpec ? 'not-allowed' : 'pointer',
-                      opacity: isSavingSpec ? 0.65 : 1,
-                      boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
-                    }}
-                  >
-                    {isSavingSpec ? '⏳ Đang xuất bản...' : '🚀 Lưu & Xuất bản Game (Công khai)'}
-                  </button>
+                    <button
+                      type="button"
+                      disabled={isSavingSpec}
+                      onClick={handleStartImmediately}
+                      style={{
+                        backgroundColor: 'var(--primary)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '12px',
+                        padding: '0.9rem 1.6rem',
+                        fontWeight: 900,
+                        fontSize: '1rem',
+                        cursor: isSavingSpec ? 'not-allowed' : 'pointer',
+                        boxShadow: 'var(--btn-shadow)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.55rem',
+                      }}
+                    >
+                      {isSavingSpec ? '⏳ Đang lưu trữ...' : '🚀 Bắt đầu ngay & Chọn chế độ'}
+                    </button>
+                  </div>
                 </div>
 
-                {/* Tổ chức phòng đấu hoặc Chơi thử */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '0.85rem', paddingTop: '1rem', borderTop: '1px solid var(--border-subtle)' }}>
-                  <button
-                    type="button"
-                    onClick={() => handleCreateRoom()}
-                    disabled={isCreatingRoom}
-                    style={{
-                      backgroundColor: isCreatingRoom ? 'var(--border-strong)' : 'var(--primary)',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: '12px',
-                      padding: '0.9rem 1.35rem',
-                      fontWeight: 900,
-                      fontSize: '0.96rem',
-                      cursor: isCreatingRoom ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {isCreatingRoom ? '⏳ Đang khởi tạo phòng chơi...' : '🏟️ Mở phòng đấu Multiplayer (QR)'}
-                  </button>
+                {/* ===================== LỰA CHỌN B: LƯU VÀO KHO GAME ===================== */}
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '16px',
+                    padding: '1.4rem',
+                    marginBottom: '1.35rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.35rem' }}>
+                    <span style={{ fontSize: '1.5rem' }}>💾</span>
+                    <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                      Lựa chọn B: Lưu vào kho game
+                    </h3>
+                  </div>
+                  <p style={{ margin: '0 0 1.1rem 0', fontSize: '0.88rem', color: 'var(--text-secondary)' }}>
+                    Lưu bộ câu hỏi vào kho dùng chung để lưu trữ, quản lý hoặc mở lại tổ chức chơi sau này.
+                  </p>
 
-                  <button
-                    type="button"
-                    onClick={() => handleStartPractice()}
-                    style={{
-                      backgroundColor: 'var(--bg-input)',
-                      color: 'var(--accent-sky)',
-                      border: '1px solid var(--accent-sky)',
-                      borderRadius: '12px',
-                      padding: '0.9rem 1.35rem',
-                      fontWeight: 800,
-                      fontSize: '0.96rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    🎮 Chơi đơn (Luyện tập ngay)
-                  </button>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))', gap: '0.85rem', marginBottom: '1.1rem' }}>
+                    <button
+                      type="button"
+                      disabled={isSavingSpec}
+                      onClick={() => handleSaveSpecEdits(false)}
+                      style={{
+                        backgroundColor: 'var(--bg-surface)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border-strong)',
+                        borderRadius: '12px',
+                        padding: '0.9rem 1.25rem',
+                        fontWeight: 800,
+                        fontSize: '0.94rem',
+                        cursor: isSavingSpec ? 'not-allowed' : 'pointer',
+                        opacity: isSavingSpec ? 0.65 : 1,
+                      }}
+                    >
+                      {isSavingSpec ? '⏳ Đang lưu...' : '📝 Lưu Bản Nháp (DRAFT)'}
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setCurrentStep(4)}
-                    style={{
-                      backgroundColor: 'var(--bg-input)',
-                      color: 'var(--text-secondary)',
-                      border: '1px solid var(--border-strong)',
-                      borderRadius: '12px',
-                      padding: '0.9rem 1.2rem',
-                      fontWeight: 700,
-                      fontSize: '0.92rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    ✏️ Quay lại sửa câu hỏi (Bước 4)
-                  </button>
+                    <button
+                      type="button"
+                      disabled={isSavingSpec}
+                      onClick={() => handleSaveSpecEdits(true)}
+                      style={{
+                        backgroundColor: 'var(--accent-emerald)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '12px',
+                        padding: '0.9rem 1.25rem',
+                        fontWeight: 900,
+                        fontSize: '0.96rem',
+                        cursor: isSavingSpec ? 'not-allowed' : 'pointer',
+                        opacity: isSavingSpec ? 0.65 : 1,
+                        boxShadow: '0 4px 14px rgba(16, 185, 129, 0.35)',
+                      }}
+                    >
+                      {isSavingSpec ? '⏳ Đang xuất bản...' : '🚀 Lưu & Xuất Bản (PUBLISHED)'}
+                    </button>
+                  </div>
+
+                  {/* Hành động tiếp nối sau khi lưu */}
+                  <div style={{ display: 'flex', gap: '0.65rem', flexWrap: 'wrap', paddingTop: '1rem', borderTop: '1px solid var(--border-subtle)' }}>
+                    {onNavigateToLibrary && (
+                      <button
+                        type="button"
+                        onClick={onNavigateToLibrary}
+                        style={{
+                          backgroundColor: 'var(--bg-surface)',
+                          color: 'var(--accent-sky)',
+                          border: '1px solid var(--accent-sky)',
+                          borderRadius: '10px',
+                          padding: '0.6rem 1.15rem',
+                          fontWeight: 800,
+                          fontSize: '0.88rem',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        📚 Đi tới Kho Game
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setModeModalSpec(generatedSpec);
+                        setIsModeModalOpen(true);
+                      }}
+                      style={{
+                        backgroundColor: 'var(--bg-surface)',
+                        color: 'var(--accent-emerald)',
+                        border: '1px solid var(--accent-emerald)',
+                        borderRadius: '10px',
+                        padding: '0.6rem 1.15rem',
+                        fontWeight: 800,
+                        fontSize: '0.88rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ▶️ Mở Game Chọn Chế Độ
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setCurrentStep(4)}
+                      style={{
+                        backgroundColor: 'var(--bg-surface)',
+                        color: 'var(--text-secondary)',
+                        border: '1px solid var(--border-strong)',
+                        borderRadius: '10px',
+                        padding: '0.6rem 1.15rem',
+                        fontWeight: 700,
+                        fontSize: '0.88rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ✏️ Quay lại sửa câu hỏi (Bước 4)
+                    </button>
+                  </div>
                 </div>
 
                 {roomCode && (
@@ -3299,6 +3397,35 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           </div>
         )}
       </div>
+      )}
+
+      {/* MODAL CHỌN CHẾ ĐỘ CHƠI (CHƠI ĐƠN VS MULTIPLAYER) */}
+      <GameModeSelectionModal
+        isOpen={isModeModalOpen}
+        onClose={() => setIsModeModalOpen(false)}
+        gameSpec={modeModalSpec || generatedSpec}
+        onStartSoloPlay={(spec) => {
+          setIsModeModalOpen(false);
+          handleStartPractice(spec);
+        }}
+        onCreateMultiplayerRoom={async (spec) => {
+          const room = await handleCreateRoom(spec);
+          if (room) {
+            return {
+              roomCode: room,
+              hostToken: hostToken,
+              joinUrl: joinUrl,
+            };
+          }
+          return null;
+        }}
+        onPublishGame={async () => {
+          const saved = await handleSaveSpecEdits(true);
+          return Boolean(saved?.isPublic);
+        }}
+        onNavigateToHost={onNavigateToHost}
+        isOwner={true}
+      />
     </div>
   );
 };

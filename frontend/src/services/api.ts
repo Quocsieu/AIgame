@@ -166,6 +166,22 @@ export async function fetchCurrentUser(): Promise<{
   return data.data;
 }
 
+export async function fetchWhoAmI(): Promise<{
+  user: AuthenticatedUser | null;
+  isGuest: boolean;
+}> {
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/whoami`, {
+      headers: buildAuthHeaders(),
+    });
+    const data = await res.json();
+    if (data.success) {
+      return data.data;
+    }
+  } catch {}
+  return { user: null, isGuest: true };
+}
+
 // ==========================================
 // Content Ingestion & Game Generation APIs
 // ==========================================
@@ -344,6 +360,17 @@ export async function saveEditedQuestions(
     throw new Error(data.error?.message || 'Không thể lưu chỉnh sửa bộ câu hỏi.');
   }
   return data.data;
+}
+
+export async function publishGame(gameId: string): Promise<GameSpecification> {
+  const current = await fetchGameById(gameId);
+  return saveEditedQuestions(gameId, {
+    title: current.title,
+    description: current.description,
+    questions: current.questions,
+    settings: current.settings,
+    isPublic: true,
+  });
 }
 
 export async function downloadGameExport(gameId: string, format: 'csv' | 'json'): Promise<void> {

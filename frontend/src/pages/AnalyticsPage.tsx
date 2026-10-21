@@ -1,16 +1,20 @@
 import React, { useEffect, useState } from 'react';
+import { GameModeSelectionModal } from '../components/GameModeSelectionModal.js';
 import { useToast } from '../components/ToastContext.js';
 import {
   createRoom,
   deleteSavedGame,
   downloadGameExport,
+  fetchCurrentUser,
   fetchGameById,
   fetchGameQr,
   fetchRoomQr,
   fetchSavedGames,
+  publishGame,
   saveEditedQuestions,
 } from '../services/api.js';
 import type {
+  AuthenticatedUser,
   GameQuestion,
   GameSpecification,
   PersistedGameSummary,
@@ -109,6 +113,30 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     qrDataUrl: string;
   } | null>(null);
   const [isOpeningRoomGameId, setIsOpeningRoomGameId] = useState<string | null>(null);
+
+  // Người dùng hiện tại & Modal chọn chế độ chơi (Luồng 2 & Luồng 3)
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
+  const [isModeModalOpen, setIsModeModalOpen] = useState(false);
+  const [modeModalSpec, setModeModalSpec] = useState<GameSpecification | null>(null);
+
+  useEffect(() => {
+    fetchCurrentUser()
+      .then((res) => setCurrentUser(res?.user || null))
+      .catch(() => setCurrentUser(null));
+  }, []);
+
+  const handleOpenModeModal = async (gameId: string) => {
+    setIsDetailLoading(true);
+    try {
+      const spec = await fetchGameById(gameId);
+      setModeModalSpec(spec);
+      setIsModeModalOpen(true);
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể mở bộ câu hỏi.', 'Lỗi tải game');
+    } finally {
+      setIsDetailLoading(false);
+    }
+  };
 
   const loadSavedGames = async (
     targetPage = page,
@@ -1402,61 +1430,28 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     </div>
                   </div>
 
-                  <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
-                    {g.isPublic && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handlePlaySavedGame(g.gameId, true)}
-                          style={{
-                            backgroundColor: 'var(--primary)',
-                            color: '#ffffff',
-                            border: 'none',
-                            borderRadius: '8px',
-                            padding: '0.48rem 0.8rem',
-                            fontWeight: 800,
-                            fontSize: '0.79rem',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          🎯 Chơi đơn
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenSoloShareModal(g)}
-                          disabled={isLoadingSoloShare}
-                          style={{
-                            backgroundColor: 'var(--bg-surface)',
-                            color: 'var(--accent-sky)',
-                            border: '1px solid var(--accent-sky)',
-                            borderRadius: '8px',
-                            padding: '0.48rem 0.78rem',
-                            fontWeight: 800,
-                            fontSize: '0.79rem',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          🔗 Link / QR
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenMultiplayerRoom(g)}
-                          disabled={isOpeningRoomGameId === g.gameId}
-                          style={{
-                            backgroundColor: 'var(--accent-emerald)',
-                            color: '#ffffff',
-                            border: 'none',
-                            borderRadius: '8px',
-                            padding: '0.48rem 0.82rem',
-                            fontWeight: 800,
-                            fontSize: '0.79rem',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          {isOpeningRoomGameId === g.gameId ? '⏳...' : '🏟️ Mở phòng'}
-                        </button>
-                      </>
-                    )}
+                  <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap', alignItems: 'center' }}>
+                    {/* NÚT CHÍNH: MỞ GAME & CHỌN CHẾ ĐỘ CHƠI (LUỒNG 2) */}
+                    <button
+                      type="button"
+                      onClick={() => handleOpenModeModal(g.gameId)}
+                      style={{
+                        backgroundColor: 'var(--primary)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '0.48rem 0.95rem',
+                        fontWeight: 800,
+                        fontSize: '0.82rem',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        boxShadow: 'var(--btn-shadow)',
+                      }}
+                    >
+                      ▶️ Mở Game
+                    </button>
 
                     <button
                       type="button"
@@ -1475,22 +1470,44 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       👁️ Chi tiết
                     </button>
 
-                    <button
-                      type="button"
-                      onClick={() => handleViewOrEditGame(g.gameId, true)}
-                      style={{
-                        backgroundColor: 'var(--bg-surface)',
-                        color: 'var(--accent-amber)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: '8px',
-                        padding: '0.48rem 0.8rem',
-                        fontWeight: 800,
-                        fontSize: '0.8rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      ✏️ Sửa
-                    </button>
+                    {/* CHỈ CHỦ SỞ HỮU HOẶC ADMIN ĐƯỢC PHÉP SỬA & XÓA (LUỒNG 3 & PHÂN QUYỀN) */}
+                    {(currentUser?.role === 'ADMIN' || (Boolean(currentUser?.userId) && g.ownerUserId === currentUser?.userId)) && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleViewOrEditGame(g.gameId, true)}
+                          style={{
+                            backgroundColor: 'var(--bg-surface)',
+                            color: 'var(--accent-amber)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '8px',
+                            padding: '0.48rem 0.8rem',
+                            fontWeight: 800,
+                            fontSize: '0.8rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          ✏️ Sửa
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setConfirmDeleteGame(g)}
+                          style={{
+                            backgroundColor: 'rgba(244, 63, 94, 0.12)',
+                            color: 'var(--accent-rose)',
+                            border: '1px solid var(--accent-rose)',
+                            borderRadius: '8px',
+                            padding: '0.48rem 0.75rem',
+                            fontWeight: 800,
+                            fontSize: '0.8rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          🗑️ Xóa
+                        </button>
+                      </>
+                    )}
 
                     <button
                       type="button"
@@ -1524,23 +1541,6 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       }}
                     >
                       📄 JSON
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDeleteGame(g)}
-                      style={{
-                        backgroundColor: 'rgba(244, 63, 94, 0.12)',
-                        color: 'var(--accent-rose)',
-                        border: '1px solid var(--accent-rose)',
-                        borderRadius: '8px',
-                        padding: '0.48rem 0.75rem',
-                        fontWeight: 800,
-                        fontSize: '0.8rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      🗑️ Xóa
                     </button>
                   </div>
                 </div>
@@ -1969,6 +1969,47 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           </div>
         </div>
       )}
+
+      {/* MODAL CHỌN CHẾ ĐỘ CHƠI (CHƠI ĐƠN VS MULTIPLAYER) - LUỒNG 2 */}
+      <GameModeSelectionModal
+        isOpen={isModeModalOpen}
+        onClose={() => setIsModeModalOpen(false)}
+        gameSpec={modeModalSpec}
+        onStartSoloPlay={(spec) => {
+          setIsModeModalOpen(false);
+          handlePlaySavedGame(spec.gameId, true);
+        }}
+        onCreateMultiplayerRoom={async (spec) => {
+          try {
+            const roomData = await createRoom({
+              gameId: spec.gameId,
+              capacity: 300,
+              requirePublished: true,
+            });
+            return {
+              roomCode: roomData.roomCode,
+              hostToken: roomData.hostToken,
+              joinUrl: roomData.joinUrl,
+            };
+          } catch (err: any) {
+            toast.error(err.message || 'Không thể tạo phòng chơi.', 'Lỗi tạo phòng');
+            return null;
+          }
+        }}
+        onPublishGame={async (gameId) => {
+          try {
+            await publishGame(gameId);
+            toast.success('Đã xuất bản game công khai thành công!', 'Xuất bản thành công');
+            loadSavedGames();
+            return true;
+          } catch (err: any) {
+            toast.error(err.message || 'Không thể xuất bản game.', 'Lỗi xuất bản');
+            return false;
+          }
+        }}
+        onNavigateToHost={onNavigateToHost}
+        isOwner={currentUser?.role === 'ADMIN' || (Boolean(currentUser?.userId) && modeModalSpec?.ownerUserId === currentUser?.userId)}
+      />
     </div>
   );
 };

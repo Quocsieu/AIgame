@@ -27,27 +27,28 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
 
     const { gameId, gameSpecification, publicPlay } = parseResult.data;
 
-    if (!gameSpecification) {
-      const storedSpec = gameStore.get(gameId);
-      if (storedSpec) {
-        const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
-        const ownerUserId = storedSpec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
-        const isPublic = storedSpec.isPublic ?? ownerInfo?.isPublic ?? false;
-        if (publicPlay && !isPublic) {
-          throw new AppError(
-            'GAME_NOT_PUBLISHED',
-            'Game này chưa được xuất bản nên không thể bắt đầu phiên chơi công khai.',
-            403
-          );
-        }
-        authService.assertResourceAccess({
-          resourceType: 'bộ câu hỏi',
-          ownerUserId,
-          currentUser: req.user,
-          mode: 'read',
-          isPublic,
-        });
-      }
+    // Verify draft access: public play MUST be on a published game
+    const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+    const storedSpec = gameStore.get(gameId);
+    const resolvedIsPublic = storedSpec?.isPublic ?? ownerInfo?.isPublic ?? gameSpecification?.isPublic ?? false;
+    const resolvedOwnerUserId = storedSpec?.ownerUserId ?? ownerInfo?.ownerUserId ?? gameSpecification?.ownerUserId ?? null;
+
+    if (publicPlay && !resolvedIsPublic) {
+      throw new AppError(
+        'GAME_NOT_PUBLISHED',
+        'Game này chưa được xuất bản nên không thể bắt đầu phiên chơi công khai.',
+        403
+      );
+    }
+
+    if (!publicPlay) {
+      authService.assertResourceAccess({
+        resourceType: 'bộ câu hỏi',
+        ownerUserId: resolvedOwnerUserId,
+        currentUser: req.user,
+        mode: 'read',
+        isPublic: resolvedIsPublic,
+      });
     }
 
     if (req.user) {

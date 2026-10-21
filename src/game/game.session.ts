@@ -37,7 +37,7 @@ export class GameSession {
   ) {
     this.sessionId = sessionId;
     this.specification = specification;
-    this.ownerUserId = ownerUserId ?? specification.ownerUserId ?? null;
+    this.ownerUserId = ownerUserId !== undefined ? ownerUserId : (specification.ownerUserId ?? null);
     this.timer = new GameTimer(clock);
   }
 

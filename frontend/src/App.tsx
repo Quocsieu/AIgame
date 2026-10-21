@@ -5,8 +5,8 @@ import { DemoPage } from './pages/DemoPage.js';
 import { HostPage } from './pages/HostPage.js';
 import { JoinPage } from './pages/JoinPage.js';
 import { PlayPage } from './pages/PlayPage.js';
-import { fetchGameById, getOrCreateGuestToken, setStoredAuthToken } from './services/api.js';
-import type { GameSpecification } from './types/index.js';
+import { fetchCurrentUser, fetchGameById, getOrCreateGuestToken, logoutUser } from './services/api.js';
+import type { AuthenticatedUser, GameSpecification } from './types/index.js';
 
 type Tab = 'demo' | 'analytics' | 'host' | 'join' | 'play';
 
@@ -19,6 +19,7 @@ export const AppContent: React.FC = () => {
   const [autoStartSoloPlay, setAutoStartSoloPlay] = useState(false);
   const [soloPlayLoading, setSoloPlayLoading] = useState(false);
   const [soloPlayError, setSoloPlayError] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
 
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
@@ -39,9 +40,18 @@ export const AppContent: React.FC = () => {
   }, [theme]);
 
   useEffect(() => {
-    // Ensure guest mode token is initialized and no legacy login session overrides guest scope
-    setStoredAuthToken(null);
-    getOrCreateGuestToken();
+    // Resolve authenticated user profile if logged in; fallback to isolated guest token
+    fetchCurrentUser()
+      .then((res) => {
+        if (res?.user) {
+          setCurrentUser(res.user);
+        } else {
+          getOrCreateGuestToken();
+        }
+      })
+      .catch(() => {
+        getOrCreateGuestToken();
+      });
   }, []);
 
   const toggleTheme = () => {
@@ -268,84 +278,151 @@ export const AppContent: React.FC = () => {
             {theme === 'dark' ? '☀️ Sáng' : '🌙 Tối'}
           </button>
 
-          {/* Nhóm tab điều hướng */}
-          <div
-            style={{
-              display: 'flex',
-              gap: '0.35rem',
-              backgroundColor: 'var(--bg-input)',
-              padding: '0.25rem',
-              borderRadius: '10px',
-              border: '1px solid var(--border-subtle)',
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => {
-                setSoloPlayError(null);
-                setAutoStartSoloPlay(false);
-                setActiveTab('demo');
-              }}
-              style={{
-                padding: '0.55rem 1rem',
-                borderRadius: '8px',
-                border: 'none',
-                backgroundColor: activeTab === 'demo' ? 'var(--primary)' : 'transparent',
-                color: activeTab === 'demo' ? '#ffffff' : 'var(--text-secondary)',
-                fontWeight: 700,
-                fontSize: '0.85rem',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                boxShadow: activeTab === 'demo' ? 'var(--btn-shadow)' : 'none',
-              }}
-            >
-              📋 Tạo Game
-            </button>
+          {/* Thông tin tài khoản đăng nhập (nếu có) */}
+          {currentUser && !autoStartSoloPlay && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem' }}>
+              <span style={{ fontWeight: 700, color: 'var(--accent-sky)' }}>
+                👤 {currentUser.displayName} ({currentUser.role})
+              </span>
+              <button
+                type="button"
+                onClick={async () => {
+                  await logoutUser();
+                  setCurrentUser(null);
+                  window.location.reload();
+                }}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--accent-rose)',
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                }}
+              >
+                Đăng xuất
+              </button>
+            </div>
+          )}
 
-            <button
-              type="button"
-              onClick={() => {
-                setSoloPlayError(null);
-                setActiveTab('analytics');
-              }}
+          {/* Nhóm tab điều hướng hoặc Banner Người chơi đơn */}
+          {autoStartSoloPlay ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+              <span
+                style={{
+                  fontSize: '0.82rem',
+                  fontWeight: 800,
+                  padding: '0.45rem 0.85rem',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                  color: 'var(--accent-sky)',
+                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                }}
+              >
+                🎮 Chế Độ Chơi Đơn
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setAutoStartSoloPlay(false);
+                  setSelectedSavedSpec(null);
+                  setSoloPlayError(null);
+                  window.history.replaceState({}, '', window.location.pathname);
+                  setActiveTab('demo');
+                }}
+                style={{
+                  padding: '0.45rem 0.85rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-secondary)',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                ✕ Thoát
+              </button>
+            </div>
+          ) : (
+            <div
               style={{
-                padding: '0.55rem 1rem',
-                borderRadius: '8px',
-                border: 'none',
-                backgroundColor: activeTab === 'analytics' ? 'var(--primary)' : 'transparent',
-                color: activeTab === 'analytics' ? '#ffffff' : 'var(--text-secondary)',
-                fontWeight: 700,
-                fontSize: '0.85rem',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                boxShadow: activeTab === 'analytics' ? 'var(--btn-shadow)' : 'none',
+                display: 'flex',
+                gap: '0.35rem',
+                backgroundColor: 'var(--bg-input)',
+                padding: '0.25rem',
+                borderRadius: '10px',
+                border: '1px solid var(--border-subtle)',
               }}
             >
-              📚 Kho Game
-            </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setSoloPlayError(null);
+                  setAutoStartSoloPlay(false);
+                  setActiveTab('demo');
+                }}
+                style={{
+                  padding: '0.55rem 1rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: activeTab === 'demo' ? 'var(--primary)' : 'transparent',
+                  color: activeTab === 'demo' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  boxShadow: activeTab === 'demo' ? 'var(--btn-shadow)' : 'none',
+                }}
+              >
+                📋 Tạo Game
+              </button>
 
-            <button
-              type="button"
-              onClick={() => {
-                setSoloPlayError(null);
-                setActiveTab(roomCode && displayName ? 'play' : 'join');
-              }}
-              style={{
-                padding: '0.55rem 1rem',
-                borderRadius: '8px',
-                border: 'none',
-                backgroundColor: activeTab === 'join' || activeTab === 'play' ? 'var(--primary)' : 'transparent',
-                color: activeTab === 'join' || activeTab === 'play' ? '#ffffff' : 'var(--text-secondary)',
-                fontWeight: 700,
-                fontSize: '0.85rem',
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                boxShadow: activeTab === 'join' || activeTab === 'play' ? 'var(--btn-shadow)' : 'none',
-              }}
-            >
-              🎮 Người Chơi
-            </button>
-          </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setSoloPlayError(null);
+                  setActiveTab('analytics');
+                }}
+                style={{
+                  padding: '0.55rem 1rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: activeTab === 'analytics' ? 'var(--primary)' : 'transparent',
+                  color: activeTab === 'analytics' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  boxShadow: activeTab === 'analytics' ? 'var(--btn-shadow)' : 'none',
+                }}
+              >
+                📚 Kho Game
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSoloPlayError(null);
+                  setActiveTab(roomCode && displayName ? 'play' : 'join');
+                }}
+                style={{
+                  padding: '0.55rem 1rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: activeTab === 'join' || activeTab === 'play' ? 'var(--primary)' : 'transparent',
+                  color: activeTab === 'join' || activeTab === 'play' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: 700,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  transition: 'all 0.15s ease',
+                  boxShadow: activeTab === 'join' || activeTab === 'play' ? 'var(--btn-shadow)' : 'none',
+                }}
+              >
+                🎮 Người Chơi
+              </button>
+            </div>
+          )}
         </div>
       </nav>
 
@@ -425,6 +502,14 @@ export const AppContent: React.FC = () => {
                 onNavigateToPlay={handleNavigateToPlayFromDemo}
                 initialSpec={selectedSavedSpec}
                 autoStartSoloPlay={autoStartSoloPlay}
+                onExitSoloPlay={() => {
+                  setAutoStartSoloPlay(false);
+                  setSelectedSavedSpec(null);
+                  setSoloPlayError(null);
+                  window.history.replaceState({}, '', window.location.pathname);
+                  setActiveTab('demo');
+                }}
+                onNavigateToLibrary={() => setActiveTab('analytics')}
               />
             )}
 

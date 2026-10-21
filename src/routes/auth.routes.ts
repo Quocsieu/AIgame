@@ -112,3 +112,23 @@ authRouter.get(
   }
 );
 
+/**
+ * GET /api/auth/whoami
+ * Return session identity for either authenticated users, guest creators, or anonymous visitors.
+ */
+authRouter.get(
+  '/whoami',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.status(200).json(
+        createSuccessResponse({
+          user: req.user || null,
+          isGuest: Boolean(req.isGuest),
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
