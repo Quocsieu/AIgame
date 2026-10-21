@@ -10,6 +10,7 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
   const toast = useToast();
   const [roomCode, setRoomCode] = useState(initialRoomCode.toUpperCase());
   const [displayName, setDisplayName] = useState('');
+  const [roomPassword, setRoomPassword] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -23,6 +24,12 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
     if (!cleanName) {
       toast.error('Vui lòng nhập tên hoặc biệt danh của bạn.', 'Thiếu tên người chơi');
       return;
+    }
+
+    if (roomPassword.trim()) {
+      try {
+        sessionStorage.setItem(`room_game_password_${cleanCode}`, roomPassword.trim());
+      } catch {}
     }
 
     toast.info(`Đang kết nối vào phòng ${cleanCode}...`, 'Tham gia phòng');
@@ -99,7 +106,7 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
 
           <div style={{ marginBottom: '1.75rem' }}>
             <label style={{ display: 'block', marginBottom: '0.45rem', color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-              TÊN NGƯỜI CHƠI
+              TÊN NGƯỜI CHƠI <span style={{ color: 'var(--accent-rose)' }}>*</span>
             </label>
             <input
               type="text"
@@ -117,6 +124,29 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
                 color: 'var(--text-primary)',
                 fontSize: '1.05rem',
                 fontWeight: 700,
+                boxSizing: 'border-box',
+                outline: 'none',
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: '1.75rem' }}>
+            <label style={{ display: 'block', marginBottom: '0.45rem', color: 'var(--text-secondary)', fontWeight: 700, fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+              🔒 MẬT KHẨU BỘ CÂU HỎI (NẾU PHÒNG YÊU CẦU)
+            </label>
+            <input
+              type="password"
+              value={roomPassword}
+              onChange={(e) => setRoomPassword(e.target.value)}
+              placeholder="Bỏ trống nếu phòng không có mật khẩu..."
+              style={{
+                width: '100%',
+                padding: '0.85rem 1rem',
+                borderRadius: '12px',
+                border: '1px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontSize: '0.95rem',
                 boxSizing: 'border-box',
                 outline: 'none',
               }}

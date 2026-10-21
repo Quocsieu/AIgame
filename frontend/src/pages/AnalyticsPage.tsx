@@ -87,6 +87,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const [editTimePerQuestion, setEditTimePerQuestion] = useState<number>(15);
   const [editScoringMode, setEditScoringMode] = useState<ScoringMode>('SPEED_BONUS');
   const [editIsPublic, setEditIsPublic] = useState<boolean>(true);
+  const [editIsPasswordProtected, setEditIsPasswordProtected] = useState<boolean>(false);
+  const [editGamePassword, setEditGamePassword] = useState<string>('');
   const [editQuestions, setEditQuestions] = useState<GameQuestion[]>([]);
   const [isSavingEdits, setIsSavingEdits] = useState(false);
 
@@ -190,6 +192,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     setEditTimePerQuestion(spec.settings.timePerQuestion || 15);
     setEditScoringMode(spec.settings.scoringMode || 'SPEED_BONUS');
     setEditIsPublic(spec.isPublic ?? false);
+    setEditIsPasswordProtected(Boolean(spec.passwordProtected));
+    setEditGamePassword('');
     setEditQuestions(
       spec.questions.map((q) => ({
         ...q,
@@ -421,6 +425,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           scoringMode: editScoringMode,
         },
         isPublic: editIsPublic,
+        passwordProtected: editIsPasswordProtected,
+        password: editIsPasswordProtected && editGamePassword.trim() ? editGamePassword.trim() : undefined,
+        removePassword: !editIsPasswordProtected,
       });
       setActiveGameSpec(updated);
       syncEditorFromSpec(updated);
@@ -1395,6 +1402,21 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       >
                         {g.isPublic ? '🚀 Đã xuất bản' : '📝 Bản nháp'}
                       </span>
+                      {g.passwordProtected && (
+                        <span
+                          style={{
+                            backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                            color: '#ef4444',
+                            border: '1px solid rgba(239, 68, 68, 0.3)',
+                            padding: '0.15rem 0.55rem',
+                            borderRadius: '6px',
+                            fontSize: '0.73rem',
+                            fontWeight: 800,
+                          }}
+                        >
+                          🔒 Có mật khẩu
+                        </span>
+                      )}
                     </div>
                     {g.description && (
                       <div style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
@@ -1470,44 +1492,39 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       👁️ Chi tiết
                     </button>
 
-                    {/* CHỈ ADMIN ĐƯỢC PHÉP SỬA & XÓA TRONG KHO GAME */}
-                    {currentUser?.role === 'ADMIN' && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handleViewOrEditGame(g.gameId, true)}
-                          style={{
-                            backgroundColor: 'var(--bg-surface)',
-                            color: 'var(--accent-amber)',
-                            border: '1px solid var(--border-strong)',
-                            borderRadius: '8px',
-                            padding: '0.48rem 0.8rem',
-                            fontWeight: 800,
-                            fontSize: '0.8rem',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          ✏️ Sửa
-                        </button>
+                    <button
+                      type="button"
+                      onClick={() => handleViewOrEditGame(g.gameId, true)}
+                      style={{
+                        backgroundColor: 'var(--bg-surface)',
+                        color: 'var(--accent-amber)',
+                        border: '1px solid var(--border-strong)',
+                        borderRadius: '8px',
+                        padding: '0.48rem 0.8rem',
+                        fontWeight: 800,
+                        fontSize: '0.8rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ✏️ Sửa
+                    </button>
 
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDeleteGame(g)}
-                          style={{
-                            backgroundColor: 'rgba(244, 63, 94, 0.12)',
-                            color: 'var(--accent-rose)',
-                            border: '1px solid var(--accent-rose)',
-                            borderRadius: '8px',
-                            padding: '0.48rem 0.75rem',
-                            fontWeight: 800,
-                            fontSize: '0.8rem',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          🗑️ Xóa
-                        </button>
-                      </>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => setConfirmDeleteGame(g)}
+                      style={{
+                        backgroundColor: 'rgba(244, 63, 94, 0.12)',
+                        color: 'var(--accent-rose)',
+                        border: '1px solid var(--accent-rose)',
+                        borderRadius: '8px',
+                        padding: '0.48rem 0.75rem',
+                        fontWeight: 800,
+                        fontSize: '0.8rem',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      🗑️ Xóa
+                    </button>
 
                     <button
                       type="button"
@@ -2008,7 +2025,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           }
         }}
         onNavigateToHost={onNavigateToHost}
-        isOwner={currentUser?.role === 'ADMIN'}
+        isOwner={true}
       />
     </div>
   );

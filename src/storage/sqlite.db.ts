@@ -181,6 +181,14 @@ export const MIGRATIONS: MigrationDefinition[] = [
       );
     `,
   },
+  {
+    version: 2,
+    name: '002_game_password_protection',
+    upSql: `
+      ALTER TABLE games ADD COLUMN is_password_protected INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE games ADD COLUMN password_hash TEXT;
+    `,
+  },
 ];
 
 let dbInstance: DatabaseSync | null = null;

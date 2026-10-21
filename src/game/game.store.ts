@@ -209,7 +209,11 @@ export class GameSpecificationStore {
     spec: GameSpecification,
     now: number = Date.now(),
     ownerUserId?: string | null,
-    isPublic?: boolean
+    isPublic?: boolean,
+    passwordOptions?: {
+      isPasswordProtected?: boolean;
+      passwordHash?: string | null;
+    }
   ): void {
     this.cleanupExpired(now);
 
@@ -240,11 +244,18 @@ export class GameSpecificationStore {
       ownerUserId !== undefined ? ownerUserId : spec.ownerUserId !== undefined ? spec.ownerUserId : null;
     const resolvedPublic =
       isPublic !== undefined ? isPublic : spec.isPublic !== undefined ? Boolean(spec.isPublic) : false;
+    const resolvedProtected =
+      passwordOptions?.isPasswordProtected !== undefined
+        ? passwordOptions.isPasswordProtected
+        : spec.passwordProtected !== undefined
+          ? Boolean(spec.passwordProtected)
+          : false;
 
     const storedSpec: GameSpecification = {
       ...spec,
       ownerUserId: resolvedOwner,
       isPublic: resolvedPublic,
+      passwordProtected: resolvedProtected,
     };
 
     this.entries.set(spec.gameId, {
@@ -253,7 +264,7 @@ export class GameSpecificationStore {
       lastAccessedAt: now,
     });
 
-    persistenceRepo.saveGameSpecification(storedSpec, resolvedOwner, resolvedPublic);
+    persistenceRepo.saveGameSpecification(storedSpec, resolvedOwner, resolvedPublic, passwordOptions);
   }
 
   public get(gameId: string, now: number = Date.now()): GameSpecification | undefined {

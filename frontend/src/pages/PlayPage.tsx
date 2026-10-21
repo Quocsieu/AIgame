@@ -133,10 +133,12 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           playerToken: savedToken,
         });
       } else {
+        const storedPassword = sessionStorage.getItem(`room_game_password_${roomCode}`) || undefined;
         client.send({
           type: 'player.join',
           roomCode,
           displayName,
+          password: storedPassword,
         });
       }
     });

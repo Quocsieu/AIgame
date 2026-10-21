@@ -1,6 +1,5 @@
 import crypto from 'node:crypto';
 import { NextFunction, Request, Response } from 'express';
-import { adminAuthService, extractAdminTokenFromRequest } from '../services/admin.auth.service.js';
 import { AuthenticatedUser, authService } from '../services/auth.service.js';
 import { AppError } from '../utils/errors.js';
 
@@ -80,17 +79,7 @@ export function optionalAuthMiddleware(
   try {
     const token = extractBearerToken(req);
     if (!token) {
-      // 1. Check for valid Admin session cookie or Bearer fallback
-      const adminUser = adminAuthService.verifyAdminSession(req);
-      if (adminUser) {
-        req.user = adminUser;
-        req.authToken = extractAdminTokenFromRequest(req);
-        req.isGuest = false;
-        next();
-        return;
-      }
-
-      // 2. Check for Guest token
+      // Check for Guest token
       const guestUser = extractGuestUser(req);
       req.user = guestUser;
       req.authToken = null;
@@ -168,11 +157,11 @@ export function requireAdminMiddleware(
       return;
     }
 
-    const token = extractAdminTokenFromRequest(req);
+    const token = extractBearerToken(req);
     if (!token) {
       throw new AppError(
         'UNAUTHORIZED',
-        'Yêu cầu xác thực mật khẩu Quản trị viên (Admin) để thực hiện thao tác này.',
+        'Yêu cầu xác thực tài khoản Quản trị viên (Admin) để thực hiện thao tác này.',
         401
       );
     }
@@ -181,7 +170,7 @@ export function requireAdminMiddleware(
     if (!user) {
       throw new AppError(
         'UNAUTHORIZED',
-        'Phiên quản trị không hợp lệ hoặc đã hết hạn. Vui lòng nhập lại mật khẩu Admin.',
+        'Phiên quản trị không hợp lệ hoặc đã hết hạn. Vui lòng đăng nhập tài khoản Admin.',
         401
       );
     }

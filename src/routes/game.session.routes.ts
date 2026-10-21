@@ -7,6 +7,7 @@ import {
 } from '../game/game.types.js';
 import { authService } from '../services/auth.service.js';
 import { exportService, ExportFormat } from '../services/export.service.js';
+import { gamePasswordService } from '../services/game.password.service.js';
 import { quotaService } from '../services/quota.service.js';
 import { persistenceRepo } from '../storage/persistence.repository.js';
 import { AppError, createSuccessResponse } from '../utils/errors.js';
@@ -38,6 +39,16 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
         'GAME_NOT_PUBLISHED',
         'Game này chưa được xuất bản nên không thể bắt đầu phiên chơi công khai.',
         403
+      );
+    }
+
+    // Verify password protection if the game is password-protected
+    const isPasswordProtected = storedSpec?.passwordProtected ?? ownerInfo?.passwordProtected ?? false;
+    if (isPasswordProtected && !gamePasswordService.hasAccess(req, gameId)) {
+      throw new AppError(
+        'PASSWORD_REQUIRED',
+        'Bộ câu hỏi này được bảo vệ bằng mật khẩu. Vui lòng xác thực mật khẩu trước khi bắt đầu chơi.',
+        401
       );
     }
 

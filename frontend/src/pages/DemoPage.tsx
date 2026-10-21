@@ -36,8 +36,6 @@ interface DemoPageProps {
   autoStartSoloPlay?: boolean;
   onExitSoloPlay?: () => void;
   onNavigateToLibrary?: () => void;
-  currentUser?: AuthenticatedUser | null;
-  onOpenAuthModal?: () => void;
 }
 
 const MAX_URLS = 5;
@@ -189,8 +187,6 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   autoStartSoloPlay,
   onExitSoloPlay,
   onNavigateToLibrary,
-  currentUser,
-  onOpenAuthModal,
 }) => {
   const toast = useToast();
 
@@ -200,6 +196,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
   // Tên game bắt buộc
   const [customGameTitle, setCustomGameTitle] = useState('');
+
+  // Password protection state
+  const [isPasswordProtected, setIsPasswordProtected] = useState(false);
+  const [gamePassword, setGamePassword] = useState('');
 
   // AI configuration state (Batch 4 & Batch 5)
   const [gameType, setGameType] = useState<GameType>('MULTIPLE_CHOICE');
@@ -262,6 +262,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     if (initialSpec) {
       setGeneratedSpec(initialSpec);
       setCustomGameTitle(initialSpec.title || '');
+      setIsPasswordProtected(Boolean(initialSpec.passwordProtected));
+      setGamePassword('');
       setGameType(initialSpec.gameType);
       setScoringMode(initialSpec.settings.scoringMode);
       setTimePerQuestion(initialSpec.settings.timePerQuestion);
@@ -364,15 +366,6 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       return null;
     }
 
-    if (!currentUser) {
-      toast.error(
-        'Tính năng tạo game AI chỉ dành cho Quản trị viên (Admin). Vui lòng đăng nhập Admin để tiếp tục.',
-        'Yêu cầu đăng nhập Admin'
-      );
-      onOpenAuthModal?.();
-      return null;
-    }
-
     setIsIngesting(true);
     const toastId = toast.loading('Đang xử lý và trích xuất nội dung nguồn...');
 
@@ -427,6 +420,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         topicFocus: topicFocus.trim() || undefined,
         sectionFilter: selectedSections.length > 0 ? selectedSections : undefined,
         title: customGameTitle.trim() || undefined,
+        passwordProtected: isPasswordProtected,
+        password: isPasswordProtected && gamePassword.trim() ? gamePassword.trim() : undefined,
       });
 
       toast.removeToast(toastId);
@@ -723,6 +718,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           scoringMode,
         },
         isPublic: nextIsPublic,
+        passwordProtected: isPasswordProtected,
+        password: isPasswordProtected && gamePassword.trim() ? gamePassword.trim() : undefined,
+        removePassword: !isPasswordProtected,
       });
       setGeneratedSpec(saved);
       setEditingQuestionIdx(null);
@@ -1587,45 +1585,6 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               animation: 'popIn 0.2s ease',
             }}
           >
-            {!currentUser && (
-              <div
-                style={{
-                  backgroundColor: 'rgba(56, 189, 248, 0.1)',
-                  border: '1px solid rgba(56, 189, 248, 0.3)',
-                  borderRadius: '12px',
-                  padding: '1rem 1.25rem',
-                  marginBottom: '1.5rem',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: '0.85rem',
-                }}
-              >
-                <div style={{ fontSize: '0.88rem', color: 'var(--text-primary)', lineHeight: 1.4 }}>
-                  🛡️ <strong>Khu vực Quản trị</strong>: Tính năng tạo game bằng AI dành riêng cho Quản trị viên (Admin). Người chơi không cần tài khoản, chỉ cần quét mã QR hoặc truy cập link chia sẻ để tham gia trực tiếp.
-                </div>
-                <button
-                  type="button"
-                  onClick={onOpenAuthModal}
-                  style={{
-                    padding: '0.5rem 1rem',
-                    borderRadius: '8px',
-                    border: 'none',
-                    backgroundColor: 'var(--primary)',
-                    color: '#ffffff',
-                    fontSize: '0.85rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    boxShadow: 'var(--btn-shadow)',
-                  }}
-                >
-                  🔒 Đăng Nhập Admin
-                </button>
-              </div>
-            )}
-
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
               <div
                 style={{
@@ -1680,6 +1639,66 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               {!customGameTitle.trim() && (
                 <div style={{ fontSize: '0.78rem', color: 'var(--accent-rose)', marginTop: '0.35rem' }}>
                   * Vui lòng đặt tên game để định danh khi lưu vào kho và chia sẻ cho người chơi.
+                </div>
+              )}
+            </div>
+
+            {/* Tùy chọn đặt mật khẩu bảo vệ bộ câu hỏi */}
+            <div
+              style={{
+                marginTop: '1.25rem',
+                marginBottom: '1.25rem',
+                padding: '1.1rem 1.25rem',
+                backgroundColor: 'var(--bg-input)',
+                borderRadius: '12px',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <label
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.65rem',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                  fontSize: '0.92rem',
+                  color: 'var(--text-primary)',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={isPasswordProtected}
+                  onChange={(e) => setIsPasswordProtected(e.target.checked)}
+                  style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                />
+                <span>🔒 Bảo vệ bộ câu hỏi bằng mật khẩu riêng (Tùy chọn)</span>
+              </label>
+              <div style={{ marginTop: '0.35rem', marginLeft: '1.85rem', fontSize: '0.8rem', color: 'var(--text-muted)', lineHeight: 1.4 }}>
+                Mặc định bộ câu hỏi không có mật khẩu (người chơi truy cập là chơi được ngay). Khi bật tùy chọn này, người chơi bắt buộc phải nhập đúng mật khẩu mới được mở xem nội dung câu hỏi và tham gia.
+              </div>
+
+              {isPasswordProtected && (
+                <div style={{ marginTop: '0.85rem', marginLeft: '1.85rem' }}>
+                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.35rem' }}>
+                    🔑 Mật khẩu riêng cho bộ câu hỏi:
+                  </label>
+                  <input
+                    type="password"
+                    value={gamePassword}
+                    onChange={(e) => setGamePassword(e.target.value)}
+                    placeholder="Nhập mật khẩu cho bộ câu hỏi này..."
+                    style={{
+                      width: '100%',
+                      maxWidth: '360px',
+                      padding: '0.65rem 0.85rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-strong)',
+                      backgroundColor: 'var(--bg-surface)',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.9rem',
+                      outline: 'none',
+                    }}
+                  />
                 </div>
               )}
             </div>

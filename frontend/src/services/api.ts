@@ -80,73 +80,73 @@ export function getOrCreateGuestToken(): string {
   }
 }
 
-function buildAuthHeaders(extraHeaders?: Record<string, string>): Record<string, string> {
+export function getStoredGameAccessToken(gameId: string): string | null {
+  try {
+    return sessionStorage.getItem(`game_token_${gameId}`);
+  } catch {
+    return null;
+  }
+}
+
+export function setStoredGameAccessToken(gameId: string, token: string | null): void {
+  try {
+    if (token) {
+      sessionStorage.setItem(`game_token_${gameId}`, token);
+    } else {
+      sessionStorage.removeItem(`game_token_${gameId}`);
+    }
+  } catch {}
+}
+
+export function buildAuthHeaders(
+  extraHeaders?: Record<string, string>,
+  options?: { isGuestPlayer?: boolean; gameId?: string }
+): Record<string, string> {
   const headers: Record<string, string> = { ...(extraHeaders || {}) };
   const token = getSessionAuthToken();
   if (token) {
     headers.Authorization = `Bearer ${token}`;
-  } else {
+  } else if (options?.isGuestPlayer) {
     headers['X-Guest-Token'] = getOrCreateGuestToken();
+  }
+
+  if (options?.gameId) {
+    const gameAccessToken = getStoredGameAccessToken(options.gameId);
+    if (gameAccessToken) {
+      headers['X-Game-Access-Token'] = gameAccessToken;
+    }
   }
   return headers;
 }
 
 // ==========================================
-// Dedicated Admin Password Authentication APIs
+// Per-Question-Set Password APIs
 // ==========================================
 
-export async function adminLogin(password: string): Promise<{
-  authenticated: boolean;
-  user: AuthenticatedUser;
-  token: string;
-  expiresAt: string;
+export async function verifyGamePassword(
+  gameId: string,
+  password: string
+): Promise<{
+  verified: boolean;
+  requiresPassword?: boolean;
+  gameAccessToken?: string;
+  expiresAt?: string;
 }> {
-  const res = await fetch(`${API_BASE_URL}/admin/auth/login`, {
+  const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/verify-password`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    credentials: 'include',
     body: JSON.stringify({ password }),
   });
   const data = await res.json();
-  if (!data.success) {
-    const err = new Error(data.error?.message || 'Mật khẩu quản trị viên không chính xác.');
-    (err as any).code = data.error?.code;
+  if (!res.ok || !data.success) {
+    const err = new Error(data?.error?.message || 'Mật khẩu bộ câu hỏi không chính xác.');
+    (err as any).code = data?.error?.code;
     throw err;
   }
-  setSessionAuthToken(data.data.token);
+  if (data.data?.gameAccessToken) {
+    setStoredGameAccessToken(gameId, data.data.gameAccessToken);
+  }
   return data.data;
-}
-
-export async function adminLogout(): Promise<void> {
-  try {
-    await fetch(`${API_BASE_URL}/admin/auth/logout`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: buildAuthHeaders(),
-    });
-  } finally {
-    setSessionAuthToken(null);
-  }
-}
-
-export async function fetchAdminMe(): Promise<{
-  authenticated: boolean;
-  user: AuthenticatedUser | null;
-}> {
-  try {
-    const res = await fetch(`${API_BASE_URL}/admin/auth/me`, {
-      headers: buildAuthHeaders(),
-      credentials: 'include',
-    });
-    const data = await res.json();
-    if (!data.success || !data.data?.authenticated) {
-      setSessionAuthToken(null);
-      return { authenticated: false, user: null };
-    }
-    return data.data;
-  } catch {
-    return { authenticated: false, user: null };
-  }
 }
 
 // ==========================================
@@ -179,32 +179,21 @@ export async function registerUser(params: {
   return data.data;
 }
 
-export async function loginUser(params: {
+export async function loginUser(_params: {
   email?: string;
-  password: string;
-}): Promise<{
-  user: AuthenticatedUser;
-  token: string;
-  expiresAt: string;
-}> {
-  // Directly authenticate with admin password
-  return adminLogin(params.password);
+  password?: string;
+}): Promise<any> {
+  throw new Error('Đăng nhập người dùng đã bị gỡ bỏ.');
 }
 
 export async function logoutUser(): Promise<void> {
-  await adminLogout();
+  setSessionAuthToken(null);
 }
 
 export async function fetchCurrentUser(): Promise<{
   user: AuthenticatedUser;
   quotas?: UserQuotaSummary;
 } | null> {
-  const adminCheck = await fetchAdminMe();
-  if (adminCheck.authenticated && adminCheck.user) {
-    return {
-      user: adminCheck.user,
-    };
-  }
   return null;
 }
 
@@ -289,6 +278,8 @@ export async function generateGame(params: {
   topicFocus?: string;
   sectionFilter?: string[];
   title?: string;
+  passwordProtected?: boolean;
+  password?: string;
 }): Promise<GameSpecification> {
   const res = await fetch(`${API_BASE_URL}/games/generate`, {
     method: 'POST',
@@ -364,11 +355,15 @@ export async function deleteSavedGame(gameId: string): Promise<void> {
 
 export async function fetchGameById(
   gameId: string,
-  options?: { mode?: 'public' | 'manage' }
+  options?: { mode?: 'public' | 'manage'; gameAccessToken?: string }
 ): Promise<GameSpecification> {
   const query = options?.mode ? `?mode=${encodeURIComponent(options.mode)}` : '';
+  const headers = buildAuthHeaders({}, { gameId });
+  if (options?.gameAccessToken) {
+    headers['X-Game-Access-Token'] = options.gameAccessToken;
+  }
   const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}${query}`, {
-    headers: buildAuthHeaders(),
+    headers,
   });
   const data = await res.json();
   if (!data.success) {
@@ -390,6 +385,9 @@ export async function saveEditedQuestions(
       scoringMode?: ScoringMode;
     };
     isPublic?: boolean;
+    passwordProtected?: boolean;
+    password?: string;
+    removePassword?: boolean;
   }
 ): Promise<GameSpecification> {
   const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/questions`, {
@@ -539,7 +537,7 @@ export async function createPracticeSession(params: {
 }> {
   const res = await fetch(`${API_BASE_URL}/games/sessions`, {
     method: 'POST',
-    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { gameId: params.gameId }),
     body: JSON.stringify(params),
   });
   const data = await res.json();

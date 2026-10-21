@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AuthModal } from './components/AuthModal.js';
+import { GamePasswordModal } from './components/GamePasswordModal.js';
 import { ToastProvider } from './components/ToastContext.js';
 import { AdminPage } from './pages/AdminPage.js';
 import { AnalyticsPage } from './pages/AnalyticsPage.js';
@@ -21,8 +21,9 @@ export const AppContent: React.FC = () => {
   const [autoStartSoloPlay, setAutoStartSoloPlay] = useState(false);
   const [soloPlayLoading, setSoloPlayLoading] = useState(false);
   const [soloPlayError, setSoloPlayError] = useState<string | null>(null);
-  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
-  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+  const [protectedGameId, setProtectedGameId] = useState('');
+  const [protectedGameTitle, setProtectedGameTitle] = useState('');
 
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
@@ -42,21 +43,6 @@ export const AppContent: React.FC = () => {
     }
   }, [theme]);
 
-  useEffect(() => {
-    // Resolve authenticated user profile if logged in; fallback to isolated guest token
-    fetchCurrentUser()
-      .then((res) => {
-        if (res?.user) {
-          setCurrentUser(res.user);
-        } else {
-          getOrCreateGuestToken();
-        }
-      })
-      .catch(() => {
-        getOrCreateGuestToken();
-      });
-  }, []);
-
   const toggleTheme = () => {
     setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
   };
@@ -74,9 +60,16 @@ export const AppContent: React.FC = () => {
       setSoloPlayError(null);
       fetchGameById(playGameId, { mode: 'public' })
         .then((spec) => {
-          setSelectedSavedSpec(spec);
-          setAutoStartSoloPlay(true);
-          setActiveTab('demo');
+          if (spec.passwordProtected && (!spec.questions || spec.questions.length === 0)) {
+            // Protected game: prompt for password before revealing questions & answers
+            setProtectedGameId(playGameId);
+            setProtectedGameTitle(spec.title);
+            setIsPasswordModalOpen(true);
+          } else {
+            setSelectedSavedSpec(spec);
+            setAutoStartSoloPlay(true);
+            setActiveTab('demo');
+          }
         })
         .catch((err: any) => {
           setSoloPlayError(
@@ -176,9 +169,30 @@ export const AppContent: React.FC = () => {
 
   const handleSelectSavedGame = (spec: GameSpecification, startSolo: boolean = false) => {
     setSoloPlayError(null);
+    if (spec.passwordProtected && (!spec.questions || spec.questions.length === 0)) {
+      setProtectedGameId(spec.gameId);
+      setProtectedGameTitle(spec.title);
+      setAutoStartSoloPlay(startSolo);
+      setIsPasswordModalOpen(true);
+      return;
+    }
     setSelectedSavedSpec(spec);
     setAutoStartSoloPlay(startSolo);
     setActiveTab('demo');
+  };
+
+  const handlePasswordVerified = async () => {
+    if (!protectedGameId) return;
+    setSoloPlayLoading(true);
+    try {
+      const fullSpec = await fetchGameById(protectedGameId, { mode: 'public' });
+      setSelectedSavedSpec(fullSpec);
+      setActiveTab('demo');
+    } catch (err: any) {
+      setSoloPlayError(err.message || 'Không thể tải câu hỏi sau khi xác thực mật khẩu.');
+    } finally {
+      setSoloPlayLoading(false);
+    }
   };
 
   return (
@@ -283,60 +297,6 @@ export const AppContent: React.FC = () => {
             {theme === 'dark' ? '☀️ Sáng' : '🌙 Tối'}
           </button>
 
-          {/* Nút Xác thực cho Admin */}
-          {!currentUser && !autoStartSoloPlay && (
-            <button
-              type="button"
-              onClick={() => setIsAuthModalOpen(true)}
-              style={{
-                padding: '0.5rem 0.85rem',
-                borderRadius: '8px',
-                border: 'none',
-                backgroundColor: 'var(--primary)',
-                color: '#ffffff',
-                fontSize: '0.82rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.35rem',
-                boxShadow: 'var(--btn-shadow)',
-              }}
-            >
-              🔒 Xác thực Admin
-            </button>
-          )}
-
-          {/* Thông tin Quản trị viên (nếu đã xác thực) */}
-          {currentUser && !autoStartSoloPlay && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem' }}>
-              <span style={{ fontWeight: 700, color: 'var(--accent-sky)' }}>
-                🛡️ Quản Trị Viên
-              </span>
-              <button
-                type="button"
-                onClick={async () => {
-                  await logoutUser();
-                  setCurrentUser(null);
-                  setActiveTab('analytics');
-                }}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: 'var(--accent-rose)',
-                  fontSize: '0.8rem',
-                  cursor: 'pointer',
-                  fontWeight: 700,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.2rem',
-                }}
-              >
-                🚪 Đăng xuất
-              </button>
-            </div>
-          )}
-
           {/* Nhóm tab điều hướng hoặc Banner Người chơi đơn */}
           {autoStartSoloPlay ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
@@ -431,30 +391,6 @@ export const AppContent: React.FC = () => {
               >
                 📚 Kho Game
               </button>
-
-              {currentUser?.role === 'ADMIN' && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSoloPlayError(null);
-                    setActiveTab('admin');
-                  }}
-                  style={{
-                    padding: '0.55rem 1rem',
-                    borderRadius: '8px',
-                    border: 'none',
-                    backgroundColor: activeTab === 'admin' ? 'var(--accent-rose)' : 'transparent',
-                    color: activeTab === 'admin' ? '#ffffff' : 'var(--accent-rose)',
-                    fontWeight: 800,
-                    fontSize: '0.85rem',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    boxShadow: activeTab === 'admin' ? 'var(--btn-shadow)' : 'none',
-                  }}
-                >
-                  🛡️ Quản Trị
-                </button>
-              )}
             </div>
           )}
         </div>
@@ -544,8 +480,6 @@ export const AppContent: React.FC = () => {
                   setActiveTab('demo');
                 }}
                 onNavigateToLibrary={() => setActiveTab('analytics')}
-                currentUser={currentUser}
-                onOpenAuthModal={() => setIsAuthModalOpen(true)}
               />
             )}
 
@@ -580,8 +514,8 @@ export const AppContent: React.FC = () => {
 
             {activeTab === 'admin' && (
               <AdminPage
-                currentUser={currentUser}
-                onOpenAuthModal={() => setIsAuthModalOpen(true)}
+                currentUser={null}
+                onOpenAuthModal={() => {}}
                 onNavigateHome={() => setActiveTab('demo')}
               />
             )}
@@ -589,11 +523,19 @@ export const AppContent: React.FC = () => {
         )}
       </main>
 
-      <AuthModal
-        isOpen={isAuthModalOpen}
-        onClose={() => setIsAuthModalOpen(false)}
-        onSuccess={(user) => {
-          setCurrentUser(user);
+      <GamePasswordModal
+        isOpen={isPasswordModalOpen}
+        gameId={protectedGameId}
+        gameTitle={protectedGameTitle}
+        onClose={() => {
+          setIsPasswordModalOpen(false);
+          setProtectedGameId('');
+          setProtectedGameTitle('');
+          setAutoStartSoloPlay(false);
+        }}
+        onSuccess={() => {
+          setIsPasswordModalOpen(false);
+          handlePasswordVerified();
         }}
       />
 

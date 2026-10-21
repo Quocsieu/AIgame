@@ -126,6 +126,8 @@ export const PlayerJoinSchema = z.object({
   roomCode: z.string().min(1),
   displayName: z.string().trim().min(1).max(30),
   playerToken: z.string().optional(),
+  gameAccessToken: z.string().optional(),
+  password: z.string().optional(),
 });
 
 export const PlayerAnswerSchema = z.object({
@@ -275,5 +277,6 @@ export interface RoomLobbyInfo {
   title: string;
   gameType: GameType;
   totalQuestions: number;
+  passwordProtected?: boolean;
 }
 

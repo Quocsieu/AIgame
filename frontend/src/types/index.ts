@@ -34,6 +34,8 @@ export interface GameSpecification {
   gameId: string;
   ownerUserId?: string | null;
   isPublic?: boolean;
+  passwordProtected?: boolean;
+  requiresPassword?: boolean;
   title: string;
   description: string;
   gameType: GameType;
@@ -206,6 +208,7 @@ export interface PersistedGameSummary {
   gameId: string;
   ownerUserId: string | null;
   isPublic: boolean;
+  passwordProtected?: boolean;
   title: string;
   description: string;
   gameType: GameType;

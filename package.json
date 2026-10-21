@@ -9,8 +9,7 @@
     "start": "tsx src/index.ts",
     "dev": "tsx watch src/index.ts",
     "test": "node --import tsx --test \"test/**/*.test.ts\"",
-    "smoke": "tsx test/smoke_test.ts",
-    "hash-admin-password": "tsx scripts/hash_admin_password.ts"
+    "smoke": "tsx test/smoke_test.ts"
   },
   "keywords": [
     "kahoot",

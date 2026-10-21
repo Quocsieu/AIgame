@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
+import { gamePasswordService } from '../services/game.password.service.js';
 import { AppError } from '../utils/errors.js';
 import { MultiplayerRoom, roomService } from './room.service.js';
 import { roomStore } from './room.store.js';
@@ -286,7 +287,24 @@ export class MultiplayerWebSocketServer {
       return;
     }
 
-    const { player, isReconnect } = room.addPlayer(displayName, playerToken);
+    const isReconnect = Boolean(playerToken && room.players.has(playerToken));
+    if (room.isPasswordProtected && !isReconnect) {
+      const hasValidToken = gamePasswordService.verifyGameAccessToken(parse.data.gameAccessToken, room.gameId);
+      const hasValidPassword = parse.data.password
+        ? gamePasswordService.verifyPassword(parse.data.password, room.passwordHash)
+        : false;
+
+      if (!hasValidToken && !hasValidPassword) {
+        this.sendError(
+          ws,
+          'PASSWORD_REQUIRED',
+          'Phòng chơi này yêu cầu mật khẩu bộ câu hỏi hợp lệ để tham gia.'
+        );
+        return;
+      }
+    }
+
+    const { player } = room.addPlayer(displayName, playerToken);
     this.registerSocket(ws, room.roomCode, 'player', player.playerToken, player.playerId);
 
     this.send(ws, {
