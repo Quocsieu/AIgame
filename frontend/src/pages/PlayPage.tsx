@@ -9,10 +9,23 @@ interface PlayPageProps {
   onLeave?: () => void;
 }
 
+const MAX_ANSWER_LENGTH = 500;
+
+const normalizeCrosswordPreview = (text: string): string =>
+  text
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toUpperCase()
+    .replace(/\s+/g, '');
+
 export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLeave }) => {
   const toast = useToast();
 
   const [playerId, setPlayerId] = useState('');
+  const playerIdRef = useRef('');
   const [playerScore, setPlayerScore] = useState(0);
 
   // 'lobby' | 'question' | 'reveal' | 'finish'
@@ -21,7 +34,9 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   const [currentQuestion, setCurrentQuestion] = useState<SanitizedQuestion | null>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [textInputAnswer, setTextInputAnswer] = useState('');
+  const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
   const [isAnswerSubmitted, setIsAnswerSubmitted] = useState(false);
+  const [answerError, setAnswerError] = useState<string | null>(null);
 
   const [timeRemaining, setTimeRemaining] = useState(20);
   const [totalQuestionTime, setTotalQuestionTime] = useState(20);
@@ -65,14 +80,36 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   };
 
   const submitAnswer = (ans: string) => {
-    if (!socketRef.current || isAnswerSubmitted || !currentQuestion) return;
+    if (!socketRef.current || isAnswerSubmitted || isSubmittingAnswer || !currentQuestion) return;
 
-    setIsAnswerSubmitted(true);
-    socketRef.current.send({
+    const clean = ans.trim();
+    if (!clean) {
+      setAnswerError('Vui lòng chọn hoặc nhập câu trả lời trước khi gửi.');
+      toast.warning('Vui lòng chọn hoặc nhập câu trả lời.', 'Chưa có câu trả lời');
+      return;
+    }
+
+    if (clean.length > MAX_ANSWER_LENGTH) {
+      setAnswerError(`Câu trả lời không được vượt quá ${MAX_ANSWER_LENGTH} ký tự.`);
+      toast.warning(`Câu trả lời vượt quá ${MAX_ANSWER_LENGTH} ký tự cho phép.`, 'Vượt giới hạn độ dài');
+      return;
+    }
+
+    setAnswerError(null);
+    setIsSubmittingAnswer(true);
+
+    const sent = socketRef.current.send({
       type: 'player.answer',
       questionId: currentQuestion.id,
-      answer: ans,
+      answer: clean,
     });
+
+    if (!sent) {
+      setIsSubmittingAnswer(false);
+      setAnswerError('Kết nối mạng bị gián đoạn. Đang kết nối lại, vui lòng bấm gửi lại.');
+      socketRef.current.connect();
+      toast.error('Không thể gửi đáp án do mất kết nối mạng. Vui lòng thử lại.', 'Lỗi kết nối');
+    }
   };
 
   useEffect(() => {
@@ -103,7 +140,11 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
         sessionStorage.setItem(tokenKey, msg.playerToken);
       }
       if (msg.playerId) {
+        playerIdRef.current = msg.playerId;
         setPlayerId(msg.playerId);
+      }
+      if (typeof msg.score === 'number') {
+        setPlayerScore(msg.score);
       }
       toast.success(`Đã vào phòng [${roomCode}] thành công!`, 'Tham gia thành công');
     });
@@ -117,7 +158,10 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       setCurrentQuestion(msg.question);
       setSelectedAnswer(null);
       setTextInputAnswer('');
+      setIsSubmittingAnswer(false);
       setIsAnswerSubmitted(false);
+      setAnswerError(null);
+      setPersonalResult(null);
       setScreen('question');
 
       const duration = msg.question.timePerQuestion || 20;
@@ -125,23 +169,28 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
     });
 
     client.on('question.answerReceived', () => {
+      setIsSubmittingAnswer(false);
+      setIsAnswerSubmitted(true);
+      setAnswerError(null);
       toast.info('Đã ghi nhận câu trả lời của bạn.', 'Đã nộp bài');
     });
 
     client.on('question.timeUp', () => {
       stopTimer();
+      setIsSubmittingAnswer(false);
       setIsAnswerSubmitted(true);
       toast.info('Hết thời gian trả lời!', 'Hết giờ');
     });
 
     client.on('question.revealed', (msg: any) => {
       stopTimer();
+      setIsSubmittingAnswer(false);
       setCorrectAnswer(msg.correctAnswer);
       setExplanation(msg.explanation);
       setLeaderboard(msg.leaderboard || []);
+      setPersonalResult(msg.personalResult ?? null);
 
       if (msg.personalResult) {
-        setPersonalResult(msg.personalResult);
         if (msg.personalResult.isCorrect) {
           toast.success(`Chính xác! Bạn nhận được +${msg.personalResult.pointsEarned} điểm!`, 'Chính xác');
         } else {
@@ -149,8 +198,9 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
         }
       }
 
-      if (msg.leaderboard && playerId) {
-        const me = msg.leaderboard.find((e: LeaderboardEntry) => e.playerId === playerId);
+      const myId = playerIdRef.current;
+      if (msg.leaderboard && myId) {
+        const me = msg.leaderboard.find((e: LeaderboardEntry) => e.playerId === myId);
         if (me) {
           setPlayerScore(me.score);
         }
@@ -161,9 +211,11 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
     client.on('game.finished', (msg: any) => {
       stopTimer();
+      setIsSubmittingAnswer(false);
       setLeaderboard(msg.leaderboard || []);
-      if (msg.leaderboard && playerId) {
-        const me = msg.leaderboard.find((e: LeaderboardEntry) => e.playerId === playerId);
+      const myId = playerIdRef.current;
+      if (msg.leaderboard && myId) {
+        const me = msg.leaderboard.find((e: LeaderboardEntry) => e.playerId === myId);
         if (me) {
           setPlayerScore(me.score);
           setFinalRank(me.rank);
@@ -174,6 +226,12 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
     });
 
     client.on('error', (msg: any) => {
+      setIsSubmittingAnswer(false);
+      if (msg.code === 'QUESTION_ALREADY_ANSWERED' || msg.code === 'ANSWER_TIMEOUT') {
+        setIsAnswerSubmitted(true);
+      } else {
+        setAnswerError(msg.message || 'Câu trả lời không hợp lệ, vui lòng kiểm tra lại.');
+      }
       toast.error(msg.message || 'Lỗi kết nối phòng chơi.', 'Thông báo');
     });
 
@@ -422,70 +480,105 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
           {/* Kahoot-style 2x2 Choice Grid for Multiple Choice & Quick Button */}
           {(currentQuestion.type === 'MULTIPLE_CHOICE' || currentQuestion.type === 'QUICK_BUTTON') && (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                gap: '0.85rem',
-              }}
-            >
-              {currentQuestion.choices?.map((choice, idx) => {
-                const config = choiceColors[idx % choiceColors.length];
-                const isSelected = selectedAnswer === choice;
-                return (
-                  <button
-                    key={idx}
-                    type="button"
-                    disabled={isAnswerSubmitted}
-                    onClick={() => {
-                      setSelectedAnswer(choice);
-                      submitAnswer(choice);
-                    }}
-                    style={{
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '1rem 1.15rem',
-                      backgroundColor: isSelected ? config.bg : 'var(--bg-card)',
-                      color: isSelected ? '#ffffff' : 'var(--text-primary)',
-                      border: isSelected ? `2px solid #ffffff` : `2px solid ${config.bg}`,
-                      borderRadius: '14px',
-                      fontSize: '1rem',
-                      fontWeight: isSelected ? 800 : 700,
-                      cursor: isAnswerSubmitted ? 'not-allowed' : 'pointer',
-                      opacity: isAnswerSubmitted && !isSelected ? 0.45 : 1,
-                      transform: isSelected ? 'scale(1.02)' : 'none',
-                      transition: 'all 0.15s ease',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.85rem',
-                      boxShadow: isSelected
-                        ? `0 0 20px ${config.bg}80, 0 6px 16px rgba(0,0,0,0.3)`
-                        : '0 4px 10px rgba(0,0,0,0.15)',
-                    }}
-                  >
-                    <span
+            <div>
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                  gap: '0.85rem',
+                }}
+              >
+                {currentQuestion.choices?.map((choice, idx) => {
+                  const config = choiceColors[idx % choiceColors.length];
+                  const isSelected = selectedAnswer === choice;
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      disabled={isAnswerSubmitted || isSubmittingAnswer}
+                      onClick={() => {
+                        setAnswerError(null);
+                        setSelectedAnswer(prev => (prev === choice ? null : choice));
+                      }}
                       style={{
-                        width: '36px',
-                        height: '36px',
-                        borderRadius: '10px',
-                        backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.25)' : config.bg,
-                        color: '#ffffff',
+                        width: '100%',
+                        textAlign: 'left',
+                        padding: '1rem 1.15rem',
+                        backgroundColor: isSelected ? config.bg : 'var(--bg-card)',
+                        color: isSelected ? '#ffffff' : 'var(--text-primary)',
+                        border: isSelected ? `2px solid #ffffff` : `2px solid ${config.bg}`,
+                        borderRadius: '14px',
+                        fontSize: '1rem',
+                        fontWeight: isSelected ? 800 : 700,
+                        cursor: isAnswerSubmitted || isSubmittingAnswer ? 'not-allowed' : 'pointer',
+                        opacity: (isAnswerSubmitted || isSubmittingAnswer) && !isSelected ? 0.45 : 1,
+                        transform: isSelected ? 'scale(1.02)' : 'none',
+                        transition: 'all 0.15s ease',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        fontWeight: 900,
-                        fontSize: '1.05rem',
-                        flexShrink: 0,
-                        boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+                        gap: '0.85rem',
+                        boxShadow: isSelected
+                          ? `0 0 20px ${config.bg}80, 0 6px 16px rgba(0,0,0,0.3)`
+                          : '0 4px 10px rgba(0,0,0,0.15)',
                       }}
                     >
-                      {config.icon}
-                    </span>
-                    <span style={{ flex: 1, wordBreak: 'break-word', lineHeight: 1.35 }}>{choice}</span>
-                    {isSelected && <span style={{ fontSize: '1.25rem', fontWeight: 900 }}>✓</span>}
-                  </button>
-                );
-              })}
+                      <span
+                        style={{
+                          width: '36px',
+                          height: '36px',
+                          borderRadius: '10px',
+                          backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.25)' : config.bg,
+                          color: '#ffffff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 900,
+                          fontSize: '1.05rem',
+                          flexShrink: 0,
+                          boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
+                        }}
+                      >
+                        {config.icon}
+                      </span>
+                      <span style={{ flex: 1, wordBreak: 'break-word', lineHeight: 1.35 }}>{choice}</span>
+                      {isSelected && <span style={{ fontSize: '1.25rem', fontWeight: 900 }}>✓</span>}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {!isAnswerSubmitted && (
+                <button
+                  type="button"
+                  disabled={!selectedAnswer || isSubmittingAnswer || isAnswerSubmitted}
+                  onClick={() => {
+                    if (selectedAnswer) {
+                      submitAnswer(selectedAnswer);
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    marginTop: '1rem',
+                    padding: '0.95rem',
+                    backgroundColor: !selectedAnswer || isSubmittingAnswer ? 'var(--border-strong)' : 'var(--primary)',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '12px',
+                    fontSize: '1.05rem',
+                    fontWeight: 800,
+                    cursor: !selectedAnswer || isSubmittingAnswer ? 'not-allowed' : 'pointer',
+                    opacity: !selectedAnswer || isSubmittingAnswer ? 0.65 : 1,
+                    boxShadow: !selectedAnswer || isSubmittingAnswer ? 'none' : 'var(--btn-shadow)',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {isSubmittingAnswer
+                    ? '⏳ Đang gửi đáp án...'
+                    : selectedAnswer
+                      ? 'Xác nhận gửi đáp án →'
+                      : 'Hãy chọn một đáp án ở trên'}
+                </button>
+              )}
             </div>
           )}
 
@@ -494,9 +587,19 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             <div>
               <input
                 type="text"
-                disabled={isAnswerSubmitted}
+                disabled={isAnswerSubmitted || isSubmittingAnswer}
+                maxLength={MAX_ANSWER_LENGTH}
                 value={textInputAnswer}
-                onChange={(e) => setTextInputAnswer(e.target.value)}
+                onChange={(e) => {
+                  setAnswerError(null);
+                  setTextInputAnswer(e.target.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    submitAnswer(textInputAnswer);
+                  }
+                }}
                 placeholder="Nhập câu trả lời của bạn..."
                 style={{
                   width: '100%',
@@ -512,8 +615,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               />
               <button
                 type="button"
-                disabled={isAnswerSubmitted || !textInputAnswer.trim()}
-                onClick={() => submitAnswer(textInputAnswer.trim())}
+                disabled={isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim()}
+                onClick={() => submitAnswer(textInputAnswer)}
                 style={{
                   width: '100%',
                   marginTop: '1rem',
@@ -524,13 +627,13 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   borderRadius: '12px',
                   fontSize: '1.05rem',
                   fontWeight: 800,
-                  cursor: isAnswerSubmitted || !textInputAnswer.trim() ? 'not-allowed' : 'pointer',
-                  opacity: isAnswerSubmitted || !textInputAnswer.trim() ? 0.6 : 1,
-                  boxShadow: isAnswerSubmitted || !textInputAnswer.trim() ? 'none' : 'var(--btn-shadow)',
+                  cursor: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'not-allowed' : 'pointer',
+                  opacity: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 0.6 : 1,
+                  boxShadow: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'none' : 'var(--btn-shadow)',
                   transition: 'all 0.15s ease',
                 }}
               >
-                Gửi câu trả lời &rarr;
+                {isSubmittingAnswer ? '⏳ Đang gửi câu trả lời...' : 'Gửi câu trả lời →'}
               </button>
             </div>
           )}
@@ -555,10 +658,20 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               )}
               <input
                 type="text"
-                disabled={isAnswerSubmitted}
+                disabled={isAnswerSubmitted || isSubmittingAnswer}
+                maxLength={MAX_ANSWER_LENGTH}
                 value={textInputAnswer}
-                onChange={(e) => setTextInputAnswer(e.target.value)}
-                placeholder="Nhập từ khóa ô chữ..."
+                onChange={(e) => {
+                  setAnswerError(null);
+                  setTextInputAnswer(e.target.value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                    e.preventDefault();
+                    submitAnswer(textInputAnswer);
+                  }
+                }}
+                placeholder="Nhập từ khóa ô chữ (hỗ trợ gõ tiếng Việt có dấu hoặc không dấu)..."
                 style={{
                   width: '100%',
                   padding: '1rem 1.15rem',
@@ -571,10 +684,16 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   outline: 'none',
                 }}
               />
+              {textInputAnswer.trim().length > 0 && (
+                <div style={{ marginTop: '0.5rem', fontSize: '0.82rem', color: 'var(--accent-sky)', fontWeight: 700 }}>
+                  🔠 Từ khóa chuẩn hóa: <strong>{normalizeCrosswordPreview(textInputAnswer)}</strong> (
+                  {normalizeCrosswordPreview(textInputAnswer).length} ký tự)
+                </div>
+              )}
               <button
                 type="button"
-                disabled={isAnswerSubmitted || !textInputAnswer.trim()}
-                onClick={() => submitAnswer(textInputAnswer.trim())}
+                disabled={isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim()}
+                onClick={() => submitAnswer(textInputAnswer)}
                 style={{
                   width: '100%',
                   marginTop: '1rem',
@@ -585,14 +704,32 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   borderRadius: '12px',
                   fontSize: '1.05rem',
                   fontWeight: 800,
-                  cursor: isAnswerSubmitted || !textInputAnswer.trim() ? 'not-allowed' : 'pointer',
-                  opacity: isAnswerSubmitted || !textInputAnswer.trim() ? 0.6 : 1,
-                  boxShadow: isAnswerSubmitted || !textInputAnswer.trim() ? 'none' : 'var(--btn-shadow)',
+                  cursor: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'not-allowed' : 'pointer',
+                  opacity: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 0.6 : 1,
+                  boxShadow: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'none' : 'var(--btn-shadow)',
                   transition: 'all 0.15s ease',
                 }}
               >
-                Gửi từ khóa &rarr;
+                {isSubmittingAnswer ? '⏳ Đang gửi từ khóa...' : 'Gửi từ khóa →'}
               </button>
+            </div>
+          )}
+
+          {answerError && !isAnswerSubmitted && (
+            <div
+              style={{
+                marginTop: '1rem',
+                padding: '0.75rem 1rem',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                border: '1px solid #ef4444',
+                color: '#ef4444',
+                fontSize: '0.88rem',
+                fontWeight: 700,
+                textAlign: 'center',
+              }}
+            >
+              ⚠️ {answerError}
             </div>
           )}
 
@@ -629,7 +766,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             boxShadow: 'var(--card-shadow)',
           }}
         >
-          {personalResult && (
+          {personalResult ? (
             <div style={{ marginBottom: '1.75rem' }}>
               <div
                 style={{
@@ -659,6 +796,29 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 }}
               >
                 {personalResult.pointsEarned > 0 ? `+${personalResult.pointsEarned} điểm` : '+0 điểm'}
+              </div>
+            </div>
+          ) : (
+            <div style={{ marginBottom: '1.75rem' }}>
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.65rem 1.5rem',
+                  borderRadius: '14px',
+                  fontWeight: 800,
+                  fontSize: '1.1rem',
+                  backgroundColor: 'rgba(245, 158, 11, 0.14)',
+                  border: '2px solid var(--accent-amber)',
+                  color: 'var(--accent-amber)',
+                }}
+              >
+                <span>⌛</span>
+                <span>CHƯA TRẢ LỜI / HẾT GIỜ</span>
+              </div>
+              <div style={{ marginTop: '0.65rem', fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-muted)' }}>
+                +0 điểm
               </div>
             </div>
           )}

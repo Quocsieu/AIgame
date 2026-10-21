@@ -2,7 +2,7 @@ import { describe, it, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import { app } from '../src/app.js';
-import { GameSpecification, GameQuestion } from '../src/contracts/game.contract.js';
+import { GameSpecification, GameQuestion, GameQuestionSchema } from '../src/contracts/game.contract.js';
 import { GameEngine, gameEngine } from '../src/game/game.engine.js';
 import { GameSession } from '../src/game/game.session.js';
 import { gameStore, sessionStore } from '../src/game/game.store.js';
@@ -875,6 +875,130 @@ describe('DAY 3 - Game Engine Core Test Suite', () => {
     assert.equal(resultRes.body.data.score, 200);
     assert.equal(resultRes.body.data.correctCount, 2);
     assert.equal(resultRes.body.data.wrongCount, 0);
+  });
+
+  // ==========================================
+  // REGRESSION TESTS — PHASE 1 ANSWER FLOW FIXES (38-40)
+  // ==========================================
+
+  it('38. MULTIPLE_CHOICE does not falsely grade prefix choices as correct (startsWith regression)', () => {
+    const handler = new MultipleChoiceHandler();
+    const question: GameQuestion = {
+      id: 'q_mc_prefix',
+      type: 'MULTIPLE_CHOICE',
+      question: 'What is 10 * 10?',
+      choices: ['A. 10', 'B. 100', 'C. 1000', 'D. 1'],
+      correctAnswer: 'B. 100',
+      difficulty: 'EASY',
+      sourceReference: {
+        sourceId: 's_prefix',
+        sourceType: 'WEBSITE',
+        sourceLocation: 'http://test',
+      },
+    };
+
+    const parsed = GameQuestionSchema.safeParse(question);
+    assert.equal(parsed.success, true);
+
+    const wrongByFull = handler.validateAnswer(question, 'A. 10');
+    assert.equal(wrongByFull.isValid, true);
+    assert.equal(wrongByFull.isCorrect, false);
+
+    const wrongByStripped = handler.validateAnswer(question, '10');
+    assert.equal(wrongByStripped.isValid, true);
+    assert.equal(wrongByStripped.isCorrect, false);
+
+    const wrongByLetter = handler.validateAnswer(question, 'A');
+    assert.equal(wrongByLetter.isValid, true);
+    assert.equal(wrongByLetter.isCorrect, false);
+
+    const rightByFull = handler.validateAnswer(question, 'B. 100');
+    assert.equal(rightByFull.isValid, true);
+    assert.equal(rightByFull.isCorrect, true);
+
+    const rightByStripped = handler.validateAnswer(question, '100');
+    assert.equal(rightByStripped.isValid, true);
+    assert.equal(rightByStripped.isCorrect, true);
+
+    const rightByLetter = handler.validateAnswer(question, 'B');
+    assert.equal(rightByLetter.isValid, true);
+    assert.equal(rightByLetter.isCorrect, true);
+  });
+
+  it('39. QUICK_BUTTON schema and handler accept valid custom choices (2-4 options)', () => {
+    const spec = createSampleQuickButtonSpec();
+    const parseRes = GameQuestionSchema.safeParse(spec.questions[0]);
+    assert.equal(parseRes.success, true);
+
+    const customViQuestion: GameQuestion = {
+      id: 'q_qb_vi',
+      type: 'QUICK_BUTTON',
+      question: 'Xe tay ga có cần thay dầu hộp số (nhớt láp) định kỳ không?',
+      choices: ['Có cần', 'Không cần'],
+      correctAnswer: 'Có cần',
+      difficulty: 'EASY',
+      sourceReference: {
+        sourceId: 's_qb',
+        sourceType: 'WEBSITE',
+        sourceLocation: 'http://test',
+      },
+    };
+
+    assert.equal(GameQuestionSchema.safeParse(customViQuestion).success, true);
+    const handler = new QuickButtonHandler();
+    assert.equal(handler.validateAnswer(customViQuestion, 'có cần').isCorrect, true);
+    assert.equal(handler.validateAnswer(customViQuestion, 'Không cần').isCorrect, false);
+  });
+
+  it('40. FILL_IN_THE_BLANK and CROSSWORD reject empty/oversized inputs and support pipe-separated valid answers & Vietnamese IME', () => {
+    const fibHandler = new FillBlankHandler();
+    const cwHandler = new CrosswordHandler();
+
+    const fibQuestion: GameQuestion = {
+      id: 'q_fib_multi',
+      type: 'FILL_IN_THE_BLANK',
+      question: 'Trung tâm kinh tế lớn nhất miền Nam Việt Nam là ___.',
+      correctAnswer: 'TP.HCM | Thành phố Hồ Chí Minh',
+      difficulty: 'EASY',
+      sourceReference: {
+        sourceId: 's_fib',
+        sourceType: 'WEBSITE',
+        sourceLocation: 'http://test',
+      },
+    };
+
+    // Empty & whitespace rejected with isValid: false
+    assert.equal(fibHandler.validateAnswer(fibQuestion, '').isValid, false);
+    assert.equal(fibHandler.validateAnswer(fibQuestion, '    ').isValid, false);
+    // Oversized (> 500 chars) rejected with isValid: false
+    assert.equal(fibHandler.validateAnswer(fibQuestion, 'a'.repeat(501)).isValid, false);
+
+    // Pipe-separated variants accepted (case & NFC normalized)
+    assert.equal(fibHandler.validateAnswer(fibQuestion, 'tp.hcm').isCorrect, true);
+    assert.equal(fibHandler.validateAnswer(fibQuestion, 'thành phố hồ chí minh').isCorrect, true);
+
+    const cwQuestion: GameQuestion = {
+      id: 'q_cw_multi',
+      type: 'CROSSWORD',
+      question: 'Bộ phận chính tạo công suất cho xe?',
+      crosswordClue: 'Bộ phận tạo công suất',
+      crosswordAnswer: 'DONGCO | DONGCODOTTRONG',
+      correctAnswer: 'DONGCO | DONGCODOTTRONG',
+      difficulty: 'MEDIUM',
+      sourceReference: {
+        sourceId: 's_cw',
+        sourceType: 'WEBSITE',
+        sourceLocation: 'http://test',
+      },
+    };
+
+    assert.equal(GameQuestionSchema.safeParse(cwQuestion).success, true);
+    assert.equal(cwHandler.validateAnswer(cwQuestion, '   ').isValid, false);
+    assert.equal(cwHandler.validateAnswer(cwQuestion, 'X'.repeat(505)).isValid, false);
+
+    // Vietnamese input with diacritics & spaces matches normalized crossword word
+    assert.equal(cwHandler.validateAnswer(cwQuestion, 'Động cơ').isCorrect, true);
+    assert.equal(cwHandler.validateAnswer(cwQuestion, 'động cơ đốt trong').isCorrect, true);
   });
 });
 

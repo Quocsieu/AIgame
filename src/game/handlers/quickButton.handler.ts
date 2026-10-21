@@ -1,5 +1,9 @@
-import { GameQuestion } from '../../contracts/game.contract.js';
+import { GameQuestion, MAX_ANSWER_LENGTH } from '../../contracts/game.contract.js';
 import { AnswerValidationResult, GameTypeHandler } from './handler.interface.js';
+
+function normalizeButtonText(text: string): string {
+  return text.trim().normalize('NFC').toLowerCase().replace(/\s+/g, ' ');
+}
 
 export class QuickButtonHandler implements GameTypeHandler {
   public validateAnswer(question: GameQuestion, rawAnswer: string): AnswerValidationResult {
@@ -22,6 +26,15 @@ export class QuickButtonHandler implements GameTypeHandler {
       };
     }
 
+    if (trimmedAnswer.length > MAX_ANSWER_LENGTH) {
+      return {
+        isValid: false,
+        normalizedAnswer: trimmedAnswer.slice(0, MAX_ANSWER_LENGTH),
+        isCorrect: false,
+        invalidReason: `Answer exceeds maximum length of ${MAX_ANSWER_LENGTH} characters.`,
+      };
+    }
+
     const choices = question.choices || [];
     if (choices.length < 2 || choices.length > 4) {
       return {
@@ -32,8 +45,8 @@ export class QuickButtonHandler implements GameTypeHandler {
       };
     }
 
-    const cleanInput = trimmedAnswer.toLowerCase();
-    const matchedChoice = choices.find(c => c.trim().toLowerCase() === cleanInput);
+    const cleanInput = normalizeButtonText(trimmedAnswer);
+    const matchedChoice = choices.find(c => normalizeButtonText(c) === cleanInput);
 
     if (!matchedChoice) {
       return {
@@ -44,8 +57,8 @@ export class QuickButtonHandler implements GameTypeHandler {
       };
     }
 
-    const cleanCorrect = question.correctAnswer.trim().toLowerCase();
-    const isCorrect = matchedChoice.trim().toLowerCase() === cleanCorrect;
+    const cleanCorrect = normalizeButtonText(question.correctAnswer);
+    const isCorrect = normalizeButtonText(matchedChoice) === cleanCorrect;
 
     return {
       isValid: true,

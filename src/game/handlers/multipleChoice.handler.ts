@@ -1,5 +1,13 @@
-import { GameQuestion } from '../../contracts/game.contract.js';
+import { GameQuestion, MAX_ANSWER_LENGTH } from '../../contracts/game.contract.js';
 import { AnswerValidationResult, GameTypeHandler } from './handler.interface.js';
+
+function normalizeChoiceText(text: string): string {
+  return text.trim().normalize('NFC').toLowerCase().replace(/\s+/g, ' ');
+}
+
+function stripOptionPrefix(text: string): string {
+  return normalizeChoiceText(text.replace(/^[A-Da-d][\.\)]\s*/, ''));
+}
 
 export class MultipleChoiceHandler implements GameTypeHandler {
   public validateAnswer(question: GameQuestion, rawAnswer: string): AnswerValidationResult {
@@ -22,6 +30,15 @@ export class MultipleChoiceHandler implements GameTypeHandler {
       };
     }
 
+    if (trimmedAnswer.length > MAX_ANSWER_LENGTH) {
+      return {
+        isValid: false,
+        normalizedAnswer: trimmedAnswer.slice(0, MAX_ANSWER_LENGTH),
+        isCorrect: false,
+        invalidReason: `Answer exceeds maximum length of ${MAX_ANSWER_LENGTH} characters.`,
+      };
+    }
+
     const choices = question.choices || [];
     if (choices.length !== 4) {
       return {
@@ -33,8 +50,8 @@ export class MultipleChoiceHandler implements GameTypeHandler {
     }
 
     // Try matching answer to one of the 4 choices:
-    // 1. By index letter (A, B, C, D)
-    const upperAnswer = trimmedAnswer.toUpperCase().replace(/[\.\)]$/, '').trim();
+    // 1. By single option letter (A, B, C, D or A., B), etc.)
+    const upperAnswer = trimmedAnswer.toUpperCase().replace(/^([A-D])[\.\)]$/, '$1');
     const letterMap: Record<string, number> = { A: 0, B: 1, C: 2, D: 3 };
 
     let selectedChoiceIndex = -1;
@@ -42,24 +59,16 @@ export class MultipleChoiceHandler implements GameTypeHandler {
     if (upperAnswer in letterMap) {
       selectedChoiceIndex = letterMap[upperAnswer];
     } else {
-      // 2. By matching choice text directly
-      const cleanAnswer = trimmedAnswer.toLowerCase();
-      const stripPrefix = (text: string) =>
-        text.replace(/^[A-Da-d0-9][\.\)]\s*/, '').trim().toLowerCase();
+      // 2. By exact full choice match first, then exact stripped option text match (no startsWith)
+      const normAnswer = normalizeChoiceText(trimmedAnswer);
+      selectedChoiceIndex = choices.findIndex(c => normalizeChoiceText(c) === normAnswer);
 
-      selectedChoiceIndex = choices.findIndex(c => {
-        const cLower = c.trim().toLowerCase();
-        const cStripped = stripPrefix(c);
-        const aStripped = stripPrefix(trimmedAnswer);
-
-        return (
-          cLower === cleanAnswer ||
-          cStripped === aStripped ||
-          cLower.startsWith(`${cleanAnswer}.`) ||
-          cLower.startsWith(`${cleanAnswer})`) ||
-          cleanAnswer.startsWith(cLower)
-        );
-      });
+      if (selectedChoiceIndex === -1) {
+        const strippedAnswer = stripOptionPrefix(trimmedAnswer);
+        if (strippedAnswer.length > 0) {
+          selectedChoiceIndex = choices.findIndex(c => stripOptionPrefix(c) === strippedAnswer);
+        }
+      }
     }
 
     if (selectedChoiceIndex < 0 || selectedChoiceIndex >= choices.length) {
@@ -73,24 +82,31 @@ export class MultipleChoiceHandler implements GameTypeHandler {
 
     const matchedChoice = choices[selectedChoiceIndex];
 
-    // Determine correctness server-side against question.correctAnswer
-    const stripPrefix = (text: string) =>
-      text.replace(/^[A-Da-d0-9][\.\)]\s*/, '').trim().toLowerCase();
+    // Determine correctness server-side against question.correctAnswer without prefix startsWith bugs
+    const trimmedCorrect = question.correctAnswer.trim();
+    const upperCorrect = trimmedCorrect.toUpperCase().replace(/^([A-D])[\.\)]$/, '$1');
+    let correctChoiceIndex = -1;
 
-    const cleanCorrect = question.correctAnswer.trim().toLowerCase();
-    const cleanMatched = matchedChoice.trim().toLowerCase();
+    if (upperCorrect in letterMap) {
+      correctChoiceIndex = letterMap[upperCorrect];
+    } else {
+      const normCorrect = normalizeChoiceText(trimmedCorrect);
+      correctChoiceIndex = choices.findIndex(c => normalizeChoiceText(c) === normCorrect);
 
-    // Check letter match if correctAnswer is "A" / "B" etc.
-    const correctLetter = upperAnswer in letterMap && cleanCorrect.length === 1 && cleanCorrect.toUpperCase() in letterMap;
-    const isLetterCorrect = correctLetter && letterMap[cleanCorrect.toUpperCase()] === selectedChoiceIndex;
+      if (correctChoiceIndex === -1) {
+        const strippedCorrect = stripOptionPrefix(trimmedCorrect);
+        if (strippedCorrect.length > 0) {
+          correctChoiceIndex = choices.findIndex(c => stripOptionPrefix(c) === strippedCorrect);
+        }
+      }
+    }
 
     const isCorrect =
-      isLetterCorrect ||
-      cleanMatched === cleanCorrect ||
-      stripPrefix(matchedChoice) === stripPrefix(question.correctAnswer) ||
-      cleanMatched.startsWith(`${cleanCorrect}.`) ||
-      cleanMatched.startsWith(`${cleanCorrect})`) ||
-      cleanCorrect.startsWith(cleanMatched);
+      correctChoiceIndex !== -1
+        ? selectedChoiceIndex === correctChoiceIndex
+        : normalizeChoiceText(matchedChoice) === normalizeChoiceText(trimmedCorrect) ||
+          (stripOptionPrefix(matchedChoice).length > 0 &&
+            stripOptionPrefix(matchedChoice) === stripOptionPrefix(trimmedCorrect));
 
     return {
       isValid: true,

@@ -71,11 +71,17 @@ export class GameSocketClient {
     };
   }
 
-  public send(msg: any): void {
+  public isConnected(): boolean {
+    return Boolean(this.ws && this.ws.readyState === WebSocket.OPEN);
+  }
+
+  public send(msg: any): boolean {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(msg));
+      return true;
     } else {
       console.warn('Không thể gửi tin nhắn WebSocket: Kết nối chưa mở.');
+      return false;
     }
   }
 

@@ -99,6 +99,14 @@ const formatProvenanceBadge = (ref?: ProvenanceReference): string => {
   return parts.join(' • ') || ref.sourceType;
 };
 
+const MAX_ANSWER_LENGTH = 500;
+
+const normalizeChoiceCompare = (text: string): string =>
+  text.trim().normalize('NFC').toLowerCase().replace(/\s+/g, ' ');
+
+const stripOptionLetterPrefix = (text: string): string =>
+  normalizeChoiceCompare(text.replace(/^[A-Da-d][\.\)]\s*/, ''));
+
 const validateQuestionItem = (q: GameQuestion): string | null => {
   if (!q.question || q.question.trim().length < 3) {
     return 'Nội dung câu hỏi phải có ít nhất 3 ký tự.';
@@ -114,39 +122,52 @@ const validateQuestionItem = (q: GameQuestion): string | null => {
     if (q.choices.some(c => !c || c.trim().length === 0)) {
       return 'Không được để trống bất kỳ lựa chọn A, B, C, D nào.';
     }
-    const normalizedTexts = q.choices.map(c =>
-      c.replace(/^[A-Da-d0-9][\.\)]\s*/, '').trim().toLowerCase()
-    );
+    const normalizedTexts = q.choices.map(c => stripOptionLetterPrefix(c));
     if (new Set(normalizedTexts).size !== 4) {
       return '4 lựa chọn A, B, C, D phải khác nhau (không được trùng lặp).';
     }
-    const cleanAns = q.correctAnswer.trim().toLowerCase();
-    const matchesChoice = q.choices.some(c => {
-      const lower = c.trim().toLowerCase();
-      return (
-        lower === cleanAns ||
-        lower.startsWith(`${cleanAns}.`) ||
-        lower.startsWith(`${cleanAns})`) ||
-        cleanAns.startsWith(lower)
-      );
-    });
+    const trimmedAns = q.correctAnswer.trim();
+    const upperLetter = trimmedAns.toUpperCase().replace(/^([A-D])[\.\)]$/, '$1');
+    const isLetterKey = ['A', 'B', 'C', 'D'].includes(upperLetter);
+    const normAns = normalizeChoiceCompare(trimmedAns);
+    const strippedAns = stripOptionLetterPrefix(trimmedAns);
+
+    const matchesChoice =
+      isLetterKey ||
+      q.choices.some(c => {
+        const normC = normalizeChoiceCompare(c);
+        const strippedC = stripOptionLetterPrefix(c);
+        return normC === normAns || (strippedC.length > 0 && strippedC === strippedAns);
+      });
     if (!matchesChoice) {
       return `Đáp án đúng "${q.correctAnswer}" phải khớp với một trong 4 lựa chọn A, B, C, D.`;
     }
   }
 
   if (q.type === 'QUICK_BUTTON') {
-    if (!q.choices || q.choices.length !== 2 || q.choices[0] !== 'Đúng' || q.choices[1] !== 'Sai') {
-      return 'Câu hỏi Đúng/Sai phải có đúng 2 lựa chọn ["Đúng", "Sai"].';
+    if (!q.choices || q.choices.length < 2 || q.choices.length > 4) {
+      return 'Câu hỏi Nút bấm nhanh phải có từ 2 đến 4 lựa chọn.';
     }
-    if (q.correctAnswer !== 'Đúng' && q.correctAnswer !== 'Sai') {
-      return 'Đáp án câu Đúng/Sai phải là "Đúng" hoặc "Sai".';
+    const normButtons = q.choices.map(c => normalizeChoiceCompare(c));
+    if (normButtons.some(c => c.length === 0)) {
+      return 'Các lựa chọn Nút bấm nhanh không được để trống.';
+    }
+    if (new Set(normButtons).size !== q.choices.length) {
+      return 'Các lựa chọn Nút bấm nhanh phải khác nhau.';
+    }
+    const normAns = normalizeChoiceCompare(q.correctAnswer);
+    if (!normButtons.includes(normAns)) {
+      return `Đáp án đúng "${q.correctAnswer}" phải khớp với một trong các nút lựa chọn.`;
     }
   }
 
   if (q.type === 'CROSSWORD') {
-    const word = normalizeCrosswordAscii(q.crosswordAnswer || q.correctAnswer);
-    if (!/^[A-Z0-9]+$/.test(word)) {
+    const rawWord = q.crosswordAnswer || q.correctAnswer;
+    const parts = rawWord
+      .split(/[|;]/)
+      .map(part => normalizeCrosswordAscii(part))
+      .filter(Boolean);
+    if (parts.length === 0 || !parts.every(p => /^[A-Z0-9]+$/.test(p))) {
       return 'Từ khóa Ô chữ phải chỉ gồm chữ cái và chữ số (không chứa ký tự đặc biệt).';
     }
   }
@@ -193,7 +214,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [isPracticeOpen, setIsPracticeOpen] = useState(false);
   const [practiceSessionId, setPracticeSessionId] = useState<string | null>(null);
   const [practiceQuestion, setPracticeQuestion] = useState<SanitizedQuestion | null>(null);
+  const [practiceSelectedChoice, setPracticeSelectedChoice] = useState<string | null>(null);
   const [practiceAnswerInput, setPracticeAnswerInput] = useState('');
+  const [practiceError, setPracticeError] = useState<string | null>(null);
   const [practiceFeedback, setPracticeFeedback] = useState<PracticeQuestionResult | null>(null);
   const [practiceFinalResult, setPracticeFinalResult] = useState<PracticeFinalResult | null>(null);
   const [practiceScore, setPracticeScore] = useState(0);
@@ -665,7 +688,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
       setPracticeSessionId(created.sessionId);
       setPracticeQuestion(started.question);
+      setPracticeSelectedChoice(null);
       setPracticeAnswerInput('');
+      setPracticeError(null);
       setPracticeFeedback(null);
       setPracticeFinalResult(null);
       setPracticeScore(0);
@@ -683,12 +708,18 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }
     const clean = chosenAnswer.trim();
     if (!clean) {
+      setPracticeError('Vui lòng chọn hoặc nhập câu trả lời trước khi gửi.');
       toast.warning('Vui lòng nhập hoặc chọn câu trả lời.', 'Chưa có câu trả lời');
       return;
     }
+    if (clean.length > MAX_ANSWER_LENGTH) {
+      setPracticeError(`Câu trả lời không được vượt quá ${MAX_ANSWER_LENGTH} ký tự.`);
+      toast.warning(`Câu trả lời vượt quá ${MAX_ANSWER_LENGTH} ký tự cho phép.`, 'Vượt giới hạn độ dài');
+      return;
+    }
 
+    setPracticeError(null);
     setIsSubmittingPractice(true);
-    stopPracticeTimer();
 
     try {
       const result = await submitPracticeAnswer(practiceSessionId, {
@@ -696,11 +727,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         answer: clean,
       });
 
+      stopPracticeTimer();
       setPracticeFeedback(result);
       setPracticeScore(prev => prev + result.pointsEarned);
       setPracticeStreak(prev => (result.isCorrect ? prev + 1 : 0));
     } catch (err: any) {
       if (err.code === 'ANSWER_TIMEOUT') {
+        stopPracticeTimer();
         setPracticeFeedback({
           questionId: practiceQuestion.id,
           answer: clean,
@@ -713,6 +746,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         });
         setPracticeStreak(0);
       } else {
+        setPracticeError(err.message || 'Không thể gửi câu trả lời. Vui lòng thử lại.');
         toast.error(err.message || 'Không thể gửi câu trả lời.', 'Lỗi');
       }
     } finally {
@@ -727,12 +761,16 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       const adv = await advancePracticeSession(practiceSessionId);
       if (adv.nextQuestionAvailable && adv.question) {
         setPracticeQuestion(adv.question);
+        setPracticeSelectedChoice(null);
         setPracticeAnswerInput('');
+        setPracticeError(null);
         setPracticeFeedback(null);
         startPracticeCountdown(adv.question.timePerQuestion || timePerQuestion, practiceSessionId);
       } else if (adv.finished && adv.result) {
         stopPracticeTimer();
         setPracticeQuestion(null);
+        setPracticeSelectedChoice(null);
+        setPracticeError(null);
         setPracticeFeedback(null);
         setPracticeFinalResult(adv.result);
       }
@@ -746,6 +784,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     setIsPracticeOpen(false);
     setPracticeSessionId(null);
     setPracticeQuestion(null);
+    setPracticeSelectedChoice(null);
+    setPracticeAnswerInput('');
+    setPracticeError(null);
     setPracticeFeedback(null);
     setPracticeFinalResult(null);
   };
@@ -1076,94 +1117,175 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               {/* Lựa chọn cho MULTIPLE_CHOICE hoặc QUICK_BUTTON */}
               {(practiceQuestion.type === 'MULTIPLE_CHOICE' || practiceQuestion.type === 'QUICK_BUTTON') &&
                 practiceQuestion.choices && (
-                  <div
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                      gap: '0.75rem',
-                      marginBottom: '1.25rem',
-                    }}
-                  >
-                    {practiceQuestion.choices.map((choice, idx) => (
-                      <button
-                        key={idx}
-                        type="button"
-                        disabled={Boolean(practiceFeedback) || isSubmittingPractice}
-                        onClick={() => handleSubmitPracticeAnswer(choice)}
-                        style={{
-                          padding: '0.95rem 1.15rem',
-                          borderRadius: '12px',
-                          border:
-                            practiceFeedback?.answer === choice
-                              ? `2px solid ${practiceFeedback.isCorrect ? 'var(--accent-emerald)' : 'var(--accent-rose)'}`
-                              : '1px solid var(--border-strong)',
-                          backgroundColor: 'var(--bg-card)',
-                          color: 'var(--text-primary)',
-                          fontWeight: 700,
-                          fontSize: '0.95rem',
-                          textAlign: 'left',
-                          cursor: practiceFeedback ? 'default' : 'pointer',
-                        }}
-                      >
-                        {choice}
-                      </button>
-                    ))}
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                        gap: '0.75rem',
+                        marginBottom: '0.85rem',
+                      }}
+                    >
+                      {practiceQuestion.choices.map((choice, idx) => {
+                        const isSelected = practiceSelectedChoice === choice;
+                        const isSubmittedChoice = practiceFeedback?.answer === choice;
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            disabled={Boolean(practiceFeedback) || isSubmittingPractice}
+                            onClick={() => {
+                              setPracticeError(null);
+                              setPracticeSelectedChoice(prev => (prev === choice ? null : choice));
+                            }}
+                            style={{
+                              padding: '0.95rem 1.15rem',
+                              borderRadius: '12px',
+                              border: isSubmittedChoice
+                                ? `2px solid ${practiceFeedback?.isCorrect ? 'var(--accent-emerald)' : 'var(--accent-rose)'}`
+                                : isSelected
+                                  ? '2px solid var(--primary)'
+                                  : '1px solid var(--border-strong)',
+                              backgroundColor: isSelected ? 'rgba(37, 99, 235, 0.14)' : 'var(--bg-card)',
+                              color: 'var(--text-primary)',
+                              fontWeight: isSelected ? 800 : 700,
+                              fontSize: '0.95rem',
+                              textAlign: 'left',
+                              cursor: practiceFeedback || isSubmittingPractice ? 'default' : 'pointer',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              gap: '0.5rem',
+                              transition: 'all 0.15s ease',
+                            }}
+                          >
+                            <span>{choice}</span>
+                            {isSelected && !practiceFeedback && (
+                              <span style={{ color: 'var(--accent-sky)', fontWeight: 900 }}>✓ Đang chọn</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {!practiceFeedback && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          disabled={!practiceSelectedChoice || isSubmittingPractice}
+                          onClick={() => {
+                            if (practiceSelectedChoice) {
+                              handleSubmitPracticeAnswer(practiceSelectedChoice);
+                            }
+                          }}
+                          style={{
+                            backgroundColor:
+                              !practiceSelectedChoice || isSubmittingPractice
+                                ? 'var(--border-strong)'
+                                : 'var(--primary)',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '10px',
+                            padding: '0.8rem 1.5rem',
+                            fontWeight: 800,
+                            cursor: !practiceSelectedChoice || isSubmittingPractice ? 'not-allowed' : 'pointer',
+                            opacity: !practiceSelectedChoice || isSubmittingPractice ? 0.65 : 1,
+                          }}
+                        >
+                          {isSubmittingPractice ? '⏳ Đang gửi đáp án...' : 'Gửi đáp án đã chọn'}
+                        </button>
+                        <span style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
+                          {practiceSelectedChoice
+                            ? 'Bấm lại vào đáp án đang chọn nếu muốn bỏ chọn.'
+                            : 'Hãy chọn một phương án trả lời rồi bấm Gửi đáp án.'}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
 
               {/* Ô nhập cho FILL_IN_THE_BLANK hoặc CROSSWORD */}
               {(practiceQuestion.type === 'FILL_IN_THE_BLANK' || practiceQuestion.type === 'CROSSWORD') &&
                 !practiceFeedback && (
-                  <div style={{ display: 'flex', gap: '0.75rem', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
-                    <input
-                      type="text"
-                      value={practiceAnswerInput}
-                      onChange={e =>
-                        setPracticeAnswerInput(
+                  <div style={{ marginBottom: '1.25rem' }}>
+                    <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+                      <input
+                        type="text"
+                        disabled={isSubmittingPractice}
+                        maxLength={MAX_ANSWER_LENGTH}
+                        value={practiceAnswerInput}
+                        onChange={e => {
+                          setPracticeError(null);
+                          setPracticeAnswerInput(e.target.value);
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                            e.preventDefault();
+                            handleSubmitPracticeAnswer(practiceAnswerInput);
+                          }
+                        }}
+                        placeholder={
                           practiceQuestion.type === 'CROSSWORD'
-                            ? normalizeCrosswordAscii(e.target.value)
-                            : e.target.value
-                        )
-                      }
-                      onKeyDown={e => {
-                        if (e.key === 'Enter') {
-                          handleSubmitPracticeAnswer(practiceAnswerInput);
+                            ? 'Nhập từ khóa ô chữ (hỗ trợ gõ tiếng Việt có dấu hoặc không dấu)...'
+                            : 'Nhập câu trả lời của bạn...'
                         }
-                      }}
-                      placeholder={
-                        practiceQuestion.type === 'CROSSWORD'
-                          ? 'Nhập từ khóa IN HOA KHÔNG DẤU (VD: DONGCO)...'
-                          : 'Nhập câu trả lời của bạn...'
-                      }
-                      style={{
-                        flex: '1 1 260px',
-                        padding: '0.85rem 1rem',
-                        backgroundColor: 'var(--bg-input)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: '10px',
-                        color: 'var(--text-primary)',
-                        fontSize: '1rem',
-                        fontWeight: 700,
-                      }}
-                    />
-                    <button
-                      type="button"
-                      disabled={isSubmittingPractice}
-                      onClick={() => handleSubmitPracticeAnswer(practiceAnswerInput)}
-                      style={{
-                        backgroundColor: 'var(--primary)',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: '10px',
-                        padding: '0.85rem 1.5rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Gửi đáp án
-                    </button>
+                        style={{
+                          flex: '1 1 260px',
+                          padding: '0.85rem 1rem',
+                          backgroundColor: 'var(--bg-input)',
+                          border: '1px solid var(--border-strong)',
+                          borderRadius: '10px',
+                          color: 'var(--text-primary)',
+                          fontSize: '1rem',
+                          fontWeight: 700,
+                        }}
+                      />
+                      <button
+                        type="button"
+                        disabled={isSubmittingPractice || !practiceAnswerInput.trim()}
+                        onClick={() => handleSubmitPracticeAnswer(practiceAnswerInput)}
+                        style={{
+                          backgroundColor:
+                            isSubmittingPractice || !practiceAnswerInput.trim()
+                              ? 'var(--border-strong)'
+                              : 'var(--primary)',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: '10px',
+                          padding: '0.85rem 1.5rem',
+                          fontWeight: 800,
+                          cursor: isSubmittingPractice || !practiceAnswerInput.trim() ? 'not-allowed' : 'pointer',
+                          opacity: isSubmittingPractice || !practiceAnswerInput.trim() ? 0.65 : 1,
+                        }}
+                      >
+                        {isSubmittingPractice ? '⏳ Đang gửi...' : 'Gửi đáp án'}
+                      </button>
+                    </div>
+                    {practiceQuestion.type === 'CROSSWORD' && practiceAnswerInput.trim().length > 0 && (
+                      <div style={{ marginTop: '0.45rem', fontSize: '0.82rem', color: 'var(--accent-sky)', fontWeight: 700 }}>
+                        🔠 Từ khóa chuẩn hóa: <strong>{normalizeCrosswordAscii(practiceAnswerInput)}</strong> (
+                        {normalizeCrosswordAscii(practiceAnswerInput).length} ký tự)
+                      </div>
+                    )}
                   </div>
                 )}
+
+              {practiceError && !practiceFeedback && (
+                <div
+                  style={{
+                    marginBottom: '1rem',
+                    padding: '0.65rem 0.9rem',
+                    borderRadius: '8px',
+                    backgroundColor: 'rgba(244, 63, 94, 0.12)',
+                    border: '1px solid var(--accent-rose)',
+                    color: 'var(--accent-rose)',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                  }}
+                >
+                  ⚠️ {practiceError}
+                </div>
+              )}
 
               {/* Phản hồi kết quả sau mỗi câu */}
               {practiceFeedback && (
@@ -2481,21 +2603,36 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                   fontWeight: 700,
                                 }}
                               >
-                                <option value="Đúng">Đúng</option>
-                                <option value="Sai">Sai</option>
+                                {(q.choices && q.choices.length >= 2 ? q.choices : ['Đúng', 'Sai']).map(
+                                  (opt, optIdx) => (
+                                    <option key={optIdx} value={opt}>
+                                      {opt}
+                                    </option>
+                                  )
+                                )}
                               </select>
                             ) : (
                               <input
                                 type="text"
                                 value={q.correctAnswer}
                                 onChange={e => {
-                                  const val =
-                                    q.type === 'CROSSWORD' ? normalizeCrosswordAscii(e.target.value) : e.target.value;
+                                  const val = e.target.value;
                                   handleUpdateQuestion(idx, prev => ({
                                     ...prev,
                                     correctAnswer: val,
-                                    crosswordAnswer: prev.type === 'CROSSWORD' ? val : prev.crosswordAnswer,
+                                    crosswordAnswer:
+                                      prev.type === 'CROSSWORD' ? normalizeCrosswordAscii(val) : prev.crosswordAnswer,
                                   }));
+                                }}
+                                onBlur={e => {
+                                  if (q.type === 'CROSSWORD') {
+                                    const val = normalizeCrosswordAscii(e.target.value);
+                                    handleUpdateQuestion(idx, prev => ({
+                                      ...prev,
+                                      correctAnswer: val,
+                                      crosswordAnswer: val,
+                                    }));
+                                  }
                                 }}
                                 style={{
                                   width: '100%',

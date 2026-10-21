@@ -162,6 +162,7 @@ export type OutboundMessage =
       roomId: string;
       playerId?: string;
       playerToken?: string;
+      score?: number;
       state: RoomState;
       title: string;
       gameType: GameType;

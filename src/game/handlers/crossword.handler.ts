@@ -1,4 +1,4 @@
-import { GameQuestion } from '../../contracts/game.contract.js';
+import { GameQuestion, MAX_ANSWER_LENGTH } from '../../contracts/game.contract.js';
 import { AnswerValidationResult, GameTypeHandler } from './handler.interface.js';
 
 /**
@@ -17,6 +17,37 @@ export function normalizeCrosswordWord(text: string): string {
     .replace(/\s+/g, '');
 }
 
+function collectValidCrosswordAnswers(question: GameQuestion): Set<string> {
+  const candidates = new Set<string>();
+  const addFromRaw = (raw: string) => {
+    const full = normalizeCrosswordWord(raw);
+    if (full.length > 0) {
+      candidates.add(full);
+    }
+    if (raw.includes('|') || raw.includes(';')) {
+      for (const part of raw.split(/[|;]/)) {
+        const normPart = normalizeCrosswordWord(part);
+        if (normPart.length > 0) {
+          candidates.add(normPart);
+        }
+      }
+    }
+  };
+
+  if (question.crosswordAnswer) {
+    addFromRaw(question.crosswordAnswer);
+  }
+  addFromRaw(question.correctAnswer);
+  if (question.acceptedAlternatives && Array.isArray(question.acceptedAlternatives)) {
+    for (const alt of question.acceptedAlternatives) {
+      if (typeof alt === 'string') {
+        addFromRaw(alt);
+      }
+    }
+  }
+  return candidates;
+}
+
 export class CrosswordHandler implements GameTypeHandler {
   public validateAnswer(question: GameQuestion, rawAnswer: string): AnswerValidationResult {
     if (typeof rawAnswer !== 'string') {
@@ -29,11 +60,27 @@ export class CrosswordHandler implements GameTypeHandler {
     }
 
     const trimmed = rawAnswer.trim();
-    const expected = question.crosswordAnswer || question.correctAnswer;
-    const normalizedInput = normalizeCrosswordWord(trimmed);
-    const normalizedExpected = normalizeCrosswordWord(expected);
+    if (!trimmed) {
+      return {
+        isValid: false,
+        normalizedAnswer: '',
+        isCorrect: false,
+        invalidReason: 'Answer cannot be empty.',
+      };
+    }
 
-    const isCorrect = normalizedInput.length > 0 && normalizedInput === normalizedExpected;
+    if (trimmed.length > MAX_ANSWER_LENGTH) {
+      return {
+        isValid: false,
+        normalizedAnswer: trimmed.slice(0, MAX_ANSWER_LENGTH),
+        isCorrect: false,
+        invalidReason: `Answer exceeds maximum length of ${MAX_ANSWER_LENGTH} characters.`,
+      };
+    }
+
+    const normalizedInput = normalizeCrosswordWord(trimmed);
+    const validCandidates = collectValidCrosswordAnswers(question);
+    const isCorrect = normalizedInput.length > 0 && validCandidates.has(normalizedInput);
 
     return {
       isValid: true,

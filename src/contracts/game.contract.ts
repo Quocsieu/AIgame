@@ -29,6 +29,16 @@ export type Difficulty = z.infer<typeof DifficultyEnum>;
 export const ScoringModeEnum = z.enum(['STANDARD', 'SPEED_BONUS', 'STREAK']);
 export type ScoringMode = z.infer<typeof ScoringModeEnum>;
 
+export const MAX_ANSWER_LENGTH = 500;
+
+function normalizeChoiceCompare(text: string): string {
+  return text.trim().normalize('NFC').toLowerCase().replace(/\s+/g, ' ');
+}
+
+function stripOptionLetterPrefix(text: string): string {
+  return normalizeChoiceCompare(text.replace(/^[A-Da-d][\.\)]\s*/, ''));
+}
+
 export const BaseQuestionSchema = z.object({
   id: z.string(),
   type: QuestionTypeEnum,
@@ -54,9 +64,7 @@ export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => 
       return;
     }
 
-    const normalizedChoiceTexts = data.choices.map(c =>
-      c.replace(/^[A-Da-d0-9][\.\)]\s*/, '').trim().toLowerCase()
-    );
+    const normalizedChoiceTexts = data.choices.map(c => stripOptionLetterPrefix(c));
     const uniqueChoices = new Set(normalizedChoiceTexts);
     if (uniqueChoices.size !== 4) {
       ctx.addIssue({
@@ -67,16 +75,22 @@ export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => 
       return;
     }
 
-    const cleanAnswer = data.correctAnswer.trim().toLowerCase();
-    const answerMatchesChoice = data.choices.some(c => {
-      const choiceLower = c.trim().toLowerCase();
-      return (
-        choiceLower === cleanAnswer ||
-        choiceLower.startsWith(`${cleanAnswer}.`) ||
-        choiceLower.startsWith(`${cleanAnswer})`) ||
-        cleanAnswer.startsWith(choiceLower)
-      );
-    });
+    const trimmedCorrect = data.correctAnswer.trim();
+    const upperLetter = trimmedCorrect.toUpperCase().replace(/^([A-D])[\.\)]$/, '$1');
+    const isLetterKey = ['A', 'B', 'C', 'D'].includes(upperLetter);
+    const normCorrect = normalizeChoiceCompare(trimmedCorrect);
+    const strippedCorrect = stripOptionLetterPrefix(trimmedCorrect);
+
+    const answerMatchesChoice =
+      isLetterKey ||
+      data.choices.some(c => {
+        const normChoice = normalizeChoiceCompare(c);
+        const strippedChoice = stripOptionLetterPrefix(c);
+        return (
+          normChoice === normCorrect ||
+          (strippedChoice.length > 0 && strippedChoice === strippedCorrect)
+        );
+      });
 
     if (!answerMatchesChoice) {
       ctx.addIssue({
@@ -88,24 +102,39 @@ export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => 
   }
 
   if (data.type === 'QUICK_BUTTON') {
-    if (!data.choices || data.choices.length !== 2) {
+    if (!data.choices || data.choices.length < 2 || data.choices.length > 4) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'QUICK_BUTTON question must have exactly 2 choices: ["Đúng", "Sai"].',
+        message: 'QUICK_BUTTON question must have between 2 and 4 choices.',
         path: ['choices'],
       });
-    } else if (data.choices[0] !== 'Đúng' || data.choices[1] !== 'Sai') {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'QUICK_BUTTON choices must be exactly ["Đúng", "Sai"].',
-        path: ['choices'],
-      });
+      return;
     }
 
-    if (data.correctAnswer !== 'Đúng' && data.correctAnswer !== 'Sai') {
+    const normalizedButtons = data.choices.map(c => normalizeChoiceCompare(c));
+    if (normalizedButtons.some(c => c.length === 0)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'QUICK_BUTTON correctAnswer must be either "Đúng" or "Sai".',
+        message: 'QUICK_BUTTON choices cannot be empty.',
+        path: ['choices'],
+      });
+      return;
+    }
+
+    if (new Set(normalizedButtons).size !== data.choices.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'QUICK_BUTTON choices must be distinct.',
+        path: ['choices'],
+      });
+      return;
+    }
+
+    const normCorrect = normalizeChoiceCompare(data.correctAnswer);
+    if (!normalizedButtons.includes(normCorrect)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `QUICK_BUTTON correctAnswer "${data.correctAnswer}" must match one of the provided choices.`,
         path: ['correctAnswer'],
       });
     }
@@ -113,14 +142,19 @@ export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => 
 
   if (data.type === 'CROSSWORD') {
     const word = data.crosswordAnswer || data.correctAnswer;
-    const asciiNormalized = word
-      .trim()
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .replace(/đ/g, 'd')
-      .replace(/Đ/g, 'D')
-      .replace(/\s+/g, '');
-    if (!/^[A-Za-z0-9]+$/.test(asciiNormalized)) {
+    const parts = word
+      .split(/[|;]/)
+      .map(part =>
+        part
+          .trim()
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/đ/g, 'd')
+          .replace(/Đ/g, 'D')
+          .replace(/\s+/g, '')
+      )
+      .filter(Boolean);
+    if (parts.length === 0 || !parts.every(p => /^[A-Za-z0-9]+$/.test(p))) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: 'CROSSWORD answer word must be alphanumeric without special symbols.',

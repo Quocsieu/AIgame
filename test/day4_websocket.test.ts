@@ -461,5 +461,87 @@ describe('DAY 4 - WebSocket Multiplayer Integration Test Suite', () => {
     hostWs.close();
     p1Ws.close();
   });
+
+  it('64. invalid answer over WebSocket returns INVALID_ANSWER error without locking player out of submitting valid answer', async () => {
+    const spec = createSampleSpec();
+    const room = roomService.createRoom(spec);
+
+    const hostWs = await createClient();
+    hostWs.send(JSON.stringify({ type: 'host.join', roomCode: room.roomCode, hostToken: room.hostToken }));
+    await waitForMessage(hostWs, (m) => m.type === 'room.joined');
+
+    const p1Ws = await createClient();
+    p1Ws.send(JSON.stringify({ type: 'player.join', roomCode: room.roomCode, displayName: 'Alice' }));
+    await waitForMessage(p1Ws, (m) => m.type === 'room.joined');
+
+    hostWs.send(JSON.stringify({ type: 'host.start' }));
+    await waitForMessage(p1Ws, (m) => m.type === 'question.started');
+
+    // Submit empty answer -> should receive INVALID_ANSWER error and NOT mark question as answered
+    p1Ws.send(JSON.stringify({ type: 'player.answer', questionId: 'q_ws_1', answer: '   ' }));
+    const errMsg = await waitForMessage(p1Ws, (m) => m.type === 'error');
+    assert.equal(errMsg.code, 'INVALID_ANSWER');
+
+    // Player immediately submits valid answer in the same question -> succeeds and triggers reveal
+    const ackWait = waitForMessage(p1Ws, (m) => m.type === 'question.answerReceived');
+    const revWait = waitForMessage(p1Ws, (m) => m.type === 'question.revealed');
+    p1Ws.send(JSON.stringify({ type: 'player.answer', questionId: 'q_ws_1', answer: 'B. WebSocket' }));
+
+    const [ackMsg, revMsg] = await Promise.all([ackWait, revWait]);
+    assert.equal(ackMsg.questionId, 'q_ws_1');
+    assert.equal(revMsg.personalResult.isCorrect, true);
+    assert.equal(revMsg.personalResult.pointsEarned, 100);
+
+    hostWs.close();
+    p1Ws.close();
+  });
+
+  it('65. player reconnecting mid-question after answering receives score and question.answerReceived state sync', async () => {
+    const spec = createSampleSpec();
+    const room = roomService.createRoom(spec);
+
+    const hostWs = await createClient();
+    hostWs.send(JSON.stringify({ type: 'host.join', roomCode: room.roomCode, hostToken: room.hostToken }));
+    await waitForMessage(hostWs, (m) => m.type === 'room.joined');
+
+    const p1Ws = await createClient();
+    p1Ws.send(JSON.stringify({ type: 'player.join', roomCode: room.roomCode, displayName: 'Alice' }));
+    const p1Join = await waitForMessage(p1Ws, (m) => m.type === 'room.joined');
+
+    const p2Ws = await createClient();
+    p2Ws.send(JSON.stringify({ type: 'player.join', roomCode: room.roomCode, displayName: 'Bob' }));
+    await waitForMessage(p2Ws, (m) => m.type === 'room.joined');
+
+    hostWs.send(JSON.stringify({ type: 'host.start' }));
+    await waitForMessage(p1Ws, (m) => m.type === 'question.started');
+
+    // Alice answers Q1 while Bob has not answered yet (so room stays QUESTION_ACTIVE)
+    p1Ws.send(JSON.stringify({ type: 'player.answer', questionId: 'q_ws_1', answer: 'B. WebSocket' }));
+    await waitForMessage(p1Ws, (m) => m.type === 'question.answerReceived');
+
+    // Alice disconnects and reconnects mid-question
+    p1Ws.close();
+    const p1ReconnectWs = await createClient();
+    const rejoinWait = waitForMessage(p1ReconnectWs, (m) => m.type === 'room.joined');
+    const qStartWait = waitForMessage(p1ReconnectWs, (m) => m.type === 'question.started');
+    const ackSyncWait = waitForMessage(p1ReconnectWs, (m) => m.type === 'question.answerReceived');
+
+    p1ReconnectWs.send(
+      JSON.stringify({
+        type: 'player.reconnect',
+        roomCode: room.roomCode,
+        playerToken: p1Join.playerToken,
+      })
+    );
+
+    const [rejoinMsg, qStartMsg, ackSyncMsg] = await Promise.all([rejoinWait, qStartWait, ackSyncWait]);
+    assert.equal(rejoinMsg.score, 100);
+    assert.equal(qStartMsg.question.id, 'q_ws_1');
+    assert.equal(ackSyncMsg.questionId, 'q_ws_1');
+
+    hostWs.close();
+    p1ReconnectWs.close();
+    p2Ws.close();
+  });
 });
 

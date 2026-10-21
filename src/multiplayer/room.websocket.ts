@@ -245,6 +245,7 @@ export class MultiplayerWebSocketServer {
       roomId: room.roomId,
       playerId: player.playerId,
       playerToken: player.playerToken,
+      score: player.score,
       state: room.state,
       title: room.gameSpecification.title,
       gameType: room.gameSpecification.gameType,
@@ -261,10 +262,17 @@ export class MultiplayerWebSocketServer {
     }
 
     if (room.state === 'QUESTION_ACTIVE') {
+      const currentQ = room.getSanitizedCurrentQuestion();
       this.send(ws, {
         type: 'question.started',
-        question: room.getSanitizedCurrentQuestion(),
+        question: currentQ,
       });
+      if (player.answeredQuestionIds.has(currentQ.id)) {
+        this.send(ws, {
+          type: 'question.answerReceived',
+          questionId: currentQ.id,
+        });
+      }
     } else if (room.state === 'QUESTION_REVEAL') {
       const activeQ = room.gameSpecification.questions[room.currentQuestionIndex];
       const personalResult = player.questionResults.get(activeQ.id);
@@ -303,6 +311,7 @@ export class MultiplayerWebSocketServer {
       roomId: room.roomId,
       playerId: player.playerId,
       playerToken: player.playerToken,
+      score: player.score,
       state: room.state,
       title: room.gameSpecification.title,
       gameType: room.gameSpecification.gameType,
@@ -311,10 +320,17 @@ export class MultiplayerWebSocketServer {
     });
 
     if (room.state === 'QUESTION_ACTIVE') {
+      const currentQ = room.getSanitizedCurrentQuestion();
       this.send(ws, {
         type: 'question.started',
-        question: room.getSanitizedCurrentQuestion(),
+        question: currentQ,
       });
+      if (player.answeredQuestionIds.has(currentQ.id)) {
+        this.send(ws, {
+          type: 'question.answerReceived',
+          questionId: currentQ.id,
+        });
+      }
     } else if (room.state === 'QUESTION_REVEAL') {
       const activeQ = room.gameSpecification.questions[room.currentQuestionIndex];
       const personalResult = player.questionResults.get(activeQ.id);
