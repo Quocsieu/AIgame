@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from '../components/ToastContext.js';
 import { GameSocketClient, ConnectionStatus } from '../services/socket.js';
-import { createRoom, fetchRoomQr } from '../services/api.js';
+import { fetchRoomQr } from '../services/api.js';
 import {
   AlertTriangleIcon,
   ArrowLeftIcon,
@@ -42,20 +42,14 @@ export const HostPage: React.FC<HostPageProps> = ({
   const [hostToken, setHostToken] = useState(
     initialHostToken || sessionStorage.getItem('active_host_token') || ''
   );
-  const [gameId, setGameId] = useState(initialGameId || '');
   const [gameTitle, setGameTitle] = useState('');
   const [joinUrl, setJoinUrl] = useState('');
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [isLocked, setIsLocked] = useState(false);
 
-  // Host screens: 'setup' | 'lobby' | 'question' | 'reveal' | 'finish'
-  const [viewState, setViewState] = useState<'setup' | 'lobby' | 'question' | 'reveal' | 'finish'>(
-    (initialRoomCode || sessionStorage.getItem('active_host_room')) &&
-      (initialHostToken || sessionStorage.getItem('active_host_token'))
-      ? 'lobby'
-      : 'setup'
-  );
+  // Host screens: 'lobby' | 'question' | 'reveal' | 'finish'
+  const [viewState, setViewState] = useState<'lobby' | 'question' | 'reveal' | 'finish'>('lobby');
   const [copiedLink, setCopiedLink] = useState(false);
   const [isLinkVisible, setIsLinkVisible] = useState<boolean>(true);
 
@@ -74,8 +68,6 @@ export const HostPage: React.FC<HostPageProps> = ({
     winner?: LeaderboardEntry;
     leaderboard: LeaderboardEntry[];
   } | null>(null);
-
-  const [isCreatingRoom, setIsCreatingRoom] = useState(false);
 
   const socketRef = useRef<GameSocketClient | null>(null);
   const timerIntervalRef = useRef<any>(null);
@@ -247,6 +239,13 @@ export const HostPage: React.FC<HostPageProps> = ({
       setRoomCode(effCode);
       setHostToken(effToken);
       handleInitExistingRoom(effCode, effToken);
+    } else {
+      if (onBackToSetup) {
+        onBackToSetup();
+      } else {
+        window.history.replaceState({}, '', '/?tab=analytics');
+        window.location.href = '/?tab=analytics';
+      }
     }
 
     return () => {
@@ -255,50 +254,7 @@ export const HostPage: React.FC<HostPageProps> = ({
         socketRef.current.close();
       }
     };
-  }, [initialRoomCode, initialHostToken]);
-
-  const handleCreateRoom = async () => {
-    setIsCreatingRoom(true);
-    const toastId = toast.loading('Đang khởi tạo phòng chơi...');
-
-    try {
-      const res = await createRoom({
-        gameId: gameId.trim() || 'fixture_mc',
-        capacity: 300,
-      });
-
-      setRoomCode(res.roomCode);
-      setHostToken(res.hostToken);
-      setJoinUrl(res.joinUrl);
-
-      try {
-        sessionStorage.setItem('active_host_room', res.roomCode);
-        sessionStorage.setItem('active_host_token', res.hostToken);
-        window.history.replaceState(
-          {},
-          '',
-          `/?tab=host&room=${res.roomCode}&token=${encodeURIComponent(res.hostToken)}`
-        );
-      } catch {}
-
-      try {
-        const qr = await fetchRoomQr(res.roomCode);
-        setQrDataUrl(qr.qrDataUrl);
-      } catch {
-        // Optional QR fetch fallback
-      }
-
-      toast.removeToast(toastId);
-      toast.success(`Phòng ${res.roomCode} đã được khởi tạo!`, 'Tạo phòng thành công');
-      setViewState('lobby');
-      connectToSocket(res.roomCode, res.hostToken);
-    } catch (err: any) {
-      toast.removeToast(toastId);
-      toast.error(err.message || 'Không thể tạo phòng chơi.', 'Lỗi khởi tạo');
-    } finally {
-      setIsCreatingRoom(false);
-    }
-  };
+  }, [initialRoomCode, initialHostToken, onBackToSetup]);
 
   const handleToggleLock = () => {
     if (socketRef.current) {
@@ -392,7 +348,7 @@ export const HostPage: React.FC<HostPageProps> = ({
         </div>
       )}
 
-      {connectionStatus === 'disconnected' && viewState !== 'setup' && (
+      {connectionStatus === 'disconnected' && (
         <div
           style={{
             backgroundColor: 'rgba(244, 63, 94, 0.15)',
@@ -436,101 +392,7 @@ export const HostPage: React.FC<HostPageProps> = ({
         </div>
       )}
 
-      {/* 1. Màn hình Khởi tạo Phòng Chơi (Setup Screen) */}
-      {viewState === 'setup' && (
-        <div
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '20px',
-            padding: '2rem',
-            boxShadow: 'var(--card-shadow)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <GamepadIcon size={26} style={{ color: 'var(--primary)' }} />
-              <h2 style={{ color: 'var(--text-primary)', fontSize: '1.45rem', fontWeight: 800, margin: 0 }}>
-                Khởi Tạo Phòng Chơi Trực Tuyến
-              </h2>
-            </div>
-            {onBackToSetup && (
-              <button
-                type="button"
-                onClick={onBackToSetup}
-                style={{
-                  backgroundColor: 'var(--bg-card)',
-                  color: 'var(--text-secondary)',
-                  border: '1px solid var(--border-strong)',
-                  borderRadius: '10px',
-                  padding: '0.5rem 1rem',
-                  fontSize: '0.85rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  minHeight: '40px',
-                }}
-              >
-                <ArrowLeftIcon size={14} /> Quay về Kho Game
-              </button>
-            )}
-          </div>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', margin: '0 0 1.75rem 0', lineHeight: 1.5 }}>
-            Nhập mã trò chơi (Game ID) hoặc để trống để sử dụng bộ câu hỏi mẫu. Phòng thi đấu hỗ trợ tối đa 300 người tham gia đồng thời.
-          </p>
-
-          <div style={{ maxWidth: '540px' }}>
-            <label htmlFor="host-game-id" style={{ display: 'block', color: 'var(--text-primary)', fontSize: '0.875rem', fontWeight: 700, marginBottom: '0.45rem' }}>
-              Mã trò chơi (Game ID):
-            </label>
-            <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
-              <input
-                id="host-game-id"
-                type="text"
-                value={gameId}
-                onChange={(e) => setGameId(e.target.value)}
-                placeholder="game_... (hoặc để trống)"
-                style={{
-                  flex: '1 1 240px',
-                  padding: '0.85rem 1rem',
-                  backgroundColor: 'var(--bg-input)',
-                  border: '1px solid var(--border-strong)',
-                  borderRadius: '10px',
-                  color: 'var(--text-primary)',
-                  fontSize: '0.95rem',
-                  outline: 'none',
-                  minHeight: '44px',
-                  boxSizing: 'border-box',
-                }}
-              />
-              <button
-                type="button"
-                onClick={handleCreateRoom}
-                disabled={isCreatingRoom}
-                style={{
-                  backgroundColor: 'var(--primary)',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '10px',
-                  padding: '0.85rem 1.5rem',
-                  fontWeight: 800,
-                  cursor: isCreatingRoom ? 'not-allowed' : 'pointer',
-                  fontSize: '0.95rem',
-                  opacity: isCreatingRoom ? 0.7 : 1,
-                  transition: 'all 0.15s ease',
-                  minHeight: '44px',
-                }}
-              >
-                {isCreatingRoom ? 'Đang tạo...' : 'Tạo phòng ngay'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 2. Màn hình Sảnh Chờ (Lobby) — Chế độ TRÌNH CHIẾU / GAME SHOW */}
+      {/* Màn hình Sảnh Chờ (Lobby) — Chế độ TRÌNH CHIẾU / GAME SHOW */}
       {viewState === 'lobby' && (
         <div
           style={{
@@ -634,21 +496,47 @@ export const HostPage: React.FC<HostPageProps> = ({
             {gameTitle || 'Phòng Thi Đấu'}
           </h1>
 
-          {/* Khu vực trung tâm: Mã Phòng Lớn & QR Lớn */}
+          {/* Khu vực trung tâm: QR Trọng Tâm & Mã Phòng */}
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap', gap: '3rem', margin: '2rem 0' }}>
-            {/* Cột Trái: Mã phòng & Đường dẫn */}
+            {/* Cột Trọng Tâm: Mã QR Lớn để quét ngay */}
+            {qrDataUrl && (
+              <div style={{ textAlign: 'center' }}>
+                <div
+                  style={{
+                    display: 'inline-block',
+                    padding: '16px',
+                    backgroundColor: '#ffffff',
+                    borderRadius: '24px',
+                    boxShadow: '0 20px 45px rgba(0, 0, 0, 0.4)',
+                    border: '3px solid var(--accent-sky)',
+                  }}
+                >
+                  <img
+                    src={qrDataUrl}
+                    alt="Mã QR tham gia phòng"
+                    style={{ width: 'clamp(240px, 30vw, 310px)', height: 'clamp(240px, 30vw, 310px)', display: 'block' }}
+                  />
+                </div>
+                <div style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '1.05rem', marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
+                  <QrCodeIcon size={20} style={{ color: 'var(--accent-sky)' }} />
+                  <span>Quét mã để vào phòng</span>
+                </div>
+              </div>
+            )}
+
+            {/* Cột Phụ: Mã phòng & Đường dẫn thứ cấp */}
             <div style={{ minWidth: '280px', maxWidth: '420px', textAlign: 'center' }}>
-              <div style={{ color: 'var(--text-muted)', fontSize: '1rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '3px', marginBottom: '0.5rem' }}>
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '3px', marginBottom: '0.5rem' }}>
                 MÃ PHÒNG THI ĐẤU
               </div>
               <div
                 style={{
-                  fontSize: 'clamp(3.5rem, 8vw, 5.5rem)',
+                  fontSize: 'clamp(3rem, 7vw, 4.8rem)',
                   fontWeight: 900,
                   letterSpacing: '8px',
                   color: 'var(--accent-sky)',
                   backgroundColor: 'var(--bg-input)',
-                  padding: '0.75rem 2rem',
+                  padding: '0.65rem 1.8rem',
                   borderRadius: '20px',
                   border: '3px dashed var(--accent-sky)',
                   display: 'inline-block',
@@ -660,11 +548,12 @@ export const HostPage: React.FC<HostPageProps> = ({
 
               <div
                 style={{
-                  marginTop: '1.75rem',
+                  marginTop: '1.5rem',
                   backgroundColor: 'var(--bg-card)',
                   padding: '1rem 1.25rem',
-                  borderRadius: '12px',
+                  borderRadius: '16px',
                   border: '1px solid var(--border-subtle)',
+                  textAlign: 'left',
                 }}
               >
                 <div
@@ -672,16 +561,16 @@ export const HostPage: React.FC<HostPageProps> = ({
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    marginBottom: '0.35rem',
+                    marginBottom: '0.45rem',
                   }}
                 >
                   <span
                     style={{
                       color: 'var(--text-muted)',
-                      fontSize: '0.85rem',
+                      fontSize: '0.82rem',
                       fontWeight: 800,
                       textTransform: 'uppercase',
-                      letterSpacing: '0.05em',
+                      letterSpacing: '0.06em',
                     }}
                   >
                     Đường dẫn tham gia:
@@ -722,11 +611,11 @@ export const HostPage: React.FC<HostPageProps> = ({
                     style={{
                       color: 'var(--accent-sky)',
                       fontWeight: 700,
-                      fontSize: '1rem',
+                      fontSize: '0.95rem',
                       wordBreak: 'break-all',
                       fontFamily: 'monospace',
                       backgroundColor: 'var(--bg-input)',
-                      padding: '0.5rem 0.75rem',
+                      padding: '0.65rem 0.85rem',
                       borderRadius: '8px',
                       border: '1px solid var(--border-strong)',
                       marginBottom: '0.75rem',
@@ -741,93 +630,47 @@ export const HostPage: React.FC<HostPageProps> = ({
                       fontStyle: 'italic',
                       fontSize: '0.84rem',
                       backgroundColor: 'var(--bg-input)',
-                      padding: '0.5rem 0.75rem',
+                      padding: '0.65rem 0.85rem',
                       borderRadius: '8px',
                       border: '1px dashed var(--border-strong)',
                       marginBottom: '0.75rem',
+                      textAlign: 'center',
                     }}
                   >
                     Liên kết đang được ẩn. Quét mã QR hoặc nhập mã phòng để vào.
                   </div>
                 )}
 
-                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const url = joinUrl || `${window.location.origin}/?room=${roomCode}`;
-                      navigator.clipboard.writeText(url);
-                      setCopiedLink(true);
-                      toast.success('Đã sao chép liên kết phòng vào clipboard!', 'Đã chép link');
-                      setTimeout(() => setCopiedLink(false), 2500);
-                    }}
-                    style={{
-                      flex: '1 1 130px',
-                      backgroundColor: copiedLink ? 'var(--accent-emerald)' : 'var(--accent-sky)',
-                      color: '#ffffff',
-                      border: 'none',
-                      borderRadius: '8px',
-                      padding: '0.55rem 0.85rem',
-                      fontWeight: 800,
-                      fontSize: '0.85rem',
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '0.35rem',
-                    }}
-                  >
-                    {copiedLink ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
-                    <span>{copiedLink ? 'Đã sao chép!' : 'Sao chép link'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const url = joinUrl || `${window.location.origin}/?room=${roomCode}`;
-                      window.open(url, '_blank');
-                    }}
-                    style={{
-                      flex: '1 1 130px',
-                      backgroundColor: 'transparent',
-                      color: 'var(--text-primary)',
-                      border: '1px solid var(--border-strong)',
-                      borderRadius: '8px',
-                      padding: '0.55rem 0.85rem',
-                      fontWeight: 700,
-                      fontSize: '0.85rem',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Mở tab người chơi ↗
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Cột Phải: QR Lớn */}
-            {qrDataUrl && (
-              <div style={{ textAlign: 'center' }}>
-                <div
+                <button
+                  type="button"
+                  onClick={() => {
+                    const url = joinUrl || `${window.location.origin}/?room=${roomCode}`;
+                    navigator.clipboard.writeText(url);
+                    setCopiedLink(true);
+                    toast.success('Đã sao chép liên kết phòng vào clipboard!', 'Đã chép link');
+                    setTimeout(() => setCopiedLink(false), 2500);
+                  }}
                   style={{
-                    display: 'inline-block',
-                    padding: '14px',
-                    backgroundColor: 'white',
-                    borderRadius: '20px',
-                    boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4)',
+                    width: '100%',
+                    backgroundColor: copiedLink ? 'var(--accent-emerald)' : 'var(--accent-sky)',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '8px',
+                    padding: '0.65rem 1rem',
+                    fontWeight: 800,
+                    fontSize: '0.88rem',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.4rem',
                   }}
                 >
-                  <img
-                    src={qrDataUrl}
-                    alt="Mã QR tham gia phòng"
-                    style={{ width: 'clamp(220px, 28vw, 280px)', height: 'clamp(220px, 28vw, 280px)', display: 'block' }}
-                  />
-                </div>
-                <div style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '1.05rem', marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
-                  <QrCodeIcon size={20} style={{ color: 'var(--accent-sky)' }} />
-                  <span>Quét mã để vào phòng</span>
-                </div>
+                  {copiedLink ? <CheckIcon size={16} /> : <CopyIcon size={16} />}
+                  <span>{copiedLink ? 'Đã sao chép!' : 'Sao chép link'}</span>
+                </button>
               </div>
-            )}
+            </div>
           </div>
 
           {/* Thanh trạng thái & Bộ đếm người chơi */}

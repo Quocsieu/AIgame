@@ -1284,12 +1284,61 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                 gap: '0.35rem',
               }}
             >
-              <span>1. Nguồn Nội Dung</span>
+              <span>1. Thông Tin & Nguồn</span>
             </span>
             <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-              URL • Tài liệu • Chủ đề
+              Tên • Nguồn • Thể loại
             </span>
           </div>
+
+          {/* 1. Tên trò chơi (Định danh đầu vào) */}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
+              <label
+                htmlFor="studio-game-title"
+                style={{
+                  fontSize: '0.82rem',
+                  fontWeight: 800,
+                  color: 'var(--text-primary)',
+                }}
+              >
+                Tên Trò Chơi
+              </label>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                (Tùy chọn)
+              </span>
+            </div>
+            <input
+              id="studio-game-title"
+              type="text"
+              value={customGameTitle}
+              onChange={(e) => setCustomGameTitle(e.target.value)}
+              placeholder="Ví dụ: Đấu trường Lịch sử Thế giới 2026..."
+              style={{
+                width: '100%',
+                backgroundColor: 'var(--bg-input)',
+                border: '1px solid var(--border-strong)',
+                borderRadius: '8px',
+                padding: '0.5rem 0.75rem',
+                color: 'var(--text-primary)',
+                fontSize: '0.86rem',
+                fontWeight: 700,
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+
+          {/* 2. Nguồn nội dung */}
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+              <label style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                Nguồn Nội Dung
+              </label>
+              <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                URL • File • Chủ đề
+              </span>
+            </div>
 
           {/* Segmented Control Tabs */}
           <div
@@ -1531,270 +1580,40 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               </div>
             )}
           </div>
-
-          {/* Primary Action Button */}
-          <button
-            type="button"
-            onClick={handleCreateGameUnified}
-            disabled={
-              isGenerating ||
-              isIngesting ||
-              (!urls.some(u => u.trim()) && files.length === 0 && !topicFocus.trim() && ingestedSources.length === 0)
-            }
-            style={{
-              width: '100%',
-              backgroundColor: 'var(--primary)',
-              color: 'var(--primary-ink)',
-              border: 'none',
-              borderRadius: '10px',
-              padding: '0.75rem 1.25rem',
-              fontSize: '0.92rem',
-              fontWeight: 900,
-              cursor:
-                isGenerating ||
-                isIngesting ||
-                (!urls.some(u => u.trim()) && files.length === 0 && !topicFocus.trim() && ingestedSources.length === 0)
-                  ? 'not-allowed'
-                  : 'pointer',
-              opacity:
-                isGenerating ||
-                isIngesting ||
-                (!urls.some(u => u.trim()) && files.length === 0 && !topicFocus.trim() && ingestedSources.length === 0)
-                  ? 0.6
-                  : 1,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '0.45rem',
-              minHeight: '42px',
-              boxShadow: 'var(--btn-shadow)',
-            }}
-          >
-            {isGenerating || isIngesting ? (
-              <>
-                <SpinnerIcon size={16} />
-                <span>{isIngesting ? 'Đang Nạp Nguồn...' : 'AI Đang Biên Soạn...'}</span>
-              </>
-            ) : (
-              <>
-                <SparklesIcon size={16} />
-                <span>{generatedSpec ? 'Tái Tạo Bộ Câu Hỏi AI' : 'Tạo Game Bằng AI'}</span>
-              </>
-            )}
-          </button>
-
-          {/* Loading Telemetry State (khi đang xử lý) */}
-          {(isGenerating || isIngesting) && (
-            <div
-              style={{
-                backgroundColor: 'var(--bg-card)',
-                borderRadius: '10px',
-                padding: '1.25rem',
-                textAlign: 'center',
-                border: '1px solid var(--border-subtle)',
-              }}
-            >
-              <div style={{ color: 'var(--primary)', marginBottom: '0.5rem', display: 'flex', justifyContent: 'center' }}>
-                <SpinnerIcon size={28} />
-              </div>
-              <div style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
-                {isIngesting ? 'Đang nạp và trích xuất nội dung nguồn...' : 'AI đang phân tích và sinh bộ câu hỏi...'}
-              </div>
-              <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                Cấu trúc hóa tài liệu thành các câu hỏi tương tác đạt chuẩn.
-              </div>
-            </div>
-          )}
-
-          {/* COMPACT RESULT TAG BAR (khi đã tạo xong) */}
-          {generatedSpec && !isGenerating && !isIngesting && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
-              {savedForLater && (
-                <div
-                  role="status"
-                  style={{
-                    padding: '0.6rem 0.85rem',
-                    borderRadius: '8px',
-                    backgroundColor: 'rgba(16, 185, 129, 0.12)',
-                    border: '1px solid var(--accent-emerald)',
-                    color: 'var(--accent-emerald)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    fontSize: '0.8rem',
-                    fontWeight: 700,
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <CheckIcon size={14} />
-                    <span>Đã lưu vào Kho Game thành công!</span>
-                  </div>
-                  {onNavigateToLibrary && (
-                    <button
-                      type="button"
-                      onClick={onNavigateToLibrary}
-                      style={{
-                        backgroundColor: 'var(--accent-emerald)',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: '6px',
-                        padding: '0.25rem 0.6rem',
-                        fontSize: '0.75rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Mở Kho →
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Tag tóm tắt kết quả */}
-              <div
-                style={{
-                  backgroundColor: 'var(--bg-card)',
-                  borderRadius: '10px',
-                  border: '1px solid var(--border-subtle)',
-                  padding: '0.85rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.65rem',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.2rem' }}>
-                      <span
-                        style={{
-                          fontSize: '0.7rem',
-                          fontWeight: 800,
-                          padding: '0.15rem 0.45rem',
-                          borderRadius: '6px',
-                          backgroundColor: 'var(--primary-subtle)',
-                          color: 'var(--primary)',
-                        }}
-                      >
-                        {formatGameTypeLabel(generatedSpec.gameType)}
-                      </span>
-                      <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                        • {generatedSpec.questions.length} câu • {generatedSpec.settings.timePerQuestion}s
-                      </span>
-                    </div>
-                    <div style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.95rem' }}>
-                      {generatedSpec.title}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Các nút hành động nhanh */}
-                <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
-                  <button
-                    type="button"
-                    onClick={handlePublishAndUseNow}
-                    disabled={isSavingSpec}
-                    style={{
-                      flex: '1 1 auto',
-                      backgroundColor: 'var(--primary)',
-                      color: 'var(--primary-ink)',
-                      border: 'none',
-                      borderRadius: '6px',
-                      padding: '0.45rem 0.75rem',
-                      fontSize: '0.8rem',
-                      fontWeight: 800,
-                      cursor: isSavingSpec ? 'not-allowed' : 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '0.35rem',
-                      minHeight: '34px',
-                    }}
-                  >
-                    <PlayIcon size={14} />
-                    <span>Xuất Bản & Dùng Ngay</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => setShowQuestionEditor(!showQuestionEditor)}
-                    style={{
-                      backgroundColor: showQuestionEditor ? 'var(--primary-subtle)' : 'var(--bg-input)',
-                      color: showQuestionEditor ? 'var(--primary)' : 'var(--text-primary)',
-                      border: '1px solid var(--border-strong)',
-                      borderRadius: '6px',
-                      padding: '0.45rem 0.65rem',
-                      fontSize: '0.78rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.3rem',
-                      minHeight: '34px',
-                    }}
-                  >
-                    <PencilIcon size={13} />
-                    <span>{showQuestionEditor ? 'Đóng sửa' : 'Sửa câu hỏi'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleSaveForLater}
-                    disabled={isSavingSpec}
-                    style={{
-                      backgroundColor: 'var(--bg-input)',
-                      color: 'var(--text-secondary)',
-                      border: '1px solid var(--border-strong)',
-                      borderRadius: '6px',
-                      padding: '0.45rem 0.65rem',
-                      fontSize: '0.78rem',
-                      fontWeight: 700,
-                      cursor: isSavingSpec ? 'not-allowed' : 'pointer',
-                      minHeight: '34px',
-                    }}
-                    title="Lưu vào Kho Game ở trạng thái Bản nháp"
-                  >
-                    Dùng Sau
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleExportCurrentGame('json')}
-                    style={{
-                      backgroundColor: 'var(--bg-input)',
-                      color: 'var(--text-muted)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: '6px',
-                      padding: '0.45rem 0.6rem',
-                      fontSize: '0.75rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      minHeight: '34px',
-                    }}
-                    title="Xuất định dạng JSON"
-                  >
-                    JSON
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
-        {/* ============================================================ */}
-        {/* CỘT PHẢI: THIẾT LẬP GAME / WORKBENCH SOẠN THẢO               */}
-        {/* ============================================================ */}
-        <div
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            borderRadius: '14px',
-            border: '1px solid var(--border-subtle)',
-            padding: '1.15rem 1.25rem',
-            display: 'flex',
-            flexDirection: 'column',
-            overflowY: 'auto',
-            boxSizing: 'border-box',
-          }}
-        >
+        {/* 3. Chọn thể loại game (Chống giật layout) */}
+        <div>
+          <label
+            style={{
+              display: 'block',
+              fontSize: '0.82rem',
+              fontWeight: 800,
+              color: 'var(--text-primary)',
+              marginBottom: '0.35rem',
+            }}
+          >
+            Thể Loại Trò Chơi
+          </label>
+          <GameTypeSelector variant="chips" selectedType={gameType} onSelectType={(t) => setGameType(t)} />
+        </div>
+      </div>
+
+      {/* ============================================================ */}
+      {/* CỘT PHẢI: CẤU HÌNH TẠO CÂU HỎI & WORKBENCH SOẠN THẢO         */}
+      {/* ============================================================ */}
+      <div
+        style={{
+          backgroundColor: 'var(--bg-surface)',
+          borderRadius: '14px',
+          border: '1px solid var(--border-subtle)',
+          padding: '1.15rem 1.25rem',
+          display: 'flex',
+          flexDirection: 'column',
+          overflowY: 'auto',
+          boxSizing: 'border-box',
+        }}
+      >
           {showQuestionEditor && generatedSpec ? (
             /* ======================================================== */
             /* QUESTION WORKBENCH / EDITOR MODE                         */
@@ -2184,7 +2003,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             </div>
           ) : (
             /* ======================================================== */
-            /* SETTINGS / CONFIGURATION MODE                            */
+            /* SETTINGS / CONFIGURATION & ACTION MODE                   */
             /* ======================================================== */
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
               {/* Header nhóm 2 */}
@@ -2201,71 +2020,17 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     gap: '0.35rem',
                   }}
                 >
-                  <span>2. Thiết Lập Trò Chơi</span>
+                  <span>2. Cấu Hình Tạo Câu Hỏi</span>
                 </span>
                 <span style={{ fontSize: '0.74rem', color: 'var(--accent-sky)', fontWeight: 700 }}>
                   {formatGameTypeLabel(gameType)}
                 </span>
               </div>
 
-              {/* 1. Chọn thể loại game (Compact chips) */}
-              <div>
-                <label
-                  style={{
-                    display: 'block',
-                    fontSize: '0.82rem',
-                    fontWeight: 800,
-                    color: 'var(--text-primary)',
-                    marginBottom: '0.35rem',
-                  }}
-                >
-                  Thể Loại Trò Chơi
-                </label>
-                <GameTypeSelector variant="chips" selectedType={gameType} onSelectType={(t) => setGameType(t)} />
-              </div>
-
               {/* Mixed distribution nếu chọn MIXED */}
               {gameType === 'MIXED' && renderMixedDistributionControl()}
 
-              {/* 2. Tên trò chơi (Tùy chọn) */}
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem' }}>
-                  <label
-                    htmlFor="studio-game-title"
-                    style={{
-                      fontSize: '0.82rem',
-                      fontWeight: 800,
-                      color: 'var(--text-primary)',
-                    }}
-                  >
-                    Tên Trò Chơi
-                  </label>
-                  <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-                    (Tùy chọn)
-                  </span>
-                </div>
-                <input
-                  id="studio-game-title"
-                  type="text"
-                  value={customGameTitle}
-                  onChange={(e) => setCustomGameTitle(e.target.value)}
-                  placeholder="Ví dụ: Đấu trường Lịch sử Thế giới 2026..."
-                  style={{
-                    width: '100%',
-                    backgroundColor: 'var(--bg-input)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '8px',
-                    padding: '0.55rem 0.85rem',
-                    color: 'var(--text-primary)',
-                    fontSize: '0.88rem',
-                    fontWeight: 700,
-                    outline: 'none',
-                    boxSizing: 'border-box',
-                  }}
-                />
-              </div>
-
-              {/* 3. Cấu hình thông số (Grid) */}
+              {/* Cấu hình thông số (Grid) */}
               <div
                 style={{
                   backgroundColor: 'var(--bg-card)',
@@ -2383,29 +2148,251 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                 </div>
               </div>
 
-              {/* Nếu đã tạo game, hiển thị nút mở Workbench câu hỏi */}
-              {generatedSpec && (
-                <button
-                  type="button"
-                  onClick={() => setShowQuestionEditor(true)}
+              {/* Nút hành động chính: Tạo Game Bằng AI */}
+              <button
+                type="button"
+                onClick={handleCreateGameUnified}
+                disabled={
+                  isGenerating ||
+                  isIngesting ||
+                  (!urls.some(u => u.trim()) && files.length === 0 && !topicFocus.trim() && ingestedSources.length === 0)
+                }
+                style={{
+                  width: '100%',
+                  backgroundColor: 'var(--primary)',
+                  color: 'var(--primary-ink)',
+                  border: 'none',
+                  borderRadius: '10px',
+                  padding: '0.75rem 1.25rem',
+                  fontSize: '0.92rem',
+                  fontWeight: 900,
+                  cursor:
+                    isGenerating ||
+                    isIngesting ||
+                    (!urls.some(u => u.trim()) && files.length === 0 && !topicFocus.trim() && ingestedSources.length === 0)
+                      ? 'not-allowed'
+                      : 'pointer',
+                  opacity:
+                    isGenerating ||
+                    isIngesting ||
+                    (!urls.some(u => u.trim()) && files.length === 0 && !topicFocus.trim() && ingestedSources.length === 0)
+                      ? 0.6
+                      : 1,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.45rem',
+                  minHeight: '44px',
+                  boxShadow: 'var(--btn-shadow)',
+                }}
+              >
+                {isGenerating || isIngesting ? (
+                  <>
+                    <SpinnerIcon size={16} />
+                    <span>{isIngesting ? 'Đang Nạp Nguồn...' : 'AI Đang Biên Soạn...'}</span>
+                  </>
+                ) : (
+                  <>
+                    <SparklesIcon size={16} />
+                    <span>{generatedSpec ? 'Tái Tạo Bộ Câu Hỏi AI' : 'Tạo Game Bằng AI'}</span>
+                  </>
+                )}
+              </button>
+
+              {/* Loading Telemetry State (khi đang xử lý) */}
+              {(isGenerating || isIngesting) && (
+                <div
                   style={{
                     backgroundColor: 'var(--bg-card)',
-                    color: 'var(--accent-sky)',
-                    border: '1px dashed var(--accent-sky)',
-                    borderRadius: '8px',
-                    padding: '0.65rem 1rem',
-                    fontSize: '0.85rem',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '0.4rem',
+                    borderRadius: '10px',
+                    padding: '1.25rem',
+                    textAlign: 'center',
+                    border: '1px solid var(--border-subtle)',
                   }}
                 >
-                  <PencilIcon size={15} />
-                  <span>Xem & Chỉnh Sửa ({generatedSpec.questions.length} câu hỏi) ➔</span>
-                </button>
+                  <div style={{ color: 'var(--primary)', marginBottom: '0.5rem', display: 'flex', justifyContent: 'center' }}>
+                    <SpinnerIcon size={28} />
+                  </div>
+                  <div style={{ fontSize: '0.9rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
+                    {isIngesting ? 'Đang nạp và trích xuất nội dung nguồn...' : 'AI đang phân tích và sinh bộ câu hỏi...'}
+                  </div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                    Cấu trúc hóa tài liệu thành các câu hỏi tương tác đạt chuẩn.
+                  </div>
+                </div>
+              )}
+
+              {/* COMPACT RESULT TAG BAR (khi đã tạo xong) */}
+              {generatedSpec && !isGenerating && !isIngesting && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                  {savedForLater && (
+                    <div
+                      role="status"
+                      style={{
+                        padding: '0.6rem 0.85rem',
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                        border: '1px solid var(--accent-emerald)',
+                        color: 'var(--accent-emerald)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        fontSize: '0.8rem',
+                        fontWeight: 700,
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                        <CheckIcon size={14} />
+                        <span>Đã lưu vào Kho Game thành công!</span>
+                      </div>
+                      {onNavigateToLibrary && (
+                        <button
+                          type="button"
+                          onClick={onNavigateToLibrary}
+                          style={{
+                            backgroundColor: 'var(--accent-emerald)',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '0.25rem 0.6rem',
+                            fontSize: '0.75rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Mở Kho →
+                        </button>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Tag tóm tắt kết quả */}
+                  <div
+                    style={{
+                      backgroundColor: 'var(--bg-card)',
+                      borderRadius: '10px',
+                      border: '1px solid var(--border-subtle)',
+                      padding: '0.85rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.65rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '0.5rem' }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.2rem' }}>
+                          <span
+                            style={{
+                              fontSize: '0.7rem',
+                              fontWeight: 800,
+                              padding: '0.15rem 0.45rem',
+                              borderRadius: '6px',
+                              backgroundColor: 'var(--primary-subtle)',
+                              color: 'var(--primary)',
+                            }}
+                          >
+                            {formatGameTypeLabel(generatedSpec.gameType)}
+                          </span>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                            • {generatedSpec.questions.length} câu • {generatedSpec.settings.timePerQuestion}s
+                          </span>
+                        </div>
+                        <div style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.95rem' }}>
+                          {generatedSpec.title}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Các nút hành động nhanh */}
+                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={handlePublishAndUseNow}
+                        disabled={isSavingSpec}
+                        style={{
+                          flex: '1 1 auto',
+                          backgroundColor: 'var(--primary)',
+                          color: 'var(--primary-ink)',
+                          border: 'none',
+                          borderRadius: '6px',
+                          padding: '0.45rem 0.75rem',
+                          fontSize: '0.8rem',
+                          fontWeight: 800,
+                          cursor: isSavingSpec ? 'not-allowed' : 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.35rem',
+                          minHeight: '34px',
+                        }}
+                      >
+                        <PlayIcon size={14} />
+                        <span>Xuất Bản & Dùng Ngay</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setShowQuestionEditor(!showQuestionEditor)}
+                        style={{
+                          backgroundColor: showQuestionEditor ? 'var(--primary-subtle)' : 'var(--bg-input)',
+                          color: showQuestionEditor ? 'var(--primary)' : 'var(--text-primary)',
+                          border: '1px solid var(--border-strong)',
+                          borderRadius: '6px',
+                          padding: '0.45rem 0.65rem',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                          minHeight: '34px',
+                        }}
+                      >
+                        <PencilIcon size={13} />
+                        <span>{showQuestionEditor ? 'Đóng sửa' : 'Sửa câu hỏi'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={handleSaveForLater}
+                        disabled={isSavingSpec}
+                        style={{
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-secondary)',
+                          border: '1px solid var(--border-strong)',
+                          borderRadius: '6px',
+                          padding: '0.45rem 0.65rem',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                          cursor: isSavingSpec ? 'not-allowed' : 'pointer',
+                          minHeight: '34px',
+                        }}
+                        title="Lưu vào Kho Game ở trạng thái Bản nháp"
+                      >
+                        Dùng Sau
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleExportCurrentGame('json')}
+                        style={{
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-muted)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: '6px',
+                          padding: '0.45rem 0.6rem',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          minHeight: '34px',
+                        }}
+                        title="Xuất định dạng JSON"
+                      >
+                        JSON
+                      </button>
+                    </div>
+                  </div>
+                </div>
               )}
             </div>
           )}

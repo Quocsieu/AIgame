@@ -23,6 +23,7 @@ import {
 } from '../components/Icons.js';
 import {
   createRoom,
+  deleteAllSavedGames,
   deleteSavedGame,
   downloadGameExport,
   fetchCurrentUser,
@@ -78,7 +79,7 @@ const formatScoringModeName = (mode: string): string => {
   }
 };
 
-const PAGE_SIZE = 6;
+const PAGE_SIZE = 12;
 
 export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   onSelectSavedGame,
@@ -116,6 +117,28 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   // Xác nhận xóa bộ câu hỏi
   const [confirmDeleteGame, setConfirmDeleteGame] = useState<PersistedGameSummary | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Xác nhận xóa toàn bộ game
+  const [isConfirmDeleteAllOpen, setIsConfirmDeleteAllOpen] = useState(false);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+
+  const handleDeleteAllGames = async () => {
+    setIsDeletingAll(true);
+    try {
+      const res = await deleteAllSavedGames();
+      toast.success(
+        `Đã xóa thành công ${res.deletedCount} bộ câu hỏi${res.skippedActiveCount > 0 ? ` (bỏ qua ${res.skippedActiveCount} game đang hoạt động)` : ''}.`,
+        'Đã xóa tất cả'
+      );
+      setIsConfirmDeleteAllOpen(false);
+      setPage(1);
+      await loadSavedGames(1, searchQuery, selectedTypeFilter, statusFilter);
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể xóa danh sách bộ câu hỏi.', 'Lỗi');
+    } finally {
+      setIsDeletingAll(false);
+    }
+  };
 
   // Modal Chia sẻ Chơi Đơn (Link + QR)
   const [soloShareData, setSoloShareData] = useState<{
@@ -337,8 +360,10 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       }
       setConfirmDeleteGame(null);
       toast.success(`Đã xóa bộ câu hỏi "${targetGame.title}" thành công.`, 'Xóa thành công');
-      // Background sync to ensure consistency
-      loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter).catch(() => {});
+      const remainingOnPage = savedGames.length - 1;
+      const nextPage = page > 1 && remainingOnPage === 0 ? page - 1 : page;
+      setPage(nextPage);
+      loadSavedGames(nextPage, searchQuery, selectedTypeFilter, statusFilter).catch(() => {});
     } catch (err: any) {
       toast.error(
         err.message || 'Không thể xóa bộ câu hỏi. Vui lòng đảm bảo bạn có quyền xóa và bộ câu hỏi không có phòng chơi đang hoạt động.',
@@ -769,6 +794,32 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               }}
             >
               {isLoading ? <SpinnerIcon size={14} /> : <RefreshIcon size={14} />}
+            </button>
+
+            {/* Nút Xóa Tất Cả Game */}
+            <button
+              type="button"
+              onClick={() => setIsConfirmDeleteAllOpen(true)}
+              disabled={isLoading || totalCount === 0}
+              title="Xóa toàn bộ game trong kho"
+              style={{
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                color: 'var(--accent-rose)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                borderRadius: '8px',
+                padding: '0 0.75rem',
+                height: '34px',
+                fontWeight: 700,
+                fontSize: '0.78rem',
+                cursor: isLoading || totalCount === 0 ? 'not-allowed' : 'pointer',
+                opacity: isLoading || totalCount === 0 ? 0.5 : 1,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+              }}
+            >
+              <TrashIcon size={13} />
+              <span>Xóa tất cả</span>
             </button>
           </div>
         </div>
@@ -1609,8 +1660,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
-                  gap: '0.75rem',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(265px, 1fr))',
+                  gap: '0.85rem',
                   alignContent: 'start',
                 }}
               >
@@ -1628,26 +1679,39 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     <div
                       key={g.gameId}
                       style={{
-                        borderRadius: '12px',
+                        borderRadius: '14px',
                         backgroundColor: 'var(--bg-surface)',
                         border: '1px solid var(--border-subtle)',
-                        borderLeft: `3.5px solid ${accentColor}`,
-                        padding: '0.85rem 1rem',
+                        borderLeft: `4px solid ${accentColor}`,
+                        padding: '0.9rem 1.05rem',
                         display: 'flex',
                         flexDirection: 'column',
                         boxSizing: 'border-box',
-                        minHeight: '148px',
+                        minHeight: '146px',
+                        boxShadow: '0 2px 8px rgba(0, 0, 0, 0.15)',
+                        transition: 'transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.transform = 'translateY(-2px)';
+                        e.currentTarget.style.borderColor = 'var(--border-strong)';
+                        e.currentTarget.style.boxShadow = '0 6px 16px rgba(0, 0, 0, 0.25)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.transform = 'translateY(0)';
+                        e.currentTarget.style.borderColor = 'var(--border-subtle)';
+                        e.currentTarget.style.boxShadow = '0 2px 8px rgba(0, 0, 0, 0.15)';
                       }}
                     >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', gap: '0.35rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.45rem', gap: '0.35rem' }}>
                         <span
                           style={{
                             backgroundColor: `${accentColor}18`,
                             color: accentColor,
-                            padding: '0.15rem 0.5rem',
+                            padding: '0.18rem 0.55rem',
                             borderRadius: '6px',
                             fontWeight: 800,
                             fontSize: '0.72rem',
+                            letterSpacing: '0.02em',
                           }}
                         >
                           {formatGameTypeName(g.gameType)}
@@ -1657,7 +1721,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           style={{
                             backgroundColor: g.isPublic ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
                             color: g.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
-                            padding: '0.12rem 0.45rem',
+                            padding: '0.15rem 0.45rem',
                             borderRadius: '6px',
                             fontSize: '0.68rem',
                             fontWeight: 700,
@@ -1666,7 +1730,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             gap: '0.2rem',
                           }}
                         >
-                          {g.isPublic ? <CheckIcon size={10} /> : <PencilIcon size={10} />}
+                          {g.isPublic ? <CheckIcon size={11} /> : <PencilIcon size={11} />}
                           <span>{g.isPublic ? 'Đã xuất bản' : 'Bản nháp'}</span>
                         </span>
                       </div>
@@ -1674,10 +1738,10 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       <h3
                         style={{
                           margin: '0 0 0.35rem 0',
-                          fontSize: '0.95rem',
+                          fontSize: '0.96rem',
                           fontWeight: 800,
                           color: 'var(--text-primary)',
-                          lineHeight: 1.3,
+                          lineHeight: 1.35,
                           display: '-webkit-box',
                           WebkitLineClamp: 2,
                           WebkitBoxOrient: 'vertical',
@@ -1688,11 +1752,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         {g.title}
                       </h3>
 
-                      <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '0.65rem' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.65rem' }}>
                         {g.questionCount ? `${g.questionCount} câu hỏi • ` : ''}Cập nhật: {new Date(g.updatedAt || g.createdAt).toLocaleDateString('vi-VN')}
                       </div>
 
-                      <div style={{ display: 'flex', gap: '0.35rem', marginTop: 'auto', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '0.4rem', marginTop: 'auto', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)', alignItems: 'center' }}>
                         <button
                           type="button"
                           onClick={() => handleOpenModeModal(g.gameId)}
@@ -1701,8 +1765,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             backgroundColor: 'var(--primary)',
                             color: '#ffffff',
                             border: 'none',
-                            borderRadius: '6px',
-                            padding: '0.4rem 0.65rem',
+                            borderRadius: '8px',
+                            padding: '0.4rem 0.75rem',
                             height: '32px',
                             fontWeight: 800,
                             fontSize: '0.8rem',
@@ -1710,7 +1774,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             display: 'inline-flex',
                             alignItems: 'center',
                             justifyContent: 'center',
-                            gap: '0.3rem',
+                            gap: '0.35rem',
+                            transition: 'background-color 0.15s ease',
                           }}
                         >
                           <GamepadIcon size={14} />
@@ -1724,8 +1789,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             backgroundColor: 'var(--bg-input)',
                             color: 'var(--text-primary)',
                             border: '1px solid var(--border-strong)',
-                            borderRadius: '6px',
-                            padding: '0 0.55rem',
+                            borderRadius: '8px',
+                            padding: '0 0.6rem',
                             height: '32px',
                             fontWeight: 700,
                             fontSize: '0.78rem',
@@ -1742,34 +1807,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
 
                         <button
                           type="button"
-                          onClick={() => handleOpenSoloShareModal(g)}
-                          style={{
-                            backgroundColor: 'var(--bg-input)',
-                            color: 'var(--text-secondary)',
-                            border: '1px solid var(--border-strong)',
-                            borderRadius: '6px',
-                            padding: '0 0.55rem',
-                            height: '32px',
-                            fontWeight: 700,
-                            fontSize: '0.78rem',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                          }}
-                          title="Mã QR & Link Chơi Đơn"
-                        >
-                          <QrCodeIcon size={14} />
-                        </button>
-
-                        <button
-                          type="button"
                           onClick={() => handleOpenDeleteModal(g)}
                           style={{
                             backgroundColor: 'rgba(239, 68, 68, 0.1)',
                             color: 'var(--accent-rose)',
                             border: '1px solid rgba(239, 68, 68, 0.25)',
-                            borderRadius: '6px',
-                            padding: '0 0.55rem',
+                            borderRadius: '8px',
+                            padding: '0 0.6rem',
                             height: '32px',
                             fontWeight: 700,
                             fontSize: '0.78rem',
@@ -1955,7 +1999,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           </div>
 
           {/* Thanh phân trang cố định đáy */}
-          {totalCount > PAGE_SIZE && (
+          {totalPages > 1 && (
             <div
               style={{
                 flexShrink: 0,
@@ -1972,46 +2016,86 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
                 Trang {page} / {totalPages} • Tổng {totalCount} bộ câu hỏi
               </span>
-              <div style={{ display: 'flex', gap: '0.4rem' }}>
+              <div style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
                 <button
                   type="button"
                   disabled={page <= 1 || isLoading}
                   onClick={() => handlePageChange(page - 1)}
                   style={{
-                    padding: '0 0.75rem',
-                    height: '32px',
+                    padding: '0 0.65rem',
+                    height: '30px',
                     borderRadius: '6px',
                     border: '1px solid var(--border-strong)',
                     backgroundColor: 'var(--bg-input)',
                     color: page <= 1 ? 'var(--text-muted)' : 'var(--text-primary)',
                     fontWeight: 700,
-                    fontSize: '0.78rem',
+                    fontSize: '0.76rem',
                     cursor: page <= 1 ? 'not-allowed' : 'pointer',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '0.3rem',
+                    gap: '0.25rem',
                   }}
                 >
                   <ArrowLeftIcon size={12} />
                   <span>Trước</span>
                 </button>
+
+                {/* Các nút số trang 1, 2, 3... */}
+                {Array.from({ length: totalPages }, (_, i) => i + 1)
+                  .filter((pNum) => pNum === 1 || pNum === totalPages || Math.abs(pNum - page) <= 2)
+                  .map((pNum, idx, arr) => {
+                    const prev = arr[idx - 1];
+                    const hasGap = prev && pNum - prev > 1;
+                    const isCurrent = pNum === page;
+
+                    return (
+                      <React.Fragment key={pNum}>
+                        {hasGap && (
+                          <span style={{ padding: '0 0.2rem', color: 'var(--text-muted)', fontSize: '0.75rem' }}>...</span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handlePageChange(pNum)}
+                          disabled={isLoading}
+                          style={{
+                            minWidth: '30px',
+                            height: '30px',
+                            padding: '0 0.45rem',
+                            borderRadius: '6px',
+                            border: isCurrent ? '1.5px solid var(--primary)' : '1px solid var(--border-subtle)',
+                            backgroundColor: isCurrent ? 'var(--primary)' : 'var(--bg-input)',
+                            color: isCurrent ? 'var(--primary-ink)' : 'var(--text-primary)',
+                            fontWeight: isCurrent ? 900 : 700,
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          {pNum}
+                        </button>
+                      </React.Fragment>
+                    );
+                  })}
+
                 <button
                   type="button"
-                  disabled={!hasMore || isLoading}
+                  disabled={page >= totalPages || isLoading}
                   onClick={() => handlePageChange(page + 1)}
                   style={{
-                    padding: '0 0.75rem',
-                    height: '32px',
+                    padding: '0 0.65rem',
+                    height: '30px',
                     borderRadius: '6px',
                     border: '1px solid var(--border-strong)',
                     backgroundColor: 'var(--bg-input)',
-                    color: !hasMore ? 'var(--text-muted)' : 'var(--text-primary)',
+                    color: page >= totalPages ? 'var(--text-muted)' : 'var(--text-primary)',
                     fontWeight: 700,
-                    fontSize: '0.78rem',
-                    cursor: !hasMore ? 'not-allowed' : 'pointer',
+                    fontSize: '0.76rem',
+                    cursor: page >= totalPages ? 'not-allowed' : 'pointer',
                     display: 'inline-flex',
                     alignItems: 'center',
-                    gap: '0.3rem',
+                    gap: '0.25rem',
                   }}
                 >
                   <span>Sau</span>
@@ -2497,6 +2581,139 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   <>
                     <TrashIcon size={16} />
                     <span>Xác nhận xóa vĩnh viễn</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Xác Nhận Xóa Toàn Bộ Game */}
+      {isConfirmDeleteAllOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="delete-all-confirm-title"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem',
+            backdropFilter: 'blur(4px)',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '2px solid var(--accent-rose)',
+              borderRadius: '20px',
+              padding: '2rem',
+              maxWidth: '480px',
+              width: '100%',
+              boxShadow: '0 25px 50px -12px rgba(244, 63, 94, 0.35)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '1.25rem' }}>
+              <div
+                style={{
+                  width: '46px',
+                  height: '46px',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                  color: 'var(--accent-rose)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <TrashIcon size={24} />
+              </div>
+              <div>
+                <h3 id="delete-all-confirm-title" style={{ margin: 0, fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                  Xác Nhận Xóa Tất Cả Game
+                </h3>
+                <span style={{ fontSize: '0.78rem', color: 'var(--accent-rose)', fontWeight: 700 }}>
+                  Hành động nguy hiểm • Không thể hoàn tác
+                </span>
+              </div>
+            </div>
+
+            <p style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+              Bạn đang yêu cầu <strong>xóa vĩnh viễn toàn bộ {totalCount} bộ câu hỏi</strong> trong kho game thuộc tài khoản của bạn.
+            </p>
+
+            <div
+              style={{
+                padding: '0.75rem 0.9rem',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                borderRadius: '10px',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                color: 'var(--accent-rose)',
+                fontSize: '0.82rem',
+                lineHeight: 1.45,
+                marginBottom: '1.5rem',
+              }}
+            >
+              ⚠️ <strong>Cảnh báo:</strong> Toàn bộ dữ liệu câu hỏi, đáp án và kết quả liên quan sẽ bị xóa vĩnh viễn khỏi hệ thống database. Các game đang có phòng thi đấu hoặc phiên chơi trực tiếp đang diễn ra sẽ được tự động bỏ qua để tránh gián đoạn người chơi.
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                disabled={isDeletingAll}
+                onClick={() => setIsConfirmDeleteAllOpen(false)}
+                style={{
+                  backgroundColor: 'var(--bg-card)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '10px',
+                  padding: '0.65rem 1.25rem',
+                  minHeight: '44px',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingAll}
+                onClick={handleDeleteAllGames}
+                style={{
+                  backgroundColor: 'var(--accent-rose)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '10px',
+                  padding: '0.65rem 1.35rem',
+                  minHeight: '44px',
+                  fontWeight: 800,
+                  fontSize: '0.9rem',
+                  cursor: isDeletingAll ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  boxShadow: '0 4px 14px rgba(239, 68, 68, 0.4)',
+                }}
+              >
+                {isDeletingAll ? (
+                  <>
+                    <SpinnerIcon size={16} />
+                    <span>Đang xóa toàn bộ...</span>
+                  </>
+                ) : (
+                  <>
+                    <TrashIcon size={16} />
+                    <span>Xác nhận xóa tất cả</span>
                   </>
                 )}
               </button>

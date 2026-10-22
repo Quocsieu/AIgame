@@ -95,9 +95,9 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
         role="radiogroup"
         aria-label="Chọn định dạng game"
         style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '0.65rem',
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+          gap: '0.5rem',
           width: '100%',
         }}
       >
@@ -113,53 +113,57 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '0.65rem',
-                padding: '0.6rem 1rem',
-                minHeight: '44px',
-                borderRadius: '12px',
-                border: isSelected
-                  ? `2px solid ${item.badgeColor}`
-                  : '1.5px solid var(--border-strong)',
+                justifyContent: 'space-between',
+                padding: '0 0.75rem',
+                height: '42px',
+                borderRadius: '10px',
+                border: `2px solid ${isSelected ? item.badgeColor : 'var(--border-subtle)'}`,
                 backgroundColor: isSelected
                   ? 'var(--bg-card-hover)'
                   : 'var(--bg-surface)',
                 color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
                 fontWeight: isSelected ? 800 : 600,
-                fontSize: '0.88rem',
+                fontSize: '0.82rem',
                 cursor: 'pointer',
-                transition: 'all 0.15s ease',
+                transition: 'background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease',
+                boxSizing: 'border-box',
+                outline: 'none',
               }}
             >
-              <span
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: item.badgeColor,
-                }}
-              >
-                {item.icon}
-              </span>
-
-              <span>{item.title}</span>
-
-              {isSelected && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', overflow: 'hidden' }}>
                 <span
                   style={{
-                    width: '18px',
-                    height: '18px',
-                    borderRadius: '50%',
-                    backgroundColor: item.badgeColor,
-                    color: '#ffffff',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    marginLeft: '0.2rem',
+                    color: item.badgeColor,
+                    flexShrink: 0,
                   }}
                 >
-                  <CheckIcon size={12} />
+                  {item.icon}
                 </span>
-              )}
+                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  {item.title}
+                </span>
+              </div>
+
+              <span
+                style={{
+                  width: '18px',
+                  height: '18px',
+                  borderRadius: '50%',
+                  backgroundColor: isSelected ? item.badgeColor : 'transparent',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  marginLeft: '0.35rem',
+                  border: isSelected ? 'none' : '1.5px solid var(--border-subtle)',
+                }}
+              >
+                {isSelected && <CheckIcon size={11} />}
+              </span>
             </button>
           );
         })}
@@ -191,11 +195,9 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
               display: 'flex',
               flexDirection: 'column',
               textAlign: 'left',
-              padding: compact ? '1rem' : '1.25rem',
+              padding: compact ? '0.85rem' : '1.15rem',
               borderRadius: '16px',
-              border: isSelected
-                ? `2px solid ${item.badgeColor}`
-                : '1.5px solid var(--border-subtle)',
+              border: `2px solid ${isSelected ? item.badgeColor : 'var(--border-subtle)'}`,
               backgroundColor: isSelected
                 ? 'var(--bg-card-hover)'
                 : 'var(--bg-surface)',
@@ -203,6 +205,7 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
               transition: 'background-color 0.15s ease, border-color 0.15s ease',
               position: 'relative',
               outline: 'none',
+              boxSizing: 'border-box',
               minHeight: '44px',
             }}
           >
@@ -231,22 +234,21 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                {isSelected && (
-                  <div
-                    style={{
-                      width: '22px',
-                      height: '22px',
-                      borderRadius: '50%',
-                      backgroundColor: item.badgeColor,
-                      color: '#ffffff',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                    }}
-                  >
-                    <CheckIcon size={14} />
-                  </div>
-                )}
+                <div
+                  style={{
+                    width: '22px',
+                    height: '22px',
+                    borderRadius: '50%',
+                    backgroundColor: isSelected ? item.badgeColor : 'transparent',
+                    color: '#ffffff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    border: isSelected ? 'none' : '1.5px solid var(--border-subtle)',
+                  }}
+                >
+                  {isSelected && <CheckIcon size={13} />}
+                </div>
               </div>
             </div>
 

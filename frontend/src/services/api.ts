@@ -298,6 +298,22 @@ export async function deleteSavedGame(gameId: string): Promise<void> {
   }
 }
 
+export async function deleteAllSavedGames(): Promise<{
+  deletedCount: number;
+  skippedActiveCount: number;
+  totalTargeted: number;
+}> {
+  const res = await fetch(`${API_BASE_URL}/games`, {
+    method: 'DELETE',
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể xóa toàn bộ danh sách bộ câu hỏi.');
+  }
+  return data.data;
+}
+
 export async function fetchGameById(
   gameId: string,
   options?: { mode?: 'public' | 'manage' }

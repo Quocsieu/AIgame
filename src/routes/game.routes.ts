@@ -273,6 +273,52 @@ gameRouter.patch('/:gameId/questions', handleUpdateGameSpecification);
 gameRouter.patch('/:gameId', handleUpdateGameSpecification);
 
 /**
+ * DELETE /api/games
+ * Safely deletes all saved game specifications owned by the caller (or all manageable games if admin),
+ * skipping any game currently locked by an active practice session or multiplayer room.
+ */
+gameRouter.delete(
+  '/',
+  gameDeleteRateLimiter.middleware,
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      rejectGuestOrPlayerWrite(req, 'xóa tất cả game');
+
+      const isUserAdmin = req.user?.role === 'ADMIN';
+      const userId = req.user?.userId ?? null;
+
+      const gameIds = persistenceRepo.getGameIdsForUser({
+        userId,
+        isAdmin: isUserAdmin,
+      });
+
+      let deletedCount = 0;
+      let skippedActiveCount = 0;
+
+      for (const gameId of gameIds) {
+        if (sessionStore.hasActiveSessionForGame(gameId) || roomStore.hasActiveRoomForGame(gameId)) {
+          skippedActiveCount++;
+          continue;
+        }
+        gameStore.delete(gameId);
+        deletedCount++;
+      }
+
+      res.status(200).json(
+        createSuccessResponse({
+          deleted: true,
+          deletedCount,
+          skippedActiveCount,
+          totalTargeted: gameIds.length,
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
  * DELETE /api/games/:gameId
  * Safely deletes a saved game specification if owned by the caller and not currently in an active session/room.
  */

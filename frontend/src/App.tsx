@@ -454,34 +454,6 @@ export const AppContent: React.FC = () => {
               {theme === 'dark' ? <SunIcon size={16} /> : <MoonIcon size={16} />}
               <span>{theme === 'dark' ? 'Giao diện Sáng' : 'Giao diện Tối'}</span>
             </button>
-
-            {activeTab !== 'admin' && activeTab !== 'demo' && (
-              <button
-                type="button"
-                onClick={() => {
-                  window.history.replaceState({}, '', '/?tab=admin');
-                  setActiveTab('admin');
-                }}
-                aria-label="Quản trị hệ thống"
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.65rem',
-                  padding: '0.55rem 0.75rem',
-                  borderRadius: '8px',
-                  border: 'none',
-                  backgroundColor: 'transparent',
-                  color: 'var(--text-secondary)',
-                  cursor: 'pointer',
-                  fontSize: '0.85rem',
-                  fontWeight: 600,
-                  width: '100%',
-                }}
-              >
-                <ShieldIcon size={16} />
-                <span>Quản trị Admin</span>
-              </button>
-            )}
           </div>
         </aside>
       )}

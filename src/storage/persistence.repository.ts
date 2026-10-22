@@ -534,6 +534,21 @@ export class PersistenceRepository {
     });
   }
 
+  public getGameIdsForUser(options: { userId: string | null; isAdmin?: boolean }): string[] {
+    const db = getDatabase();
+    if (options.isAdmin) {
+      const rows = db.prepare('SELECT game_id FROM games').all() as { game_id: string }[];
+      return rows.map((r) => String(r.game_id));
+    }
+    if (!options.userId) {
+      // Unauthenticated / guest games where owner_user_id IS NULL or starts with guest_
+      const rows = db.prepare('SELECT game_id FROM games WHERE owner_user_id IS NULL OR owner_user_id LIKE ?').all('guest_%') as { game_id: string }[];
+      return rows.map((r) => String(r.game_id));
+    }
+    const rows = db.prepare('SELECT game_id FROM games WHERE owner_user_id = ?').all(options.userId) as { game_id: string }[];
+    return rows.map((r) => String(r.game_id));
+  }
+
   /**
    * Persists a practice session state / result.
    */
