@@ -4,16 +4,14 @@ import {
   GameSpecificationSchema,
   GenerateGameRequestSchema,
   UpdateGameQuestionsRequestSchema,
-  VerifyGamePasswordRequestSchema,
 } from '../contracts/game.contract.js';
 import { gameStore, sessionStore } from '../game/game.store.js';
-import { gamePasswordVerifyRateLimiter, generateRateLimiter } from '../middleware/rateLimiter.js';
+import { gameDeleteRateLimiter, generateRateLimiter } from '../middleware/rateLimiter.js';
 import { rejectGuestOrPlayerWrite } from '../middleware/auth.middleware.js';
 import { roomStore } from '../multiplayer/room.store.js';
 import { aiQuestionService } from '../services/ai.question.service.js';
 import { authService } from '../services/auth.service.js';
 import { exportService, ExportFormat } from '../services/export.service.js';
-import { gamePasswordService } from '../services/game.password.service.js';
 import { quotaService } from '../services/quota.service.js';
 import { persistenceRepo } from '../storage/persistence.repository.js';
 import { sourceStore } from '../storage/source.store.js';
@@ -137,89 +135,17 @@ gameRouter.post(
         userId: req.user?.userId ?? null,
       });
 
-      // Handle password protection if requested
-      let passwordOptions: { isPasswordProtected?: boolean; passwordHash?: string | null } | undefined;
-      let issuedAccessToken: { token: string; expiresAt: string } | undefined;
-      if (requestData.passwordProtected && requestData.password && requestData.password.trim().length > 0) {
-        const passwordHash = gamePasswordService.hashPassword(requestData.password.trim());
-        passwordOptions = { isPasswordProtected: true, passwordHash };
-        issuedAccessToken = gamePasswordService.issueGameAccessToken(gameSpecification.gameId);
-      } else {
-        passwordOptions = { isPasswordProtected: false, passwordHash: null };
-      }
-
       // Save generated specification in store and SQLite persistence as draft (isPublic = false)
-      gameStore.save(gameSpecification, Date.now(), req.user?.userId ?? null, false, passwordOptions);
+      gameStore.save(gameSpecification, Date.now(), req.user?.userId ?? null, false);
 
       // 6. Return validated GameSpecification
       const savedSpec = gameStore.get(gameSpecification.gameId) || {
         ...gameSpecification,
         ownerUserId: req.user?.userId ?? null,
         isPublic: false,
-        passwordProtected: Boolean(passwordOptions.isPasswordProtected),
       };
       res.status(200).json(
-        createSuccessResponse({
-          ...savedSpec,
-          ...(issuedAccessToken ? { gameAccessToken: issuedAccessToken.token } : {}),
-        })
-      );
-    } catch (err) {
-      next(err);
-    }
-  }
-);
-
-gameRouter.post(
-  '/:gameId/verify-password',
-  gamePasswordVerifyRateLimiter.middleware,
-  (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const gameId = String(req.params.gameId || '').trim();
-      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
-      if (!ownerInfo && !gameStore.has(gameId)) {
-        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
-      }
-
-      const authData = persistenceRepo.getGamePasswordAuthData(gameId);
-      const isProtected = authData?.isPasswordProtected ?? false;
-
-      // If game is not password-protected, verify immediately without requiring a token
-      if (!isProtected) {
-        res.status(200).json(
-          createSuccessResponse({
-            verified: true,
-            gameId,
-            requiresPassword: false,
-            message: 'Bộ câu hỏi này không yêu cầu mật khẩu.',
-          })
-        );
-        return;
-      }
-
-      const parseResult = VerifyGamePasswordRequestSchema.safeParse(req.body);
-      if (!parseResult.success) {
-        const issue = parseResult.error.issues[0]?.message || 'Mật khẩu không được để trống.';
-        throw new AppError('INVALID_REQUEST', issue, 400);
-      }
-
-      const { password } = parseResult.data;
-      const isValid = gamePasswordService.verifyPassword(password, authData?.passwordHash);
-
-      if (!isValid) {
-        throw new AppError('INVALID_CREDENTIALS', 'Mật khẩu bộ câu hỏi không chính xác. Vui lòng thử lại.', 401);
-      }
-
-      const access = gamePasswordService.issueGameAccessToken(gameId);
-
-      res.status(200).json(
-        createSuccessResponse({
-          verified: true,
-          gameId,
-          requiresPassword: true,
-          gameAccessToken: access.token,
-          expiresAt: access.expiresAt,
-        })
+        createSuccessResponse(savedSpec)
       );
     } catch (err) {
       next(err);
@@ -256,43 +182,11 @@ gameRouter.get(
         isPublic,
       });
 
-      const isPasswordProtected = spec.passwordProtected ?? ownerInfo?.passwordProtected ?? false;
-      const hasAccess = !isPasswordProtected || gamePasswordService.hasAccess(req, gameId);
-
-      // If protected and caller has not verified password, return safe public metadata withholding questions & answers
-      if (isPasswordProtected && !hasAccess) {
-        res.status(200).json(
-          createSuccessResponse({
-            gameId: spec.gameId,
-            ownerUserId,
-            isPublic,
-            passwordProtected: true,
-            requiresPassword: true,
-            title: spec.title,
-            description: spec.description,
-            gameType: spec.gameType,
-            settings: {
-              questionCount: spec.settings.questionCount,
-              timePerQuestion: spec.settings.timePerQuestion,
-              scoringMode: spec.settings.scoringMode,
-            },
-            sourceSummary: {
-              sourceCount: spec.sourceSummary.sourceCount,
-              sources: [],
-            },
-            generatedAt: spec.generatedAt,
-            questions: [], // Protected content strictly withheld until password is provided
-          })
-        );
-        return;
-      }
-
       res.status(200).json(
         createSuccessResponse({
           ...spec,
           ownerUserId,
           isPublic,
-          passwordProtected: isPasswordProtected,
         })
       );
     } catch (err) {
@@ -322,59 +216,13 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
       mode: 'write',
     });
 
-    // Enforce per-game password authorization before updating
-    const authData = persistenceRepo.getGamePasswordAuthData(gameId);
-    const isExistingProtected = existing.passwordProtected ?? authData?.isPasswordProtected ?? false;
-
-    if (isExistingProtected && req.user?.role !== 'ADMIN') {
-      const hasTokenAccess = gamePasswordService.hasAccess(req, gameId);
-      const directPassword =
-        (typeof req.headers['x-game-password'] === 'string' && req.headers['x-game-password'].trim()) ||
-        (typeof req.body?.password === 'string' && req.body.password.trim()) ||
-        null;
-      const hasValidPassword = directPassword
-        ? gamePasswordService.verifyPassword(directPassword, authData?.passwordHash)
-        : false;
-
-      if (!hasTokenAccess && !hasValidPassword) {
-        throw new AppError(
-          'UNAUTHORIZED',
-          'Bộ câu hỏi này được bảo vệ bằng mật khẩu. Vui lòng cung cấp mật khẩu hoặc gameAccessToken hợp lệ để chỉnh sửa.',
-          401
-        );
-      }
-    }
-
     const parseResult = UpdateGameQuestionsRequestSchema.safeParse(req.body);
     if (!parseResult.success) {
       const issues = parseResult.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
       throw new AppError('INVALID_REQUEST', `Question validation failed: ${issues}`, 400);
     }
 
-    const { title, description, questions, settings, isPublic, passwordProtected, password, removePassword } = parseResult.data;
-
-    // Handle password update/removal
-    let passwordOptions: { isPasswordProtected?: boolean; passwordHash?: string | null } | undefined;
-    let issuedAccessToken: { token: string; expiresAt: string } | undefined;
-    if (removePassword === true || passwordProtected === false) {
-      passwordOptions = { isPasswordProtected: false, passwordHash: null };
-      gamePasswordService.revokeTokensForGame(gameId);
-    } else if (password && password.trim().length > 0) {
-      const newHash = gamePasswordService.hashPassword(password.trim());
-      passwordOptions = { isPasswordProtected: true, passwordHash: newHash };
-      gamePasswordService.revokeTokensForGame(gameId);
-      issuedAccessToken = gamePasswordService.issueGameAccessToken(gameId);
-    } else if (passwordProtected === true) {
-      const existingAuth = persistenceRepo.getGamePasswordAuthData(gameId);
-      passwordOptions = { isPasswordProtected: true, passwordHash: existingAuth?.passwordHash ?? null };
-    }
-
-    const resolvedProtected =
-      passwordOptions?.isPasswordProtected !== undefined
-        ? passwordOptions.isPasswordProtected
-        : existing.passwordProtected !== undefined
-          ? Boolean(existing.passwordProtected)
-          : false;
+    const { title, description, questions, settings, isPublic } = parseResult.data;
 
     // Ensure all edited questions match the game's type unless gameType is MIXED
     if (existing.gameType !== 'MIXED') {
@@ -395,7 +243,6 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
       ...existing,
       ownerUserId,
       isPublic: resolvedIsPublic,
-      passwordProtected: resolvedProtected,
       title: title !== undefined ? title : existing.title,
       description:
         description !== undefined
@@ -413,12 +260,9 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
       },
     });
 
-    gameStore.save(updatedSpec, Date.now(), ownerUserId, resolvedIsPublic, passwordOptions);
+    gameStore.save(updatedSpec, Date.now(), ownerUserId, resolvedIsPublic);
     res.status(200).json(
-      createSuccessResponse({
-        ...updatedSpec,
-        ...(issuedAccessToken ? { gameAccessToken: issuedAccessToken.token } : {}),
-      })
+      createSuccessResponse(updatedSpec)
     );
   } catch (err) {
     next(err);
@@ -434,6 +278,7 @@ gameRouter.patch('/:gameId', handleUpdateGameSpecification);
  */
 gameRouter.delete(
   '/:gameId',
+  gameDeleteRateLimiter.middleware,
   (req: Request, res: Response, next: NextFunction) => {
     try {
       rejectGuestOrPlayerWrite(req, 'xóa game');
@@ -454,29 +299,6 @@ gameRouter.delete(
         mode: 'write',
       });
 
-      // Enforce per-game password authorization before deleting
-      const authData = persistenceRepo.getGamePasswordAuthData(gameId);
-      const isExistingProtected = existing.passwordProtected ?? authData?.isPasswordProtected ?? false;
-
-      if (isExistingProtected && req.user?.role !== 'ADMIN') {
-        const hasTokenAccess = gamePasswordService.hasAccess(req, gameId);
-        const directPassword =
-          (typeof req.headers['x-game-password'] === 'string' && req.headers['x-game-password'].trim()) ||
-          (typeof req.body?.password === 'string' && req.body.password.trim()) ||
-          null;
-        const hasValidPassword = directPassword
-          ? gamePasswordService.verifyPassword(directPassword, authData?.passwordHash)
-          : false;
-
-        if (!hasTokenAccess && !hasValidPassword) {
-          throw new AppError(
-            'UNAUTHORIZED',
-            'Bộ câu hỏi này được bảo vệ bằng mật khẩu. Vui lòng cung cấp mật khẩu hoặc gameAccessToken hợp lệ để xóa.',
-            401
-          );
-        }
-      }
-
       if (sessionStore.hasActiveSessionForGame(gameId) || roomStore.hasActiveRoomForGame(gameId)) {
         throw new AppError(
           'GAME_IN_USE',
@@ -486,7 +308,6 @@ gameRouter.delete(
       }
 
       gameStore.delete(gameId);
-      gamePasswordService.revokeTokensForGame(gameId);
       res.status(200).json(
         createSuccessResponse({
           deleted: true,
@@ -569,15 +390,6 @@ gameRouter.get(
       const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
       const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
 
-      const isPasswordProtected = spec.passwordProtected ?? ownerInfo?.passwordProtected ?? false;
-      if (isPasswordProtected && !gamePasswordService.hasAccess(req, gameId)) {
-        throw new AppError(
-          'PASSWORD_REQUIRED',
-          'Bộ câu hỏi này được bảo vệ bằng mật khẩu. Vui lòng xác thực mật khẩu trước khi xuất dữ liệu.',
-          401
-        );
-      }
-
       authService.assertResourceAccess({
         resourceType: 'bộ câu hỏi',
         ownerUserId,
@@ -613,15 +425,6 @@ gameRouter.get(
       const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
       const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
       const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
-
-      const isPasswordProtected = spec.passwordProtected ?? ownerInfo?.passwordProtected ?? false;
-      if (isPasswordProtected && !gamePasswordService.hasAccess(req, gameId)) {
-        throw new AppError(
-          'PASSWORD_REQUIRED',
-          'Bộ câu hỏi này được bảo vệ bằng mật khẩu. Vui lòng xác thực mật khẩu trước khi xuất dữ liệu.',
-          401
-        );
-      }
 
       authService.assertResourceAccess({
         resourceType: 'lịch sử bộ câu hỏi',

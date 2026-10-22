@@ -25,8 +25,6 @@ export class MultiplayerRoom {
   public state: RoomState = 'WAITING';
   public isLocked: boolean = false;
   public readonly capacity: number;
-  public readonly isPasswordProtected: boolean;
-  public readonly passwordHash: string | null;
   public currentQuestionIndex: number = 0;
   public questionStartedAt: number | null = null;
   public questionDeadlineAt: number | null = null;
@@ -54,9 +52,6 @@ export class MultiplayerRoom {
     this.hostToken = hostToken;
     this.ownerUserId = ownerUserId ?? gameSpecification.ownerUserId ?? null;
     this.capacity = capacity;
-    this.isPasswordProtected = Boolean(gameSpecification.passwordProtected);
-    const authData = persistenceRepo.getGamePasswordAuthData(gameSpecification.gameId);
-    this.passwordHash = authData?.passwordHash ?? null;
     this.createdAt = Date.now();
     this.updatedAt = Date.now();
   }
@@ -501,7 +496,6 @@ export class MultiplayerRoom {
       title: this.gameSpecification.title,
       gameType: this.gameSpecification.gameType,
       totalQuestions: this.gameSpecification.questions.length,
-      passwordProtected: this.isPasswordProtected,
     };
   }
 }

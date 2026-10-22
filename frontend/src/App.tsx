@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from 'react';
-import { GamePasswordModal } from './components/GamePasswordModal.js';
 import { ToastProvider } from './components/ToastContext.js';
 import {
   AlertTriangleIcon,
@@ -22,10 +21,11 @@ import { HostPage } from './pages/HostPage.js';
 import { JoinPage } from './pages/JoinPage.js';
 import { PlayPage } from './pages/PlayPage.js';
 import { SoloPlayer } from './components/SoloPlayer.js';
+import { SoloPresentationPage } from './pages/SoloPresentationPage.js';
 import { fetchCurrentUser, fetchGameById } from './services/api.js';
 import type { AuthenticatedUser, GameSpecification, GameType } from './types/index.js';
 
-type Tab = 'home' | 'demo' | 'analytics' | 'host' | 'join' | 'play' | 'admin';
+type Tab = 'home' | 'demo' | 'analytics' | 'host' | 'join' | 'play' | 'admin' | 'solo-present';
 
 export const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('home');
@@ -38,12 +38,9 @@ export const AppContent: React.FC = () => {
   const [selectedSavedSpec, setSelectedSavedSpec] = useState<GameSpecification | null>(null);
   const [soloGameId, setSoloGameId] = useState<string | null>(null);
   const [soloGameSpec, setSoloGameSpec] = useState<GameSpecification | null>(null);
-  const [autoStartSoloPlay, setAutoStartSoloPlay] = useState(false);
   const [soloPlayLoading, setSoloPlayLoading] = useState(false);
   const [soloPlayError, setSoloPlayError] = useState<string | null>(null);
-  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
-  const [protectedGameId, setProtectedGameId] = useState('');
-  const [protectedGameTitle, setProtectedGameTitle] = useState('');
+  const [autoStartSoloPlay, setAutoStartSoloPlay] = useState(false);
 
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
     try {
@@ -96,6 +93,21 @@ export const AppContent: React.FC = () => {
       )
     ) {
       setSelectedGameType(typeParam);
+    }
+
+    const soloPresentGameId = (params.get('gameId') || '').trim();
+    if (tab === 'solo-present' && (soloPresentGameId || playGameId)) {
+      const gid = soloPresentGameId || playGameId;
+      setSoloGameId(gid);
+      fetchGameById(gid, { mode: 'manage' })
+        .then((spec) => {
+          setSoloGameSpec(spec);
+          setActiveTab('solo-present');
+        })
+        .catch(() => {
+          setActiveTab('analytics');
+        });
+      return;
     }
 
     if (playGameId) {
@@ -151,17 +163,10 @@ export const AppContent: React.FC = () => {
     setSoloPlayError(null);
     fetchGameById(gameId, { mode: 'public' })
       .then((spec) => {
-        if (spec.passwordProtected && (!spec.questions || spec.questions.length === 0)) {
-          setProtectedGameId(gameId);
-          setProtectedGameTitle(spec.title);
-          setAutoStartSoloPlay(true);
-          setIsPasswordModalOpen(true);
-        } else {
-          setSoloGameId(gameId);
-          setSoloGameSpec(spec);
-          window.history.replaceState({}, '', `/?play=${gameId}`);
-          setActiveTab('play');
-        }
+        setSoloGameId(gameId);
+        setSoloGameSpec(spec);
+        window.history.replaceState({}, '', `/?play=${gameId}`);
+        setActiveTab('play');
       })
       .catch((err: any) => {
         setSoloPlayError(
@@ -186,6 +191,13 @@ export const AppContent: React.FC = () => {
       );
     } catch {}
     setActiveTab('host');
+  };
+
+  const handleNavigateToSoloPresentation = (spec: GameSpecification) => {
+    setSoloGameId(spec.gameId);
+    setSoloGameSpec(spec);
+    window.history.replaceState({}, '', `/?tab=solo-present&gameId=${spec.gameId}`);
+    setActiveTab('solo-present');
   };
 
   const handleNavigateToPlayFromDemo = (code: string) => {
@@ -221,13 +233,6 @@ export const AppContent: React.FC = () => {
 
   const handleSelectSavedGame = (spec: GameSpecification, startSolo: boolean = false) => {
     setSoloPlayError(null);
-    if (spec.passwordProtected && (!spec.questions || spec.questions.length === 0)) {
-      setProtectedGameId(spec.gameId);
-      setProtectedGameTitle(spec.title);
-      setAutoStartSoloPlay(startSolo);
-      setIsPasswordModalOpen(true);
-      return;
-    }
     if (startSolo) {
       setSoloGameId(spec.gameId);
       setSoloGameSpec(spec);
@@ -237,28 +242,6 @@ export const AppContent: React.FC = () => {
       setSelectedSavedSpec(spec);
       window.history.replaceState({}, '', '/?tab=demo');
       setActiveTab('demo');
-    }
-  };
-
-  const handlePasswordVerified = async () => {
-    if (!protectedGameId) return;
-    setSoloPlayLoading(true);
-    try {
-      const fullSpec = await fetchGameById(protectedGameId, { mode: 'public' });
-      if (autoStartSoloPlay) {
-        setSoloGameId(protectedGameId);
-        setSoloGameSpec(fullSpec);
-        window.history.replaceState({}, '', `/?play=${protectedGameId}`);
-        setActiveTab('play');
-      } else {
-        setSelectedSavedSpec(fullSpec);
-        window.history.replaceState({}, '', '/?tab=demo');
-        setActiveTab('demo');
-      }
-    } catch (err: any) {
-      setSoloPlayError(err.message || 'Không thể tải câu hỏi sau khi xác thực mật khẩu.');
-    } finally {
-      setSoloPlayLoading(false);
     }
   };
 
@@ -283,8 +266,14 @@ export const AppContent: React.FC = () => {
     { id: 'home' as Tab, label: 'Khám Phá', icon: <HomeIcon size={17} /> },
     { id: 'demo' as Tab, label: 'Tạo Game', icon: <SparklesIcon size={17} /> },
     { id: 'analytics' as Tab, label: 'Kho Game', icon: <BookOpenIcon size={17} /> },
-    { id: 'join' as Tab, label: 'Nhập PIN', icon: <GamepadIcon size={17} /> },
   ];
+
+  const isPlayerMode =
+    activeTab === 'play' ||
+    activeTab === 'join' ||
+    activeTab === 'host' ||
+    activeTab === 'solo-present' ||
+    autoStartSoloPlay;
 
   return (
     <div
@@ -296,254 +285,212 @@ export const AppContent: React.FC = () => {
         flexDirection: 'column',
       }}
     >
-      {/* 1. TOP NAVBAR (Sticky Kahoot-Style App Header) */}
-      <nav
-        aria-label="Điều hướng chính"
-        style={{
-          backgroundColor: 'var(--bg-surface)',
-          borderBottom: '1px solid var(--border-subtle)',
-          padding: '0.65rem 1.25rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: '1rem',
-          boxShadow: 'var(--shadow-sm)',
-          position: 'sticky',
-          top: 0,
-          zIndex: 100,
-          backdropFilter: 'blur(10px)',
-        }}
-      >
-        {/* Brand Logo & Title */}
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label="Về trang chủ"
+      {/* FIXED LEFT-SIDE NAVIGATION (the9bit Cyber Dock for Management Pages on Desktop >= 768px) */}
+      {!isPlayerMode && (
+        <aside
+          aria-label="Điều hướng hệ thống"
+          className="app-layout-left-nav"
           style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            bottom: 0,
+            width: '220px',
+            backgroundColor: 'var(--bg-surface)',
+            borderRight: '1px solid var(--border-subtle)',
             display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            cursor: 'pointer',
-            userSelect: 'none',
-          }}
-          onClick={() => {
-            setSoloPlayError(null);
-            setAutoStartSoloPlay(false);
-            window.history.replaceState({}, '', '/');
-            setActiveTab('home');
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter' || e.key === ' ') {
-              e.preventDefault();
-              setSoloPlayError(null);
-              setAutoStartSoloPlay(false);
-              window.history.replaceState({}, '', '/');
-              setActiveTab('home');
-            }
+            flexDirection: 'column',
+            justifyContent: 'space-between',
+            padding: '1.5rem 1rem',
+            zIndex: 100,
+            boxSizing: 'border-box',
           }}
         >
-          <div
-            style={{
-              width: '38px',
-              height: '38px',
-              borderRadius: '10px',
-              background: 'linear-gradient(135deg, var(--primary) 0%, var(--accent-sky) 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: '#ffffff',
-              boxShadow: 'var(--btn-shadow)',
-              flexShrink: 0,
-            }}
-          >
-            <SparklesIcon size={20} />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: '0.35rem' }}>
-            <span
-              style={{
-                fontWeight: 900,
-                fontSize: '1.18rem',
-                letterSpacing: '-0.03em',
-                color: 'var(--text-primary)',
-              }}
-            >
-              AI GAME
-            </span>
-            <span
-              style={{
-                fontWeight: 800,
-                fontSize: '0.78rem',
-                letterSpacing: '0.08em',
-                color: 'var(--primary)',
-                textTransform: 'uppercase',
-              }}
-            >
-              SHOW
-            </span>
-          </div>
-        </div>
-
-        {/* Desktop Navigation Links (>= 768px) */}
-        {!autoStartSoloPlay && (
-          <div
-            role="tablist"
-            aria-label="Các trang chính"
-            className="desktop-nav"
-            style={{
-              display: 'flex',
-              gap: '0.3rem',
-              backgroundColor: 'var(--bg-input)',
-              padding: '0.25rem',
-              borderRadius: '12px',
-              border: '1px solid var(--border-subtle)',
-            }}
-          >
-            {navItems.map((item) => {
-              const isSelected = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  role="tab"
-                  aria-selected={isSelected}
-                  type="button"
-                  onClick={() => {
-                    setSoloPlayError(null);
-                    setAutoStartSoloPlay(false);
-                    window.history.replaceState({}, '', `/?tab=${item.id}`);
-                    setActiveTab(item.id);
-                  }}
-                  style={{
-                    padding: '0.45rem 0.85rem',
-                    borderRadius: '8px',
-                    border: 'none',
-                    backgroundColor: isSelected ? 'var(--primary)' : 'transparent',
-                    color: isSelected ? '#ffffff' : 'var(--text-secondary)',
-                    fontWeight: isSelected ? 800 : 700,
-                    fontSize: '0.86rem',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.4rem',
-                    boxShadow: isSelected ? 'var(--btn-shadow)' : 'none',
-                    minHeight: '38px',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  {item.icon}
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Solo Play Exit Banner */}
-        {autoStartSoloPlay && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <span
-              style={{
-                fontSize: '0.82rem',
-                fontWeight: 800,
-                padding: '0.35rem 0.75rem',
-                borderRadius: '8px',
-                backgroundColor: 'rgba(14, 165, 233, 0.15)',
-                color: '#0ea5e9',
-                border: '1px solid #0ea5e9',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-              }}
-            >
-              <GamepadIcon size={16} />
-              <span>Chế Độ Chơi Đơn</span>
-            </span>
-            <button
-              type="button"
+          {/* Top: Brand Header & Main Nav Tabs */}
+          <div>
+            <div
+              role="button"
+              tabIndex={0}
+              aria-label="Về trang chủ"
               onClick={() => {
-                setAutoStartSoloPlay(false);
-                setSelectedSavedSpec(null);
                 setSoloPlayError(null);
+                setAutoStartSoloPlay(false);
                 window.history.replaceState({}, '', '/');
                 setActiveTab('home');
               }}
-              style={{
-                padding: '0.4rem 0.75rem',
-                borderRadius: '8px',
-                border: '1px solid var(--border-strong)',
-                backgroundColor: 'var(--bg-input)',
-                color: 'var(--text-secondary)',
-                fontSize: '0.82rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                minHeight: '38px',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.35rem',
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  setSoloPlayError(null);
+                  setAutoStartSoloPlay(false);
+                  window.history.replaceState({}, '', '/');
+                  setActiveTab('home');
+                }
               }}
-            >
-              <XMarkIcon size={14} />
-              <span>Thoát</span>
-            </button>
-          </div>
-        )}
-
-        {/* Right Section: Theme Toggle & Admin Link */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          {/* Nút chuyển đổi Theme (Sáng / Tối) */}
-          <button
-            type="button"
-            onClick={toggleTheme}
-            aria-label={theme === 'dark' ? 'Chuyển sang giao diện Sáng' : 'Chuyển sang giao diện Tối'}
-            title={theme === 'dark' ? 'Giao diện Sáng' : 'Giao diện Tối'}
-            style={{
-              padding: '0.5rem',
-              borderRadius: '10px',
-              border: '1px solid var(--border-strong)',
-              backgroundColor: 'var(--bg-input)',
-              color: 'var(--text-primary)',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              minWidth: '40px',
-              minHeight: '40px',
-            }}
-          >
-            {theme === 'dark' ? <SunIcon size={18} /> : <MoonIcon size={18} />}
-          </button>
-
-          {/* Nút tắt Quản trị Admin */}
-          {activeTab !== 'admin' && (
-            <button
-              type="button"
-              onClick={() => {
-                window.history.replaceState({}, '', '/?tab=admin');
-                setActiveTab('admin');
-              }}
-              aria-label="Bảng điều khiển Quản trị viên"
-              title="Quản trị hệ thống (Admin Panel)"
               style={{
-                padding: '0.5rem',
-                borderRadius: '10px',
-                border: '1px solid var(--border-subtle)',
-                backgroundColor: 'transparent',
-                color: 'var(--text-muted)',
-                cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                justifyContent: 'center',
-                minWidth: '40px',
-                minHeight: '40px',
+                gap: '0.65rem',
+                cursor: 'pointer',
+                marginBottom: '2rem',
+                padding: '0.25rem 0.5rem',
+                userSelect: 'none',
               }}
             >
-              <ShieldIcon size={18} />
-            </button>
-          )}
-        </div>
-      </nav>
+              <div
+                style={{
+                  width: '34px',
+                  height: '34px',
+                  borderRadius: '8px',
+                  backgroundColor: 'var(--bg-elevated)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--primary)',
+                  flexShrink: 0,
+                }}
+              >
+                <SparklesIcon size={18} />
+              </div>
+              <div>
+                <div
+                  style={{
+                    fontWeight: 900,
+                    fontSize: '1rem',
+                    letterSpacing: '-0.02em',
+                    color: 'var(--text-primary)',
+                    lineHeight: 1.1,
+                  }}
+                >
+                  9BIT AI GAME
+                </div>
+                <div
+                  style={{
+                    fontWeight: 700,
+                    fontSize: '0.82rem',
+                    color: 'var(--text-secondary)',
+                    letterSpacing: '0.04em',
+                    textTransform: 'uppercase',
+                  }}
+                >
+                  STUDIO PLATFORM
+                </div>
+              </div>
+            </div>
 
-      {/* 2. MAIN CONTENT AREA */}
-      <main style={{ flex: 1, paddingBottom: '4rem' }}>
+            {/* Vertical Tab Navigation */}
+            <nav
+              aria-label="Các trang chính"
+              style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}
+            >
+              {navItems.map((item) => {
+                const isSelected = activeTab === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setSoloPlayError(null);
+                      setAutoStartSoloPlay(false);
+                      window.history.replaceState({}, '', `/?tab=${item.id}`);
+                      setActiveTab(item.id);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      padding: '0.65rem 0.85rem',
+                      borderRadius: '10px',
+                      border: 'none',
+                      backgroundColor: isSelected ? 'var(--bg-elevated)' : 'transparent',
+                      color: isSelected ? 'var(--primary)' : 'var(--text-secondary)',
+                      fontWeight: isSelected ? 800 : 600,
+                      fontSize: '0.9rem',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      width: '100%',
+                      transition: 'all 0.15s ease',
+                      minHeight: '40px',
+                    }}
+                  >
+                    {item.icon}
+                    <span>{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Bottom: Theme Toggle & Admin Settings */}
+          <div
+            style={{
+              paddingTop: '1rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.5rem',
+            }}
+          >
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={
+                theme === 'dark' ? 'Chuyển sang giao diện Sáng' : 'Chuyển sang giao diện Tối'
+              }
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.65rem',
+                padding: '0.55rem 0.75rem',
+                borderRadius: '8px',
+                border: 'none',
+                backgroundColor: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                cursor: 'pointer',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+                width: '100%',
+              }}
+            >
+              {theme === 'dark' ? <SunIcon size={16} /> : <MoonIcon size={16} />}
+              <span>{theme === 'dark' ? 'Giao diện Sáng' : 'Giao diện Tối'}</span>
+            </button>
+
+            {activeTab !== 'admin' && activeTab !== 'demo' && (
+              <button
+                type="button"
+                onClick={() => {
+                  window.history.replaceState({}, '', '/?tab=admin');
+                  setActiveTab('admin');
+                }}
+                aria-label="Quản trị hệ thống"
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.65rem',
+                  padding: '0.55rem 0.75rem',
+                  borderRadius: '8px',
+                  border: 'none',
+                  backgroundColor: 'transparent',
+                  color: 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  width: '100%',
+                }}
+              >
+                <ShieldIcon size={16} />
+                <span>Quản trị Admin</span>
+              </button>
+            )}
+          </div>
+        </aside>
+      )}
+
+      {/* MAIN CONTENT AREA */}
+      <main
+        className={isPlayerMode ? '' : 'app-main-content-with-nav'}
+        style={{ flex: 1 }}
+      >
         {soloPlayLoading && (
           <div
             role="status"
@@ -635,6 +582,10 @@ export const AppContent: React.FC = () => {
                   window.history.replaceState({}, '', '/?tab=admin');
                   setActiveTab('admin');
                 }}
+                onNavigateToJoin={() => {
+                  window.history.replaceState({}, '', '/?tab=play');
+                  setActiveTab('play');
+                }}
               />
             )}
 
@@ -648,6 +599,7 @@ export const AppContent: React.FC = () => {
                   window.history.replaceState({}, '', `/?play=${spec.gameId}`);
                   setActiveTab('play');
                 }}
+                onNavigateToSoloPresentation={handleNavigateToSoloPresentation}
                 initialSpec={selectedSavedSpec}
                 initialGameType={selectedGameType}
                 onNavigateToLibrary={() => {
@@ -665,6 +617,7 @@ export const AppContent: React.FC = () => {
               <AnalyticsPage
                 onSelectSavedGame={handleSelectSavedGame}
                 onNavigateToHost={handleNavigateToHost}
+                onNavigateToSoloPresentation={handleNavigateToSoloPresentation}
               />
             )}
 
@@ -708,6 +661,23 @@ export const AppContent: React.FC = () => {
               )
             )}
 
+            {activeTab === 'solo-present' && (
+              <SoloPresentationPage
+                gameSpec={soloGameSpec}
+                gameId={soloGameId || undefined}
+                onStartPlay={(spec) => {
+                  setSoloGameId(spec.gameId);
+                  setSoloGameSpec(spec);
+                  window.history.replaceState({}, '', `/?play=${spec.gameId}`);
+                  setActiveTab('play');
+                }}
+                onBack={() => {
+                  window.history.replaceState({}, '', '/?tab=analytics');
+                  setActiveTab('analytics');
+                }}
+              />
+            )}
+
             {activeTab === 'admin' && (
               <AdminPage
                 currentUser={currentUser}
@@ -722,8 +692,8 @@ export const AppContent: React.FC = () => {
         )}
       </main>
 
-      {/* 3. MOBILE BOTTOM NAVIGATION (Kahoot-style Mobile Bar for screens < 768px) */}
-      {!autoStartSoloPlay && activeTab !== 'play' && (
+      {/* 3. MOBILE BOTTOM NAVIGATION (the9bit Cyber Dock for screens < 768px) */}
+      {!isPlayerMode && (
         <nav
           aria-label="Điều hướng di động"
           className="mobile-bottom-nav"
@@ -733,14 +703,11 @@ export const AppContent: React.FC = () => {
             left: 0,
             right: 0,
             backgroundColor: 'var(--bg-surface)',
-            borderTop: '1px solid var(--border-subtle)',
             padding: '0.4rem 0.5rem calc(0.4rem + env(safe-area-inset-bottom, 0px))',
             display: 'flex',
             justifyContent: 'space-around',
             alignItems: 'center',
             zIndex: 90,
-            boxShadow: '0 -4px 16px rgba(0, 0, 0, 0.08)',
-            backdropFilter: 'blur(10px)',
           }}
         >
           {navItems.map((item) => {
@@ -763,11 +730,11 @@ export const AppContent: React.FC = () => {
                   justifyContent: 'center',
                   gap: '0.2rem',
                   padding: '0.35rem 0.2rem',
-                  border: 'none',
-                  backgroundColor: isSelected ? 'rgba(99, 102, 241, 0.1)' : 'transparent',
-                  borderRadius: '8px',
-                  color: isSelected ? 'var(--primary)' : 'var(--text-muted)',
-                  fontSize: '0.72rem',
+                  border: isSelected ? '1px solid var(--border-strong)' : '1px solid transparent',
+                  backgroundColor: isSelected ? 'var(--bg-elevated)' : 'transparent',
+                  borderRadius: '10px',
+                  color: isSelected ? 'var(--primary)' : 'var(--text-secondary)',
+                  fontSize: '0.74rem',
                   fontWeight: isSelected ? 800 : 600,
                   cursor: 'pointer',
                   minHeight: '44px',
@@ -780,23 +747,6 @@ export const AppContent: React.FC = () => {
           })}
         </nav>
       )}
-
-      {/* 4. MODAL BẢO VỆ MẬT KHẨU BỘ CÂU HỎI */}
-      <GamePasswordModal
-        isOpen={isPasswordModalOpen}
-        gameId={protectedGameId}
-        gameTitle={protectedGameTitle}
-        onClose={() => {
-          setIsPasswordModalOpen(false);
-          setProtectedGameId('');
-          setProtectedGameTitle('');
-          setAutoStartSoloPlay(false);
-        }}
-        onSuccess={() => {
-          setIsPasswordModalOpen(false);
-          handlePasswordVerified();
-        }}
-      />
     </div>
   );
 };

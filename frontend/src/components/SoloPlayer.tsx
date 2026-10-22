@@ -13,6 +13,9 @@ import {
 import {
   advancePracticeSession,
   createPracticeSession,
+  fetchPracticeResult,
+  fetchPracticeSessionQuestion,
+  fetchPracticeSessionSummary,
   startPracticeSession,
   submitPracticeAnswer,
 } from '../services/api.js';
@@ -54,6 +57,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
   const timerRef = useRef<number | null>(null);
 
+  const handleLeave = () => {
+    const targetGameId = gameId || initialSpec?.gameId;
+    if (targetGameId) sessionStorage.removeItem(`active_solo_session_${targetGameId}`);
+    onLeave();
+  };
+
   const stopTimer = () => {
     if (timerRef.current) {
       window.clearInterval(timerRef.current);
@@ -87,6 +96,41 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     setPlayerStreak(0);
     stopTimer();
 
+    const targetGameId = gameId || initialSpec?.gameId;
+    const sessionKey = targetGameId ? `active_solo_session_${targetGameId}` : null;
+    const savedSessionId = sessionKey ? sessionStorage.getItem(sessionKey) : null;
+
+    // Reload recovery: check if previous in-progress session exists
+    if (savedSessionId) {
+      try {
+        const summary = await fetchPracticeSessionSummary(savedSessionId);
+        if (summary.state === 'FINISHED') {
+          const res = await fetchPracticeResult(savedSessionId);
+          setSessionId(savedSessionId);
+          setFinalResult(res);
+          setIsLoading(false);
+          return;
+        } else if (
+          summary.state === 'IN_PROGRESS' ||
+          summary.state === 'QUESTION_ACTIVE' ||
+          summary.state === 'QUESTION_ANSWERED'
+        ) {
+          const q = await fetchPracticeSessionQuestion(savedSessionId);
+          setSessionId(savedSessionId);
+          setCurrentQuestion(q);
+          setPlayerScore(summary.score || 0);
+          setPlayerStreak(summary.currentStreak || 0);
+          const questionTime = q.timePerQuestion || 20;
+          startCountdown(questionTime);
+          setIsLoading(false);
+          return;
+        }
+      } catch {
+        // Stale or abandoned session in storage, clear and recreate
+        if (sessionKey) sessionStorage.removeItem(sessionKey);
+      }
+    }
+
     try {
       let activeSessionId: string;
 
@@ -104,6 +148,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       }
 
       setSessionId(activeSessionId);
+      if (sessionKey) {
+        sessionStorage.setItem(sessionKey, activeSessionId);
+      }
       const startRes = await startPracticeSession(activeSessionId);
       setCurrentQuestion(startRes.question);
       const questionTime = startRes.question.timePerQuestion || 20;
@@ -163,6 +210,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         setFinalResult(advanceRes.result);
         setCurrentQuestion(null);
         stopTimer();
+        const targetGameId = gameId || initialSpec?.gameId;
+        if (targetGameId) sessionStorage.removeItem(`active_solo_session_${targetGameId}`);
       } else if (advanceRes.question) {
         setCurrentQuestion(advanceRes.question);
         const qTime = advanceRes.question.timePerQuestion || 20;
@@ -264,7 +313,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           </button>
           <button
             type="button"
-            onClick={onLeave}
+            onClick={handleLeave}
             style={{
               minHeight: '44px',
               padding: '0.65rem 1.25rem',
@@ -317,13 +366,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             width: '68px',
             height: '68px',
             borderRadius: '20px',
-            background: 'linear-gradient(135deg, #f59e0b, #ef4444)',
+            backgroundColor: 'var(--accent-amber)',
             color: '#ffffff',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
             marginBottom: '1.25rem',
-            boxShadow: '0 8px 20px rgba(245, 158, 11, 0.3)',
           }}
         >
           <TrophyIcon size={34} />
@@ -405,14 +453,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               borderRadius: '12px',
               border: 'none',
               backgroundColor: 'var(--primary)',
-              color: '#ffffff',
+              color: 'var(--primary-ink)',
               fontWeight: 800,
               fontSize: '0.95rem',
               cursor: 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
               gap: '0.5rem',
-              boxShadow: 'var(--btn-shadow)',
+              boxShadow: '0 0 16px var(--primary-subtle)',
             }}
           >
             <RefreshIcon size={18} />
@@ -421,7 +469,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
           <button
             type="button"
-            onClick={onLeave}
+            onClick={handleLeave}
             style={{
               minHeight: '48px',
               padding: '0.75rem 1.5rem',
@@ -533,7 +581,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           {/* Leave Button */}
           <button
             type="button"
-            onClick={onLeave}
+            onClick={handleLeave}
             title="Thoát trận đấu"
             style={{
               minHeight: '40px',
@@ -654,14 +702,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 borderRadius: '12px',
                 border: 'none',
                 backgroundColor: 'var(--primary)',
-                color: '#ffffff',
+                color: 'var(--primary-ink)',
                 fontWeight: 800,
                 fontSize: '0.95rem',
                 cursor: 'pointer',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '0.5rem',
-                boxShadow: 'var(--btn-shadow)',
+                boxShadow: '0 0 16px var(--primary-subtle)',
               }}
             >
               <span>Tiếp Tục Câu Kế Tiếp</span>
@@ -681,8 +729,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 }}
               >
                 {currentQuestion.choices.map((opt: string, idx: number) => {
-                  const kahootColors = ['#ef4444', '#0ea5e9', '#f59e0b', '#10b981'];
-                  const color = kahootColors[idx % 4];
+                  const configs = [
+                    { bg: 'var(--k-red)', dark: 'var(--k-red-dark)', icon: '▲', label: 'A', text: '#ffffff' },
+                    { bg: 'var(--k-blue)', dark: 'var(--k-blue-dark)', icon: '◆', label: 'B', text: '#ffffff' },
+                    { bg: 'var(--k-yellow)', dark: 'var(--k-yellow-dark)', icon: '●', label: 'C', text: 'var(--k-yellow-ink)' },
+                    { bg: 'var(--k-green)', dark: 'var(--k-green-dark)', icon: '■', label: 'D', text: '#ffffff' },
+                  ];
+                  const cfg = configs[idx % 4];
                   const isSelected = selectedChoice === opt;
 
                   return (
@@ -694,25 +747,47 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                         setSelectedChoice(opt);
                         handleSubmitAnswer(opt);
                       }}
+                      className="k-btn"
                       style={{
-                        padding: '1.25rem 1rem',
-                        minHeight: '64px',
+                        padding: '1.15rem 1.25rem',
+                        minHeight: '68px',
                         borderRadius: '16px',
-                        border: isSelected ? `3px solid #ffffff` : `2px solid transparent`,
-                        backgroundColor: color,
-                        color: '#ffffff',
-                        fontWeight: 800,
+                        border: isSelected ? '3px solid #ffffff' : 'none',
+                        backgroundColor: cfg.bg,
+                        color: cfg.text,
+                        fontWeight: 900,
                         fontSize: '1.05rem',
                         cursor: isSubmitting ? 'not-allowed' : 'pointer',
                         display: 'flex',
                         alignItems: 'center',
-                        justifyContent: 'center',
-                        textAlign: 'center',
-                        boxShadow: '0 6px 16px rgba(0, 0, 0, 0.15)',
-                        transition: 'transform 0.12s ease, opacity 0.12s ease',
+                        justifyContent: 'flex-start',
+                        textAlign: 'left',
+                        gap: '0.85rem',
+                        boxShadow: isSelected
+                          ? `0 2px 0 ${cfg.dark}`
+                          : `0 5px 0 ${cfg.dark}`,
+                        transform: isSelected ? 'translateY(3px)' : 'none',
+                        transition: 'transform 0.1s ease, box-shadow 0.1s ease',
                       }}
                     >
-                      {opt}
+                      <span
+                        style={{
+                          width: '36px',
+                          height: '36px',
+                          borderRadius: '10px',
+                          backgroundColor: 'rgba(0, 0, 0, 0.2)',
+                          color: '#ffffff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 900,
+                          fontSize: '1.15rem',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {cfg.icon}
+                      </span>
+                      <span style={{ flex: 1, wordBreak: 'break-word', lineHeight: 1.35 }}>{opt}</span>
                     </button>
                   );
                 })}
@@ -734,37 +809,43 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                   type="button"
                   disabled={isSubmitting}
                   onClick={() => handleSubmitAnswer('Đúng')}
+                  className="k-btn k-btn-green"
                   style={{
-                    minHeight: '72px',
+                    minHeight: '74px',
                     borderRadius: '18px',
                     border: 'none',
-                    backgroundColor: '#10b981',
-                    color: '#ffffff',
                     fontWeight: 900,
                     fontSize: '1.35rem',
                     cursor: isSubmitting ? 'not-allowed' : 'pointer',
-                    boxShadow: '0 6px 16px rgba(16, 185, 129, 0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.65rem',
                   }}
                 >
-                  ✓ ĐÚNG
+                  <CheckIcon size={26} />
+                  <span>ĐÚNG</span>
                 </button>
                 <button
                   type="button"
                   disabled={isSubmitting}
                   onClick={() => handleSubmitAnswer('Sai')}
+                  className="k-btn k-btn-red"
                   style={{
-                    minHeight: '72px',
+                    minHeight: '74px',
                     borderRadius: '18px',
                     border: 'none',
-                    backgroundColor: '#ef4444',
-                    color: '#ffffff',
                     fontWeight: 900,
                     fontSize: '1.35rem',
                     cursor: isSubmitting ? 'not-allowed' : 'pointer',
-                    boxShadow: '0 6px 16px rgba(239, 68, 68, 0.3)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.65rem',
                   }}
                 >
-                  ✕ SAI
+                  <XMarkIcon size={26} />
+                  <span>SAI</span>
                 </button>
               </div>
             )}

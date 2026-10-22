@@ -7,15 +7,16 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   CheckIcon,
+  CopyIcon,
+  EyeIcon,
+  EyeOffIcon,
   FlameIcon,
   GamepadIcon,
   InfoIcon,
-  LockIcon,
   PlayIcon,
   QrCodeIcon,
   RefreshIcon,
   TrophyIcon,
-  UnlockIcon,
   UsersIcon,
 } from '../components/Icons.js';
 import type { LeaderboardEntry, SanitizedQuestion } from '../types/index.js';
@@ -55,7 +56,8 @@ export const HostPage: React.FC<HostPageProps> = ({
       ? 'lobby'
       : 'setup'
   );
-  const [isPresentationMode, setIsPresentationMode] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [isLinkVisible, setIsLinkVisible] = useState<boolean>(true);
 
   const [players, setPlayers] = useState<Array<{ id: string; displayName: string }>>([]);
   const [currentQuestion, setCurrentQuestion] = useState<SanitizedQuestion | null>(null);
@@ -301,7 +303,7 @@ export const HostPage: React.FC<HostPageProps> = ({
   const handleToggleLock = () => {
     if (socketRef.current) {
       socketRef.current.send({
-        type: isLocked ? 'host.unlock' : 'host.lock',
+        type: isLocked ? 'host.unlock' : 'host.lock', // taste-skill-ignore: protocol message
       });
     }
   };
@@ -340,7 +342,6 @@ export const HostPage: React.FC<HostPageProps> = ({
       sessionStorage.removeItem('active_host_room');
       sessionStorage.removeItem('active_host_token');
     } catch {}
-    setIsPresentationMode(false);
     setRoomCode('');
     setHostToken('');
     setPlayers([]);
@@ -359,16 +360,16 @@ export const HostPage: React.FC<HostPageProps> = ({
     handleRestart();
   };
 
-  // Kahoot color config for 4 choices (A: Red, B: Blue, C: Amber, D: Emerald)
+  // Kahoot color config for 4 choices (A: Red, B: Blue, C: Yellow, D: Green)
   const choiceColors = [
-    { bg: '#ef4444', border: '#dc2626', icon: '▲', label: 'A' },
-    { bg: '#2563eb', border: '#1d4ed8', icon: '◆', label: 'B' },
-    { bg: '#f59e0b', border: '#d97706', icon: '●', label: 'C' },
-    { bg: '#10b981', border: '#059669', icon: '■', label: 'D' },
+    { bg: 'var(--k-red)', dark: 'var(--k-red-dark)', border: 'var(--k-red-dark)', icon: '▲', label: 'A', text: '#ffffff' },
+    { bg: 'var(--k-blue)', dark: 'var(--k-blue-dark)', border: 'var(--k-blue-dark)', icon: '◆', label: 'B', text: '#ffffff' },
+    { bg: 'var(--k-yellow)', dark: 'var(--k-yellow-dark)', border: 'var(--k-yellow-dark)', icon: '●', label: 'C', text: 'var(--k-yellow-ink)' },
+    { bg: 'var(--k-green)', dark: 'var(--k-green-dark)', border: 'var(--k-green-dark)', icon: '■', label: 'D', text: '#ffffff' },
   ];
 
   return (
-    <div style={{ maxWidth: isPresentationMode ? '1180px' : '1050px', margin: '0 auto', padding: '0.75rem 0.5rem 2rem 0.5rem' }}>
+    <div style={{ maxWidth: '1180px', margin: '0 auto', padding: '0.75rem 0.5rem 2rem 0.5rem' }}>
       {/* Reconnect & Connection Status Banners */}
       {connectionStatus === 'reconnecting' && (
         <div
@@ -433,112 +434,6 @@ export const HostPage: React.FC<HostPageProps> = ({
             <RefreshIcon size={14} /> Kết nối lại
           </button>
         </div>
-      )}
-
-      {/* Host Top Header (Shown in Normal Admin Mode) */}
-      {!isPresentationMode && (
-        <header
-          style={{
-            marginBottom: '1.5rem',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '1rem',
-            padding: '1.25rem 1.5rem',
-            backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '16px',
-            boxShadow: 'var(--card-shadow)',
-          }}
-        >
-          <div>
-            <h1 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.65rem', fontWeight: 900, letterSpacing: '-0.02em' }}>
-              Bảng Điều Khiển Chủ Phòng
-            </h1>
-          </div>
-
-          {viewState === 'lobby' && (
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
-              <button
-                type="button"
-                onClick={handleToggleLock}
-                style={{
-                  backgroundColor: isLocked ? 'rgba(244, 63, 94, 0.15)' : 'var(--bg-card)',
-                  color: isLocked ? 'var(--accent-rose)' : 'var(--text-secondary)',
-                  border: isLocked ? '1px solid var(--accent-rose)' : '1px solid var(--border-strong)',
-                  borderRadius: '10px',
-                  padding: '0.7rem 1.15rem',
-                  fontSize: '0.92rem',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  minHeight: '44px',
-                }}
-              >
-                {isLocked ? (
-                  <>
-                    <LockIcon size={16} /> Phòng đang khóa
-                  </>
-                ) : (
-                  <>
-                    <UnlockIcon size={16} /> Khóa phòng
-                  </>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsPresentationMode(true)}
-                style={{
-                  backgroundColor: 'var(--bg-card)',
-                  color: 'var(--accent-sky)',
-                  border: '1px solid var(--border-strong)',
-                  borderRadius: '10px',
-                  padding: '0.7rem 1.25rem',
-                  fontSize: '0.95rem',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-                  transition: 'all 0.15s ease',
-                  minHeight: '44px',
-                }}
-              >
-                <GamepadIcon size={16} /> Chế độ trình chiếu
-              </button>
-
-              <button
-                type="button"
-                onClick={handleStartGame}
-                disabled={players.length === 0}
-                style={{
-                  backgroundColor: players.length === 0 ? 'var(--border-strong)' : '#16a34a',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '10px',
-                  padding: '0.7rem 1.5rem',
-                  fontSize: '0.95rem',
-                  fontWeight: 800,
-                  cursor: players.length === 0 ? 'not-allowed' : 'pointer',
-                  boxShadow: players.length === 0 ? 'none' : '0 4px 14px rgba(22, 163, 74, 0.4)',
-                  transition: 'all 0.15s ease',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  minHeight: '44px',
-                }}
-              >
-                <span>Bắt đầu trận đấu</span>
-                <ArrowRightIcon size={16} />
-              </button>
-            </div>
-          )}
-        </header>
       )}
 
       {/* 1. Màn hình Khởi tạo Phòng Chơi (Setup Screen) */}
@@ -623,7 +518,6 @@ export const HostPage: React.FC<HostPageProps> = ({
                   fontWeight: 800,
                   cursor: isCreatingRoom ? 'not-allowed' : 'pointer',
                   fontSize: '0.95rem',
-                  boxShadow: 'var(--btn-shadow)',
                   opacity: isCreatingRoom ? 0.7 : 1,
                   transition: 'all 0.15s ease',
                   minHeight: '44px',
@@ -636,8 +530,8 @@ export const HostPage: React.FC<HostPageProps> = ({
         </div>
       )}
 
-      {/* 2. Màn hình Sảnh Chờ (Lobby) — Chế độ TRÌNH CHIẾU / GAME SHOW (Presentation Mode) */}
-      {viewState === 'lobby' && isPresentationMode && (
+      {/* 2. Màn hình Sảnh Chờ (Lobby) — Chế độ TRÌNH CHIẾU / GAME SHOW */}
+      {viewState === 'lobby' && (
         <div
           style={{
             backgroundColor: 'var(--bg-surface)',
@@ -663,7 +557,7 @@ export const HostPage: React.FC<HostPageProps> = ({
           >
             <button
               type="button"
-              onClick={() => setIsPresentationMode(false)}
+              onClick={handleRestart}
               style={{
                 backgroundColor: 'var(--bg-card)',
                 color: 'var(--text-secondary)',
@@ -679,10 +573,10 @@ export const HostPage: React.FC<HostPageProps> = ({
                 minHeight: '44px',
               }}
             >
-              <ArrowLeftIcon size={16} /> Bảng điều khiển
+              <ArrowLeftIcon size={16} /> Quay về Kho Game
             </button>
 
-            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+            <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 onClick={handleToggleFullscreen}
@@ -714,7 +608,6 @@ export const HostPage: React.FC<HostPageProps> = ({
                   fontWeight: 800,
                   fontSize: '1rem',
                   cursor: players.length === 0 ? 'not-allowed' : 'pointer',
-                  boxShadow: players.length === 0 ? 'none' : '0 4px 18px rgba(22, 163, 74, 0.45)',
                   transition: 'all 0.15s ease',
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -732,18 +625,14 @@ export const HostPage: React.FC<HostPageProps> = ({
           <h1
             style={{
               color: 'var(--accent-sky)',
-              fontSize: 'clamp(2.2rem, 5vw, 3.2rem)',
+              fontSize: 'clamp(2rem, 4vw, 2.8rem)',
               fontWeight: 900,
-              margin: '0 0 0.5rem 0',
-              textTransform: 'uppercase',
-              letterSpacing: '2px',
+              margin: '0 0 1.5rem 0',
+              letterSpacing: '-0.02em',
             }}
           >
-            SẴN SÀNG THAM GIA?
+            {gameTitle || 'Phòng Thi Đấu'}
           </h1>
-          <p style={{ color: 'var(--text-secondary)', fontSize: 'clamp(1rem, 2.5vw, 1.25rem)', margin: '0 0 2rem 0' }}>
-            {gameTitle || 'Quét mã QR bằng điện thoại hoặc nhập mã phòng để bắt đầu tranh tài'}
-          </p>
 
           {/* Khu vực trung tâm: Mã Phòng Lớn & QR Lớn */}
           <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap', gap: '3rem', margin: '2rem 0' }}>
@@ -778,9 +667,139 @@ export const HostPage: React.FC<HostPageProps> = ({
                   border: '1px solid var(--border-subtle)',
                 }}
               >
-                <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '0.35rem' }}>Đường dẫn tham gia:</div>
-                <div style={{ color: 'var(--accent-sky)', fontWeight: 700, fontSize: '1.05rem', wordBreak: 'break-all' }}>
-                  {joinUrl || `${window.location.origin}/?room=${roomCode}`}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '0.35rem',
+                  }}
+                >
+                  <span
+                    style={{
+                      color: 'var(--text-muted)',
+                      fontSize: '0.85rem',
+                      fontWeight: 800,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.05em',
+                    }}
+                  >
+                    Đường dẫn tham gia:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsLinkVisible(!isLinkVisible)}
+                    style={{
+                      backgroundColor: 'transparent',
+                      color: 'var(--text-secondary)',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: '6px',
+                      padding: '0.2rem 0.55rem',
+                      fontSize: '0.76rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.3rem',
+                    }}
+                  >
+                    {isLinkVisible ? (
+                      <>
+                        <EyeOffIcon size={13} />
+                        <span>Ẩn link</span>
+                      </>
+                    ) : (
+                      <>
+                        <EyeIcon size={13} />
+                        <span>Hiện link</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                {isLinkVisible ? (
+                  <div
+                    style={{
+                      color: 'var(--accent-sky)',
+                      fontWeight: 700,
+                      fontSize: '1rem',
+                      wordBreak: 'break-all',
+                      fontFamily: 'monospace',
+                      backgroundColor: 'var(--bg-input)',
+                      padding: '0.5rem 0.75rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-strong)',
+                      marginBottom: '0.75rem',
+                    }}
+                  >
+                    {joinUrl || `${window.location.origin}/?room=${roomCode}`}
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      color: 'var(--text-muted)',
+                      fontStyle: 'italic',
+                      fontSize: '0.84rem',
+                      backgroundColor: 'var(--bg-input)',
+                      padding: '0.5rem 0.75rem',
+                      borderRadius: '8px',
+                      border: '1px dashed var(--border-strong)',
+                      marginBottom: '0.75rem',
+                    }}
+                  >
+                    Liên kết đang được ẩn. Quét mã QR hoặc nhập mã phòng để vào.
+                  </div>
+                )}
+
+                <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = joinUrl || `${window.location.origin}/?room=${roomCode}`;
+                      navigator.clipboard.writeText(url);
+                      setCopiedLink(true);
+                      toast.success('Đã sao chép liên kết phòng vào clipboard!', 'Đã chép link');
+                      setTimeout(() => setCopiedLink(false), 2500);
+                    }}
+                    style={{
+                      flex: '1 1 130px',
+                      backgroundColor: copiedLink ? 'var(--accent-emerald)' : 'var(--accent-sky)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0.55rem 0.85rem',
+                      fontWeight: 800,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    {copiedLink ? <CheckIcon size={14} /> : <CopyIcon size={14} />}
+                    <span>{copiedLink ? 'Đã sao chép!' : 'Sao chép link'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const url = joinUrl || `${window.location.origin}/?room=${roomCode}`;
+                      window.open(url, '_blank');
+                    }}
+                    style={{
+                      flex: '1 1 130px',
+                      backgroundColor: 'transparent',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: '8px',
+                      padding: '0.55rem 0.85rem',
+                      fontWeight: 700,
+                      fontSize: '0.85rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Mở tab người chơi ↗
+                  </button>
                 </div>
               </div>
             </div>
@@ -803,19 +822,20 @@ export const HostPage: React.FC<HostPageProps> = ({
                     style={{ width: 'clamp(220px, 28vw, 280px)', height: 'clamp(220px, 28vw, 280px)', display: 'block' }}
                   />
                 </div>
-                <div style={{ color: 'var(--text-primary)', fontWeight: 700, fontSize: '1.05rem', marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
-                  <QrCodeIcon size={20} /> Quét mã bằng camera điện thoại
+                <div style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '1.05rem', marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
+                  <QrCodeIcon size={20} style={{ color: 'var(--accent-sky)' }} />
+                  <span>Quét mã để vào phòng</span>
                 </div>
               </div>
             )}
           </div>
 
           {/* Thanh trạng thái & Bộ đếm người chơi */}
-          <div style={{ margin: '2.5rem 0 1rem 0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+          <div style={{ margin: '2rem 0 1rem 0', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
             <div
               style={{
                 backgroundColor: 'var(--bg-card)',
-                padding: '0.65rem 1.75rem',
+                padding: '0.55rem 1.5rem',
                 borderRadius: '30px',
                 border: '1px solid var(--border-strong)',
                 display: 'inline-flex',
@@ -823,13 +843,9 @@ export const HostPage: React.FC<HostPageProps> = ({
                 gap: '0.65rem',
               }}
             >
-              <UsersIcon size={20} style={{ color: 'var(--accent-sky)' }} />
-              <span style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--accent-sky)' }}>{players.length}</span>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>/ 300 người chơi</span>
-            </div>
-
-            <div style={{ color: players.length === 0 ? 'var(--text-muted)' : 'var(--accent-emerald)', fontSize: '1.05rem', fontWeight: 700 }}>
-              {players.length === 0 ? 'Đang chờ người chơi tham gia...' : 'Đang chờ người chủ trì bấm bắt đầu...'}
+              <UsersIcon size={18} style={{ color: 'var(--accent-sky)' }} />
+              <span style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--accent-sky)' }}>{players.length}</span>
+              <span style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>người đã vào</span>
             </div>
           </div>
 
@@ -868,7 +884,6 @@ export const HostPage: React.FC<HostPageProps> = ({
                     fontWeight: 700,
                     fontSize: '0.95rem',
                     color: 'var(--text-primary)',
-                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
                     animation: 'popIn 0.25s ease-out',
                   }}
                 >
@@ -881,193 +896,6 @@ export const HostPage: React.FC<HostPageProps> = ({
         </div>
       )}
 
-      {/* 2. Màn hình Sảnh Chờ (Lobby) — Chế độ QUẢN TRỊ (Admin Mode) */}
-      {viewState === 'lobby' && !isPresentationMode && (
-        <div
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '20px',
-            padding: '1.5rem',
-            boxShadow: 'var(--card-shadow)',
-          }}
-        >
-          {/* Header row */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border-subtle)', marginBottom: '1.25rem' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span style={{ backgroundColor: 'rgba(56, 189, 248, 0.12)', color: 'var(--accent-sky)', padding: '0.25rem 0.65rem', borderRadius: '8px', fontSize: '0.8rem', fontWeight: 800 }}>
-                PHÒNG CHƠI
-              </span>
-              <h2 style={{ margin: 0, color: 'var(--text-primary)', fontSize: '1.35rem', fontWeight: 800 }}>
-                {gameTitle || 'Sảnh Chờ Trò Chơi'}
-              </h2>
-            </div>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>
-                Sức chứa: <strong style={{ color: 'var(--text-primary)' }}>300 người</strong>
-              </span>
-              <span
-                style={{
-                  backgroundColor: players.length === 0 ? 'var(--bg-card)' : 'rgba(16, 185, 129, 0.15)',
-                  color: players.length === 0 ? 'var(--text-muted)' : 'var(--accent-emerald)',
-                  border: players.length === 0 ? '1px solid var(--border-subtle)' : '1px solid rgba(16, 185, 129, 0.3)',
-                  padding: '0.3rem 0.85rem',
-                  borderRadius: '20px',
-                  fontSize: '0.8rem',
-                  fontWeight: 700,
-                }}
-              >
-                {players.length === 0 ? 'Đang chờ người tham gia' : `Sẵn sàng (${players.length} người)`}
-              </span>
-            </div>
-          </div>
-
-          {/* 2-column layout */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '1.5rem', alignItems: 'stretch' }}>
-            {/* Left Col: Room ID & QR */}
-            <div
-              style={{
-                backgroundColor: 'var(--bg-card)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '16px',
-                padding: '1.25rem',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-                gap: '1rem',
-              }}
-            >
-              <div>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.08em', display: 'block', marginBottom: '0.35rem' }}>
-                  MÃ PHÒNG THI ĐẤU
-                </span>
-                <div
-                  style={{
-                    fontSize: '2.2rem',
-                    fontWeight: 900,
-                    letterSpacing: '0.12em',
-                    color: 'var(--accent-sky)',
-                    padding: '0.4rem 1.25rem',
-                    borderRadius: '12px',
-                    display: 'inline-block',
-                    border: '2px dashed var(--accent-sky)',
-                    backgroundColor: 'var(--bg-input)',
-                  }}
-                >
-                  {roomCode}
-                </div>
-              </div>
-
-              {qrDataUrl && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <div style={{ padding: '8px', backgroundColor: 'white', borderRadius: '12px', display: 'inline-block', flexShrink: 0 }}>
-                    <img src={qrDataUrl} alt="Mã QR tham gia phòng" style={{ width: '100px', height: '100px', display: 'block' }} />
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: '1.45', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <QrCodeIcon size={18} /> Quét mã bằng camera điện thoại để tham gia ngay
-                  </div>
-                </div>
-              )}
-
-              <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
-                Đường dẫn tham gia:<br />
-                <span style={{ color: 'var(--accent-sky)', wordBreak: 'break-all', fontWeight: 700 }}>
-                  {joinUrl || `${window.location.origin}/?room=${roomCode}`}
-                </span>
-              </div>
-            </div>
-
-            {/* Right Col: Player roster & Actions */}
-            <div
-              style={{
-                backgroundColor: 'var(--bg-card)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '16px',
-                padding: '1.25rem',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'space-between',
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-                  <span style={{ fontSize: '0.9rem', color: 'var(--text-primary)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                    <UsersIcon size={16} /> Danh sách người chơi ({players.length}):
-                  </span>
-                  <span style={{ fontSize: '0.8rem', color: players.length === 0 ? 'var(--text-muted)' : 'var(--accent-emerald)', fontWeight: 600 }}>
-                    {players.length === 0 ? 'Chưa có ai tham gia' : 'Đang trực tuyến'}
-                  </span>
-                </div>
-
-                <div
-                  style={{
-                    height: '180px',
-                    overflowY: 'auto',
-                    display: 'flex',
-                    flexWrap: 'wrap',
-                    alignContent: 'flex-start',
-                    gap: '0.5rem',
-                    padding: '0.75rem',
-                    backgroundColor: 'var(--bg-input)',
-                    borderRadius: '12px',
-                    border: '1px solid var(--border-subtle)',
-                  }}
-                >
-                  {players.length === 0 ? (
-                    <div style={{ color: 'var(--text-muted)', fontStyle: 'italic', fontSize: '0.85rem', margin: 'auto' }}>
-                      Đang đợi người chơi quét mã QR hoặc nhập mã {roomCode}...
-                    </div>
-                  ) : (
-                    players.map((p) => (
-                      <span
-                        key={p.id}
-                        style={{
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.35rem',
-                          padding: '0.35rem 0.85rem',
-                          backgroundColor: 'var(--bg-surface)',
-                          border: '1px solid var(--border-strong)',
-                          borderRadius: '16px',
-                          fontWeight: 600,
-                          fontSize: '0.85rem',
-                          color: 'var(--text-primary)',
-                        }}
-                      >
-                        <UsersIcon size={14} style={{ color: 'var(--text-muted)' }} />
-                        <span>{p.displayName}</span>
-                      </span>
-                    ))
-                  )}
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem' }}>
-                <button
-                  type="button"
-                  onClick={handleRestart}
-                  style={{
-                    backgroundColor: 'transparent',
-                    color: 'var(--text-muted)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '8px',
-                    padding: '0.55rem 1.15rem',
-                    fontSize: '0.85rem',
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                    transition: 'all 0.15s ease',
-                    minHeight: '44px',
-                  }}
-                >
-                  Hủy / Tạo phòng khác
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* 3. Màn hình Câu hỏi đang diễn ra (Question Screen) */}
       {viewState === 'question' && currentQuestion && (
         <div
@@ -1075,7 +903,7 @@ export const HostPage: React.FC<HostPageProps> = ({
             backgroundColor: 'var(--bg-surface)',
             border: '1px solid var(--border-subtle)',
             borderRadius: '20px',
-            padding: isPresentationMode ? '2.5rem' : '1.75rem',
+            padding: '2.5rem',
             boxShadow: 'var(--card-shadow)',
           }}
         >
@@ -1085,7 +913,7 @@ export const HostPage: React.FC<HostPageProps> = ({
               style={{
                 color: 'var(--accent-sky)',
                 fontWeight: 900,
-                fontSize: isPresentationMode ? '1.4rem' : '1.15rem',
+                fontSize: '1.4rem',
                 backgroundColor: 'rgba(56, 189, 248, 0.12)',
                 padding: '0.35rem 0.85rem',
                 borderRadius: '8px',
@@ -1105,7 +933,7 @@ export const HostPage: React.FC<HostPageProps> = ({
               }}
             >
               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 800 }}>Thời gian còn lại</div>
-              <div style={{ fontSize: isPresentationMode ? '2.5rem' : '2rem', fontWeight: 900, color: timeRemaining <= 5 ? '#ef4444' : 'var(--accent-sky)' }}>
+              <div style={{ fontSize: '2.5rem', fontWeight: 900, color: timeRemaining <= 5 ? '#ef4444' : 'var(--accent-sky)' }}>
                 {timeRemaining}s
               </div>
             </div>
@@ -1116,10 +944,10 @@ export const HostPage: React.FC<HostPageProps> = ({
             style={{
               margin: '1rem 0 2rem 0',
               color: 'var(--text-primary)',
-              fontSize: isPresentationMode ? 'clamp(1.6rem, 3.5vw, 2.4rem)' : '1.45rem',
+              fontSize: 'clamp(1.6rem, 3.5vw, 2.4rem)',
               lineHeight: 1.4,
               fontWeight: 900,
-              textAlign: isPresentationMode ? 'center' : 'left',
+              textAlign: 'center',
             }}
           >
             {currentQuestion.question}
@@ -1129,7 +957,7 @@ export const HostPage: React.FC<HostPageProps> = ({
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: isPresentationMode ? 'repeat(2, 1fr)' : 'repeat(auto-fit, minmax(280px, 1fr))',
+              gridTemplateColumns: 'repeat(2, 1fr)',
               gap: '1rem',
             }}
           >
@@ -1139,36 +967,36 @@ export const HostPage: React.FC<HostPageProps> = ({
                 <div
                   key={idx}
                   style={{
-                    backgroundColor: 'var(--bg-card)',
-                    padding: isPresentationMode ? '1.5rem' : '1.15rem',
-                    borderRadius: '14px',
-                    fontSize: isPresentationMode ? '1.25rem' : '1.05rem',
-                    color: 'var(--text-primary)',
-                    border: `2px solid ${config.bg}`,
+                    backgroundColor: config.bg,
+                    padding: '1.5rem 1.75rem',
+                    borderRadius: '18px',
+                    fontSize: '1.35rem',
+                    color: config.text,
+                    border: 'none',
                     display: 'flex',
                     alignItems: 'center',
                     gap: '1rem',
-                    boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                    boxShadow: `0 5px 0 ${config.dark}`,
                   }}
                 >
                   <span
                     style={{
-                      width: isPresentationMode ? '44px' : '36px',
-                      height: isPresentationMode ? '44px' : '36px',
-                      borderRadius: '10px',
-                      backgroundColor: config.bg,
+                      width: '48px',
+                      height: '48px',
+                      borderRadius: '12px',
+                      backgroundColor: 'rgba(0, 0, 0, 0.2)',
                       color: '#ffffff',
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'center',
                       fontWeight: 900,
-                      fontSize: isPresentationMode ? '1.2rem' : '1rem',
+                      fontSize: '1.35rem',
                       flexShrink: 0,
                     }}
                   >
                     {config.icon}
                   </span>
-                  <span style={{ fontWeight: 700, wordBreak: 'break-word' }}>{choice}</span>
+                  <span style={{ fontWeight: 800, wordBreak: 'break-word', lineHeight: 1.35 }}>{choice}</span>
                 </div>
               );
             })}
@@ -1333,7 +1161,6 @@ export const HostPage: React.FC<HostPageProps> = ({
                 fontSize: '1.05rem',
                 fontWeight: 800,
                 cursor: 'pointer',
-                boxShadow: 'var(--btn-shadow)',
                 transition: 'all 0.15s ease',
                 minHeight: '44px',
                 display: 'inline-flex',
@@ -1439,7 +1266,6 @@ export const HostPage: React.FC<HostPageProps> = ({
                 fontSize: '1.05rem',
                 fontWeight: 800,
                 cursor: 'pointer',
-                boxShadow: 'var(--btn-shadow)',
                 transition: 'all 0.15s ease',
                 minHeight: '44px',
                 display: 'inline-flex',

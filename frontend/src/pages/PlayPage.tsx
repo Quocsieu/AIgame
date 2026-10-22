@@ -6,6 +6,7 @@ import {
   AlertTriangleIcon,
   CheckIcon,
   ClockIcon,
+  FlameIcon,
   GamepadIcon,
   SparklesIcon,
   SpinnerIcon,
@@ -285,12 +286,12 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   const timerPercentage = totalQuestionTime > 0 ? Math.max(0, (timeRemaining / totalQuestionTime) * 100) : 0;
   const isUrgentTime = timeRemaining <= 5;
 
-  // Kahoot color config for 4 choices (A: Red, B: Blue, C: Amber, D: Emerald)
+  // Kahoot color config for 4 choices (A: Red, B: Blue, C: Yellow, D: Green)
   const choiceColors = [
-    { bg: '#ef4444', hover: '#dc2626', icon: '▲', label: 'A' },
-    { bg: '#2563eb', hover: '#1d4ed8', icon: '◆', label: 'B' },
-    { bg: '#f59e0b', hover: '#d97706', icon: '●', label: 'C' },
-    { bg: '#10b981', hover: '#059669', icon: '■', label: 'D' },
+    { bg: 'var(--k-red)', dark: 'var(--k-red-dark)', hover: 'var(--k-red-hover)', icon: '▲', label: 'A', text: '#ffffff' },
+    { bg: 'var(--k-blue)', dark: 'var(--k-blue-dark)', hover: 'var(--k-blue-hover)', icon: '◆', label: 'B', text: '#ffffff' },
+    { bg: 'var(--k-yellow)', dark: 'var(--k-yellow-dark)', hover: 'var(--k-yellow-hover)', icon: '●', label: 'C', text: 'var(--k-yellow-ink)' },
+    { bg: 'var(--k-green)', dark: 'var(--k-green-dark)', hover: 'var(--k-green-hover)', icon: '■', label: 'D', text: '#ffffff' },
   ];
 
   if (roomError) {
@@ -429,12 +430,11 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               width: '42px',
               height: '42px',
               borderRadius: '12px',
-              background: 'linear-gradient(135deg, var(--primary), var(--accent-sky))',
+              backgroundColor: 'var(--primary)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               color: '#ffffff',
-              boxShadow: '0 4px 10px rgba(37, 99, 235, 0.3)',
             }}
           >
             <GamepadIcon size={22} />
@@ -497,7 +497,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               height: '80px',
               margin: '0 auto 1.25rem auto',
               borderRadius: '24px',
-              background: 'linear-gradient(135deg, rgba(37, 99, 235, 0.15), rgba(56, 189, 248, 0.15))',
+              backgroundColor: 'var(--primary-subtle)',
               border: '1px solid var(--border-strong)',
               display: 'flex',
               alignItems: 'center',
@@ -636,7 +636,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 style={{
                   display: 'grid',
                   gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                  gap: '0.85rem',
+                  gap: '1rem',
                 }}
               >
                 {currentQuestion.choices?.map((choice, idx) => {
@@ -652,52 +652,64 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                         setAnswerError(null);
                         setSelectedAnswer(prev => (prev === choice ? null : choice));
                       }}
+                      className="k-btn"
                       style={{
                         width: '100%',
                         textAlign: 'left',
-                        padding: '1rem 1.15rem',
-                        backgroundColor: isSelected ? config.bg : 'var(--bg-card)',
-                        color: isSelected ? '#ffffff' : 'var(--text-primary)',
-                        border: isSelected ? '2px solid #ffffff' : `2px solid ${config.bg}`,
-                        outline: isSelected ? `2px solid ${config.bg}` : 'none',
-                        outlineOffset: '2px',
-                        borderRadius: '14px',
-                        fontSize: '1rem',
-                        fontWeight: isSelected ? 800 : 700,
+                        padding: '1.1rem 1.25rem',
+                        backgroundColor: config.bg,
+                        color: config.text,
+                        border: isSelected ? '3px solid #ffffff' : 'none',
+                        borderRadius: '16px',
+                        fontSize: '1.05rem',
+                        fontWeight: 900,
                         cursor: isAnswerSubmitted || isSubmittingAnswer ? 'not-allowed' : 'pointer',
-                        opacity: (isAnswerSubmitted || isSubmittingAnswer) && !isSelected ? 0.45 : 1,
-                        transition: 'background-color 0.15s ease, border-color 0.15s ease',
+                        opacity: (isAnswerSubmitted || isSubmittingAnswer) && !isSelected ? 0.35 : 1,
                         display: 'flex',
                         alignItems: 'center',
                         gap: '0.85rem',
-                        minHeight: '52px',
+                        minHeight: '64px',
                         boxShadow: isSelected
-                          ? `0 0 16px ${config.bg}80, 0 4px 12px rgba(0,0,0,0.25)`
-                          : '0 2px 8px rgba(0,0,0,0.08)',
+                          ? `0 2px 0 ${config.dark}`
+                          : `0 5px 0 ${config.dark}`,
+                        transform: isSelected ? 'translateY(3px)' : 'none',
+                        transition: 'transform 0.1s ease, box-shadow 0.1s ease, opacity 0.15s ease',
                       }}
                     >
                       <span
                         style={{
-                          width: '36px',
-                          height: '36px',
+                          width: '38px',
+                          height: '38px',
                           borderRadius: '10px',
-                          backgroundColor: isSelected ? 'rgba(255, 255, 255, 0.25)' : config.bg,
+                          backgroundColor: 'rgba(0, 0, 0, 0.2)',
                           color: '#ffffff',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           fontWeight: 900,
-                          fontSize: '1.05rem',
+                          fontSize: '1.15rem',
                           flexShrink: 0,
-                          boxShadow: '0 2px 6px rgba(0,0,0,0.2)',
                         }}
                       >
                         {config.icon}
                       </span>
                       <span style={{ flex: 1, wordBreak: 'break-word', lineHeight: 1.35 }}>{choice}</span>
                       {isSelected && (
-                        <span style={{ display: 'flex', alignItems: 'center' }}>
-                          <CheckIcon size={20} />
+                        <span
+                          style={{
+                            width: '28px',
+                            height: '28px',
+                            borderRadius: '50%',
+                            backgroundColor: '#ffffff',
+                            color: config.bg === 'var(--k-yellow)' ? 'var(--k-yellow-ink)' : config.bg,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
+                            flexShrink: 0,
+                          }}
+                        >
+                          <CheckIcon size={18} />
                         </span>
                       )}
                     </button>
@@ -708,6 +720,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               {!isAnswerSubmitted && (
                 <button
                   type="button"
+                  className="k-btn"
                   disabled={!selectedAnswer || isSubmittingAnswer || isAnswerSubmitted}
                   onClick={() => {
                     if (selectedAnswer) {
@@ -716,19 +729,16 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   }}
                   style={{
                     width: '100%',
-                    marginTop: '1rem',
-                    padding: '0.95rem',
-                    minHeight: '48px',
-                    backgroundColor: !selectedAnswer || isSubmittingAnswer ? 'var(--border-strong)' : 'var(--primary)',
-                    color: '#ffffff',
-                    border: 'none',
-                    borderRadius: '12px',
-                    fontSize: '1.05rem',
-                    fontWeight: 800,
+                    marginTop: '1.25rem',
+                    padding: '1rem',
+                    minHeight: '52px',
+                    borderRadius: '14px',
+                    fontSize: '1.1rem',
+                    fontWeight: 900,
                     cursor: !selectedAnswer || isSubmittingAnswer ? 'not-allowed' : 'pointer',
-                    opacity: !selectedAnswer || isSubmittingAnswer ? 0.65 : 1,
-                    boxShadow: !selectedAnswer || isSubmittingAnswer ? 'none' : 'var(--btn-shadow)',
-                    transition: 'all 0.15s ease',
+                    opacity: !selectedAnswer || isSubmittingAnswer ? 0.6 : 1,
+                    backgroundColor: 'var(--primary)',
+                    color: 'var(--primary-ink)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -737,13 +747,13 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 >
                   {isSubmittingAnswer ? (
                     <>
-                      <SpinnerIcon size={18} />
+                      <SpinnerIcon size={20} />
                       <span>Đang gửi đáp án...</span>
                     </>
                   ) : selectedAnswer ? (
-                    'Xác nhận gửi đáp án →'
+                    <span>Xác nhận gửi đáp án &rarr;</span>
                   ) : (
-                    'Hãy chọn một đáp án ở trên'
+                    <span>Hãy chọn một đáp án ở trên</span>
                   )}
                 </button>
               )}
@@ -802,7 +812,6 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   fontWeight: 800,
                   cursor: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'not-allowed' : 'pointer',
                   opacity: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 0.6 : 1,
-                  boxShadow: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'none' : 'var(--btn-shadow)',
                   transition: 'all 0.15s ease',
                   display: 'flex',
                   alignItems: 'center',
@@ -899,7 +908,6 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   fontWeight: 800,
                   cursor: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'not-allowed' : 'pointer',
                   opacity: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 0.6 : 1,
-                  boxShadow: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'none' : 'var(--btn-shadow)',
                   transition: 'all 0.15s ease',
                   display: 'flex',
                   alignItems: 'center',
@@ -974,65 +982,88 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
         <div
           style={{
             backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '20px',
-            padding: '2rem 1.5rem',
+            border: '2px solid var(--border-subtle)',
+            borderRadius: '24px',
+            padding: '2.5rem 1.5rem',
             textAlign: 'center',
             boxShadow: 'var(--card-shadow)',
+            animation: 'popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
           }}
         >
           {personalResult ? (
-            <div style={{ marginBottom: '1.75rem' }}>
+            <div style={{ marginBottom: '2rem' }}>
               <div
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '0.5rem',
-                  padding: '0.65rem 1.5rem',
-                  borderRadius: '14px',
+                  gap: '0.65rem',
+                  padding: '0.85rem 2rem',
+                  borderRadius: '16px',
                   fontWeight: 900,
-                  fontSize: '1.25rem',
-                  backgroundColor: personalResult.isCorrect ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                  border: personalResult.isCorrect ? '2px solid var(--accent-emerald)' : '2px solid #ef4444',
-                  color: personalResult.isCorrect ? 'var(--accent-emerald)' : '#ef4444',
-                  boxShadow: personalResult.isCorrect ? '0 0 20px rgba(16, 185, 129, 0.25)' : 'none',
+                  fontSize: '1.35rem',
+                  backgroundColor: personalResult.isCorrect ? 'var(--k-green)' : 'var(--k-red)',
+                  color: '#ffffff',
+                  boxShadow: personalResult.isCorrect
+                    ? '0 4px 0 var(--k-green-dark)'
+                    : '0 4px 0 var(--k-red-dark)',
                 }}
               >
-                {personalResult.isCorrect ? <CheckIcon size={22} /> : <XMarkIcon size={22} />}
+                {personalResult.isCorrect ? <CheckIcon size={26} /> : <XMarkIcon size={26} />}
                 <span>{personalResult.isCorrect ? 'CHÍNH XÁC!' : 'CHƯA ĐÚNG!'}</span>
               </div>
 
               <div
                 style={{
-                  marginTop: '0.85rem',
-                  fontSize: '1.5rem',
+                  marginTop: '1.15rem',
+                  fontSize: '1.85rem',
                   fontWeight: 900,
                   color: personalResult.isCorrect ? 'var(--accent-emerald)' : 'var(--text-muted)',
                 }}
               >
-                {personalResult.pointsEarned > 0 ? `+${personalResult.pointsEarned} điểm` : '+0 điểm'}
+                {personalResult.pointsEarned > 0 ? `+${personalResult.pointsEarned.toLocaleString()} điểm` : '+0 điểm'}
               </div>
+
+              {personalResult.streak && personalResult.streak > 1 && (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    marginTop: '0.75rem',
+                    padding: '0.35rem 0.85rem',
+                    borderRadius: '20px',
+                    backgroundColor: 'rgba(255, 166, 2, 0.2)',
+                    border: '1.5px solid var(--k-yellow)',
+                    color: 'var(--k-yellow)',
+                    fontWeight: 900,
+                    fontSize: '0.95rem',
+                  }}
+                >
+                  <FlameIcon size={16} />
+                  <span>Chuỗi đúng liên tiếp x{personalResult.streak}!</span>
+                </div>
+              )}
             </div>
           ) : (
-            <div style={{ marginBottom: '1.75rem' }}>
+            <div style={{ marginBottom: '2rem' }}>
               <div
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '0.5rem',
-                  padding: '0.65rem 1.5rem',
-                  borderRadius: '14px',
-                  fontWeight: 800,
-                  fontSize: '1.1rem',
-                  backgroundColor: 'rgba(245, 158, 11, 0.14)',
-                  border: '2px solid var(--accent-amber)',
-                  color: 'var(--accent-amber)',
+                  padding: '0.75rem 1.75rem',
+                  borderRadius: '16px',
+                  fontWeight: 900,
+                  fontSize: '1.15rem',
+                  backgroundColor: 'var(--k-yellow)',
+                  color: 'var(--k-yellow-ink)',
+                  boxShadow: '0 4px 0 var(--k-yellow-dark)',
                 }}
               >
-                <ClockIcon size={20} />
+                <ClockIcon size={22} />
                 <span>CHƯA TRẢ LỜI / HẾT GIỜ</span>
               </div>
-              <div style={{ marginTop: '0.65rem', fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-muted)' }}>
+              <div style={{ marginTop: '0.75rem', fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-muted)' }}>
                 +0 điểm
               </div>
             </div>
@@ -1215,7 +1246,6 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 fontSize: '1.05rem',
                 fontWeight: 800,
                 cursor: 'pointer',
-                boxShadow: 'var(--btn-shadow)',
                 transition: 'all 0.15s ease',
               }}
             >

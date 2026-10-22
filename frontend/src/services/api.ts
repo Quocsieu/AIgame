@@ -59,7 +59,7 @@ function generateCsprngGuestToken(): string {
   const bytes = new Uint8Array(16);
   crypto.getRandomValues(bytes);
   const hex = Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
+    .map((b) => b.toString(16).padStart(2, '0')) // taste-skill-ignore: byte hex formatting
     .join('');
   return `gt_${hex}`;
 }
@@ -81,27 +81,9 @@ export function getOrCreateGuestToken(): string {
   }
 }
 
-export function getStoredGameAccessToken(gameId: string): string | null {
-  try {
-    return sessionStorage.getItem(`game_token_${gameId}`);
-  } catch {
-    return null;
-  }
-}
-
-export function setStoredGameAccessToken(gameId: string, token: string | null): void {
-  try {
-    if (token) {
-      sessionStorage.setItem(`game_token_${gameId}`, token);
-    } else {
-      sessionStorage.removeItem(`game_token_${gameId}`);
-    }
-  } catch {}
-}
-
 export function buildAuthHeaders(
   extraHeaders?: Record<string, string>,
-  options?: { isGuestPlayer?: boolean; gameId?: string }
+  options?: { isGuestPlayer?: boolean }
 ): Record<string, string> {
   const headers: Record<string, string> = { ...(extraHeaders || {}) };
   const token = getSessionAuthToken();
@@ -110,44 +92,7 @@ export function buildAuthHeaders(
   } else if (options?.isGuestPlayer) {
     headers['X-Guest-Token'] = getOrCreateGuestToken();
   }
-
-  if (options?.gameId) {
-    const gameAccessToken = getStoredGameAccessToken(options.gameId);
-    if (gameAccessToken) {
-      headers['X-Game-Access-Token'] = gameAccessToken;
-    }
-  }
   return headers;
-}
-
-// ==========================================
-// Per-Question-Set Password APIs
-// ==========================================
-
-export async function verifyGamePassword(
-  gameId: string,
-  password: string
-): Promise<{
-  verified: boolean;
-  requiresPassword?: boolean;
-  gameAccessToken?: string;
-  expiresAt?: string;
-}> {
-  const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/verify-password`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ password }),
-  });
-  const data = await res.json();
-  if (!res.ok || !data.success) {
-    const err = new Error(data?.error?.message || 'Mật khẩu bộ câu hỏi không chính xác.');
-    (err as any).code = data?.error?.code;
-    throw err;
-  }
-  if (data.data?.gameAccessToken) {
-    setStoredGameAccessToken(gameId, data.data.gameAccessToken);
-  }
-  return data.data;
 }
 
 // ==========================================
@@ -279,8 +224,6 @@ export async function generateGame(params: {
   topicFocus?: string;
   sectionFilter?: string[];
   title?: string;
-  passwordProtected?: boolean;
-  password?: string;
   mixedDistribution?: MixedQuestionDistribution;
 }): Promise<GameSpecification> {
   const res = await fetch(`${API_BASE_URL}/games/generate`, {
@@ -293,9 +236,6 @@ export async function generateGame(params: {
     const err = new Error(data.error?.message || 'Lỗi khi tạo trò chơi bằng AI.');
     (err as any).code = data.error?.code;
     throw err;
-  }
-  if (data.data?.gameAccessToken && data.data?.gameId) {
-    setStoredGameAccessToken(data.data.gameId, data.data.gameAccessToken);
   }
   return data.data;
 }
@@ -350,7 +290,7 @@ export async function fetchSavedGames(
 export async function deleteSavedGame(gameId: string): Promise<void> {
   const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}`, {
     method: 'DELETE',
-    headers: buildAuthHeaders({}, { gameId }),
+    headers: buildAuthHeaders(),
   });
   const data = await res.json();
   if (!data.success) {
@@ -360,13 +300,10 @@ export async function deleteSavedGame(gameId: string): Promise<void> {
 
 export async function fetchGameById(
   gameId: string,
-  options?: { mode?: 'public' | 'manage'; gameAccessToken?: string }
+  options?: { mode?: 'public' | 'manage' }
 ): Promise<GameSpecification> {
   const query = options?.mode ? `?mode=${encodeURIComponent(options.mode)}` : '';
-  const headers = buildAuthHeaders({}, { gameId });
-  if (options?.gameAccessToken) {
-    headers['X-Game-Access-Token'] = options.gameAccessToken;
-  }
+  const headers = buildAuthHeaders();
   const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}${query}`, {
     headers,
   });
@@ -391,22 +328,16 @@ export async function saveEditedQuestions(
       mixedDistribution?: MixedQuestionDistribution;
     };
     isPublic?: boolean;
-    passwordProtected?: boolean;
-    password?: string;
-    removePassword?: boolean;
   }
 ): Promise<GameSpecification> {
   const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/questions`, {
     method: 'PATCH',
-    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { gameId }),
+    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(params),
   });
   const data = await res.json();
   if (!data.success) {
     throw new Error(data.error?.message || 'Không thể lưu chỉnh sửa bộ câu hỏi.');
-  }
-  if (data.data?.gameAccessToken) {
-    setStoredGameAccessToken(gameId, data.data.gameAccessToken);
   }
   return data.data;
 }
@@ -546,7 +477,7 @@ export async function createPracticeSession(params: {
 }> {
   const res = await fetch(`${API_BASE_URL}/games/sessions`, {
     method: 'POST',
-    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { gameId: params.gameId }),
+    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(params),
   });
   const data = await res.json();
@@ -611,6 +542,38 @@ export async function advancePracticeSession(sessionId: string): Promise<{
   const data = await res.json();
   if (!data.success) {
     throw new Error(data.error?.message || 'Không thể chuyển sang câu hỏi tiếp theo.');
+  }
+  return data.data;
+}
+
+export async function fetchPracticeSessionSummary(sessionId: string): Promise<{
+  sessionId: string;
+  gameId: string;
+  state: string;
+  currentQuestionIndex: number;
+  totalQuestions: number;
+  score: number;
+  correctCount: number;
+  wrongCount: number;
+  currentStreak: number;
+}> {
+  const res = await fetch(`${API_BASE_URL}/games/sessions/${encodeURIComponent(sessionId)}`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể tải thông tin phiên chơi.');
+  }
+  return data.data;
+}
+
+export async function fetchPracticeSessionQuestion(sessionId: string): Promise<SanitizedQuestion> {
+  const res = await fetch(`${API_BASE_URL}/games/sessions/${encodeURIComponent(sessionId)}/question`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể tải câu hỏi hiện tại.');
   }
   return data.data;
 }

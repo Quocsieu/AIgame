@@ -198,7 +198,6 @@ export const GameSpecificationSchema = z.object({
   gameId: z.string(),
   ownerUserId: z.string().nullable().optional(),
   isPublic: z.boolean().optional(),
-  passwordProtected: z.boolean().optional(),
   title: z.string().trim().min(1, 'Tên game không được để trống').max(100, 'Tên game không được vượt quá 100 ký tự'),
   description: z.string(),
   gameType: GameTypeEnum,
@@ -223,8 +222,6 @@ export const GenerateGameRequestSchema = z.object({
   questionCount: z.number().int().min(1).max(20).default(5).optional(),
   timePerQuestion: z.number().int().min(5).max(120).default(20).optional(),
   title: z.string().trim().min(1, 'Tên game không được để trống').max(100, 'Tên game không được vượt quá 100 ký tự').optional(),
-  passwordProtected: z.boolean().optional(),
-  password: z.string().trim().max(100).optional(),
   topicFocus: z.string().trim().max(300).optional(),
   sectionFilter: z.array(z.string().trim().min(1)).optional(),
   mixedDistribution: MixedQuestionDistributionSchema.optional(),
@@ -246,16 +243,8 @@ export const UpdateGameQuestionsRequestSchema = z.object({
     })
     .optional(),
   isPublic: z.boolean().optional(),
-  passwordProtected: z.boolean().optional(),
-  password: z.string().trim().max(100).optional(),
-  removePassword: z.boolean().optional(),
 });
 export type UpdateGameQuestionsRequest = z.infer<typeof UpdateGameQuestionsRequestSchema>;
-
-export const VerifyGamePasswordRequestSchema = z.object({
-  password: z.string().min(1, 'Mật khẩu không được để trống'),
-});
-export type VerifyGamePasswordRequest = z.infer<typeof VerifyGamePasswordRequestSchema>;
 
 
 

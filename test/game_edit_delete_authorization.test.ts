@@ -2,18 +2,13 @@ import { describe, it, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import { app } from '../src/app.js';
-import { gameStore, sessionStore } from '../src/game/game.store.js';
-import { roomStore } from '../src/multiplayer/room.store.js';
+import { gameStore } from '../src/game/game.store.js';
 import { getDatabase } from '../src/storage/sqlite.db.js';
-import { gamePasswordService } from '../src/services/game.password.service.js';
 import { authService } from '../src/services/auth.service.js';
 import { resetAllRateLimiters } from '../src/middleware/rateLimiter.js';
 import type { GameSpecification } from '../src/contracts/game.contract.js';
 
-describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION', () => {
-  const passwordA = 'PassGameA123!';
-  const passwordB = 'PassGameB456!';
-
+describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION (NO PASSWORDS)', () => {
   let adminToken: string;
   let userTokenA: string;
   let userIdA: string;
@@ -26,22 +21,12 @@ describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION', () => {
     gameId: string;
     ownerUserId?: string | null;
     isPublic?: boolean;
-    password?: string;
     title?: string;
   }): GameSpecification {
-    let passwordOptions: { isPasswordProtected?: boolean; passwordHash?: string | null } | undefined;
-    if (params.password) {
-      const hash = gamePasswordService.hashPassword(params.password);
-      passwordOptions = { isPasswordProtected: true, passwordHash: hash };
-    } else {
-      passwordOptions = { isPasswordProtected: false, passwordHash: null };
-    }
-
     const spec: GameSpecification = {
       gameId: params.gameId,
       ownerUserId: params.ownerUserId ?? null,
       isPublic: params.isPublic ?? false,
-      passwordProtected: Boolean(params.password),
       title: params.title || `Test Game ${params.gameId}`,
       description: 'Game for authorization test',
       gameType: 'MULTIPLE_CHOICE',
@@ -80,7 +65,7 @@ describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION', () => {
       generatedAt: new Date().toISOString(),
     };
 
-    gameStore.save(spec, Date.now(), params.ownerUserId ?? null, params.isPublic ?? false, passwordOptions);
+    gameStore.save(spec, Date.now(), params.ownerUserId ?? null, params.isPublic ?? false);
     return spec;
   }
 
@@ -118,166 +103,59 @@ describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION', () => {
   });
 
   // ========================================================
-  // 1. REPRO & RESOLUTION: Anonymous Password-Protected Games
+  // 1. ANONYMOUS / DEMO GAMES (ownerUserId: null)
   // ========================================================
-  describe('Group 1: Anonymous Password-Protected Games (ownerUserId: null)', () => {
-    it('1.1. Direct DELETE on anonymous password-protected game WITHOUT credentials is REJECTED with 401 UNAUTHORIZED', async () => {
-      const gameId = `test_anon_del_reject_${Date.now()}`;
-      createTestGame({ gameId, ownerUserId: null, password: passwordA });
+  describe('Group 1: Anonymous / Demo Games (ownerUserId: null) - No password required', () => {
+    it('1.1. Direct DELETE on anonymous game succeeds without any password (200)', async () => {
+      const gameId = `test_anon_del_${Date.now()}`;
+      createTestGame({ gameId, ownerUserId: null });
 
       const res = await request(app).delete(`/api/games/${gameId}`);
 
-      assert.equal(res.status, 401);
-      assert.equal(res.body.error.code, 'UNAUTHORIZED');
-      assert.match(res.body.error.message, /bảo vệ bằng mật khẩu/i);
-      // Ensure game is NOT deleted
-      assert.ok(gameStore.get(gameId));
+      assert.equal(res.status, 200);
+      assert.equal(res.body.data.deleted, true);
+      assert.equal(gameStore.get(gameId), undefined);
     });
 
-    it('1.2. Direct PATCH on anonymous password-protected game WITHOUT credentials is REJECTED with 401 UNAUTHORIZED', async () => {
-      const gameId = `test_anon_patch_reject_${Date.now()}`;
-      const game = createTestGame({ gameId, ownerUserId: null, password: passwordA, title: 'Original Title' });
+    it('1.2. Direct PATCH on anonymous game succeeds without any password (200)', async () => {
+      const gameId = `test_anon_patch_${Date.now()}`;
+      const game = createTestGame({ gameId, ownerUserId: null, title: 'Original Title' });
 
       const res = await request(app)
         .patch(`/api/games/${gameId}`)
         .send({
-          title: 'Hacked Title',
+          title: 'Direct Updated Title',
           questions: game.questions,
         });
 
-      assert.equal(res.status, 401);
-      assert.equal(res.body.error.code, 'UNAUTHORIZED');
-      assert.match(res.body.error.message, /bảo vệ bằng mật khẩu/i);
-      // Ensure title was not changed
-      assert.equal(gameStore.get(gameId)?.title, 'Original Title');
+      assert.equal(res.status, 200);
+      assert.equal(res.body.data.title, 'Direct Updated Title');
+      assert.equal(gameStore.get(gameId)?.title, 'Direct Updated Title');
     });
 
-    it('1.3. Authorized DELETE on anonymous password-protected game WITH X-Game-Access-Token SUCCEEDS with 200', async () => {
-      const gameId = `test_anon_del_auth_${Date.now()}`;
-      createTestGame({ gameId, ownerUserId: null, password: passwordA });
+    it('1.3. Old verify-password route returns 404 Not Found since password endpoints are removed', async () => {
+      const gameId = `test_anon_no_verify_${Date.now()}`;
+      createTestGame({ gameId, ownerUserId: null });
 
-      // Step 1: Verify password to obtain token
       const verifyRes = await request(app)
         .post(`/api/games/${gameId}/verify-password`)
-        .send({ password: passwordA });
-      assert.equal(verifyRes.status, 200);
-      const token = verifyRes.body.data.gameAccessToken;
+        .send({ password: 'AnyPassword123!' });
 
-      // Step 2: Delete with X-Game-Access-Token
-      const delRes = await request(app)
-        .delete(`/api/games/${gameId}`)
-        .set('X-Game-Access-Token', token);
-
-      assert.equal(delRes.status, 200);
-      assert.equal(delRes.body.data.deleted, true);
-      assert.equal(gameStore.get(gameId), undefined);
-    });
-
-    it('1.4. Authorized PATCH on anonymous password-protected game WITH X-Game-Access-Token SUCCEEDS with 200', async () => {
-      const gameId = `test_anon_patch_auth_${Date.now()}`;
-      const game = createTestGame({ gameId, ownerUserId: null, password: passwordA });
-
-      // Step 1: Verify password to obtain token
-      const verifyRes = await request(app)
-        .post(`/api/games/${gameId}/verify-password`)
-        .send({ password: passwordA });
-      assert.equal(verifyRes.status, 200);
-      const token = verifyRes.body.data.gameAccessToken;
-
-      // Step 2: Patch with X-Game-Access-Token
-      const patchRes = await request(app)
-        .patch(`/api/games/${gameId}`)
-        .set('X-Game-Access-Token', token)
-        .send({
-          title: 'Authorized Updated Title',
-          questions: game.questions,
-        });
-
-      assert.equal(patchRes.status, 200);
-      assert.equal(patchRes.body.data.title, 'Authorized Updated Title');
-      assert.equal(gameStore.get(gameId)?.title, 'Authorized Updated Title');
-    });
-
-    it('1.5. Direct password in request body or X-Game-Password header allows edit/delete', async () => {
-      const gameId = `test_anon_direct_pass_${Date.now()}`;
-      const game = createTestGame({ gameId, ownerUserId: null, password: passwordA });
-
-      // Edit with body.password
-      const patchRes = await request(app)
-        .patch(`/api/games/${gameId}`)
-        .send({
-          title: 'Direct Pass Edit',
-          questions: game.questions,
-          password: passwordA,
-        });
-      assert.equal(patchRes.status, 200);
-      assert.equal(patchRes.body.data.title, 'Direct Pass Edit');
-
-      // Delete with X-Game-Password header
-      const delRes = await request(app)
-        .delete(`/api/games/${gameId}`)
-        .set('X-Game-Password', passwordA);
-      assert.equal(delRes.status, 200);
-      assert.equal(delRes.body.data.deleted, true);
-    });
-
-    it('1.6. Wrong token or wrong password is REJECTED with 401 UNAUTHORIZED', async () => {
-      const gameId = `test_anon_wrong_pass_${Date.now()}`;
-      createTestGame({ gameId, ownerUserId: null, password: passwordA });
-
-      // Wrong token
-      const wrongTokenRes = await request(app)
-        .delete(`/api/games/${gameId}`)
-        .set('X-Game-Access-Token', 'gat_invalid_fake_token_00000000000000000000000000000000');
-      assert.equal(wrongTokenRes.status, 401);
-
-      // Wrong password header
-      const wrongPassRes = await request(app)
-        .delete(`/api/games/${gameId}`)
-        .set('X-Game-Password', 'WrongPass!');
-      assert.equal(wrongPassRes.status, 401);
-    });
-
-    it('1.7. IDOR Prevention: Token for Game A CANNOT be used to edit/delete Game B', async () => {
-      const gameIdA = `test_idor_a_${Date.now()}`;
-      const gameIdB = `test_idor_b_${Date.now()}`;
-      createTestGame({ gameId: gameIdA, ownerUserId: null, password: passwordA });
-      createTestGame({ gameId: gameIdB, ownerUserId: null, password: passwordB });
-
-      // Verify Game A
-      const verifyA = await request(app)
-        .post(`/api/games/${gameIdA}/verify-password`)
-        .send({ password: passwordA });
-      const tokenA = verifyA.body.data.gameAccessToken;
-
-      // Try to DELETE Game B using Token A -> REJECTED 401
-      const idorDel = await request(app)
-        .delete(`/api/games/${gameIdB}`)
-        .set('X-Game-Access-Token', tokenA);
-      assert.equal(idorDel.status, 401);
-      assert.ok(gameStore.get(gameIdB));
+      assert.equal(verifyRes.status, 404);
     });
   });
 
   // ========================================================
-  // 2. RESOURCE OWNERSHIP ISOLATION (Rule 4)
+  // 2. RESOURCE OWNERSHIP ISOLATION
   // ========================================================
-  describe('Group 2: Resource Ownership Isolation (Rule 4: Knowing password does not bypass ownership)', () => {
-    it('2.1. User B CANNOT edit User A game even if User B knows the game password or passes gameAccessToken', async () => {
+  describe('Group 2: Resource Ownership Isolation (User B cannot edit/delete User A game)', () => {
+    it('2.1. User B CANNOT edit User A game (403 ACCESS_DENIED)', async () => {
       const gameId = `test_owned_isolation_${Date.now()}`;
-      const gameA = createTestGame({ gameId, ownerUserId: userIdA, password: passwordA });
+      const gameA = createTestGame({ gameId, ownerUserId: userIdA });
 
-      // Obtain token for gameA
-      const verifyRes = await request(app)
-        .post(`/api/games/${gameId}/verify-password`)
-        .send({ password: passwordA });
-      const token = verifyRes.body.data.gameAccessToken;
-
-      // User B attempts to edit User A's game while providing the valid gameAccessToken
       const res = await request(app)
         .patch(`/api/games/${gameId}`)
         .set('Authorization', `Bearer ${userTokenB}`)
-        .set('X-Game-Access-Token', token)
         .send({
           title: 'Hacked by User B',
           questions: gameA.questions,
@@ -288,23 +166,41 @@ describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION', () => {
       assert.equal(gameStore.get(gameId)?.title, gameA.title);
     });
 
-    it('2.2. User B CANNOT delete User A game even if User B knows the game password', async () => {
+    it('2.2. User B CANNOT delete User A game (403 ACCESS_DENIED)', async () => {
       const gameId = `test_owned_del_isolation_${Date.now()}`;
-      createTestGame({ gameId, ownerUserId: userIdA, password: passwordA });
-
-      const verifyRes = await request(app)
-        .post(`/api/games/${gameId}/verify-password`)
-        .send({ password: passwordA });
-      const token = verifyRes.body.data.gameAccessToken;
+      createTestGame({ gameId, ownerUserId: userIdA });
 
       const res = await request(app)
         .delete(`/api/games/${gameId}`)
-        .set('Authorization', `Bearer ${userTokenB}`)
-        .set('X-Game-Access-Token', token);
+        .set('Authorization', `Bearer ${userTokenB}`);
 
       assert.equal(res.status, 403);
       assert.equal(res.body.error.code, 'ACCESS_DENIED');
       assert.ok(gameStore.get(gameId));
+    });
+
+    it('2.3. User A (owner) CAN edit and delete their own game without password (200 OK)', async () => {
+      const gameId = `test_owner_success_${Date.now()}`;
+      const gameA = createTestGame({ gameId, ownerUserId: userIdA, title: 'Original A' });
+
+      // Owner edit
+      const editRes = await request(app)
+        .patch(`/api/games/${gameId}`)
+        .set('Authorization', `Bearer ${userTokenA}`)
+        .send({
+          title: 'Owner Updated A',
+          questions: gameA.questions,
+        });
+      assert.equal(editRes.status, 200);
+      assert.equal(editRes.body.data.title, 'Owner Updated A');
+
+      // Owner delete
+      const delRes = await request(app)
+        .delete(`/api/games/${gameId}`)
+        .set('Authorization', `Bearer ${userTokenA}`);
+      assert.equal(delRes.status, 200);
+      assert.equal(delRes.body.data.deleted, true);
+      assert.equal(gameStore.get(gameId), undefined);
     });
   });
 
@@ -314,7 +210,7 @@ describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION', () => {
   describe('Group 3: Guest and Player Token Rejection', () => {
     it('3.1. Guest token (X-Guest-Token) CANNOT delete or edit games (403)', async () => {
       const gameId = `test_guest_guard_${Date.now()}`;
-      const game = createTestGame({ gameId, ownerUserId: null, password: undefined });
+      const game = createTestGame({ gameId, ownerUserId: null });
 
       const delRes = await request(app)
         .delete(`/api/games/${gameId}`)
@@ -332,7 +228,7 @@ describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION', () => {
 
     it('3.2. Player token (X-Player-Token) CANNOT delete or edit games (403)', async () => {
       const gameId = `test_player_guard_${Date.now()}`;
-      const game = createTestGame({ gameId, ownerUserId: null, password: undefined });
+      const game = createTestGame({ gameId, ownerUserId: null });
 
       const delRes = await request(app)
         .delete(`/api/games/${gameId}`)
@@ -353,9 +249,9 @@ describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION', () => {
   // 4. ADMIN PRIVILEGE & UNPROTECTED DEMO GAMES
   // ========================================================
   describe('Group 4: Admin Authority & Unprotected Anonymous/Demo Games', () => {
-    it('4.1. Admin CAN delete and edit any password-protected game without needing game password (200)', async () => {
+    it('4.1. Admin CAN delete and edit any user game without needing game password (200)', async () => {
       const gameId = `test_admin_override_${Date.now()}`;
-      const game = createTestGame({ gameId, ownerUserId: userIdA, password: passwordA });
+      const game = createTestGame({ gameId, ownerUserId: userIdA });
 
       // Admin patches without password
       const patchRes = await request(app)
@@ -378,7 +274,7 @@ describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION', () => {
 
     it('4.2. Unprotected anonymous games (demo/public) can still be edited and deleted anonymously (200)', async () => {
       const gameId = `test_demo_unprotected_${Date.now()}`;
-      const game = createTestGame({ gameId, ownerUserId: null, password: undefined });
+      const game = createTestGame({ gameId, ownerUserId: null });
 
       // Anonymous edit on unprotected game
       const patchRes = await request(app)
@@ -398,4 +294,3 @@ describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION', () => {
     });
   });
 });
-

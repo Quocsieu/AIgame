@@ -412,8 +412,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   borderRadius: '8px',
                   border: 'none',
                   backgroundColor: isCurrent ? 'var(--primary)' : 'transparent',
-                  color: isCurrent ? '#ffffff' : 'var(--text-secondary)',
-                  fontWeight: 700,
+                  color: isCurrent ? 'var(--primary-ink)' : 'var(--text-secondary)',
+                  fontWeight: 800,
                   fontSize: '0.85rem',
                   cursor: 'pointer',
                   transition: 'background-color 0.15s ease, color 0.15s ease',
@@ -472,12 +472,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             }}
           >
             {[
-              { label: 'Tổng Người Dùng', val: overview.totalUsers, icon: <UsersIcon size={20} />, color: '#38bdf8' },
-              { label: 'Tổng Bộ Câu Hỏi', val: overview.totalGames, icon: <GamepadIcon size={20} />, color: '#818cf8' },
-              { label: 'Game Đã Xuất Bản', val: overview.publishedGames, icon: <GlobeIcon size={20} />, color: '#34d399' },
-              { label: 'Bản Nháp (Draft)', val: overview.draftGames, icon: <FileTextIcon size={20} />, color: '#fbbf24' },
-              { label: 'Lượt Chơi Đơn', val: overview.totalSessions, icon: <TargetIcon size={20} />, color: '#f472b6' },
-              { label: 'Phòng Multiplayer Đang Mở', val: overview.activeRoomsCount, icon: <FlameIcon size={20} />, color: '#fb7185' },
+              { label: 'Tổng Người Dùng', val: overview.totalUsers, icon: <UsersIcon size={20} />, color: 'var(--accent-sky)' },
+              { label: 'Tổng Bộ Câu Hỏi', val: overview.totalGames, icon: <GamepadIcon size={20} />, color: 'var(--primary)' },
+              { label: 'Game Đã Xuất Bản', val: overview.publishedGames, icon: <GlobeIcon size={20} />, color: 'var(--accent-emerald)' },
+              { label: 'Bản Nháp (Draft)', val: overview.draftGames, icon: <FileTextIcon size={20} />, color: 'var(--accent-amber)' },
+              { label: 'Lượt Chơi Đơn', val: overview.totalSessions, icon: <TargetIcon size={20} />, color: 'var(--game-mixed)' },
+              { label: 'Phòng Multiplayer Đang Mở', val: overview.activeRoomsCount, icon: <FlameIcon size={20} />, color: 'var(--game-mc)' },
             ].map((card, i) => (
               <div
                 key={i}

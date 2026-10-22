@@ -4,36 +4,41 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI Content &rarr; Question &rarr; Game Platform</title>
-    <!-- Google Fonts: Plus Jakarta Sans for crisp modern typography with offline fallback -->
+    <!-- Google Fonts: Plus Jakarta Sans & JetBrains Mono for AI-native gaming & studio typography -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700;800&display=swap"
       rel="stylesheet"
     />
     <style>
       :root,
       [data-theme="dark"] {
-        /* Color Tokens - Dark Mode (WCAG AA Compliant) */
-        --bg-body: #0a0e17;
-        --bg-surface: #111827;
-        --bg-card: #182235;
-        --bg-card-hover: #1e2b43;
-        --bg-input: #0d131f;
-        --bg-elevated: #1f293d;
+        /* the9bit-inspired AI-Native Gaming Platform - Deep Space Dark Room */
+        --bg-body: #08090e;
+        --bg-surface: #0f1018;
+        --bg-card: #141522;
+        --bg-card-hover: #1a1c2c;
+        --bg-input: #10111a;
+        --bg-elevated: #1f2133;
 
-        --text-primary: #f9fafb;
-        --text-secondary: #cbd5e1;
-        --text-muted: #94a3b8; /* Contrast 5.6:1 against #111827 -> WCAG AA Pass */
+        --text-primary: #f8fafc;
+        --text-secondary: #94a3b8;
+        --text-muted: #64748b;
 
-        --border-subtle: #1f2937;
-        --border-strong: #374151;
-        --border-focus: #3b82f6;
+        --border-subtle: #1e2030;
+        --border-strong: #2e3148;
+        --border-focus: #38bdf8;
 
-        --primary: #2563eb;
-        --primary-hover: #1d4ed8;
-        --primary-active: #1e40af;
-        --primary-subtle: rgba(37, 99, 235, 0.15);
+        /* Brand & AI-Native Identity Tokens */
+        --brand-purple: #6366f1;
+        --brand-purple-hover: #4f46e5;
+        --brand-purple-dark: #3730a3;
+        --primary: #38bdf8;
+        --primary-hover: #0ea5e9;
+        --primary-active: #0284c7;
+        --primary-subtle: rgba(56, 189, 248, 0.15);
+        --primary-ink: #08090e;
 
         --accent-sky: #38bdf8;
         --accent-sky-subtle: rgba(56, 189, 248, 0.15);
@@ -41,143 +46,229 @@
         --accent-emerald-subtle: rgba(16, 185, 129, 0.15);
         --accent-amber: #f59e0b;
         --accent-amber-subtle: rgba(245, 158, 11, 0.15);
-        --accent-rose: #ef4444;
-        --accent-rose-subtle: rgba(239, 68, 68, 0.15);
+        --accent-rose: #f43f5e;
+        --accent-rose-subtle: rgba(244, 63, 94, 0.15);
+        --accent-lime: #c6f24e;
+        --accent-lime-subtle: rgba(198, 242, 78, 0.15);
 
-        /* Elevation & Shadow Tokens - Refined, avoiding heavy glow */
-        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
-        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.4);
-        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
-        --shadow-modal: 0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.6);
-        --card-shadow: var(--shadow-md);
-        --btn-shadow: 0 2px 4px 0 rgba(0, 0, 0, 0.3);
-        --focus-ring: 0 0 0 3px rgba(59, 130, 246, 0.4);
+        /* 4-Game Format Tokens (High-Contrast, Vivid Interactive Play) */
+        --k-red: #ef4444;
+        --k-red-dark: #b91c1c;
+        --k-red-hover: #dc2626;
+        --k-blue: #3b82f6;
+        --k-blue-dark: #1d4ed8;
+        --k-blue-hover: #2563eb;
+        --k-yellow: #f59e0b;
+        --k-yellow-dark: #b45309;
+        --k-yellow-hover: #d97706;
+        --k-yellow-ink: #08090e;
+        --k-green: #10b981;
+        --k-green-dark: #047857;
+        --k-green-hover: #059669;
+
+        /* Unified Game Format Tokens */
+        --game-mc: var(--k-red);
+        --game-mc-hover: var(--k-red-hover);
+        --game-mc-subtle: rgba(239, 68, 68, 0.15);
+        --game-qb: var(--k-blue);
+        --game-qb-hover: var(--k-blue-hover);
+        --game-qb-subtle: rgba(59, 130, 246, 0.15);
+        --game-fill: var(--k-yellow);
+        --game-fill-hover: var(--k-yellow-hover);
+        --game-fill-subtle: rgba(245, 158, 11, 0.15);
+        --game-cross: var(--k-green);
+        --game-cross-hover: var(--k-green-hover);
+        --game-cross-subtle: rgba(16, 185, 129, 0.15);
+        --game-mixed: #8b5cf6;
+        --game-mixed-hover: #7c3aed;
+        --game-mixed-subtle: rgba(139, 92, 246, 0.15);
+
+        /* Modern Tactile & Ambient Shadows */
+        --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
+        --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+        --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.55);
+        --shadow-modal: 0 20px 50px rgba(0, 0, 0, 0.75);
+        --card-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+        --btn-shadow: 0 2px 10px rgba(56, 189, 248, 0.25);
+        --focus-ring: 0 0 0 3px rgba(56, 189, 248, 0.45);
       }
 
       [data-theme="light"] {
-        /* Color Tokens - Light Mode (WCAG AA Compliant) */
+        /* Studio Clean Light Mode */
         --bg-body: #f8fafc;
         --bg-surface: #ffffff;
         --bg-card: #ffffff;
         --bg-card-hover: #f1f5f9;
-        --bg-input: #f8fafc;
+        --bg-input: #f1f5f9;
         --bg-elevated: #ffffff;
 
-        --text-primary: #0f172a;
-        --text-secondary: #334155;
-        --text-muted: #64748b; /* Contrast 4.6:1 against #ffffff -> WCAG AA Pass */
+        --text-primary: #090a0f;
+        --text-secondary: #475569;
+        --text-muted: #64748b;
 
         --border-subtle: #e2e8f0;
         --border-strong: #cbd5e1;
-        --border-focus: #2563eb;
+        --border-focus: #0284c7;
 
-        --primary: #2563eb;
-        --primary-hover: #1d4ed8;
-        --primary-active: #1e40af;
-        --primary-subtle: rgba(37, 99, 235, 0.1);
+        /* Brand Colors */
+        --brand-purple: #4f46e5;
+        --brand-purple-hover: #4338ca;
+        --brand-purple-dark: #3730a3;
+        --primary: #0284c7;
+        --primary-hover: #0369a1;
+        --primary-active: #075985;
+        --primary-subtle: rgba(2, 132, 199, 0.12);
+        --primary-ink: #ffffff;
 
         --accent-sky: #0284c7;
-        --accent-sky-subtle: rgba(2, 132, 199, 0.1);
+        --accent-sky-subtle: rgba(2, 132, 199, 0.12);
         --accent-emerald: #059669;
-        --accent-emerald-subtle: rgba(5, 150, 105, 0.1);
+        --accent-emerald-subtle: rgba(5, 150, 105, 0.12);
         --accent-amber: #d97706;
-        --accent-amber-subtle: rgba(217, 119, 6, 0.1);
-        --accent-rose: #dc2626;
-        --accent-rose-subtle: rgba(220, 38, 38, 0.1);
+        --accent-amber-subtle: rgba(217, 119, 6, 0.12);
+        --accent-rose: #e11d48;
+        --accent-rose-subtle: rgba(225, 29, 72, 0.12);
+        --accent-lime: #65a30d;
+        --accent-lime-subtle: rgba(101, 163, 13, 0.12);
 
-        /* Elevation & Shadow Tokens - Soft, clean */
-        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
-        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08), 0 2px 4px -2px rgba(0, 0, 0, 0.04);
-        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
-        --shadow-modal: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.08);
-        --card-shadow: var(--shadow-md);
-        --btn-shadow: 0 1px 3px 0 rgba(37, 99, 235, 0.2);
-        --focus-ring: 0 0 0 3px rgba(37, 99, 235, 0.35);
-      }
-
-      /* Kahoot-inspired Vibrant Color Palette */
-      :root {
+        /* 4-Game Format Tokens */
         --k-red: #ef4444;
+        --k-red-dark: #b91c1c;
         --k-red-hover: #dc2626;
         --k-blue: #3b82f6;
+        --k-blue-dark: #1d4ed8;
         --k-blue-hover: #2563eb;
         --k-yellow: #f59e0b;
+        --k-yellow-dark: #b45309;
         --k-yellow-hover: #d97706;
+        --k-yellow-ink: #ffffff;
         --k-green: #10b981;
+        --k-green-dark: #047857;
         --k-green-hover: #059669;
-        --k-purple: #8b5cf6;
-        --k-purple-hover: #7c3aed;
-        --k-cyan: #06b6d4;
-        --k-cyan-hover: #0891b2;
+
+        /* Unified Game Format Tokens */
+        --game-mc: var(--k-red);
+        --game-mc-hover: var(--k-red-hover);
+        --game-mc-subtle: rgba(239, 68, 68, 0.12);
+        --game-qb: var(--k-blue);
+        --game-qb-hover: var(--k-blue-hover);
+        --game-qb-subtle: rgba(59, 130, 246, 0.12);
+        --game-fill: var(--k-yellow);
+        --game-fill-hover: var(--k-yellow-hover);
+        --game-fill-subtle: rgba(245, 158, 11, 0.12);
+        --game-cross: var(--k-green);
+        --game-cross-hover: var(--k-green-hover);
+        --game-cross-subtle: rgba(16, 185, 129, 0.12);
+        --game-mixed: #8b5cf6;
+        --game-mixed-hover: #7c3aed;
+        --game-mixed-subtle: rgba(139, 92, 246, 0.12);
+
+        /* Elevation & 3D Tactile Shadows */
+        --shadow-sm: 0 2px 0 rgba(0, 0, 0, 0.08);
+        --shadow-md: 0 4px 0 rgba(0, 0, 0, 0.12);
+        --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.08);
+        --shadow-modal: 0 16px 32px rgba(0, 0, 0, 0.15);
+        --card-shadow: 0 4px 0 rgba(0, 0, 0, 0.06);
+        --btn-shadow: 0 4px 0 rgba(0, 0, 0, 0.12);
+        --focus-ring: 0 0 0 3px rgba(70, 23, 143, 0.35);
       }
 
-      /* Vibrant Block Elements */
-      .vibrant-card {
+      /* Modern Cyber & Studio Button Utilities */
+      .k-btn {
+        border-radius: 10px;
+        font-weight: 700;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justifyContent: center;
+        gap: 0.5rem;
+        border: 1px solid transparent;
+        transition: transform 0.1s ease, box-shadow 0.12s ease, background-color 0.12s ease, border-color 0.12s ease;
+        user-select: none;
+      }
+      .k-btn:active:not(:disabled) {
+        transform: translateY(1.5px) !important;
+      }
+
+      .k-btn-purple {
+        background-color: var(--brand-purple);
+        color: #ffffff;
+      }
+      .k-btn-purple:hover:not(:disabled) {
+        background-color: var(--brand-purple-hover);
+      }
+
+      .k-btn-red {
+        background-color: var(--k-red);
+        color: #ffffff;
+      }
+      .k-btn-red:hover:not(:disabled) {
+        background-color: var(--k-red-hover);
+      }
+
+      .k-btn-blue {
+        background-color: var(--k-blue);
+        color: #ffffff;
+      }
+      .k-btn-blue:hover:not(:disabled) {
+        background-color: var(--k-blue-hover);
+      }
+
+      .k-btn-yellow {
+        background-color: var(--k-yellow);
+        color: var(--k-yellow-ink);
+      }
+      .k-btn-yellow:hover:not(:disabled) {
+        background-color: var(--k-yellow-hover);
+      }
+
+      .k-btn-green {
+        background-color: var(--k-green);
+        color: #ffffff;
+      }
+      .k-btn-green:hover:not(:disabled) {
+        background-color: var(--k-green-hover);
+      }
+
+      .k-card {
+        background-color: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        border-radius: 16px;
+        box-shadow: var(--card-shadow);
+        transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
+      }
+      .k-card:hover {
+        border-color: var(--border-strong);
+      }
+
+      /* Base Flat Utility Classes */
+      .flat-card {
         border-radius: 14px;
-        transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+        background-color: var(--bg-surface);
+        border: 1px solid var(--border-subtle);
+        box-shadow: var(--card-shadow);
+        transition: border-color 0.15s ease, background-color 0.15s ease;
       }
-      .vibrant-card:hover {
-        transform: translateY(-2px);
-      }
-
-      .btn-vibrant-red {
-        background-color: var(--k-red) !important;
-        color: #ffffff !important;
-        box-shadow: 0 3px 0 #b91c1c !important;
-      }
-      .btn-vibrant-red:hover:not(:disabled) {
-        background-color: var(--k-red-hover) !important;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 0 #991b1b !important;
-      }
-      .btn-vibrant-red:active:not(:disabled) {
-        transform: translateY(2px) !important;
-        box-shadow: 0 1px 0 #991b1b !important;
+      .flat-card:hover {
+        border-color: var(--border-strong);
       }
 
-      .btn-vibrant-blue {
-        background-color: var(--k-blue) !important;
-        color: #ffffff !important;
-        box-shadow: 0 3px 0 #1d4ed8 !important;
-      }
-      .btn-vibrant-blue:hover:not(:disabled) {
-        background-color: var(--k-blue-hover) !important;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 0 #1e40af !important;
-      }
-      .btn-vibrant-blue:active:not(:disabled) {
-        transform: translateY(2px) !important;
-        box-shadow: 0 1px 0 #1e40af !important;
+      /* the9bit AI Studio Pill & Badge */
+      .studio-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 0.35rem;
+        padding: 0.25rem 0.65rem;
+        border-radius: 999px;
+        font-size: 0.75rem;
+        font-weight: 700;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
       }
 
-      .btn-vibrant-green {
-        background-color: var(--k-green) !important;
-        color: #ffffff !important;
-        box-shadow: 0 3px 0 #047857 !important;
-      }
-      .btn-vibrant-green:hover:not(:disabled) {
-        background-color: var(--k-green-hover) !important;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 0 #065f46 !important;
-      }
-      .btn-vibrant-green:active:not(:disabled) {
-        transform: translateY(2px) !important;
-        box-shadow: 0 1px 0 #065f46 !important;
-      }
-
-      .btn-vibrant-purple {
-        background-color: var(--k-purple) !important;
-        color: #ffffff !important;
-        box-shadow: 0 3px 0 #6d28d9 !important;
-      }
-      .btn-vibrant-purple:hover:not(:disabled) {
-        background-color: var(--k-purple-hover) !important;
-        transform: translateY(-1px);
-        box-shadow: 0 4px 0 #5b21b6 !important;
-      }
-      .btn-vibrant-purple:active:not(:disabled) {
-        transform: translateY(2px) !important;
-        box-shadow: 0 1px 0 #5b21b6 !important;
+      /* Numeric Data Alignment */
+      .tabular-nums, table td, table th, [data-tabular] {
+        font-variant-numeric: tabular-nums;
       }
 
       /* Global Layout & Typography */
@@ -257,15 +348,109 @@
         }
       }
 
-      /* Responsive Navigation Breakpoints (Kahoot-style Mobile App Shell) */
+      /* Responsive Navigation Breakpoints (the9bit Left-Dock Layout) */
       @media (min-width: 768px) {
         .mobile-bottom-nav {
           display: none !important;
+        }
+        .app-layout-left-nav,
+        .app-layout-right-nav {
+          display: flex !important;
+        }
+        .app-main-content-with-nav {
+          margin-left: 220px !important;
+          margin-right: 0 !important;
         }
       }
       @media (max-width: 767px) {
         .desktop-nav {
           display: none !important;
+        }
+        .app-layout-left-nav,
+        .app-layout-right-nav {
+          display: none !important;
+        }
+        .app-main-content-with-nav {
+          margin-left: 0 !important;
+          margin-right: 0 !important;
+          padding-bottom: 5rem !important;
+        }
+      }
+
+      /* Creator Studio Fullscreen Viewport (No Window Scroll) */
+      @media (min-width: 960px) {
+        .creator-studio-page {
+          height: 100vh !important;
+          max-height: 100vh !important;
+          overflow: hidden !important;
+        }
+        .creator-studio-grid {
+          display: grid !important;
+          grid-template-columns: 1.05fr 0.95fr !important;
+          gap: 1rem !important;
+          flex: 1 !important;
+          min-height: 0 !important;
+        }
+      }
+      @media (max-width: 959px) {
+        .creator-studio-page {
+          height: auto !important;
+          max-height: none !important;
+          overflow: visible !important;
+        }
+        .creator-studio-grid {
+          display: flex !important;
+          flex-direction: column !important;
+          gap: 1rem !important;
+        }
+      }
+
+      /* Explore Page Fullscreen Viewport (No Window Scroll on Desktop) */
+      @media (min-width: 960px) {
+        .explore-page-container {
+          height: 100vh !important;
+          max-height: 100vh !important;
+          overflow: hidden !important;
+        }
+        .explore-cards-grid {
+          grid-template-columns: repeat(5, 1fr) !important;
+        }
+      }
+      @media (max-width: 959px) and (min-width: 640px) {
+        .explore-page-container {
+          height: auto !important;
+          max-height: none !important;
+          overflow: visible !important;
+        }
+        .explore-cards-grid {
+          grid-template-columns: repeat(2, 1fr) !important;
+        }
+      }
+      @media (max-width: 639px) {
+        .explore-page-container {
+          height: auto !important;
+          max-height: none !important;
+          overflow: visible !important;
+        }
+        .explore-cards-grid {
+          grid-template-columns: 1fr !important;
+        }
+      }
+
+      /* the9bit Arcade Cards Layout */
+      .arcade-cards-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+        gap: 1.25rem;
+      }
+      @media (min-width: 1140px) {
+        .arcade-cards-grid {
+          grid-template-columns: repeat(5, 1fr) !important;
+        }
+      }
+      @media (max-width: 1139px) and (min-width: 640px) {
+        .arcade-cards-grid {
+          grid-template-columns: repeat(2, 1fr);
         }
       }
     </style>

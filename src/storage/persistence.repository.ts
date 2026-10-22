@@ -31,7 +31,6 @@ export interface PersistedGameSummary {
   gameId: string;
   ownerUserId: string | null;
   isPublic: boolean;
-  passwordProtected: boolean;
   title: string;
   description: string;
   gameType: GameType;
@@ -235,19 +234,15 @@ export class PersistenceRepository {
   public saveGameSpecification(
     spec: GameSpecification,
     ownerUserId?: string | null,
-    isPublic?: boolean,
-    passwordOptions?: {
-      isPasswordProtected?: boolean;
-      passwordHash?: string | null;
-    }
+    isPublic?: boolean
   ): void {
     const nowIso = new Date().toISOString();
 
     runInTransaction((db) => {
       const existing = db
-        .prepare('SELECT owner_user_id, is_public, is_password_protected, password_hash, created_at FROM games WHERE game_id = ?')
+        .prepare('SELECT owner_user_id, is_public, created_at FROM games WHERE game_id = ?')
         .get(spec.gameId) as
-        | { owner_user_id: string | null; is_public: number; is_password_protected?: number; password_hash?: string | null; created_at: string }
+        | { owner_user_id: string | null; is_public: number; created_at: string }
         | undefined;
 
       const resolvedOwner =
@@ -268,22 +263,6 @@ export class PersistenceRepository {
               ? Boolean(existing.is_public)
               : false;
 
-      const resolvedProtected =
-        passwordOptions?.isPasswordProtected !== undefined
-          ? (passwordOptions.isPasswordProtected ? 1 : 0)
-          : spec.passwordProtected !== undefined
-            ? (spec.passwordProtected ? 1 : 0)
-            : existing?.is_password_protected !== undefined
-              ? existing.is_password_protected
-              : 0;
-
-      const resolvedPasswordHash =
-        passwordOptions?.passwordHash !== undefined
-          ? passwordOptions.passwordHash
-          : existing?.password_hash !== undefined
-            ? existing.password_hash
-            : null;
-
       const createdAt = existing ? existing.created_at : spec.generatedAt || nowIso;
 
       db.prepare(
@@ -292,12 +271,12 @@ export class PersistenceRepository {
           title, description, game_type,
           settings_json, source_summary_json, diagnostics_json, generated_at,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(game_id) DO UPDATE SET
           owner_user_id = excluded.owner_user_id,
           is_public = excluded.is_public,
-          is_password_protected = excluded.is_password_protected,
-          password_hash = excluded.password_hash,
+          is_password_protected = 0,
+          password_hash = NULL,
           title = excluded.title,
           description = excluded.description,
           game_type = excluded.game_type,
@@ -310,8 +289,6 @@ export class PersistenceRepository {
         spec.gameId,
         resolvedOwner ?? null,
         resolvedPublic ? 1 : 0,
-        resolvedProtected,
-        resolvedPasswordHash ?? null,
         spec.title,
         spec.description ?? '',
         spec.gameType,
@@ -353,33 +330,26 @@ export class PersistenceRepository {
     });
   }
 
-  public getGameOwnerInfo(gameId: string): { ownerUserId: string | null; isPublic: boolean; passwordProtected: boolean } | undefined {
+  public getGameOwnerInfo(gameId: string): { ownerUserId: string | null; isPublic: boolean } | undefined {
     const db = getDatabase();
     const row = db
-      .prepare('SELECT owner_user_id, is_public, is_password_protected FROM games WHERE game_id = ?')
-      .get(gameId) as { owner_user_id: string | null; is_public: number; is_password_protected?: number } | undefined;
+      .prepare('SELECT owner_user_id, is_public FROM games WHERE game_id = ?')
+      .get(gameId) as { owner_user_id: string | null; is_public: number } | undefined;
 
     if (!row) return undefined;
     return {
       ownerUserId: row.owner_user_id ? String(row.owner_user_id) : null,
       isPublic: Boolean(row.is_public),
-      passwordProtected: Boolean(row.is_password_protected),
     };
   }
 
-  public getGamePasswordAuthData(gameId: string): {
+  public getGamePasswordAuthData(_gameId: string): {
     isPasswordProtected: boolean;
     passwordHash: string | null;
-  } | undefined {
-    const db = getDatabase();
-    const row = db
-      .prepare('SELECT is_password_protected, password_hash FROM games WHERE game_id = ?')
-      .get(gameId) as { is_password_protected?: number; password_hash?: string | null } | undefined;
-
-    if (!row) return undefined;
+  } {
     return {
-      isPasswordProtected: Boolean(row.is_password_protected),
-      passwordHash: row.password_hash ? String(row.password_hash) : null,
+      isPasswordProtected: false,
+      passwordHash: null,
     };
   }
 
@@ -433,7 +403,6 @@ export class PersistenceRepository {
       settings: JSON.parse(String(gameRow.settings_json)),
       sourceSummary: JSON.parse(String(gameRow.source_summary_json)),
       generatedAt: String(gameRow.generated_at),
-      passwordProtected: Boolean(gameRow.is_password_protected),
     };
 
     if (gameRow.owner_user_id) {
@@ -534,7 +503,6 @@ export class PersistenceRepository {
         gameId: String(row.game_id),
         ownerUserId: row.owner_user_id ? String(row.owner_user_id) : null,
         isPublic: Boolean(row.is_public),
-        passwordProtected: Boolean(row.is_password_protected),
         title: String(row.title),
         description: String(row.description),
         gameType: row.game_type as GameType,

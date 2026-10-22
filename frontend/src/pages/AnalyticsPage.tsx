@@ -45,6 +45,7 @@ import type {
 interface AnalyticsPageProps {
   onSelectSavedGame?: (spec: GameSpecification, autoStartSolo?: boolean) => void;
   onNavigateToHost?: (roomCode: string, hostToken: string) => void;
+  onNavigateToSoloPresentation?: (spec: GameSpecification) => void;
 }
 
 const formatGameTypeName = (type: string): string => {
@@ -82,6 +83,7 @@ const PAGE_SIZE = 6;
 export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   onSelectSavedGame,
   onNavigateToHost,
+  onNavigateToSoloPresentation,
 }) => {
   const toast = useToast();
 
@@ -108,8 +110,6 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const [editTimePerQuestion, setEditTimePerQuestion] = useState<number>(15);
   const [editScoringMode, setEditScoringMode] = useState<ScoringMode>('SPEED_BONUS');
   const [editIsPublic, setEditIsPublic] = useState<boolean>(true);
-  const [editIsPasswordProtected, setEditIsPasswordProtected] = useState<boolean>(false);
-  const [editGamePassword, setEditGamePassword] = useState<string>('');
   const [editQuestions, setEditQuestions] = useState<GameQuestion[]>([]);
   const [isSavingEdits, setIsSavingEdits] = useState(false);
 
@@ -213,8 +213,6 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     setEditTimePerQuestion(spec.settings.timePerQuestion || 15);
     setEditScoringMode(spec.settings.scoringMode || 'SPEED_BONUS');
     setEditIsPublic(spec.isPublic ?? false);
-    setEditIsPasswordProtected(Boolean(spec.passwordProtected));
-    setEditGamePassword('');
     setEditQuestions(
       spec.questions.map((q) => ({
         ...q,
@@ -321,28 +319,29 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     }
   };
 
+  const handleOpenDeleteModal = (game: PersistedGameSummary) => {
+    setConfirmDeleteGame(game);
+  };
+
   const handleConfirmDelete = async () => {
     if (!confirmDeleteGame) return;
     const targetGame = confirmDeleteGame;
     setIsDeleting(true);
 
-    // Optimistic UI update: Immediately remove from savedGames list & clear active spec
-    setSavedGames(prev => prev.filter(g => g.gameId !== targetGame.gameId));
-    setTotalCount(prev => Math.max(0, prev - 1));
-    if (activeGameSpec?.gameId === targetGame.gameId) {
-      setActiveGameSpec(null);
-    }
-    setConfirmDeleteGame(null);
-
     try {
       await deleteSavedGame(targetGame.gameId);
+      setSavedGames(prev => prev.filter(g => g.gameId !== targetGame.gameId));
+      setTotalCount(prev => Math.max(0, prev - 1));
+      if (activeGameSpec?.gameId === targetGame.gameId) {
+        setActiveGameSpec(null);
+      }
+      setConfirmDeleteGame(null);
       toast.success(`Đã xóa bộ câu hỏi "${targetGame.title}" thành công.`, 'Xóa thành công');
       // Background sync to ensure consistency
       loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter).catch(() => {});
     } catch (err: any) {
-      // Revert if error
       toast.error(
-        err.message || 'Không thể xóa bộ câu hỏi. Có thể bộ câu hỏi đang có phòng chơi trực tuyến đang diễn ra hoặc bạn không có quyền xóa.',
+        err.message || 'Không thể xóa bộ câu hỏi. Vui lòng đảm bảo bạn có quyền xóa và bộ câu hỏi không có phòng chơi đang hoạt động.',
         'Lỗi xóa bộ câu hỏi'
       );
       await loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter);
@@ -458,9 +457,6 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           scoringMode: editScoringMode,
         },
         isPublic: editIsPublic,
-        passwordProtected: editIsPasswordProtected,
-        password: editIsPasswordProtected && editGamePassword.trim() ? editGamePassword.trim() : undefined,
-        removePassword: !editIsPasswordProtected,
       });
       setActiveGameSpec(updated);
       syncEditorFromSpec(updated);
@@ -477,249 +473,360 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
 
   return (
-    <div style={{ maxWidth: '1080px', margin: '0 auto', padding: '0.5rem 0 2.5rem 0' }}>
-      {/* Tiêu đề trang */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '1rem',
-          marginBottom: '1.5rem',
-        }}
-      >
-        <div>
-          <h1 style={{ margin: 0, fontSize: '1.85rem', fontWeight: 900, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
-            <BookOpenIcon size={28} />
-            <span>Kho Game & Bộ Câu Hỏi Dùng Chung</span>
-          </h1>
-          <p style={{ margin: '0.35rem 0 0 0', color: 'var(--text-secondary)', fontSize: '0.92rem' }}>
-            Quản lý, tìm kiếm, lọc theo trạng thái/thể loại, chỉnh sửa câu hỏi, chia sẻ Link/QR chơi đơn và mở phòng Multiplayer.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={() => loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter)}
-          disabled={isLoading}
+    <div
+      style={{
+        height: '100vh',
+        maxHeight: '100vh',
+        display: 'flex',
+        flexDirection: 'column',
+        boxSizing: 'border-box',
+        padding: '0.85rem 1.25rem',
+        overflow: 'hidden',
+      }}
+    >
+      {/* 1. Header Toolbar */}
+      {activeGameSpec ? (
+        /* Top Header when in Detail/Edit mode */
+        <div
           style={{
-            backgroundColor: 'var(--bg-surface)',
-            color: 'var(--text-primary)',
-            border: '1px solid var(--border-strong)',
-            borderRadius: '10px',
-            padding: '0.6rem 1.1rem',
-            minHeight: '44px',
-            fontWeight: 700,
-            fontSize: '0.88rem',
-            cursor: isLoading ? 'not-allowed' : 'pointer',
-            display: 'inline-flex',
+            display: 'flex',
+            justifyContent: 'space-between',
             alignItems: 'center',
-            gap: '0.45rem',
+            paddingBottom: '0.65rem',
+            marginBottom: '0.65rem',
+            borderBottom: '1px solid var(--border-subtle)',
+            flexShrink: 0,
+            flexWrap: 'wrap',
+            gap: '0.5rem',
           }}
         >
-          {isLoading ? (
-            <>
-              <SpinnerIcon size={16} />
-              <span>Đang tải...</span>
-            </>
-          ) : (
-            <>
-              <RefreshIcon size={16} />
-              <span>Làm mới kho game</span>
-            </>
-          )}
-        </button>
-      </div>
-
-      {/* Thanh tìm kiếm & lọc theo loại trò chơi / trạng thái */}
-      <section
-        style={{
-          backgroundColor: 'var(--bg-surface)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: '14px',
-          padding: '1.1rem 1.25rem',
-          marginBottom: '1.5rem',
-          boxShadow: 'var(--card-shadow)',
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: '0.85rem',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}
-      >
-        <form
-          onSubmit={handleSearchSubmit}
-          style={{ display: 'flex', gap: '0.6rem', flex: '1 1 320px', alignItems: 'center' }}
-        >
-          <label htmlFor="analytics-search-input" className="sr-only">
-            Tìm kiếm theo tiêu đề hoặc mô tả bộ câu hỏi
-          </label>
-          <input
-            id="analytics-search-input"
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Tìm kiếm theo tiêu đề hoặc mô tả bộ câu hỏi..."
-            style={{
-              flex: 1,
-              padding: '0.65rem 0.9rem',
-              borderRadius: '8px',
-              border: '1px solid var(--border-strong)',
-              backgroundColor: 'var(--bg-input)',
-              color: 'var(--text-primary)',
-              fontSize: '0.88rem',
-              minHeight: '40px',
-            }}
-          />
-          <button
-            type="submit"
-            style={{
-              backgroundColor: 'var(--primary)',
-              color: '#ffffff',
-              border: 'none',
-              borderRadius: '8px',
-              padding: '0.65rem 1rem',
-              minHeight: '40px',
-              fontWeight: 800,
-              fontSize: '0.86rem',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-            }}
-          >
-            <SearchIcon size={15} />
-            <span>Tìm kiếm</span>
-          </button>
-          {searchQuery && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
             <button
               type="button"
               onClick={() => {
-                setSearchQuery('');
-                setPage(1);
-                loadSavedGames(1, '', selectedTypeFilter, statusFilter);
+                setActiveGameSpec(null);
+                setIsEditMode(false);
               }}
               style={{
-                backgroundColor: 'var(--bg-input)',
-                color: 'var(--text-secondary)',
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
                 border: '1px solid var(--border-strong)',
                 borderRadius: '8px',
-                padding: '0.65rem 0.85rem',
-                minHeight: '40px',
-                fontWeight: 700,
-                fontSize: '0.84rem',
+                padding: '0 0.75rem',
+                height: '34px',
+                fontWeight: 800,
+                fontSize: '0.82rem',
                 cursor: 'pointer',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '0.35rem',
               }}
             >
-              <XMarkIcon size={14} />
-              <span>Xóa lọc</span>
+              <ArrowLeftIcon size={14} />
+              <span>Kho Game</span>
             </button>
-          )}
-        </form>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-            <label htmlFor="analytics-status-filter" style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-              Trạng thái:
-            </label>
-            <select
-              id="analytics-status-filter"
-              value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as 'ALL' | 'PUBLISHED' | 'DRAFT')}
+            <span
               style={{
-                padding: '0.6rem 0.8rem',
+                backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                color: 'var(--accent-sky)',
+                padding: '0.15rem 0.5rem',
+                borderRadius: '6px',
+                fontSize: '0.74rem',
+                fontWeight: 800,
+              }}
+            >
+              {formatGameTypeName(activeGameSpec.gameType)}
+            </span>
+
+            <h2
+              style={{
+                margin: 0,
+                fontSize: '1rem',
+                fontWeight: 800,
+                color: 'var(--text-primary)',
+                maxWidth: '450px',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+              title={editTitle || activeGameSpec.title}
+            >
+              {isEditMode ? 'Chỉnh sửa: ' : 'Chi tiết: '}
+              {editTitle || activeGameSpec.title}
+            </h2>
+          </div>
+        </div>
+      ) : (
+        /* Top Header Toolbar when in Kho Game library mode (Unified single line) */
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: '0.5rem',
+            marginBottom: '0.65rem',
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem' }}>
+            <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 900, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
+              <BookOpenIcon size={22} />
+              <span>Kho Game</span>
+            </h1>
+            <span
+              style={{
+                fontSize: '0.74rem',
+                fontWeight: 700,
+                padding: '0.15rem 0.45rem',
+                borderRadius: '10px',
+                backgroundColor: 'var(--bg-elevated)',
+                color: 'var(--text-secondary)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              {totalCount} bộ
+            </span>
+            {isDetailLoading && (
+              <span style={{ fontSize: '0.76rem', color: 'var(--accent-sky)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                <SpinnerIcon size={14} />
+              </span>
+            )}
+          </div>
+
+          {/* Controls: Search, Filters, View toggle, Refresh */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap', flex: '1 1 auto', justifyContent: 'flex-end' }}>
+            {/* Search Input */}
+            <form
+              onSubmit={handleSearchSubmit}
+              style={{ display: 'flex', alignItems: 'center', minWidth: '180px', maxWidth: '280px', flex: '1 1 180px' }}
+            >
+              <div style={{ position: 'relative', width: '100%' }}>
+                <input
+                  id="analytics-search-input"
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Tìm theo tên..."
+                  style={{
+                    width: '100%',
+                    padding: '0.35rem 1.85rem 0.35rem 0.75rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.82rem',
+                    height: '34px',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                {searchQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchQuery('');
+                      setPage(1);
+                      loadSavedGames(1, '', selectedTypeFilter, statusFilter);
+                    }}
+                    style={{
+                      position: 'absolute',
+                      right: '6px',
+                      top: '50%',
+                      transform: 'translateY(-50%)',
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--text-muted)',
+                      cursor: 'pointer',
+                      padding: '2px',
+                      display: 'flex',
+                    }}
+                  >
+                    <XMarkIcon size={14} />
+                  </button>
+                ) : (
+                  <span style={{ position: 'absolute', right: '8px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none', display: 'flex' }}>
+                    <SearchIcon size={13} />
+                  </span>
+                )}
+              </div>
+            </form>
+
+            {/* Type Filter */}
+            <select
+              id="analytics-type-filter"
+              value={selectedTypeFilter}
+              onChange={(e) => setSelectedTypeFilter(e.target.value)}
+              style={{
+                padding: '0.35rem 0.65rem',
                 borderRadius: '8px',
                 border: '1px solid var(--border-strong)',
                 backgroundColor: 'var(--bg-input)',
                 color: 'var(--text-primary)',
                 fontWeight: 700,
-                fontSize: '0.85rem',
+                fontSize: '0.8rem',
                 cursor: 'pointer',
-                minHeight: '40px',
+                height: '34px',
+              }}
+            >
+              <option value="ALL">Tất cả thể loại</option>
+              <option value="MULTIPLE_CHOICE">Trắc nghiệm ABCD</option>
+              <option value="FILL_IN_THE_BLANK">Điền từ</option>
+              <option value="QUICK_BUTTON">Đúng / Sai</option>
+              <option value="CROSSWORD">Ô chữ</option>
+              <option value="MIXED">Hỗn hợp</option>
+            </select>
+
+            {/* Status Filter */}
+            <select
+              id="analytics-status-filter"
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as 'ALL' | 'PUBLISHED' | 'DRAFT')}
+              style={{
+                padding: '0.35rem 0.65rem',
+                borderRadius: '8px',
+                border: '1px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontWeight: 700,
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                height: '34px',
               }}
             >
               <option value="ALL">Tất cả trạng thái</option>
               <option value="PUBLISHED">Đã xuất bản</option>
               <option value="DRAFT">Bản nháp</option>
             </select>
-          </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-            <label htmlFor="analytics-type-filter" style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-              Thể loại:
-            </label>
-            <select
-              id="analytics-type-filter"
-              value={selectedTypeFilter}
-              onChange={(e) => setSelectedTypeFilter(e.target.value)}
+            {/* View Layout Toggle */}
+            <div
               style={{
-                padding: '0.6rem 0.85rem',
-                borderRadius: '8px',
-                border: '1px solid var(--border-strong)',
+                display: 'inline-flex',
                 backgroundColor: 'var(--bg-input)',
-                color: 'var(--text-primary)',
-                fontWeight: 700,
-                fontSize: '0.85rem',
-                cursor: 'pointer',
-                minHeight: '40px',
+                padding: '2px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-subtle)',
+                height: '34px',
+                boxSizing: 'border-box',
               }}
             >
-              <option value="ALL">Tất cả ({totalCount})</option>
-              <option value="MULTIPLE_CHOICE">Trắc nghiệm ABCD</option>
-              <option value="FILL_IN_THE_BLANK">Điền từ</option>
-              <option value="QUICK_BUTTON">Đúng / Sai</option>
-              <option value="CROSSWORD">Ô chữ</option>
-              <option value="MIXED">Hỗn hợp (Mixed)</option>
-            </select>
+              <button
+                type="button"
+                onClick={() => setViewLayout('grid')}
+                style={{
+                  padding: '0 0.55rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: viewLayout === 'grid' ? 'var(--primary)' : 'transparent',
+                  color: viewLayout === 'grid' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: 700,
+                  fontSize: '0.76rem',
+                  cursor: 'pointer',
+                  height: '100%',
+                }}
+              >
+                Lưới
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewLayout('list')}
+                style={{
+                  padding: '0 0.55rem',
+                  borderRadius: '6px',
+                  border: 'none',
+                  backgroundColor: viewLayout === 'list' ? 'var(--primary)' : 'transparent',
+                  color: viewLayout === 'list' ? '#ffffff' : 'var(--text-secondary)',
+                  fontWeight: 700,
+                  fontSize: '0.76rem',
+                  cursor: 'pointer',
+                  height: '100%',
+                }}
+              >
+                Bảng
+              </button>
+            </div>
+
+            {/* Refresh Button */}
+            <button
+              type="button"
+              onClick={() => loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter)}
+              disabled={isLoading}
+              title="Làm mới"
+              style={{
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                border: '1px solid var(--border-strong)',
+                borderRadius: '8px',
+                padding: '0 0.65rem',
+                height: '34px',
+                fontWeight: 700,
+                fontSize: '0.8rem',
+                cursor: isLoading ? 'not-allowed' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+              }}
+            >
+              {isLoading ? <SpinnerIcon size={14} /> : <RefreshIcon size={14} />}
+            </button>
           </div>
         </div>
-      </section>
+      )}
 
+      {/* Error Message */}
       {errorMessage && (
         <div
           role="alert"
           style={{
-            padding: '1rem 1.25rem',
-            borderRadius: '12px',
+            padding: '0.5rem 0.85rem',
+            borderRadius: '8px',
             backgroundColor: 'rgba(244, 63, 94, 0.12)',
             border: '1px solid var(--accent-rose)',
             color: 'var(--accent-rose)',
-            marginBottom: '1.5rem',
+            marginBottom: '0.65rem',
             fontWeight: 700,
+            fontSize: '0.82rem',
             display: 'flex',
             alignItems: 'center',
-            gap: '0.5rem',
+            gap: '0.45rem',
+            flexShrink: 0,
           }}
         >
-          <AlertTriangleIcon size={18} />
+          <AlertTriangleIcon size={15} />
           <span>{errorMessage}</span>
         </div>
       )}
 
       {/* KHỐI XEM CHI TIẾT & CHỈNH SỬA BỘ CÂU HỎI ĐANG CHỌN */}
       {activeGameSpec && (
-        <section
+        <div
           style={{
-            backgroundColor: 'var(--bg-surface)',
-            border: '2px solid var(--primary)',
-            borderRadius: '16px',
-            padding: '1.5rem',
-            marginBottom: '1.75rem',
-            boxShadow: 'var(--card-shadow)',
+            flex: 1,
+            minHeight: 0,
+            overflowY: 'auto',
+            paddingRight: '0.4rem',
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
           <div
             style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'flex-start',
-              flexWrap: 'wrap',
-              gap: '1rem',
-              marginBottom: '1.2rem',
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '12px',
+              padding: '1rem',
+              marginBottom: '1rem',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                flexWrap: 'wrap',
+                gap: '1rem',
+                marginBottom: '1.2rem',
               paddingBottom: '1rem',
               borderBottom: '1px solid var(--border-subtle)',
             }}
@@ -1461,630 +1568,460 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               </div>
             ))}
           </div>
-        </section>
-      )}
-
-      {/* DANH SÁCH CÁC BỘ CÂU HỎI ĐÃ TẠO */}
-      <section
-        style={{
-          backgroundColor: 'var(--bg-surface)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: '16px',
-          padding: '1.5rem',
-          boxShadow: 'var(--card-shadow)',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            marginBottom: '1rem',
-            flexWrap: 'wrap',
-            gap: '0.5rem',
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-            <BookOpenIcon size={20} />
-            <span>Kho Game Dùng Chung ({totalCount} bộ câu hỏi)</span>
-          </h2>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            {isDetailLoading && (
-              <span style={{ fontSize: '0.84rem', color: 'var(--accent-sky)', fontWeight: 700, display: 'inline-flex', alignItems: 'center', gap: '0.35rem' }}>
-                <SpinnerIcon size={15} />
-                <span>Đang tải chi tiết...</span>
-              </span>
-            )}
-            <div style={{ display: 'inline-flex', backgroundColor: 'var(--bg-input)', padding: '0.2rem', borderRadius: '8px', border: '1px solid var(--border-subtle)' }}>
-              <button
-                type="button"
-                onClick={() => setViewLayout('grid')}
-                style={{
-                  padding: '0.35rem 0.65rem',
-                  borderRadius: '6px',
-                  border: 'none',
-                  backgroundColor: viewLayout === 'grid' ? 'var(--primary)' : 'transparent',
-                  color: viewLayout === 'grid' ? '#ffffff' : 'var(--text-secondary)',
-                  fontWeight: 700,
-                  fontSize: '0.78rem',
-                  cursor: 'pointer',
-                }}
-              >
-                Dạng Thẻ (Grid)
-              </button>
-              <button
-                type="button"
-                onClick={() => setViewLayout('list')}
-                style={{
-                  padding: '0.35rem 0.65rem',
-                  borderRadius: '6px',
-                  border: 'none',
-                  backgroundColor: viewLayout === 'list' ? 'var(--primary)' : 'transparent',
-                  color: viewLayout === 'list' ? '#ffffff' : 'var(--text-secondary)',
-                  fontWeight: 700,
-                  fontSize: '0.78rem',
-                  cursor: 'pointer',
-                }}
-              >
-                Danh Sách (List)
-              </button>
-            </div>
-          </div>
         </div>
+      </div>
+    )}
 
-        {savedGames.length === 0 ? (
+      {/* DANH SÁCH CÁC BỘ CÂU HỎI ĐÃ TẠO (VỪA KHÍT MÀN HÌNH KHÔNG CẦN SCROLL NGOÀI) */}
+      {!activeGameSpec && (
+        <>
           <div
             style={{
-              padding: '2.5rem 1.25rem',
-              borderRadius: '12px',
-              backgroundColor: 'var(--bg-input)',
-              border: '1px dashed var(--border-strong)',
-              textAlign: 'center',
-              color: 'var(--text-secondary)',
+              flex: 1,
+              minHeight: 0,
+              overflowY: 'auto',
+              paddingRight: '2px',
             }}
           >
-            <div style={{ color: 'var(--text-muted)', marginBottom: '0.5rem', display: 'flex', justifyContent: 'center' }}>
-              <BookOpenIcon size={36} />
-            </div>
-            <div style={{ fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.3rem', fontSize: '1rem' }}>
-              Chưa tìm thấy bộ câu hỏi nào
-            </div>
-            <div style={{ fontSize: '0.88rem' }}>
-              Hãy chuyển sang tab <strong>Tạo Game</strong> để trích xuất tài liệu/URL và tạo bộ câu hỏi mới bằng AI.
-            </div>
-          </div>
-        ) : viewLayout === 'grid' ? (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
-              gap: '1.25rem',
-            }}
-          >
-            {savedGames.map((g) => {
-              const isSelected = activeGameSpec?.gameId === g.gameId;
-              const typeColorMap: Record<string, string> = {
-                MULTIPLE_CHOICE: '#6366f1',
-                QUICK_BUTTON: '#10b981',
-                FILL_IN_THE_BLANK: '#0ea5e9',
-                CROSSWORD: '#f59e0b',
-                MIXED: '#ec4899',
-              };
-              const accentColor = typeColorMap[g.gameType] || 'var(--primary)';
+            {savedGames.length === 0 ? (
+              <div
+                style={{
+                  padding: '2.5rem 1.25rem',
+                  borderRadius: '12px',
+                  backgroundColor: 'var(--bg-surface)',
+                  border: '1px dashed var(--border-strong)',
+                  textAlign: 'center',
+                  color: 'var(--text-secondary)',
+                  marginTop: '1rem',
+                }}
+              >
+                <div style={{ color: 'var(--text-muted)', marginBottom: '0.5rem', display: 'flex', justifyContent: 'center' }}>
+                  <BookOpenIcon size={32} />
+                </div>
+                <div style={{ fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.25rem', fontSize: '0.95rem' }}>
+                  Chưa có bộ câu hỏi nào
+                </div>
+                <div style={{ fontSize: '0.82rem' }}>
+                  Chuyển sang <strong>Tạo Game</strong> để tạo bộ câu hỏi tự động từ tài liệu bằng AI.
+                </div>
+              </div>
+            ) : viewLayout === 'grid' ? (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                  gap: '0.75rem',
+                  alignContent: 'start',
+                }}
+              >
+                {savedGames.map((g) => {
+                  const typeColorMap: Record<string, string> = {
+                    MULTIPLE_CHOICE: 'var(--game-mc)',
+                    QUICK_BUTTON: 'var(--game-qb)',
+                    FILL_IN_THE_BLANK: 'var(--game-fill)',
+                    CROSSWORD: 'var(--game-cross)',
+                    MIXED: 'var(--game-mixed)',
+                  };
+                  const accentColor = typeColorMap[g.gameType] || 'var(--primary)';
 
-              return (
-                <div
-                  key={g.gameId}
-                  style={{
-                    borderRadius: '16px',
-                    backgroundColor: 'var(--bg-surface)',
-                    border: isSelected ? `2px solid ${accentColor}` : '1px solid var(--border-subtle)',
-                    boxShadow: isSelected ? `0 0 0 1px ${accentColor}, var(--card-shadow)` : 'var(--card-shadow)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <div style={{ height: '4px', backgroundColor: accentColor, width: '100%' }} />
-
-                  <div style={{ padding: '1.25rem', display: 'flex', flexDirection: 'column', flex: 1 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.65rem', flexWrap: 'wrap', gap: '0.35rem' }}>
-                      <span
-                        style={{
-                          backgroundColor: `${accentColor}18`,
-                          color: accentColor,
-                          padding: '0.2rem 0.55rem',
-                          borderRadius: '6px',
-                          fontWeight: 800,
-                          fontSize: '0.72rem',
-                        }}
-                      >
-                        {formatGameTypeName(g.gameType)}
-                      </span>
-
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                        <span
-                          style={{
-                            backgroundColor: g.isPublic ? 'rgba(16, 185, 129, 0.14)' : 'rgba(245, 158, 11, 0.15)',
-                            color: g.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
-                            padding: '0.15rem 0.5rem',
-                            borderRadius: '6px',
-                            fontSize: '0.7rem',
-                            fontWeight: 800,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.25rem',
-                          }}
-                        >
-                          {g.isPublic ? <CheckIcon size={11} /> : <PencilIcon size={11} />}
-                          <span>{g.isPublic ? 'Đã xuất bản' : 'Bản nháp'}</span>
-                        </span>
-
-                        {g.passwordProtected && (
-                          <span
-                            title="Có mật khẩu bảo vệ"
-                            style={{
-                              backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                              color: 'var(--accent-rose)',
-                              padding: '0.15rem 0.45rem',
-                              borderRadius: '6px',
-                              fontSize: '0.7rem',
-                              fontWeight: 800,
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '0.25rem',
-                            }}
-                          >
-                            <LockIcon size={11} />
-                          </span>
-                        )}
-                      </div>
-                    </div>
-
-                    <h3
+                  return (
+                    <div
+                      key={g.gameId}
                       style={{
-                        margin: '0 0 0.4rem 0',
-                        fontSize: '1.05rem',
-                        fontWeight: 900,
-                        color: 'var(--text-primary)',
-                        lineHeight: 1.35,
+                        borderRadius: '12px',
+                        backgroundColor: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
+                        borderLeft: `3.5px solid ${accentColor}`,
+                        padding: '0.85rem 1rem',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        boxSizing: 'border-box',
+                        minHeight: '148px',
                       }}
                     >
-                      {g.title}
-                    </h3>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.4rem', gap: '0.35rem' }}>
+                        <span
+                          style={{
+                            backgroundColor: `${accentColor}18`,
+                            color: accentColor,
+                            padding: '0.15rem 0.5rem',
+                            borderRadius: '6px',
+                            fontWeight: 800,
+                            fontSize: '0.72rem',
+                          }}
+                        >
+                          {formatGameTypeName(g.gameType)}
+                        </span>
 
-                    {g.description && (
-                      <p
+                        <span
+                          style={{
+                            backgroundColor: g.isPublic ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                            color: g.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+                            padding: '0.12rem 0.45rem',
+                            borderRadius: '6px',
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.2rem',
+                          }}
+                        >
+                          {g.isPublic ? <CheckIcon size={10} /> : <PencilIcon size={10} />}
+                          <span>{g.isPublic ? 'Đã xuất bản' : 'Bản nháp'}</span>
+                        </span>
+                      </div>
+
+                      <h3
                         style={{
-                          margin: '0 0 0.85rem 0',
-                          fontSize: '0.82rem',
-                          color: 'var(--text-secondary)',
-                          lineHeight: 1.45,
+                          margin: '0 0 0.35rem 0',
+                          fontSize: '0.95rem',
+                          fontWeight: 800,
+                          color: 'var(--text-primary)',
+                          lineHeight: 1.3,
                           display: '-webkit-box',
                           WebkitLineClamp: 2,
                           WebkitBoxOrient: 'vertical',
                           overflow: 'hidden',
                         }}
+                        title={g.title}
                       >
-                        {g.description}
-                      </p>
-                    )}
+                        {g.title}
+                      </h3>
 
+                      <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', marginBottom: '0.65rem' }}>
+                        {g.questionCount ? `${g.questionCount} câu hỏi • ` : ''}Cập nhật: {new Date(g.updatedAt || g.createdAt).toLocaleDateString('vi-VN')}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '0.35rem', marginTop: 'auto', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)', alignItems: 'center' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenModeModal(g.gameId)}
+                          style={{
+                            flex: 1,
+                            backgroundColor: 'var(--primary)',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '0.4rem 0.65rem',
+                            height: '32px',
+                            fontWeight: 800,
+                            fontSize: '0.8rem',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '0.3rem',
+                          }}
+                        >
+                          <GamepadIcon size={14} />
+                          <span>Mở Game</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleViewOrEditGame(g.gameId, false)}
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            padding: '0 0.55rem',
+                            height: '32px',
+                            fontWeight: 700,
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
+                          }}
+                          title="Xem chi tiết & Chỉnh sửa câu hỏi"
+                        >
+                          <PencilIcon size={13} />
+                          <span>Sửa</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenSoloShareModal(g)}
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--text-secondary)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            padding: '0 0.55rem',
+                            height: '32px',
+                            fontWeight: 700,
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                          }}
+                          title="Mã QR & Link Chơi Đơn"
+                        >
+                          <QrCodeIcon size={14} />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDeleteModal(g)}
+                          style={{
+                            backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                            color: 'var(--accent-rose)',
+                            border: '1px solid rgba(239, 68, 68, 0.25)',
+                            borderRadius: '6px',
+                            padding: '0 0.55rem',
+                            height: '32px',
+                            fontWeight: 700,
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                          }}
+                          title="Xóa bộ câu hỏi"
+                        >
+                          <TrashIcon size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                {savedGames.map((g) => {
+                  return (
                     <div
+                      key={g.gameId}
                       style={{
+                        padding: '0.6rem 0.85rem',
+                        borderRadius: '8px',
+                        backgroundColor: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
                         display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
                         flexWrap: 'wrap',
-                        gap: '0.45rem',
-                        fontSize: '0.75rem',
-                        color: 'var(--text-muted)',
-                        marginBottom: '1.15rem',
-                        marginTop: 'auto',
+                        gap: '0.5rem',
                       }}
                     >
-                      <span style={{ padding: '0.15rem 0.45rem', backgroundColor: 'var(--bg-input)', borderRadius: '4px' }}>
-                        {g.questionCount} câu hỏi
-                      </span>
-                      <span style={{ padding: '0.15rem 0.45rem', backgroundColor: 'var(--bg-input)', borderRadius: '4px' }}>
-                        {g.timePerQuestion}s/câu
-                      </span>
-                      <span style={{ padding: '0.15rem 0.45rem', backgroundColor: 'var(--bg-input)', borderRadius: '4px' }}>
-                        {formatScoringModeName(g.scoringMode)}
-                      </span>
-                    </div>
-
-                    <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', borderTop: '1px solid var(--border-subtle)', paddingTop: '0.85rem' }}>
-                      <button
-                        type="button"
-                        onClick={() => handleOpenModeModal(g.gameId)}
-                        style={{
-                          flex: 1,
-                          backgroundColor: 'var(--primary)',
-                          color: '#ffffff',
-                          border: 'none',
-                          borderRadius: '8px',
-                          padding: '0.55rem 0.75rem',
-                          minHeight: '40px',
-                          fontWeight: 800,
-                          fontSize: '0.84rem',
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '0.35rem',
-                          boxShadow: 'var(--btn-shadow)',
-                        }}
-                      >
-                        <GamepadIcon size={15} />
-                        <span>Mở Game</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleViewOrEditGame(g.gameId, false)}
-                        style={{
-                          backgroundColor: 'var(--bg-input)',
-                          color: 'var(--text-primary)',
-                          border: '1px solid var(--border-strong)',
-                          borderRadius: '8px',
-                          padding: '0.55rem 0.65rem',
-                          minHeight: '40px',
-                          fontWeight: 700,
-                          fontSize: '0.8rem',
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.3rem',
-                        }}
-                        title="Xem chi tiết & Chỉnh sửa câu hỏi"
-                      >
-                        <PencilIcon size={14} />
-                        <span>Sửa</span>
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleOpenSoloShareModal(g)}
-                        style={{
-                          backgroundColor: 'var(--bg-input)',
-                          color: 'var(--text-secondary)',
-                          border: '1px solid var(--border-strong)',
-                          borderRadius: '8px',
-                          padding: '0.55rem 0.65rem',
-                          minHeight: '40px',
-                          fontWeight: 700,
-                          fontSize: '0.8rem',
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.3rem',
-                        }}
-                        title="Mã QR & Link Chơi Đơn"
-                      >
-                        <QrCodeIcon size={14} />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => setConfirmDeleteGame(g)}
-                        style={{
-                          backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                          color: 'var(--accent-rose)',
-                          border: '1px solid rgba(239, 68, 68, 0.25)',
-                          borderRadius: '8px',
-                          padding: '0.55rem 0.65rem',
-                          minHeight: '40px',
-                          fontWeight: 700,
-                          fontSize: '0.8rem',
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.3rem',
-                        }}
-                        title="Xóa bộ câu hỏi"
-                      >
-                        <TrashIcon size={14} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
-            {savedGames.map((g) => {
-              const isSelected = activeGameSpec?.gameId === g.gameId;
-              return (
-                <div
-                  key={g.gameId}
-                  style={{
-                    padding: '1rem 1.2rem',
-                    borderRadius: '12px',
-                    backgroundColor: 'var(--bg-input)',
-                    border: isSelected ? '2px solid var(--primary)' : '1px solid var(--border-subtle)',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    flexWrap: 'wrap',
-                    gap: '0.85rem',
-                  }}
-                >
-                  <div style={{ flex: '1 1 300px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
-                      <div style={{ fontWeight: 900, color: 'var(--text-primary)', fontSize: '1.02rem' }}>
-                        {g.title}
-                      </div>
-                      <span
-                        style={{
-                          backgroundColor: g.isPublic
-                            ? 'rgba(16, 185, 129, 0.14)'
-                            : 'rgba(245, 158, 11, 0.15)',
-                          color: g.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
-                          padding: '0.15rem 0.55rem',
-                          borderRadius: '6px',
-                          fontSize: '0.73rem',
-                          fontWeight: 800,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.3rem',
-                        }}
-                      >
-                        {g.isPublic ? <CheckIcon size={12} /> : <PencilIcon size={12} />}
-                        <span>{g.isPublic ? 'Đã xuất bản' : 'Bản nháp'}</span>
-                      </span>
-                      {g.passwordProtected && (
+                      <div style={{ flex: '1 1 260px', display: 'flex', alignItems: 'center', gap: '0.55rem', flexWrap: 'wrap' }}>
                         <span
                           style={{
-                            backgroundColor: 'rgba(239, 68, 68, 0.15)',
-                            color: '#ef4444',
-                            border: '1px solid rgba(239, 68, 68, 0.3)',
-                            padding: '0.15rem 0.55rem',
+                            backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                            color: 'var(--accent-sky)',
+                            padding: '0.12rem 0.45rem',
                             borderRadius: '6px',
-                            fontSize: '0.73rem',
                             fontWeight: 800,
+                            fontSize: '0.72rem',
+                          }}
+                        >
+                          {formatGameTypeName(g.gameType)}
+                        </span>
+                        <div style={{ fontWeight: 800, color: 'var(--text-primary)', fontSize: '0.9rem' }}>
+                          {g.title}
+                        </div>
+                        <span
+                          style={{
+                            backgroundColor: g.isPublic ? 'rgba(16, 185, 129, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                            color: g.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+                            padding: '0.12rem 0.45rem',
+                            borderRadius: '6px',
+                            fontSize: '0.68rem',
+                            fontWeight: 700,
+                          }}
+                        >
+                          {g.isPublic ? 'Đã xuất bản' : 'Bản nháp'}
+                        </span>
+                        {g.questionCount ? (
+                          <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                            {g.questionCount} câu
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenModeModal(g.gameId)}
+                          style={{
+                            backgroundColor: 'var(--primary)',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '6px',
+                            padding: '0 0.75rem',
+                            height: '32px',
+                            fontWeight: 800,
+                            fontSize: '0.8rem',
+                            cursor: 'pointer',
                             display: 'inline-flex',
                             alignItems: 'center',
                             gap: '0.3rem',
                           }}
                         >
-                          <LockIcon size={12} />
-                          <span>Có mật khẩu</span>
-                        </span>
-                      )}
-                    </div>
-                    {g.description && (
-                      <div style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
-                        {g.description}
+                          <GamepadIcon size={14} />
+                          <span>Mở Game</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleViewOrEditGame(g.gameId, false)}
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            padding: '0 0.55rem',
+                            height: '32px',
+                            fontWeight: 700,
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Chi tiết
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleViewOrEditGame(g.gameId, true)}
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--accent-amber)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            padding: '0 0.55rem',
+                            height: '32px',
+                            fontWeight: 700,
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Sửa
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleOpenDeleteModal(g)}
+                          style={{
+                            backgroundColor: 'rgba(244, 63, 94, 0.12)',
+                            color: 'var(--accent-rose)',
+                            border: '1px solid var(--accent-rose)',
+                            borderRadius: '6px',
+                            padding: '0 0.55rem',
+                            height: '32px',
+                            fontWeight: 700,
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Xóa
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleExportGame(g.gameId, 'csv')}
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--accent-emerald)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            padding: '0 0.5rem',
+                            height: '32px',
+                            fontWeight: 700,
+                            fontSize: '0.74rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          CSV
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleExportGame(g.gameId, 'json')}
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--accent-sky)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            padding: '0 0.5rem',
+                            height: '32px',
+                            fontWeight: 700,
+                            fontSize: '0.74rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          JSON
+                        </button>
                       </div>
-                    )}
-                    <div
-                      style={{
-                        fontSize: '0.78rem',
-                        color: 'var(--text-muted)',
-                        marginTop: '0.4rem',
-                        display: 'flex',
-                        flexWrap: 'wrap',
-                        gap: '0.6rem',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <span
-                        style={{
-                          backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                          color: 'var(--accent-sky)',
-                          padding: '0.15rem 0.55rem',
-                          borderRadius: '6px',
-                          fontWeight: 800,
-                        }}
-                      >
-                        {formatGameTypeName(g.gameType)}
-                      </span>
-                      <span>• {g.questionCount} câu hỏi</span>
-                      <span>• {g.timePerQuestion}s/câu</span>
-                      <span>• Điểm: {formatScoringModeName(g.scoringMode)}</span>
-                      <span>• Cập nhật: {new Date(g.updatedAt || g.createdAt).toLocaleString('vi-VN')}</span>
                     </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap', alignItems: 'center' }}>
-                    {/* NÚT CHÍNH: MỞ GAME & CHỌN CHẾ ĐỘ CHƠI (LUỒNG 2) */}
-                    <button
-                      type="button"
-                      onClick={() => handleOpenModeModal(g.gameId)}
-                      style={{
-                        backgroundColor: 'var(--primary)',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: '8px',
-                        padding: '0.48rem 0.95rem',
-                        minHeight: '40px',
-                        fontWeight: 800,
-                        fontSize: '0.82rem',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.35rem',
-                        boxShadow: 'var(--btn-shadow)',
-                      }}
-                    >
-                      <GamepadIcon size={15} />
-                      <span>Mở Game</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleViewOrEditGame(g.gameId, false)}
-                      style={{
-                        backgroundColor: 'var(--bg-surface)',
-                        color: 'var(--text-primary)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: '8px',
-                        padding: '0.48rem 0.8rem',
-                        minHeight: '40px',
-                        fontWeight: 700,
-                        fontSize: '0.8rem',
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.35rem',
-                      }}
-                    >
-                      <EyeIcon size={14} />
-                      <span>Chi tiết</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleViewOrEditGame(g.gameId, true)}
-                      style={{
-                        backgroundColor: 'var(--bg-surface)',
-                        color: 'var(--accent-amber)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: '8px',
-                        padding: '0.48rem 0.8rem',
-                        minHeight: '40px',
-                        fontWeight: 800,
-                        fontSize: '0.8rem',
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.35rem',
-                      }}
-                    >
-                      <PencilIcon size={14} />
-                      <span>Sửa</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setConfirmDeleteGame(g)}
-                      style={{
-                        backgroundColor: 'rgba(244, 63, 94, 0.12)',
-                        color: 'var(--accent-rose)',
-                        border: '1px solid var(--accent-rose)',
-                        borderRadius: '8px',
-                        padding: '0.48rem 0.75rem',
-                        minHeight: '40px',
-                        fontWeight: 800,
-                        fontSize: '0.8rem',
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.35rem',
-                      }}
-                    >
-                      <TrashIcon size={14} />
-                      <span>Xóa</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleExportGame(g.gameId, 'csv')}
-                      style={{
-                        backgroundColor: 'var(--bg-surface)',
-                        color: 'var(--accent-emerald)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: '8px',
-                        padding: '0.48rem 0.75rem',
-                        minHeight: '40px',
-                        fontWeight: 800,
-                        fontSize: '0.8rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      CSV
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => handleExportGame(g.gameId, 'json')}
-                      style={{
-                        backgroundColor: 'var(--bg-surface)',
-                        color: 'var(--accent-sky)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: '8px',
-                        padding: '0.48rem 0.75rem',
-                        minHeight: '40px',
-                        fontWeight: 800,
-                        fontSize: '0.8rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      JSON
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+                  );
+                })}
+              </div>
+            )}
           </div>
-        )}
 
-        {/* Thanh phân trang */}
-        {totalCount > PAGE_SIZE && (
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginTop: '1.25rem',
-              paddingTop: '1rem',
-              borderTop: '1px solid var(--border-subtle)',
-              flexWrap: 'wrap',
-              gap: '0.75rem',
-            }}
-          >
-            <span style={{ fontSize: '0.84rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
-              Trang {page} / {totalPages} • Tổng cộng {totalCount} bộ câu hỏi
-            </span>
-            <div style={{ display: 'flex', gap: '0.5rem' }}>
-              <button
-                type="button"
-                disabled={page <= 1 || isLoading}
-                onClick={() => handlePageChange(page - 1)}
-                style={{
-                  padding: '0.5rem 0.95rem',
-                  minHeight: '40px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-strong)',
-                  backgroundColor: 'var(--bg-input)',
-                  color: page <= 1 ? 'var(--text-muted)' : 'var(--text-primary)',
-                  fontWeight: 800,
-                  fontSize: '0.84rem',
-                  cursor: page <= 1 ? 'not-allowed' : 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.35rem',
-                }}
-              >
-                <ArrowLeftIcon size={14} />
-                <span>Trang trước</span>
-              </button>
-              <button
-                type="button"
-                disabled={!hasMore || isLoading}
-                onClick={() => handlePageChange(page + 1)}
-                style={{
-                  padding: '0.5rem 0.95rem',
-                  minHeight: '40px',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-strong)',
-                  backgroundColor: 'var(--bg-input)',
-                  color: !hasMore ? 'var(--text-muted)' : 'var(--text-primary)',
-                  fontWeight: 800,
-                  fontSize: '0.84rem',
-                  cursor: !hasMore ? 'not-allowed' : 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.35rem',
-                }}
-              >
-                <span>Trang tiếp</span>
-                <ArrowRightIcon size={14} />
-              </button>
+          {/* Thanh phân trang cố định đáy */}
+          {totalCount > PAGE_SIZE && (
+            <div
+              style={{
+                flexShrink: 0,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                paddingTop: '0.45rem',
+                marginTop: '0.4rem',
+                borderTop: '1px solid var(--border-subtle)',
+                flexWrap: 'wrap',
+                gap: '0.4rem',
+              }}
+            >
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                Trang {page} / {totalPages} • Tổng {totalCount} bộ câu hỏi
+              </span>
+              <div style={{ display: 'flex', gap: '0.4rem' }}>
+                <button
+                  type="button"
+                  disabled={page <= 1 || isLoading}
+                  onClick={() => handlePageChange(page - 1)}
+                  style={{
+                    padding: '0 0.75rem',
+                    height: '32px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: page <= 1 ? 'var(--text-muted)' : 'var(--text-primary)',
+                    fontWeight: 700,
+                    fontSize: '0.78rem',
+                    cursor: page <= 1 ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                  }}
+                >
+                  <ArrowLeftIcon size={12} />
+                  <span>Trước</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!hasMore || isLoading}
+                  onClick={() => handlePageChange(page + 1)}
+                  style={{
+                    padding: '0 0.75rem',
+                    height: '32px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: !hasMore ? 'var(--text-muted)' : 'var(--text-primary)',
+                    fontWeight: 700,
+                    fontSize: '0.78rem',
+                    cursor: !hasMore ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.3rem',
+                  }}
+                >
+                  <span>Sau</span>
+                  <ArrowRightIcon size={12} />
+                </button>
+              </div>
             </div>
-          </div>
-        )}
-      </section>
+          )}
+        </>
+      )}
 
       {/* Modal Chia Sẻ Link / QR Chơi Đơn */}
       {soloShareData && (
@@ -2440,10 +2377,14 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
             padding: '1rem',
           }}
           onClick={(e) => {
-            if (e.target === e.currentTarget && !isDeleting) setConfirmDeleteGame(null);
+            if (e.target === e.currentTarget && !isDeleting) {
+              setConfirmDeleteGame(null);
+            }
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Escape' && !isDeleting) setConfirmDeleteGame(null);
+            if (e.key === 'Escape' && !isDeleting) {
+              setConfirmDeleteGame(null);
+            }
           }}
         >
           <div
@@ -2511,7 +2452,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               <button
                 type="button"
                 disabled={isDeleting}
-                onClick={() => setConfirmDeleteGame(null)}
+                onClick={() => {
+                  setConfirmDeleteGame(null);
+                }}
                 style={{
                   backgroundColor: 'var(--bg-card)',
                   color: 'var(--text-primary)',
@@ -2543,7 +2486,6 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   display: 'inline-flex',
                   alignItems: 'center',
                   gap: '0.45rem',
-                  boxShadow: '0 4px 12px rgba(239, 68, 68, 0.3)',
                 }}
               >
                 {isDeleting ? (
@@ -2568,9 +2510,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         isOpen={isModeModalOpen}
         onClose={() => setIsModeModalOpen(false)}
         gameSpec={modeModalSpec}
-        onStartSoloPlay={(spec) => {
+        onStartSoloPresentation={(spec) => {
           setIsModeModalOpen(false);
-          handlePlaySavedGame(spec.gameId, true);
+          if (onNavigateToSoloPresentation) {
+            onNavigateToSoloPresentation(spec);
+          } else {
+            handlePlaySavedGame(spec.gameId, true);
+          }
         }}
         onCreateMultiplayerRoom={async (spec) => {
           try {

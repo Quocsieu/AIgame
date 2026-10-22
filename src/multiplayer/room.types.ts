@@ -277,6 +277,5 @@ export interface RoomLobbyInfo {
   title: string;
   gameType: GameType;
   totalQuestions: number;
-  passwordProtected?: boolean;
 }
 

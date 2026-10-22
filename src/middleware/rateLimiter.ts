@@ -140,11 +140,11 @@ export const authRateLimiter = new InMemoryRateLimiter({
   message: 'Too many authentication attempts. Please wait before trying again.',
 });
 
-export const gamePasswordVerifyRateLimiter = new InMemoryRateLimiter({
-  name: 'game-password-verify',
+export const gameDeleteRateLimiter = new InMemoryRateLimiter({
+  name: 'game-delete',
   windowMs: LIMITS.RATE_LIMIT_WINDOW_MS,
-  maxRequests: LIMITS.RATE_LIMIT_GAME_PASSWORD_VERIFY_MAX,
-  message: 'Bạn đã thử mật khẩu sai quá nhiều lần. Vui lòng đợi 1 phút trước khi thử lại.',
+  maxRequests: 10,
+  message: 'Bạn đã thực hiện thao tác xóa game quá nhiều lần. Vui lòng đợi 1 phút trước khi thử lại.',
 });
 
 export function resetAllRateLimiters(): void {
@@ -152,7 +152,7 @@ export function resetAllRateLimiters(): void {
   generateRateLimiter.reset();
   roomCreateRateLimiter.reset();
   authRateLimiter.reset();
-  gamePasswordVerifyRateLimiter.reset();
+  gameDeleteRateLimiter.reset();
 }
 
 

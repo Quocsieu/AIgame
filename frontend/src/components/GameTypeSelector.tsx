@@ -27,9 +27,9 @@ export const SUPPORTED_GAME_TYPES: GameTypeOption[] = [
     title: 'Trắc Nghiệm 4 Lựa Chọn',
     subtitle: 'Định dạng kinh điển phong cách Kahoot! với 4 khối màu rực rỡ, tính điểm theo tốc độ và chuỗi đúng.',
     badge: 'Phổ biến nhất',
-    badgeColor: '#6366f1',
-    accentColor: '#4f46e5',
-    icon: <GamepadIcon size={24} style={{ color: '#6366f1' }} />,
+    badgeColor: 'var(--game-mc)',
+    accentColor: 'var(--game-mc-hover)',
+    icon: <GamepadIcon size={24} style={{ color: 'var(--game-mc)' }} />,
     tags: ['4 đáp án màu', 'Thưởng tốc độ', 'Multiplayer'],
   },
   {
@@ -37,9 +37,9 @@ export const SUPPORTED_GAME_TYPES: GameTypeOption[] = [
     title: 'Đúng / Sai Thần Tốc',
     subtitle: 'Hai nút bấm phản xạ cực nhanh. Kiểm tra kiến thức cốt lõi và khả năng ra quyết định dưới áp lực thời gian.',
     badge: 'Phản xạ nhanh',
-    badgeColor: '#10b981',
-    accentColor: '#059669',
-    icon: <FlameIcon size={24} style={{ color: '#10b981' }} />,
+    badgeColor: 'var(--game-qb)',
+    accentColor: 'var(--game-qb-hover)',
+    icon: <FlameIcon size={24} style={{ color: 'var(--game-qb)' }} />,
     tags: ['Đúng/Sai', 'Blitz 5-10s', 'Kịch tính'],
   },
   {
@@ -47,9 +47,9 @@ export const SUPPORTED_GAME_TYPES: GameTypeOption[] = [
     title: 'Điền Từ Vào Chỗ Trống',
     subtitle: 'Thử thách trí nhớ chính xác với ô nhập từ khóa. Hỗ trợ nhiều đáp án chấp nhận tương đương.',
     badge: 'Ghi nhớ sâu',
-    badgeColor: '#0ea5e9',
-    accentColor: '#0284c7',
-    icon: <BookOpenIcon size={24} style={{ color: '#0ea5e9' }} />,
+    badgeColor: 'var(--game-fill)',
+    accentColor: 'var(--game-fill-hover)',
+    icon: <BookOpenIcon size={24} style={{ color: 'var(--game-fill)' }} />,
     tags: ['Từ khóa', 'Chính tả', 'Học thuật'],
   },
   {
@@ -57,9 +57,9 @@ export const SUPPORTED_GAME_TYPES: GameTypeOption[] = [
     title: 'Giải Đố Ô Chữ',
     subtitle: 'Gợi ý giải mã theo hàng ngang và hàng dọc. Rèn luyện tư duy ngôn ngữ và liên tưởng logic.',
     badge: 'Tư duy logic',
-    badgeColor: '#f59e0b',
-    accentColor: '#d97706',
-    icon: <LayersIcon size={24} style={{ color: '#f59e0b' }} />,
+    badgeColor: 'var(--game-cross)',
+    accentColor: 'var(--game-cross-hover)',
+    icon: <LayersIcon size={24} style={{ color: 'var(--game-cross)' }} />,
     tags: ['Ô chữ', 'Gợi ý từ', 'Khám phá'],
   },
   {
@@ -67,9 +67,9 @@ export const SUPPORTED_GAME_TYPES: GameTypeOption[] = [
     title: 'Bộ Đề Hỗn Hợp (Mixed)',
     subtitle: 'Kết hợp linh hoạt cả 4 định dạng câu hỏi trong cùng một trận đấu, tạo trải nghiệm phong phú bất ngờ.',
     badge: 'Toàn diện',
-    badgeColor: '#ec4899',
-    accentColor: '#db2777',
-    icon: <SparklesIcon size={24} style={{ color: '#ec4899' }} />,
+    badgeColor: 'var(--game-mixed)',
+    accentColor: 'var(--game-mixed-hover)',
+    icon: <SparklesIcon size={24} style={{ color: 'var(--game-mixed)' }} />,
     tags: ['Đa định dạng', 'Thử thách cao', 'Độc đáo'],
   },
 ];
@@ -121,16 +121,13 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
                   ? `2px solid ${item.badgeColor}`
                   : '1.5px solid var(--border-strong)',
                 backgroundColor: isSelected
-                  ? `${item.badgeColor}15`
+                  ? 'var(--bg-card-hover)'
                   : 'var(--bg-surface)',
                 color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
                 fontWeight: isSelected ? 800 : 600,
                 fontSize: '0.88rem',
                 cursor: 'pointer',
                 transition: 'all 0.15s ease',
-                boxShadow: isSelected
-                  ? `0 2px 8px ${item.badgeColor}25`
-                  : 'none',
               }}
             >
               <span
@@ -146,7 +143,7 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
 
               <span>{item.title}</span>
 
-              {isSelected ? (
+              {isSelected && (
                 <span
                   style={{
                     width: '18px',
@@ -162,19 +159,6 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
                 >
                   <CheckIcon size={12} />
                 </span>
-              ) : (
-                <span
-                  style={{
-                    fontSize: '0.7rem',
-                    color: 'var(--text-muted)',
-                    backgroundColor: 'var(--bg-input)',
-                    padding: '0.15rem 0.4rem',
-                    borderRadius: '6px',
-                    marginLeft: '0.2rem',
-                  }}
-                >
-                  {item.badge}
-                </span>
               )}
             </button>
           );
@@ -189,8 +173,8 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
       aria-label="Chọn định dạng game"
       style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-        gap: '1rem',
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+        gap: '0.85rem',
         width: '100%',
       }}
     >
@@ -211,15 +195,12 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
               borderRadius: '16px',
               border: isSelected
                 ? `2px solid ${item.badgeColor}`
-                : '2px solid var(--border-subtle)',
+                : '1.5px solid var(--border-subtle)',
               backgroundColor: isSelected
                 ? 'var(--bg-card-hover)'
                 : 'var(--bg-surface)',
-              boxShadow: isSelected
-                ? `0 0 0 1px ${item.badgeColor}, var(--card-shadow)`
-                : 'var(--shadow-sm)',
               cursor: 'pointer',
-              transition: 'background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease',
+              transition: 'background-color 0.15s ease, border-color 0.15s ease',
               position: 'relative',
               outline: 'none',
               minHeight: '44px',
@@ -237,9 +218,9 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
             >
               <div
                 style={{
-                  width: '44px',
-                  height: '44px',
-                  borderRadius: '12px',
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
                   backgroundColor: 'var(--bg-input)',
                   display: 'flex',
                   alignItems: 'center',
@@ -250,20 +231,6 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
               </div>
 
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <span
-                  style={{
-                    fontSize: '0.72rem',
-                    fontWeight: 800,
-                    padding: '0.2rem 0.55rem',
-                    borderRadius: '20px',
-                    backgroundColor: `${item.badgeColor}20`,
-                    color: item.badgeColor,
-                    border: `1px solid ${item.badgeColor}40`,
-                  }}
-                >
-                  {item.badge}
-                </span>
-
                 {isSelected && (
                   <div
                     style={{
@@ -297,8 +264,8 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
 
             <p
               style={{
-                margin: '0 0 0.85rem 0',
-                fontSize: '0.82rem',
+                margin: 0,
+                fontSize: '0.84rem',
                 color: 'var(--text-secondary)',
                 lineHeight: 1.45,
                 flex: 1,
@@ -306,25 +273,6 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
             >
               {item.subtitle}
             </p>
-
-            {/* Feature tags */}
-            <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-              {item.tags.map((tag, tagIdx) => (
-                <span
-                  key={tagIdx}
-                  style={{
-                    fontSize: '0.7rem',
-                    padding: '0.15rem 0.45rem',
-                    borderRadius: '6px',
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--text-muted)',
-                    fontWeight: 600,
-                  }}
-                >
-                  #{tag}
-                </span>
-              ))}
-            </div>
           </button>
         );
       })}

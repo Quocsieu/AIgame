@@ -7,4 +7,6 @@ dist/
 coverage/
 *.log
 data/*.sqlite*
+.taste-skill/
+
 
