@@ -1,6 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useToast } from '../components/ToastContext.js';
-import { ArrowRightIcon, LinkIcon, QrCodeIcon, UsersIcon } from '../components/Icons.js';
+import {
+  AlertTriangleIcon,
+  ArrowRightIcon,
+  GamepadIcon,
+  LinkIcon,
+  QrCodeIcon,
+  SpinnerIcon,
+  UsersIcon,
+} from '../components/Icons.js';
+import { fetchRoomLobby, type RoomLobbyInfo } from '../services/api.js';
 
 interface JoinPageProps {
   initialRoomCode?: string;
@@ -10,18 +19,12 @@ interface JoinPageProps {
 export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin }) => {
   const toast = useToast();
 
-  // Extract roomCode from props or current URL query (?room=...)
-  const getInitialCode = () => {
-    if (initialRoomCode.trim()) return initialRoomCode.trim().toUpperCase();
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const qRoom = params.get('room');
-      if (qRoom?.trim()) return qRoom.trim().toUpperCase();
-    } catch {}
-    return '';
-  };
+  const [roomCode, setRoomCode] = useState('');
+  const [pinInput, setPinInput] = useState('');
+  const [isVerifyingPin, setIsVerifyingPin] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [verifiedLobby, setVerifiedLobby] = useState<RoomLobbyInfo | null>(null);
 
-  const [roomCode, setRoomCode] = useState(getInitialCode);
   const [displayName, setDisplayName] = useState(() => {
     try {
       return sessionStorage.getItem('active_player_name') || '';
@@ -30,15 +33,90 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
     }
   });
 
-  // State for fallback link/QR paste when navigated directly without URL room
   const [pasteInput, setPasteInput] = useState('');
+  const [showPasteSection, setShowPasteSection] = useState(false);
 
+  // Verify room code when passed as prop (e.g. from QR / URL)
   useEffect(() => {
-    if (initialRoomCode.trim()) {
-      setRoomCode(initialRoomCode.trim().toUpperCase());
+    const raw = (initialRoomCode || '').trim().toUpperCase();
+    if (raw && raw.length >= 4) {
+      setIsVerifyingPin(true);
+      setPinError(null);
+      fetchRoomLobby(raw)
+        .then((lobby) => {
+          if (lobby.state === 'CLOSED') {
+            setPinError('Phòng chơi này đã kết thúc hoặc bị đóng bởi Host.');
+            setRoomCode('');
+            setVerifiedLobby(null);
+          } else {
+            setRoomCode(lobby.roomCode);
+            setVerifiedLobby(lobby);
+            setPinInput(lobby.roomCode);
+          }
+        })
+        .catch((err: any) => {
+          setPinError(err.message || 'Mã phòng không tồn tại hoặc đã hết hạn.');
+          setRoomCode('');
+          setVerifiedLobby(null);
+        })
+        .finally(() => {
+          setIsVerifyingPin(false);
+        });
+    } else {
+      setRoomCode('');
+      setVerifiedLobby(null);
+      setPinError(null);
     }
   }, [initialRoomCode]);
 
+  // Handle direct PIN input submit
+  const handleVerifyPinSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanCode = pinInput.trim().toUpperCase();
+
+    if (!cleanCode) {
+      setPinError('Vui lòng nhập mã PIN phòng chơi.');
+      toast.warning('Vui lòng nhập mã PIN phòng chơi.', 'Thiếu mã PIN');
+      return;
+    }
+
+    if (cleanCode.length < 4) {
+      setPinError('Mã PIN phòng chơi hợp lệ phải có từ 4 đến 6 ký tự.');
+      toast.warning('Mã PIN phòng chơi hợp lệ phải có từ 4 đến 6 ký tự.', 'Mã PIN không hợp lệ');
+      return;
+    }
+
+    setIsVerifyingPin(true);
+    setPinError(null);
+
+    try {
+      const lobby = await fetchRoomLobby(cleanCode);
+      if (lobby.state === 'CLOSED') {
+        setPinError('Phòng thi đấu này đã kết thúc hoặc đã bị đóng.');
+        toast.error('Phòng thi đấu này đã kết thúc hoặc đã bị đóng.', 'Phòng đã đóng');
+        setRoomCode('');
+        setVerifiedLobby(null);
+        return;
+      }
+
+      setRoomCode(lobby.roomCode);
+      setVerifiedLobby(lobby);
+      setPinInput(lobby.roomCode);
+      try {
+        window.history.replaceState({}, '', `/?room=${lobby.roomCode}`);
+      } catch {}
+      toast.success(`Đã kết nối phòng #${lobby.roomCode} - ${lobby.title}`, 'Kết nối thành công');
+    } catch (err: any) {
+      setPinError(err.message || 'Mã PIN không tồn tại hoặc phòng chơi đã hết hạn. Vui lòng kiểm tra lại.');
+      toast.error('Không tìm thấy phòng chơi tương ứng với mã PIN này.', 'Mã PIN không đúng');
+      setRoomCode('');
+      setVerifiedLobby(null);
+    } finally {
+      setIsVerifyingPin(false);
+    }
+  };
+
+  // Fallback: Extract from pasted URL or text
   const handleExtractFromPaste = (e: React.FormEvent) => {
     e.preventDefault();
     const raw = pasteInput.trim();
@@ -48,7 +126,6 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
     }
 
     let extracted = '';
-    // Try URL parsing
     try {
       if (raw.includes('room=')) {
         const url = new URL(raw.startsWith('http') ? raw : `http://${raw}`);
@@ -57,8 +134,7 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
     } catch {}
 
     if (!extracted) {
-      // If 6 alphanumeric characters or raw text
-      const match = raw.match(/[A-Za-z0-9]{6}/);
+      const match = raw.match(/[A-Za-z0-9]{4,6}/);
       if (match) {
         extracted = match[0];
       } else {
@@ -67,22 +143,41 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
     }
 
     if (extracted && extracted.length >= 4) {
-      const code = extracted.toUpperCase();
-      setRoomCode(code);
+      setPinInput(extracted.toUpperCase());
       setPasteInput('');
-      toast.success(`Đã nhận diện phòng chơi: ${code}`, 'Kết nối thành công');
+      setShowPasteSection(false);
+      // Trigger verification
+      setIsVerifyingPin(true);
+      setPinError(null);
+      fetchRoomLobby(extracted.toUpperCase())
+        .then((lobby) => {
+          if (lobby.state === 'CLOSED') {
+            setPinError('Phòng chơi này đã kết thúc hoặc bị đóng bởi Host.');
+          } else {
+            setRoomCode(lobby.roomCode);
+            setVerifiedLobby(lobby);
+            toast.success(`Đã nhận diện phòng chơi: ${lobby.roomCode}`, 'Kết nối thành công');
+          }
+        })
+        .catch((err: any) => {
+          setPinError(err.message || 'Không tìm thấy phòng chơi hợp lệ.');
+        })
+        .finally(() => {
+          setIsVerifyingPin(false);
+        });
     } else {
-      toast.error('Không tìm thấy mã phòng hợp lệ trong liên kết vừa dán.', 'Liên kết không hợp lệ');
+      toast.error('Không tìm thấy mã phòng hợp lệ trong nội dung vừa dán.', 'Liên kết không hợp lệ');
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  // Handle final join with nickname
+  const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanCode = roomCode.trim().toUpperCase();
     const cleanName = displayName.trim();
 
     if (!cleanCode) {
-      toast.error('Chưa có mã phòng chơi. Vui lòng quét mã QR hoặc mở link từ Host.', 'Thiếu mã phòng');
+      toast.error('Chưa có mã phòng chơi. Vui lòng nhập mã PIN trước.', 'Thiếu mã PIN');
       return;
     }
     if (!cleanName) {
@@ -98,7 +193,17 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
     onJoin(cleanCode, cleanName);
   };
 
-  const isRoomReady = Boolean(roomCode && roomCode.length >= 4);
+  const handleResetRoom = () => {
+    setRoomCode('');
+    setVerifiedLobby(null);
+    setPinInput('');
+    setPinError(null);
+    try {
+      window.history.replaceState({}, '', '/?tab=join');
+    } catch {}
+  };
+
+  const isRoomReady = Boolean(roomCode && roomCode.length >= 4 && verifiedLobby);
 
   return (
     <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '78vh', padding: '1rem' }}>
@@ -114,6 +219,7 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
           animation: 'popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
+        {/* Header Icon & Title */}
         <div style={{ textAlign: 'center', marginBottom: '1.75rem' }}>
           <div
             style={{
@@ -130,28 +236,28 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
               color: 'var(--primary)',
             }}
           >
-            <UsersIcon size={28} />
+            {isRoomReady ? <GamepadIcon size={28} /> : <UsersIcon size={28} />}
           </div>
           <h1 style={{ margin: 0, fontSize: '1.85rem', color: 'var(--text-primary)', fontWeight: 900, letterSpacing: '-0.03em' }}>
-            Tham Gia Phòng Đấu
+            {isRoomReady ? 'Sẵn Sàng Tranh Tài' : 'Tham Gia Phòng Đấu'}
           </h1>
           <p style={{ margin: '0.4rem 0 0 0', color: 'var(--text-secondary)', fontSize: '0.92rem' }}>
             {isRoomReady
-              ? 'Tự động nhận diện phòng qua QR/Link. Nhập tên để vào tranh tài!'
-              : 'Quét mã QR từ màn hình Host hoặc dán liên kết để vào phòng'}
+              ? 'Phòng đã sẵn sàng! Nhập tên hoặc biệt danh để vào trận đấu.'
+              : 'Nhập mã PIN hiển thị trên màn hình của Host để vào phòng'}
           </p>
         </div>
 
         {isRoomReady ? (
-          /* Luồng ưu tiên: Đã quét QR hoặc mở Link, mã phòng tự động nhận diện, KHÔNG CẦN NHẬP PIN */
-          <form onSubmit={handleSubmit}>
-            {/* Huy hiệu phòng chơi đã liên kết */}
+          /* GIAI ĐOẠN 2: Phòng đã xác minh hợp lệ -> Nhập tên để vào chơi */
+          <form onSubmit={handleJoinSubmit}>
+            {/* Huy hiệu phòng đã liên kết */}
             <div
               style={{
                 backgroundColor: 'var(--bg-input)',
                 border: '1.5px solid var(--border-strong)',
                 borderRadius: '16px',
-                padding: '0.85rem 1.1rem',
+                padding: '0.9rem 1.15rem',
                 marginBottom: '1.5rem',
                 display: 'flex',
                 alignItems: 'center',
@@ -160,10 +266,10 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
             >
               <div>
                 <div style={{ fontSize: '0.72rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-secondary)', marginBottom: '0.15rem' }}>
-                  Phòng thi đấu đã kết nối
+                  {verifiedLobby?.title || 'Phòng thi đấu đã kết nối'}
                 </div>
-                <div style={{ fontSize: '1.4rem', fontWeight: 900, color: 'var(--primary)', letterSpacing: '0.12em', fontVariantNumeric: 'tabular-nums' }}>
-                  {roomCode}
+                <div style={{ fontSize: '1.45rem', fontWeight: 900, color: 'var(--accent-sky)', letterSpacing: '0.12em', fontVariantNumeric: 'tabular-nums' }}>
+                  #{roomCode}
                 </div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '0.25rem' }}>
@@ -181,11 +287,11 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
                   }}
                 >
                   <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#16a34a' }} />
-                  Sẵn sàng
+                  {verifiedLobby?.playerCount !== undefined ? `${verifiedLobby.playerCount} người` : 'Sẵn sàng'}
                 </span>
                 <button
                   type="button"
-                  onClick={() => setRoomCode('')}
+                  onClick={handleResetRoom}
                   style={{
                     background: 'none',
                     border: 'none',
@@ -196,12 +302,12 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
                     padding: 0,
                   }}
                 >
-                  Đổi phòng
+                  Đổi mã PIN khác
                 </button>
               </div>
             </div>
 
-            {/* Ô nhập duy nhất: Tên hoặc biệt danh người chơi */}
+            {/* Ô nhập Nickname */}
             <div style={{ marginBottom: '1.75rem' }}>
               <label
                 htmlFor="join-player-name"
@@ -263,101 +369,202 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
             </button>
           </form>
         ) : (
-          /* Trường hợp chưa có link/QR: Hướng dẫn quét QR và hỗ trợ dán liên kết */
+          /* GIAI ĐOẠN 1: Chưa có phòng -> Nhập mã PIN độc lập trực tiếp */
           <div>
-            <div
-              style={{
-                backgroundColor: 'var(--bg-input)',
-                border: '1px dashed var(--border-strong)',
-                borderRadius: '16px',
-                padding: '1.5rem 1.25rem',
-                textAlign: 'center',
-                marginBottom: '1.5rem',
-              }}
-            >
-              <div
-                style={{
-                  width: '48px',
-                  height: '48px',
-                  borderRadius: '12px',
-                  backgroundColor: 'rgba(99, 102, 241, 0.12)',
-                  color: 'var(--brand-purple)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  marginBottom: '0.75rem',
-                }}
-              >
-                <QrCodeIcon size={26} />
-              </div>
-              <h3 style={{ margin: '0 0 0.35rem 0', fontSize: '1rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                Quét mã QR để tham gia
-              </h3>
-              <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
-                Dùng camera điện thoại quét mã QR trên màn hình của người tổ chức (Host) để tự động vào phòng mà không cần gõ mã.
-              </p>
-            </div>
-
-            <form onSubmit={handleExtractFromPaste}>
+            <form onSubmit={handleVerifyPinSubmit}>
               <div style={{ marginBottom: '1.25rem' }}>
                 <label
-                  htmlFor="join-paste-url"
+                  htmlFor="join-room-pin"
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '0.35rem',
-                    marginBottom: '0.45rem',
+                    display: 'block',
+                    marginBottom: '0.5rem',
                     color: 'var(--text-primary)',
                     fontWeight: 800,
-                    fontSize: '0.88rem',
+                    fontSize: '0.92rem',
+                    textAlign: 'center',
                   }}
                 >
-                  <LinkIcon size={14} />
-                  <span>Hoặc dán liên kết phòng chơi:</span>
+                  Nhập mã PIN phòng chơi
                 </label>
                 <input
-                  id="join-paste-url"
+                  id="join-room-pin"
                   type="text"
-                  value={pasteInput}
-                  onChange={(e) => setPasteInput(e.target.value)}
-                  placeholder="Dán link phòng (VD: http://.../?room=ABC123)..."
+                  maxLength={6}
+                  value={pinInput}
+                  onChange={(e) => {
+                    setPinInput(e.target.value.toUpperCase());
+                    if (pinError) setPinError(null);
+                  }}
+                  placeholder="MÃ PIN (VD: BCDF23)"
                   autoComplete="off"
                   spellCheck="false"
+                  autoFocus
+                  disabled={isVerifyingPin}
                   style={{
                     width: '100%',
-                    padding: '0.85rem 1rem',
-                    borderRadius: '12px',
-                    border: '1.5px solid var(--border-strong)',
+                    padding: '0.95rem 1rem',
+                    borderRadius: '14px',
+                    border: pinError ? '2px solid var(--accent-rose)' : '2px solid var(--border-strong)',
                     backgroundColor: 'var(--bg-input)',
-                    color: 'var(--text-primary)',
-                    fontSize: '0.92rem',
+                    color: 'var(--accent-sky)',
+                    fontSize: '1.5rem',
+                    fontWeight: 900,
+                    textAlign: 'center',
+                    letterSpacing: '0.2em',
                     boxSizing: 'border-box',
                     outline: 'none',
+                    textTransform: 'uppercase',
                   }}
                 />
+
+                {/* Thông báo lỗi PIN */}
+                {pinError && (
+                  <div
+                    style={{
+                      marginTop: '0.5rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      color: 'var(--accent-rose)',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <AlertTriangleIcon size={14} />
+                    <span>{pinError}</span>
+                  </div>
+                )}
               </div>
 
               <button
                 type="submit"
+                disabled={isVerifyingPin || pinInput.trim().length < 4}
                 className="k-btn k-btn-blue"
                 style={{
                   width: '100%',
-                  minHeight: '48px',
-                  padding: '0.85rem 1.25rem',
-                  borderRadius: '12px',
-                  fontSize: '1rem',
+                  minHeight: '52px',
+                  padding: '0.95rem 1.25rem',
+                  borderRadius: '14px',
+                  fontSize: '1.1rem',
                   fontWeight: 900,
-                  cursor: 'pointer',
+                  cursor: isVerifyingPin || pinInput.trim().length < 4 ? 'not-allowed' : 'pointer',
+                  opacity: isVerifyingPin || pinInput.trim().length < 4 ? 0.6 : 1,
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '0.5rem',
+                  marginBottom: '1.5rem',
                 }}
               >
-                <span>Nhận diện phòng chơi</span>
-                <ArrowRightIcon size={18} />
+                {isVerifyingPin ? (
+                  <>
+                    <SpinnerIcon size={18} />
+                    <span>Đang kiểm tra mã PIN...</span>
+                  </>
+                ) : (
+                  <>
+                    <span>Vào phòng</span>
+                    <ArrowRightIcon size={20} />
+                  </>
+                )}
               </button>
             </form>
+
+            {/* Divider */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
+              <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--border-subtle)' }} />
+              <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                HOẶC
+              </span>
+              <div style={{ flex: 1, height: '1px', backgroundColor: 'var(--border-subtle)' }} />
+            </div>
+
+            {/* Hướng dẫn quét QR */}
+            <div
+              style={{
+                backgroundColor: 'var(--bg-input)',
+                border: '1px dashed var(--border-subtle)',
+                borderRadius: '14px',
+                padding: '1rem',
+                textAlign: 'center',
+                marginBottom: '1rem',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '0.35rem', color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.88rem' }}>
+                <QrCodeIcon size={18} style={{ color: 'var(--brand-purple)' }} />
+                <span>Quét mã QR từ màn hình Host</span>
+              </div>
+              <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                Dùng camera quét mã QR của Host để tự động điền mã PIN và kết nối phòng.
+              </p>
+            </div>
+
+            {/* Accordion Toggle: Dán liên kết phòng */}
+            <div style={{ textAlign: 'center' }}>
+              {!showPasteSection ? (
+                <button
+                  type="button"
+                  onClick={() => setShowPasteSection(true)}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--primary)',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.35rem',
+                    padding: '0.25rem',
+                  }}
+                >
+                  <LinkIcon size={14} />
+                  <span>Dán liên kết phòng chơi (nếu có link)</span>
+                </button>
+              ) : (
+                <form onSubmit={handleExtractFromPaste} style={{ marginTop: '0.75rem', textAlign: 'left' }}>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <input
+                      type="text"
+                      value={pasteInput}
+                      onChange={(e) => setPasteInput(e.target.value)}
+                      placeholder="Dán link (VD: http://.../?room=ABC123)"
+                      autoComplete="off"
+                      spellCheck="false"
+                      style={{
+                        flex: 1,
+                        padding: '0.65rem 0.85rem',
+                        borderRadius: '10px',
+                        border: '1.5px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-input)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.85rem',
+                        boxSizing: 'border-box',
+                        outline: 'none',
+                      }}
+                    />
+                    <button
+                      type="submit"
+                      disabled={isVerifyingPin}
+                      style={{
+                        backgroundColor: 'var(--primary)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '10px',
+                        padding: '0.65rem 0.95rem',
+                        fontWeight: 800,
+                        fontSize: '0.82rem',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Nhận diện
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           </div>
         )}
       </div>

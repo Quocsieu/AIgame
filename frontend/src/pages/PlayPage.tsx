@@ -66,6 +66,35 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   const [explanation, setExplanation] = useState<string | undefined>();
   const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
   const [finalRank, setFinalRank] = useState<number | null>(null);
+  const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
+
+  const confirmLeaveRoom = () => {
+    if (isLeaving) return;
+    setIsLeaving(true);
+    stopTimer();
+    const tokenKey = `token_${roomCode}`;
+    const savedToken = sessionStorage.getItem(tokenKey);
+    if (socketRef.current && savedToken) {
+      socketRef.current.send({
+        type: 'player.leave',
+        playerToken: savedToken,
+      });
+    }
+    if (socketRef.current) {
+      socketRef.current.close();
+    }
+    try {
+      sessionStorage.removeItem(tokenKey);
+      sessionStorage.removeItem(`name_${roomCode}`);
+      sessionStorage.removeItem(`room_game_password_${roomCode}`);
+      sessionStorage.removeItem('active_player_room');
+      sessionStorage.removeItem('active_player_name');
+    } catch {}
+    if (onLeave) {
+      onLeave();
+    }
+  };
 
   const socketRef = useRef<GameSocketClient | null>(null);
   const timerIntervalRef = useRef<any>(null);
@@ -464,20 +493,151 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           </div>
         </div>
 
-        <div style={{ textAlign: 'right' }}>
-          <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em', display: 'block' }}>
-            ĐIỂM SỐ
-          </span>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', justifyContent: 'flex-end' }}>
-            <span style={{ color: '#facc15', display: 'flex', alignItems: 'center' }}>
-              <StarIcon size={18} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+          <div style={{ textAlign: 'right' }}>
+            <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em', display: 'block' }}>
+              ĐIỂM SỐ
             </span>
-            <strong style={{ color: 'var(--accent-emerald)', fontSize: '1.45rem', fontWeight: 900 }}>
-              {playerScore}
-            </strong>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', justifyContent: 'flex-end' }}>
+              <span style={{ color: '#facc15', display: 'flex', alignItems: 'center' }}>
+                <StarIcon size={18} />
+              </span>
+              <strong style={{ color: 'var(--accent-emerald)', fontSize: '1.45rem', fontWeight: 900 }}>
+                {playerScore}
+              </strong>
+            </div>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setShowLeaveConfirm(true)}
+            title="Rời khỏi phòng chơi"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.35rem',
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              color: 'var(--accent-rose)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: '10px',
+              padding: '0.45rem 0.85rem',
+              fontSize: '0.82rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              minHeight: '38px',
+              transition: 'all 0.15s ease',
+            }}
+          >
+            <XMarkIcon size={15} />
+            <span>Rời phòng</span>
+          </button>
         </div>
       </div>
+
+      {/* Modal Xác nhận rời phòng an toàn */}
+      {showLeaveConfirm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="leave-confirm-title"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.75)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 9999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1.5px solid var(--border-strong)',
+              borderRadius: '20px',
+              padding: '1.75rem',
+              maxWidth: '440px',
+              width: '100%',
+              boxShadow: 'var(--shadow-lg)',
+              color: 'var(--text-primary)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.15)',
+                  color: 'var(--accent-rose)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <AlertTriangleIcon size={22} />
+              </div>
+              <h3 id="leave-confirm-title" style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>
+                Xác nhận rời phòng
+              </h3>
+            </div>
+            <p style={{ margin: '0 0 1.5rem 0', fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Bạn có chắc chắn muốn rời phòng thi đấu <strong>#{roomCode}</strong>? Phiên chơi của bạn sẽ dừng lại. Phòng thi đấu của Host và các người chơi khác vẫn tiếp tục bình thường.
+            </p>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                onClick={() => setShowLeaveConfirm(false)}
+                disabled={isLeaving}
+                style={{
+                  backgroundColor: 'transparent',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '10px',
+                  padding: '0.65rem 1.25rem',
+                  minHeight: '44px',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  cursor: isLeaving ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Ở lại thi đấu
+              </button>
+              <button
+                type="button"
+                onClick={confirmLeaveRoom}
+                disabled={isLeaving}
+                style={{
+                  backgroundColor: 'var(--accent-rose)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '10px',
+                  padding: '0.65rem 1.25rem',
+                  minHeight: '44px',
+                  fontWeight: 800,
+                  fontSize: '0.9rem',
+                  cursor: isLeaving ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                }}
+              >
+                {isLeaving ? (
+                  <>
+                    <SpinnerIcon size={16} />
+                    <span>Đang rời...</span>
+                  </>
+                ) : (
+                  <span>Xác nhận rời</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 2. Màn hình Sảnh Chờ (Lobby) */}
       {screen === 'lobby' && (
@@ -1228,13 +1388,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           <div style={{ marginTop: '1.5rem' }}>
             <button
               type="button"
-              onClick={() => {
-                if (onLeave) {
-                  onLeave();
-                } else {
-                  window.location.reload();
-                }
-              }}
+              onClick={confirmLeaveRoom}
               style={{
                 width: '100%',
                 padding: '0.95rem',

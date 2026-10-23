@@ -478,6 +478,32 @@ export async function fetchRoomQr(roomCode: string): Promise<QrResponse> {
   return data.data;
 }
 
+export interface RoomLobbyInfo {
+  roomCode: string;
+  state: 'WAITING' | 'QUESTION_ACTIVE' | 'QUESTION_REVEAL' | 'FINISHED' | 'CLOSED';
+  playerCount: number;
+  capacity: number;
+  title: string;
+  gameType: string;
+  totalQuestions: number;
+}
+
+export async function fetchRoomLobby(roomCode: string): Promise<RoomLobbyInfo> {
+  const cleanCode = roomCode.trim().toUpperCase();
+  const res = await fetch(`${API_BASE_URL}/rooms/${encodeURIComponent(cleanCode)}`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const error: any = new Error(data.error?.message || 'Không tìm thấy phòng chơi này.');
+    error.code = data.error?.code;
+    throw error;
+  }
+  return data.data;
+}
+
+
+
 // ==========================================
 // Single-Player Practice Mode APIs
 // ==========================================

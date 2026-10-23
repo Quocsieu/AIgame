@@ -223,10 +223,17 @@ export const AppContent: React.FC = () => {
 
   const handleLeaveGame = () => {
     try {
+      const currentRoom = roomCode;
+      if (currentRoom) {
+        sessionStorage.removeItem(`token_${currentRoom}`);
+        sessionStorage.removeItem(`name_${currentRoom}`);
+        sessionStorage.removeItem(`room_game_password_${currentRoom}`);
+      }
       sessionStorage.removeItem('active_player_room');
       sessionStorage.removeItem('active_player_name');
       window.history.replaceState({}, '', '/?tab=join');
     } catch {}
+    setRoomCode('');
     setDisplayName('');
     setActiveTab('join');
   };
@@ -246,10 +253,18 @@ export const AppContent: React.FC = () => {
   };
 
   const handleLeaveSoloPlay = () => {
+    const targetGameId = soloGameId || soloGameSpec?.gameId;
+    if (targetGameId) {
+      try {
+        sessionStorage.removeItem(`active_solo_session_${targetGameId}`);
+      } catch {}
+    }
     setSoloGameId(null);
     setSoloGameSpec(null);
-    window.history.replaceState({}, '', '/');
-    setActiveTab('home');
+    setRoomCode('');
+    setDisplayName('');
+    window.history.replaceState({}, '', '/?tab=join');
+    setActiveTab('join');
   };
 
   const handleNavigateToCreate = (type?: GameType) => {
@@ -266,6 +281,7 @@ export const AppContent: React.FC = () => {
     { id: 'home' as Tab, label: 'Khám Phá', icon: <HomeIcon size={17} /> },
     { id: 'demo' as Tab, label: 'Tạo Game', icon: <SparklesIcon size={17} /> },
     { id: 'analytics' as Tab, label: 'Kho Game', icon: <BookOpenIcon size={17} /> },
+    { id: 'join' as Tab, label: 'Nhập mã PIN', icon: <UsersIcon size={17} /> },
   ];
 
   const isPlayerMode =
@@ -554,8 +570,8 @@ export const AppContent: React.FC = () => {
                   setActiveTab('admin');
                 }}
                 onNavigateToJoin={() => {
-                  window.history.replaceState({}, '', '/?tab=play');
-                  setActiveTab('play');
+                  window.history.replaceState({}, '', '/?tab=join');
+                  setActiveTab('join');
                 }}
               />
             )}
