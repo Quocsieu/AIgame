@@ -287,7 +287,7 @@ export class MultiplayerWebSocketServer {
     }
 
     // Players can join room with roomCode/PIN without requiring any password (password protection is for game deletion only)
-    const { player } = room.addPlayer(displayName, playerToken);
+    const { player, isReconnect } = room.addPlayer(displayName, playerToken);
     this.registerSocket(ws, room.roomCode, 'player', player.playerToken, player.playerId);
 
     this.send(ws, {

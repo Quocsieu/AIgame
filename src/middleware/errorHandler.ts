@@ -32,7 +32,16 @@ export function errorHandler(
       res.status(413).json(
         createErrorResponse(
           'FILE_TOO_LARGE',
-          'Tệp tải lên vượt quá dung lượng cho phép (tối đa 15MB). Nguyên nhân: Kích thước tệp quá lớn. Vui lòng nén tệp hoặc chọn tài liệu khác.'
+          'Tệp tải lên vượt quá dung lượng cho phép (tối đa 10MB mỗi tệp). Nguyên nhân: Kích thước tệp quá lớn. Vui lòng nén tệp hoặc chọn tài liệu khác.'
+        )
+      );
+      return;
+    }
+    if (multerErr.code === 'LIMIT_FILE_COUNT') {
+      res.status(400).json(
+        createErrorResponse(
+          'LIMIT_EXCEEDED',
+          'Vượt quá số lượng tệp cho phép (tối đa 5 tệp mỗi lần tải lên). Vui lòng kiểm tra lại.'
         )
       );
       return;

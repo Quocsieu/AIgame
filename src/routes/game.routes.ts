@@ -274,34 +274,56 @@ gameRouter.patch('/:gameId', handleUpdateGameSpecification);
 
 /**
  * DELETE /api/games
- * Safely deletes all saved game specifications owned by the caller (or all manageable games if admin),
- * skipping any game currently locked by an active practice session or multiplayer room.
+ * Safely deletes all saved game specifications in the shared game repository,
+ * skipping and reporting any game currently locked by an active practice session or multiplayer room.
+ * Rejects deletion if requested with a player token.
  */
 gameRouter.delete(
   '/',
   gameDeleteRateLimiter.middleware,
   (req: Request, res: Response, next: NextFunction) => {
     try {
-      rejectGuestOrPlayerWrite(req, 'xóa tất cả game');
+      if (req.headers['x-player-token']) {
+        throw new AppError(
+          'ACCESS_DENIED',
+          'Người chơi trong phòng không có quyền xóa game.',
+          403
+        );
+      }
 
-      const isUserAdmin = req.user?.role === 'ADMIN';
-      const userId = req.user?.userId ?? null;
-
-      const gameIds = persistenceRepo.getGameIdsForUser({
-        userId,
-        isAdmin: isUserAdmin,
-      });
+      // Collect all game IDs across persistent SQLite and in-memory cache
+      const dbGameIds = persistenceRepo.getAllGameIds();
+      const memGameIds = gameStore.getAllKeys();
+      const allGameIds = Array.from(new Set([...dbGameIds, ...memGameIds]));
 
       let deletedCount = 0;
       let skippedActiveCount = 0;
+      const skippedGames: Array<{ gameId: string; title?: string; reason: string }> = [];
 
-      for (const gameId of gameIds) {
-        if (sessionStore.hasActiveSessionForGame(gameId) || roomStore.hasActiveRoomForGame(gameId)) {
+      for (const gameId of allGameIds) {
+        const hasSession = sessionStore.hasActiveSessionForGame(gameId);
+        const hasRoom = roomStore.hasActiveRoomForGame(gameId);
+
+        if (hasSession || hasRoom) {
           skippedActiveCount++;
+          const spec = gameStore.get(gameId);
+          skippedGames.push({
+            gameId,
+            title: spec?.title || gameId,
+            reason: hasRoom
+              ? 'Phòng chơi trực tiếp đang diễn ra'
+              : 'Phiên luyện tập đang hoạt động',
+          });
           continue;
         }
-        gameStore.delete(gameId);
-        deletedCount++;
+
+        try {
+          gameStore.delete(gameId);
+          deletedCount++;
+        } catch (err: any) {
+          // Continue deleting other games if a single game deletion encounters an unexpected error
+          logger.error(`[DeleteAllGames] Failed to delete game "${gameId}":`, err);
+        }
       }
 
       res.status(200).json(
@@ -309,7 +331,8 @@ gameRouter.delete(
           deleted: true,
           deletedCount,
           skippedActiveCount,
-          totalTargeted: gameIds.length,
+          totalTargeted: allGameIds.length,
+          skippedGames,
         })
       );
     } catch (err) {
@@ -320,30 +343,28 @@ gameRouter.delete(
 
 /**
  * DELETE /api/games/:gameId
- * Safely deletes a saved game specification if owned by the caller and not currently in an active session/room.
+ * Safely deletes a saved game specification from the game repository.
+ * Proactively allows game repository managers to delete any game in the warehouse,
+ * while rejecting player tokens (players in rooms) and preventing deletion of active games.
  */
 gameRouter.delete(
   '/:gameId',
   gameDeleteRateLimiter.middleware,
   (req: Request, res: Response, next: NextFunction) => {
     try {
-      rejectGuestOrPlayerWrite(req, 'xóa game');
+      if (req.headers['x-player-token']) {
+        throw new AppError(
+          'ACCESS_DENIED',
+          'Người chơi trong phòng không có quyền xóa game.',
+          403
+        );
+      }
 
       const gameId = String(req.params.gameId || '');
       const existing = gameStore.get(gameId);
       if (!existing) {
         throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
       }
-
-      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
-      const ownerUserId = existing.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
-
-      authService.assertResourceAccess({
-        resourceType: 'bộ câu hỏi',
-        ownerUserId,
-        currentUser: req.user,
-        mode: 'write',
-      });
 
       if (sessionStore.hasActiveSessionForGame(gameId) || roomStore.hasActiveRoomForGame(gameId)) {
         throw new AppError(

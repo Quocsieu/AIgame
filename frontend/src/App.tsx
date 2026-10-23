@@ -362,7 +362,7 @@ export const AppContent: React.FC = () => {
                     lineHeight: 1.1,
                   }}
                 >
-                  9BIT AI GAME
+                  AI Tạo Game
                 </div>
                 <div
                   style={{
@@ -373,7 +373,6 @@ export const AppContent: React.FC = () => {
                     textTransform: 'uppercase',
                   }}
                 >
-                  STUDIO PLATFORM
                 </div>
               </div>
             </div>

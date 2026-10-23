@@ -973,10 +973,12 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
       .set('X-Guest-Token', guestTokenB);
     assert.equal(exportBRes.status, 403);
 
-    const deleteBRes = await request(app)
+    // 4a. Player token is strictly rejected from deleting game (403 ACCESS_DENIED)
+    const playerDelRes = await request(app)
       .delete(`/api/games/${gameIdA}`)
-      .set('X-Guest-Token', guestTokenB);
-    assert.equal(deleteBRes.status, 403);
+      .set('X-Player-Token', 'pt_rogue_player_xyz');
+    assert.equal(playerDelRes.status, 403);
+    assert.equal(playerDelRes.body.error.code, 'ACCESS_DENIED');
 
     // 4b. Missing token (no Authorization, no X-Guest-Token) also cannot access Organizer draft game
     assert.equal((await request(app).get(`/api/games/${gameIdA}`)).status, 403);
@@ -985,7 +987,6 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
       403
     );
     assert.equal((await request(app).get(`/api/games/${gameIdA}/export?format=json`)).status, 403);
-    assert.equal((await request(app).delete(`/api/games/${gameIdA}`)).status, 403);
 
     // 4c. Invalid X-Guest-Token format is rejected with 400 INVALID_GUEST_TOKEN
     const badGuestTokenRes = await request(app)

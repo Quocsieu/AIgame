@@ -150,6 +150,10 @@ export class GameSessionStore {
     return this.entries.delete(sessionId);
   }
 
+  public getAllKeys(): string[] {
+    return Array.from(this.entries.keys());
+  }
+
   public count(): number {
     return this.entries.size;
   }
@@ -289,6 +293,10 @@ export class GameSpecificationStore {
     const deletedMem = this.entries.delete(gameId);
     const deletedDb = persistenceRepo.deleteGame(gameId);
     return deletedMem || deletedDb;
+  }
+
+  public getAllKeys(): string[] {
+    return Array.from(this.entries.keys());
   }
 
   public count(): number {

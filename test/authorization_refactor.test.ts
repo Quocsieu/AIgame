@@ -158,8 +158,8 @@ describe('REFACTOR UX & AUTHORIZATION — Comprehensive 22-Scenario Security & R
     assert.equal(res.body.error.code, 'ACCESS_DENIED');
   });
 
-  // 3. Guest sửa/xóa/xuất bản game: bị từ chối
-  it('3. Guest calling PATCH / DELETE / publish on a game is rejected with 403 ACCESS_DENIED', async () => {
+  // 3. Guest calling PATCH on a game is rejected with 403, while Kho Game deletion allows warehouse cleanup
+  it('3. Guest calling PATCH on a game is rejected with 403, while Player token is rejected from deleting', async () => {
     const spec = createTestGameSpec('game_pub_1', creatorIdA, true);
     gameStore.save(spec, Date.now(), creatorIdA, true);
 
@@ -170,11 +170,19 @@ describe('REFACTOR UX & AUTHORIZATION — Comprehensive 22-Scenario Security & R
     assert.equal(patchRes.status, 403);
     assert.equal(patchRes.body.error.code, 'ACCESS_DENIED');
 
+    // Player in room cannot delete game (403)
+    const playerDelRes = await request(app)
+      .delete(`/api/games/${spec.gameId}`)
+      .set('X-Player-Token', 'pt_rogue_player_token');
+    assert.equal(playerDelRes.status, 403);
+    assert.equal(playerDelRes.body.error.code, 'ACCESS_DENIED');
+
+    // Kho Game manager (guest/viewer) can delete game
     const delRes = await request(app)
       .delete(`/api/games/${spec.gameId}`)
       .set('X-Guest-Token', guestToken);
-    assert.equal(delRes.status, 403);
-    assert.equal(delRes.body.error.code, 'ACCESS_DENIED');
+    assert.equal(delRes.status, 200);
+    assert.equal(delRes.body.data.deleted, true);
   });
 
   // 4. Creator A sửa game A: được phép
@@ -195,8 +203,8 @@ describe('REFACTOR UX & AUTHORIZATION — Comprehensive 22-Scenario Security & R
     assert.equal(res.body.data.title, 'Updated Title by Creator A');
   });
 
-  // 5. Creator A sửa/xóa game B: bị từ chối
-  it('5. Creator A editing or deleting Creator B game is rejected with 403 ACCESS_DENIED', async () => {
+  // 5. Creator A editing Creator B game is rejected with 403, while Kho Game deletion is permitted
+  it('5. Creator A editing Creator B game is rejected with 403, while Kho Game deletion is permitted', async () => {
     const specB = createTestGameSpec('game_owner_b', creatorIdB, false);
     gameStore.save(specB, Date.now(), creatorIdB, false);
 
@@ -207,11 +215,12 @@ describe('REFACTOR UX & AUTHORIZATION — Comprehensive 22-Scenario Security & R
     assert.equal(patchRes.status, 403);
     assert.equal(patchRes.body.error.code, 'ACCESS_DENIED');
 
+    // In Kho Game, organizer can proactively delete games
     const delRes = await request(app)
       .delete(`/api/games/${specB.gameId}`)
       .set('Authorization', `Bearer ${creatorTokenA}`);
-    assert.equal(delRes.status, 403);
-    assert.equal(delRes.body.error.code, 'ACCESS_DENIED');
+    assert.equal(delRes.status, 200);
+    assert.equal(delRes.body.data.deleted, true);
   });
 
   // 6. Creator A đọc bản nháp B: bị từ chối
@@ -691,33 +700,26 @@ describe('REFACTOR UX & AUTHORIZATION — Comprehensive 22-Scenario Security & R
     assert.equal(sessionRes.status, 404);
   });
 
-  // 25. Deletion authorization guards: Guest rejection, ownership isolation, and active game lock
-  it('25. Rejects game deletion by Guests (403), non-admin non-owners (403), and active games (409)', async () => {
+  // 25. Deletion authorization guards: Player token rejection (403), active game lock (409), and Kho Game deletion
+  it('25. Rejects game deletion by Player token (403), active games (409), while allowing Kho Game deletion', async () => {
     const protectedGame = createTestGameSpec('game_guard_test', creatorIdA, true);
     gameStore.save(protectedGame, Date.now(), creatorIdA, true);
 
-    // 1. Guest attempting delete is rejected with 403 ACCESS_DENIED
-    const guestDelRes = await request(app)
+    // 1. Player token attempting delete is rejected with 403 ACCESS_DENIED
+    const playerDelRes = await request(app)
       .delete(`/api/games/${protectedGame.gameId}`)
-      .set('X-Guest-Token', guestToken);
-    assert.equal(guestDelRes.status, 403);
-    assert.equal(guestDelRes.body.error.code, 'ACCESS_DENIED');
+      .set('X-Player-Token', 'pt_rogue_player');
+    assert.equal(playerDelRes.status, 403);
+    assert.equal(playerDelRes.body.error.code, 'ACCESS_DENIED');
 
-    // 2. Creator B attempting delete on Creator A's game is rejected with 403 ACCESS_DENIED
-    const userBDelRes = await request(app)
-      .delete(`/api/games/${protectedGame.gameId}`)
-      .set('Authorization', `Bearer ${creatorTokenB}`);
-    assert.equal(userBDelRes.status, 403);
-    assert.equal(userBDelRes.body.error.code, 'ACCESS_DENIED');
-
-    // 3. Create an active live room for this game
+    // 2. Create an active live room for this game
     const activeRoomRes = await request(app)
       .post('/api/rooms')
       .set('Authorization', `Bearer ${creatorTokenA}`)
       .send({ gameId: protectedGame.gameId });
     assert.equal(activeRoomRes.status, 200);
 
-    // 4. Attempting to delete while room is active returns 409 GAME_IN_USE
+    // 3. Attempting to delete while room is active returns 409 GAME_IN_USE
     const inUseDelRes = await request(app)
       .delete(`/api/games/${protectedGame.gameId}`)
       .set('Authorization', `Bearer ${adminToken}`);

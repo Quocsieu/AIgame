@@ -126,15 +126,23 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     setIsDeletingAll(true);
     try {
       const res = await deleteAllSavedGames();
-      toast.success(
-        `Đã xóa thành công ${res.deletedCount} bộ câu hỏi${res.skippedActiveCount > 0 ? ` (bỏ qua ${res.skippedActiveCount} game đang hoạt động)` : ''}.`,
-        'Đã xóa tất cả'
-      );
+      if (res.skippedActiveCount > 0) {
+        toast.warning(
+          `Đã xóa thành công ${res.deletedCount} bộ câu hỏi. Còn ${res.skippedActiveCount} game đang có phòng chơi hoặc phiên luyện tập hoạt động nên được giữ lại an toàn.`,
+          'Hoàn tất xóa một phần'
+        );
+      } else {
+        toast.success(
+          `Đã xóa thành công toàn bộ ${res.deletedCount} bộ câu hỏi khỏi kho game.`,
+          'Đã xóa tất cả'
+        );
+      }
       setIsConfirmDeleteAllOpen(false);
+      setActiveGameSpec(null);
       setPage(1);
       await loadSavedGames(1, searchQuery, selectedTypeFilter, statusFilter);
     } catch (err: any) {
-      toast.error(err.message || 'Không thể xóa danh sách bộ câu hỏi.', 'Lỗi');
+      toast.error(err.message || 'Không thể xóa danh sách bộ câu hỏi.', 'Lỗi xóa tất cả');
     } finally {
       setIsDeletingAll(false);
     }
@@ -2648,7 +2656,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
             </div>
 
             <p style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>
-              Bạn đang yêu cầu <strong>xóa vĩnh viễn toàn bộ {totalCount} bộ câu hỏi</strong> trong kho game thuộc tài khoản của bạn.
+              Bạn đang yêu cầu <strong>xóa vĩnh viễn toàn bộ {totalCount} bộ câu hỏi</strong> trong kho game chung.
             </p>
 
             <div

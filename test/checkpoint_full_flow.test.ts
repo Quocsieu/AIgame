@@ -310,14 +310,14 @@ describe('COMPREHENSIVE AUDIT & ACCEPTANCE — AI Game Platform Full Flow & Auth
     assert.equal(unauthorizedEdit.status, 403);
     assert.equal(unauthorizedEdit.body.error.code, 'ACCESS_DENIED');
 
-    // User B attempts to delete User A's game -> must be rejected with 403 ACCESS_DENIED
-    const unauthorizedDelete = await request(app)
+    // Player client attempts to delete game -> rejected with 403 ACCESS_DENIED
+    const playerDelete = await request(app)
       .delete(`/api/games/${gameA.gameId}`)
-      .set('Authorization', `Bearer ${userBToken}`);
-    assert.equal(unauthorizedDelete.status, 403);
-    assert.equal(unauthorizedDelete.body.error.code, 'ACCESS_DENIED');
+      .set('X-Player-Token', 'pt_rogue_player');
+    assert.equal(playerDelete.status, 403);
+    assert.equal(playerDelete.body.error.code, 'ACCESS_DENIED');
 
-    // But ADMIN CAN manage/delete User A's game
+    // Admin CAN manage User A's game
     const adminEdit = await request(app)
       .patch(`/api/games/${gameA.gameId}`)
       .set('Authorization', `Bearer ${adminToken}`)
@@ -327,6 +327,13 @@ describe('COMPREHENSIVE AUDIT & ACCEPTANCE — AI Game Platform Full Flow & Auth
       });
     assert.equal(adminEdit.status, 200);
     assert.equal(adminEdit.body.data.title, 'Admin Audited Game Title');
+
+    // In Kho Game, repository manager can proactively delete game
+    const warehouseDelete = await request(app)
+      .delete(`/api/games/${gameA.gameId}`)
+      .set('Authorization', `Bearer ${userBToken}`);
+    assert.equal(warehouseDelete.status, 200);
+    assert.equal(warehouseDelete.body.data.deleted, true);
   });
 
   // =========================================================================

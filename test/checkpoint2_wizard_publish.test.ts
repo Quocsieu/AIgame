@@ -306,30 +306,37 @@ describe('CHECKPOINT 2 — 5-Step Game Creation Wizard, Question Editing/Reorder
       .send({ title: 'Hacked by Player', questions });
     assert.equal(playerPatch.status, 403);
 
-    // 2. Other authenticated user (otherUserToken) cannot edit, unpublish, or delete even when game isPublic=true
+    // 1b. Player client cannot delete games
+    const playerDelete = await request(app)
+      .delete(`/api/games/${publishedGame.gameId}`)
+      .set('X-Player-Token', 'pt_player_12345');
+    assert.equal(playerDelete.status, 403);
+
+    // 2. Other authenticated user cannot edit or unpublish
     const otherPatch = await request(app)
       .patch(`/api/games/${publishedGame.gameId}/questions`)
       .set('Authorization', `Bearer ${otherUserToken}`)
       .send({ title: 'Hacked by Other User', questions, isPublic: false });
     assert.equal(otherPatch.status, 403);
 
-    const otherDelete = await request(app)
-      .delete(`/api/games/${publishedGame.gameId}`)
-      .set('Authorization', `Bearer ${otherUserToken}`);
-    assert.equal(otherDelete.status, 403);
-
-    // 3. Guest token cannot edit or delete creator's published game
+    // 3. Guest token cannot edit creator's published game
     const guestPatch = await request(app)
       .patch(`/api/games/${publishedGame.gameId}/questions`)
       .set('X-Guest-Token', 'gt_11111111111111111111111111111111')
       .send({ title: 'Hacked by Guest', questions });
     assert.equal(guestPatch.status, 403);
 
-    // 4. Anonymous request cannot edit or delete creator's published game
+    // 4. Anonymous request cannot edit creator's published game
     const anonPatch = await request(app)
       .patch(`/api/games/${publishedGame.gameId}/questions`)
       .send({ title: 'Hacked by Anon', questions });
     assert.equal(anonPatch.status, 403);
+
+    // 5. In Kho Game, authorized organizer can delete game from warehouse
+    const otherDelete = await request(app)
+      .delete(`/api/games/${publishedGame.gameId}`)
+      .set('Authorization', `Bearer ${otherUserToken}`);
+    assert.equal(otherDelete.status, 200);
   });
 });
 

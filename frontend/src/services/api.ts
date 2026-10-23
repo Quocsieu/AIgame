@@ -302,6 +302,7 @@ export async function deleteAllSavedGames(): Promise<{
   deletedCount: number;
   skippedActiveCount: number;
   totalTargeted: number;
+  skippedGames?: Array<{ gameId: string; title?: string; reason: string }>;
 }> {
   const res = await fetch(`${API_BASE_URL}/games`, {
     method: 'DELETE',

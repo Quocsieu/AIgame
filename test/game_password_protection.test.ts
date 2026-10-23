@@ -218,7 +218,7 @@ describe('NO-PASSWORD ARCHITECTURE & DIRECT LINK/QR JOIN TEST SUITE', () => {
       assert.equal(gameStore.get(gameId)?.title, 'Game Của User A');
     });
 
-    it('8. User B KHÔNG THỂ xóa game thuộc sở hữu của User A (HTTP 403 ACCESS_DENIED)', async () => {
+    it('8. Người quản lý Kho Game (User B) ĐƯỢC PHÉP chủ động xóa game khỏi kho (HTTP 200 OK)', async () => {
       const gameId = `game_owner_guard_del_${Date.now()}`;
       createSampleGame({ gameId, title: 'Game Của User A', ownerUserId: userIdA });
 
@@ -226,20 +226,15 @@ describe('NO-PASSWORD ARCHITECTURE & DIRECT LINK/QR JOIN TEST SUITE', () => {
         .delete(`/api/games/${gameId}`)
         .set('Authorization', `Bearer ${userTokenB}`);
 
-      assert.equal(res.status, 403);
-      assert.equal(res.body.error.code, 'ACCESS_DENIED');
-      assert.ok(gameStore.get(gameId));
+      assert.equal(res.status, 200);
+      assert.equal(res.body.success, true);
+      assert.equal(res.body.data.deleted, true);
+      assert.equal(gameStore.get(gameId), undefined);
     });
 
-    it('9. Guest Token (X-Guest-Token) bị chặn sửa và xóa game (HTTP 403 ACCESS_DENIED)', async () => {
+    it('9. Guest Token bị chặn sửa game (403), nhưng tại Kho Game được phép chủ động xóa (200)', async () => {
       const gameId = `game_guest_guard_${Date.now()}`;
-      const game = createSampleGame({ gameId, title: 'Game Khách Không Được Xóa' });
-
-      const delRes = await request(app)
-        .delete(`/api/games/${gameId}`)
-        .set('X-Guest-Token', guestToken);
-      assert.equal(delRes.status, 403);
-      assert.equal(delRes.body.error.code, 'ACCESS_DENIED');
+      const game = createSampleGame({ gameId, title: 'Game Khách Quản Lý' });
 
       const patchRes = await request(app)
         .patch(`/api/games/${gameId}`)
@@ -247,6 +242,12 @@ describe('NO-PASSWORD ARCHITECTURE & DIRECT LINK/QR JOIN TEST SUITE', () => {
         .send({ title: 'Khách Đổi Tên', questions: game.questions });
       assert.equal(patchRes.status, 403);
       assert.equal(patchRes.body.error.code, 'ACCESS_DENIED');
+
+      const delRes = await request(app)
+        .delete(`/api/games/${gameId}`)
+        .set('X-Guest-Token', guestToken);
+      assert.equal(delRes.status, 200);
+      assert.equal(delRes.body.data.deleted, true);
     });
 
     it('10. Player Token (X-Player-Token) bị chặn sửa và xóa game (HTTP 403 ACCESS_DENIED)', async () => {

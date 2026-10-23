@@ -534,6 +534,12 @@ export class PersistenceRepository {
     });
   }
 
+  public getAllGameIds(): string[] {
+    const db = getDatabase();
+    const rows = db.prepare('SELECT game_id FROM games').all() as { game_id: string }[];
+    return rows.map((r) => String(r.game_id));
+  }
+
   public getGameIdsForUser(options: { userId: string | null; isAdmin?: boolean }): string[] {
     const db = getDatabase();
     if (options.isAdmin) {

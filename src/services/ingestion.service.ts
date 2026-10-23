@@ -53,6 +53,26 @@ export class IngestionService {
       );
     }
 
+    const totalBytes = files.reduce((acc, f) => acc + (f.size || f.buffer?.length || 0), 0);
+    if (totalBytes > LIMITS.MAX_TOTAL_FILE_BYTES) {
+      throw new AppError(
+        'TOTAL_FILE_SIZE_EXCEEDED',
+        `Tổng dung lượng các tệp (${(totalBytes / (1024 * 1024)).toFixed(1)}MB) vượt quá giới hạn 25MB cho phép.`,
+        413
+      );
+    }
+
+    for (const file of files) {
+      const fileSize = file.size || file.buffer?.length || 0;
+      if (fileSize > LIMITS.MAX_FILE_BYTES) {
+        throw new AppError(
+          'FILE_TOO_LARGE',
+          `Tệp "${file.originalname}" (${(fileSize / (1024 * 1024)).toFixed(1)}MB) vượt quá dung lượng tối đa 10MB cho phép.`,
+          413
+        );
+      }
+    }
+
     const documents: CanonicalDocument[] = [];
     let sourceCounter = 1;
 
