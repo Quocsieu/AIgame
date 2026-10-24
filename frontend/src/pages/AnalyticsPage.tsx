@@ -65,7 +65,7 @@ const formatGameTypeName = (type: string): string => {
     case 'MIXED':
       return 'Hỗn hợp (Mixed)';
     case 'ADVENTURE':
-      return 'Đi cảnh theo ngành nghề';
+      return 'Game đi cảnh theo ngành nghề';
     default:
       return type;
   }
@@ -1740,6 +1740,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     FILL_IN_THE_BLANK: 'var(--game-fill)',
                     CROSSWORD: 'var(--game-cross)',
                     MIXED: 'var(--game-mixed)',
+                    ADVENTURE: '#F59E0B',
                   };
                   const accentColor = typeColorMap[g.gameType] || 'var(--primary)';
 
@@ -1821,7 +1822,44 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       </h3>
 
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: '0.65rem' }}>
-                        {g.questionCount ? `${g.questionCount} câu hỏi • ` : ''}Cập nhật: {new Date(g.updatedAt || g.createdAt).toLocaleDateString('vi-VN')}
+                      {g.gameType === 'ADVENTURE' && g.adventureConfig && (
+                        <div
+                          style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            color: '#F59E0B',
+                            marginBottom: '0.3rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
+                            flexWrap: 'wrap',
+                          }}
+                        >
+                          <span>{g.adventureConfig.industryLabel}</span>
+                          {g.adventureConfig.subEnvironment ? (
+                            <span style={{ color: 'var(--text-secondary)', fontWeight: 600 }}>
+                              • {g.adventureConfig.subEnvironment}
+                            </span>
+                          ) : null}
+                        </div>
+                      )}
+                      {(g.description || (g.gameType === 'ADVENTURE' && g.adventureConfig?.learningObjective)) && (
+                        <div
+                          style={{
+                            fontSize: '0.75rem',
+                            color: 'var(--text-secondary)',
+                            marginBottom: '0.35rem',
+                            lineHeight: 1.4,
+                            display: '-webkit-box',
+                            WebkitLineClamp: 2,
+                            WebkitBoxOrient: 'vertical',
+                            overflow: 'hidden',
+                          }}
+                        >
+                          {g.description || g.adventureConfig?.learningObjective}
+                        </div>
+                      )}
+                      {g.questionCount ? `${g.questionCount} câu hỏi • ` : ''}Cập nhật: {new Date(g.updatedAt || g.createdAt).toLocaleDateString('vi-VN')}
                       </div>
 
                       <div style={{ display: 'flex', gap: '0.4rem', marginTop: 'auto', paddingTop: '0.5rem', borderTop: '1px solid var(--border-subtle)', alignItems: 'center' }}>

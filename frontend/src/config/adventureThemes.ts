@@ -676,6 +676,7 @@ export function buildDefaultAdventureConfig(
     obstacleDensity: 'MEDIUM',
     speedMultiplier: 1,
     reducedMotion: false,
+    questionTypes: ['MULTIPLE_CHOICE', 'QUICK_BUTTON'],
     stages,
   };
 }

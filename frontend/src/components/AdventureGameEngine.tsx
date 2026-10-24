@@ -134,7 +134,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   );
 
   // Preview mode internal state — starts immediately without multi-step briefing friction
-  const [previewStarted, setPreviewStarted] = useState<boolean>(true);
+  const [previewStarted, setPreviewStarted] = useState<boolean>(false);
   const [previewStageIdx, setPreviewStageIdx] = useState<number>(0);
   const [previewFeedback, setPreviewFeedback] = useState<PracticeQuestionResult | null>(null);
   const [previewFinished, setPreviewFinished] = useState<boolean>(false);
@@ -463,12 +463,25 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       // Creator Preview Mode evaluation
       const fullQ = game.questions?.[previewStageIdx];
       if (!fullQ) return;
-      const normalizedUser = rawAns.trim().toLowerCase();
-      const normalizedCorrect = (fullQ.correctAnswer || '').trim().toLowerCase();
-      const altMatches = (fullQ.acceptedAlternatives || []).some(
-        alt => alt.trim().toLowerCase() === normalizedUser
-      );
-      const isCorrect = normalizedUser === normalizedCorrect || altMatches;
+      const normalizeAns = (val: string) =>
+        val.trim().normalize('NFC').toLowerCase().replace(/\s+/g, ' ');
+      const normalizedUser = normalizeAns(rawAns);
+      const validAnswers = new Set<string>();
+      const addCandidate = (rawStr: string) => {
+        const full = normalizeAns(rawStr);
+        if (full) validAnswers.add(full);
+        if (rawStr.includes('|') || rawStr.includes(';')) {
+          for (const part of rawStr.split(/[|;]/)) {
+            const p = normalizeAns(part);
+            if (p) validAnswers.add(p);
+          }
+        }
+      };
+      addCandidate(fullQ.correctAnswer || '');
+      for (const alt of fullQ.acceptedAlternatives || []) {
+        if (typeof alt === 'string') addCandidate(alt);
+      }
+      const isCorrect = normalizedUser.length > 0 && validAnswers.has(normalizedUser);
       const earned = isCorrect ? 100 + previewStreak * 15 : 0;
       const newStreak = isCorrect ? previewStreak + 1 : 0;
 
@@ -580,9 +593,10 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
   // Keyboard Listeners (Space / Up / W jump, 1-4 answer shortcuts, Enter continue, Left/Right optional)
   useEffect(() => {
-    if (!isJourneyStarted || isJourneyFinished) return;
+    if (isJourneyFinished) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isJourneyStarted) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') {
         if (e.key === 'Enter' && activeModalOpen && !activeFeedback) {
@@ -659,7 +673,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
   // Main 60fps Canvas Physics & Rendering Loop
   useEffect(() => {
-    if (!isJourneyStarted || isJourneyFinished) return;
+    if (isJourneyFinished) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -892,7 +906,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     };
 
     const step = (now: number) => {
-      const dt = Math.min(0.05, (now - lastTime) / 1000);
+      const dt = isJourneyStarted ? Math.min(0.05, (now - lastTime) / 1000) : 0;
       lastTime = now;
 
       const p = physicsRef.current;
@@ -909,7 +923,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           : finishGateX;
 
       // 1. Auto-run forward by default unless paused by checkpoint modal
-      const moveRightActive = p.keys.right || (autoCruise && !activeModalOpen);
+      const moveRightActive = isJourneyStarted && (p.keys.right || (autoCruise && !activeModalOpen));
       const moveLeftActive = p.keys.left && !activeModalOpen;
 
       const speed = BASE_MOVE_SPEED * (effectiveConfig.speedMultiplier || 1);
@@ -1212,7 +1226,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         ctx.restore();
       }
 
-      animationFrameId = requestAnimationFrame(step);
+      if (isJourneyStarted) {
+        animationFrameId = requestAnimationFrame(step);
+      } else if (!animationFrameId) {
+        animationFrameId = -1;
+        step(performance.now());
+      }
     };
 
     animationFrameId = requestAnimationFrame(step);
@@ -1567,7 +1586,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               position: 'absolute',
               inset: 0,
               zIndex: 25,
-              backgroundColor: '#090d16',
+              backgroundColor: 'rgba(9, 13, 22, 0.84)',
+              backdropFilter: 'blur(4px)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -1577,7 +1597,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             <div
               style={{
                 width: '100%',
-                maxWidth: '480px',
+                maxWidth: '540px',
                 backgroundColor: '#111726',
                 border: '1px solid #222d42',
                 borderRadius: '12px',
@@ -1613,11 +1633,43 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   lineHeight: 1.5,
                 }}
               >
-                Xe tự động chạy qua {totalStages} chặng câu hỏi. Nhấn Space hoặc chạm nút NHẢY để né vật cản trên đường.
+                {game.description || effectiveConfig.learningObjective || `Chinh phục ${totalStages} chặng câu hỏi thực tế trong bối cảnh ${effectiveConfig.subEnvironment}.`}
+              </p>
+              <div
+                style={{
+                  textAlign: 'left',
+                  backgroundColor: '#0b0f19',
+                  border: '1px solid #1e293b',
+                  borderRadius: '10px',
+                  padding: '14px 16px',
+                  marginBottom: '20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '8px',
+                  fontSize: '13px',
+                  color: '#cbd5e1',
+                  lineHeight: 1.5,
+                }}
+              >
+                <div style={{ fontWeight: 700, color: '#f8fafc', fontSize: '13.5px', marginBottom: '2px' }}>
+                  Hướng dẫn cách chơi ({effectiveConfig.avatarLabel}):
+                </div>
+                <div>• <strong>Tự động di chuyển:</strong> Phương tiện tự chạy về phía trước sau khi bạn bấm <strong>Bắt đầu</strong>.</div>
+                <div>• <strong>Trên máy tính (Desktop):</strong> Nhấn phím <strong>Space</strong> (hoặc mũi tên lên <strong>↑</strong>) để nhảy qua chướng ngại vật.</div>
+                <div>• <strong>Trên điện thoại / cảm ứng:</strong> Chạm nút <strong>NHẢY</strong> ở góc dưới phải hoặc chạm vào vùng chơi để nhảy.</div>
+                <div>• <strong>Trạm câu hỏi &amp; Về đích:</strong> Dừng tại các trạm kiểm tra (Checkpoint) để trả lời câu hỏi và hoàn thành đủ <strong>{totalStages} chặng</strong> để kết thúc hành trình.</div>
+              </div>
+              <p style={{ display: 'none' }}>
               </p>
               <button
                 type="button"
-                onClick={onStartSession}
+                onClick={() => {
+                  if (mode === 'LIVE_SESSION' && onStartSession) {
+                    onStartSession();
+                  } else {
+                    setPreviewStarted(true);
+                  }
+                }}
                 disabled={startingSession}
                 style={{
                   width: '100%',
@@ -1632,7 +1684,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   opacity: startingSession ? 0.6 : 1,
                 }}
               >
-                {startingSession ? 'Đang chuẩn bị đường chạy...' : 'Bắt đầu chơi'}
+                {startingSession ? 'Đang chuẩn bị đường chạy...' : 'Bắt đầu'}
               </button>
             </div>
           </div>
@@ -1780,7 +1832,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 <div>
                   <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
                     Chặng {activeStageIndex + 1} / {totalStages} ·{' '}
-                    {currentStageMeta?.zoneLabel || effectiveConfig.subEnvironment}
+                    {currentStageMeta?.zoneLabel || effectiveConfig.subEnvironment} ·{' '}
+                    {activeQuestion.type === 'QUICK_BUTTON'
+                      ? 'Đúng / Sai'
+                      : activeQuestion.type === 'FILL_IN_THE_BLANK'
+                        ? 'Điền từ vào chỗ trống'
+                        : 'Trắc nghiệm 4 lựa chọn'}
                   </div>
                   <h2
                     style={{

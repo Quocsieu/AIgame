@@ -200,7 +200,7 @@ const GAME_FORMATS: FormatMeta[] = [
   },
   {
     type: 'ADVENTURE',
-    title: 'Đi cảnh theo ngành nghề',
+    title: 'Game đi cảnh theo ngành nghề',
     badge: 'Đi cảnh 2D',
     accent: '#F59E0B',
     illustration: (

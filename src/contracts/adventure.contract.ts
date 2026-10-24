@@ -78,6 +78,13 @@ export const AdventureStageSchema = z.object({
 });
 export type AdventureStage = z.infer<typeof AdventureStageSchema>;
 
+export const AdventureQuestionTypeEnum = z.enum([
+  'MULTIPLE_CHOICE',
+  'QUICK_BUTTON',
+  'FILL_IN_THE_BLANK',
+]);
+export type AdventureQuestionType = z.infer<typeof AdventureQuestionTypeEnum>;
+
 export const AdventureConfigSchema = z.object({
   version: z.number().int().default(1),
   industryId: IndustryIdEnum.default('MOTORCYCLE_TRAFFIC'),
@@ -132,6 +139,11 @@ export const AdventureConfigSchema = z.object({
   obstacleDensity: z.enum(['LOW', 'MEDIUM', 'HIGH']).default('MEDIUM'),
   speedMultiplier: z.number().min(0.6).max(1.6).default(1),
   reducedMotion: z.boolean().default(false),
+  questionTypes: z
+    .array(AdventureQuestionTypeEnum)
+    .min(1)
+    .max(3)
+    .default(['MULTIPLE_CHOICE', 'QUICK_BUTTON']),
   stages: z.array(AdventureStageSchema).default([]),
 });
 export type AdventureConfig = z.infer<typeof AdventureConfigSchema>;
@@ -768,40 +780,53 @@ export function analyzeSourceContentForAdventure(
 ): AdventureConfig {
   const combinedText = [
     options?.topicFocus || '',
+    options?.customIndustryLabel || '',
     ...documents.map(d => `${d.title || ''} ${d.text || ''}`),
+    ...(options?.questions || []).map(q => `${q.question || ''} ${q.explanation || ''}`),
   ]
     .join(' \n ')
     .toLowerCase();
 
   let detectedIndustryId: IndustryId = options?.preferredIndustryId || 'EDUCATION_GENERAL';
+  let contentMatchedIndustryId: IndustryId = 'EDUCATION_GENERAL';
   let aiDetectedIndustry = !options?.preferredIndustryId;
   let bestScore = 0;
   let matchedTerms: string[] = [];
 
-  if (!options?.preferredIndustryId) {
-    for (const item of INDUSTRY_CATALOG) {
-      if (item.industryId === 'CUSTOM') continue;
-      let score = 0;
-      const hits: string[] = [];
-      for (const kw of item.keywords) {
-        if (combinedText.includes(kw.toLowerCase())) {
-          score += kw.includes(' ') ? 3 : 1;
-          hits.push(kw);
-        }
+  for (const item of INDUSTRY_CATALOG) {
+    if (item.industryId === 'CUSTOM') continue;
+    let score = 0;
+    const hits: string[] = [];
+    for (const kw of item.keywords) {
+      if (combinedText.includes(kw.toLowerCase())) {
+        score += kw.includes(' ') ? 3 : 1;
+        hits.push(kw);
       }
-      if (score > bestScore) {
-        bestScore = score;
-        detectedIndustryId = item.industryId;
-        matchedTerms = hits.slice(0, 5);
-      }
+    }
+    if (options?.preferredIndustryId && item.industryId === options.preferredIndustryId && hits.length > 0) {
+      matchedTerms = hits.slice(0, 5);
+      bestScore = Math.max(bestScore, score);
+    }
+    if (score > bestScore && !options?.preferredIndustryId) {
+      bestScore = score;
+      detectedIndustryId = item.industryId;
+      contentMatchedIndustryId = item.industryId;
+      matchedTerms = hits.slice(0, 5);
+    } else if (score > bestScore && options?.preferredIndustryId === 'CUSTOM') {
+      bestScore = score;
+      contentMatchedIndustryId = item.industryId;
+      matchedTerms = hits.slice(0, 5);
     }
   }
 
+  const presetLookupIndustryId =
+    detectedIndustryId === 'CUSTOM' ? contentMatchedIndustryId : detectedIndustryId;
+
   let selectedPresetId =
-    INDUSTRY_CATALOG.find(i => i.industryId === detectedIndustryId)?.defaultPresetId ||
+    INDUSTRY_CATALOG.find(i => i.industryId === presetLookupIndustryId)?.defaultPresetId ||
     'theme_edu_campus';
 
-  if (detectedIndustryId === 'MOTORCYCLE_TRAFFIC') {
+  if (presetLookupIndustryId === 'MOTORCYCLE_TRAFFIC') {
     const maintenanceHits = [
       'bảo dưỡng',
       'dầu nhớt',
@@ -827,28 +852,29 @@ export function analyzeSourceContentForAdventure(
     ].filter(w => combinedText.includes(w)).length;
     selectedPresetId =
       trafficHits > maintenanceHits ? 'theme_moto_circuit' : 'theme_moto_garage';
-  } else if (detectedIndustryId === 'BUSINESS_SALES') {
+  } else if (presetLookupIndustryId === 'BUSINESS_SALES') {
     const officeHits = ['chiến lược', 'hợp đồng', 'quản trị', 'tài chính', 'kpi', 'vận hành'].filter(
       w => combinedText.includes(w)
     ).length;
     selectedPresetId = officeHits >= 2 ? 'theme_biz_office' : 'theme_biz_retail';
-  } else if (detectedIndustryId === 'MANUFACTURING_INDUSTRIAL') {
+  } else if (presetLookupIndustryId === 'MANUFACTURING_INDUSTRIAL') {
     const warehouseHits = ['kho vận', 'logistics', 'tồn kho', 'nhập kho', 'xuất hàng', 'kệ hàng'].filter(
       w => combinedText.includes(w)
     ).length;
     selectedPresetId = warehouseHits >= 2 ? 'theme_mfg_warehouse' : 'theme_mfg_factory';
-  } else if (detectedIndustryId === 'IT_TECHNOLOGY') {
+  } else if (presetLookupIndustryId === 'IT_TECHNOLOGY') {
     const securityHits = [
       'an ninh mạng',
       'bảo mật',
       'phishing',
       'mật khẩu',
+      'xác thực',
       'mã độc',
       'lỗ hổng',
       'cyber',
     ].filter(w => combinedText.includes(w)).length;
-    selectedPresetId = securityHits >= 2 ? 'theme_it_cyberlab' : 'theme_it_datacenter';
-  } else if (detectedIndustryId === 'HEALTHCARE_TRAINING') {
+    selectedPresetId = securityHits >= 1 ? 'theme_it_cyberlab' : 'theme_it_datacenter';
+  } else if (presetLookupIndustryId === 'HEALTHCARE_TRAINING') {
     const pharmaHits = ['dược phẩm', 'nhà thuốc', 'dược lý', 'bảo quản thuốc', 'đơn thuốc'].filter(
       w => combinedText.includes(w)
     ).length;
@@ -928,14 +954,19 @@ export function sanitizeAdventureConfig(
   }
 
   const candidate = rawConfig as Record<string, any>;
+  const parsedIndustry = IndustryIdEnum.safeParse(candidate.industryId);
+  const industryId = parsedIndustry.success ? parsedIndustry.data : fallback.industryId;
+  const catalogForIndustry = INDUSTRY_CATALOG.find(i => i.industryId === industryId);
+
   const presetId =
-    typeof candidate.themePresetId === 'string' && ADVENTURE_THEME_PRESETS[candidate.themePresetId]
+    typeof candidate.themePresetId === 'string' &&
+    ADVENTURE_THEME_PRESETS[candidate.themePresetId] &&
+    (!catalogForIndustry ||
+      industryId === 'CUSTOM' ||
+      catalogForIndustry.presetIds.includes(candidate.themePresetId))
       ? candidate.themePresetId
       : fallback.themePresetId;
   const preset = ADVENTURE_THEME_PRESETS[presetId] || ADVENTURE_THEME_PRESETS.theme_edu_campus;
-
-  const parsedIndustry = IndustryIdEnum.safeParse(candidate.industryId);
-  const industryId = parsedIndustry.success ? parsedIndustry.data : fallback.industryId;
 
   const parsedAvatar = AvatarIdEnum.safeParse(candidate.avatarId);
   const avatarId = parsedAvatar.success ? parsedAvatar.data : preset.avatarId;
@@ -953,6 +984,23 @@ export function sanitizeAdventureConfig(
         .map(r => r.data)
     : [];
   const obstacleTypes = validObstacles.length > 0 ? validObstacles.slice(0, 5) : preset.obstacleTypes;
+
+  const validQuestionTypes: AdventureQuestionType[] = Array.isArray(candidate.questionTypes)
+    ? Array.from(
+        new Set(
+          candidate.questionTypes
+            .map((t: unknown) => AdventureQuestionTypeEnum.safeParse(t))
+            .filter((r): r is { success: true; data: AdventureQuestionType } => r.success)
+            .map(r => r.data)
+        )
+      )
+    : [];
+  const questionTypes: AdventureQuestionType[] =
+    validQuestionTypes.length > 0
+      ? validQuestionTypes
+      : fallback.questionTypes && fallback.questionTypes.length > 0
+        ? fallback.questionTypes
+        : ['MULTIPLE_CHOICE', 'QUICK_BUTTON'];
 
   const targetCount = questions && questions.length > 0 ? questions.length : fallback.stages.length || 5;
   const rawStages = Array.isArray(candidate.stages) ? candidate.stages : [];
@@ -1057,6 +1105,7 @@ export function sanitizeAdventureConfig(
       typeof candidate.reducedMotion === 'boolean'
         ? candidate.reducedMotion
         : fallback.reducedMotion,
+    questionTypes,
     stages,
   });
 }

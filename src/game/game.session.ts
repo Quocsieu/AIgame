@@ -60,7 +60,10 @@ export class GameSession {
     this.state = 'QUESTION_ACTIVE';
     this.startedAt = new Date().toISOString();
     this.currentQuestionIndex = 0;
-    this.timer.start(this.specification.settings.timePerQuestion);
+    this.timer.start(
+      this.specification.settings.timePerQuestion +
+        (this.specification.gameType === 'ADVENTURE' ? 120 : 0)
+    );
 
     return this.getCurrentClientQuestion();
   }
@@ -265,7 +268,10 @@ export class GameSession {
     if (nextIndex < this.specification.questions.length) {
       this.currentQuestionIndex = nextIndex;
       this.state = 'QUESTION_ACTIVE';
-      this.timer.start(this.specification.settings.timePerQuestion);
+      this.timer.start(
+      this.specification.settings.timePerQuestion +
+        (this.specification.gameType === 'ADVENTURE' ? 120 : 0)
+    );
 
       return {
         nextQuestionAvailable: true,

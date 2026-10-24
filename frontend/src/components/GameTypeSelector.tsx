@@ -74,8 +74,8 @@ export const SUPPORTED_GAME_TYPES: GameTypeOption[] = [
   },
   {
     id: 'ADVENTURE',
-    title: 'Đi Cảnh Theo Ngành Nghề',
-    subtitle: 'Điều khiển nhân vật hoặc phương tiện vượt chướng ngại vật 2D và chinh phục các trạm câu hỏi theo bối cảnh ngành nghề thực tế.',
+    title: 'Game đi cảnh theo ngành nghề',
+    subtitle: 'Khám phá kiến thức qua hành trình tương tác với bối cảnh được tạo theo ngành nghề.',
     badge: 'Mới • Đi cảnh 2D',
     badgeColor: '#F59E0B',
     accentColor: '#D97706',

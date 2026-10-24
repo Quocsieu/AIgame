@@ -337,11 +337,298 @@ async function runAdventureGameTests() {
   assert.equal(classicGameRes.body.data.settings.adventureConfig, undefined);
   console.log('✓ [Test 9] Kiểm thử hồi quy (Regression): Game truyền thống MULTIPLE_CHOICE không bị ảnh hưởng');
 
+  // 10. Test chọn 1 loại câu hỏi duy nhất cho ADVENTURE (VD: FILL_IN_THE_BLANK)
+  let capturedPromptSingleType = '';
+  aiQuestionService.setProvider({
+    async generateJson(prompt: string) {
+      capturedPromptSingleType = prompt;
+      return {
+        adventureProposal: {
+          industryId: 'MOTORCYCLE_TRAFFIC',
+          themePresetId: 'theme_moto_garage',
+        },
+        questions: [
+          {
+            id: 'q_fib_1',
+            type: 'FILL_IN_THE_BLANK',
+            question: 'Kỹ thuật viên cần kiểm tra và thay ___ động cơ mỗi 2.000 km.',
+            correctAnswer: 'dầu nhớt',
+            acceptedAlternatives: ['nhớt', 'dầu nhớt động cơ'],
+            explanation: 'Thay dầu nhớt định kỳ mỗi 2.000 km.',
+            difficulty: 'MEDIUM',
+          },
+          {
+            id: 'q_fib_2',
+            type: 'FILL_IN_THE_BLANK',
+            question: 'Tại cầu nâng, cần kiểm tra bugi đánh lửa và điện áp ắc quy ___.',
+            correctAnswer: '12V',
+            acceptedAlternatives: ['12 v', '12 volt'],
+            explanation: 'Điện áp ắc quy tiêu chuẩn là 12V.',
+            difficulty: 'MEDIUM',
+          },
+        ],
+      };
+    },
+  });
+
+  const singleTypeAdvRes = await request(app)
+    .post('/api/games/generate')
+    .set(authHeader)
+    .send({
+      sourceIds: [motoSource.sourceId],
+      gameType: 'ADVENTURE',
+      questionCount: 2,
+      timePerQuestion: 25,
+      difficulty: 'MEDIUM',
+      scoringMode: 'STANDARD',
+      title: 'Game Đi Cảnh Chỉ Dùng Điền Từ',
+      adventureConfig: {
+        industryId: 'MOTORCYCLE_TRAFFIC',
+        aiDetectedIndustry: false,
+        questionTypes: ['FILL_IN_THE_BLANK'],
+      },
+    });
+  assert.equal(singleTypeAdvRes.status, 200, 'Tạo game ADVENTURE với 1 loại câu hỏi phải thành công');
+  const singleTypeAdvGame = singleTypeAdvRes.body.data;
+  assert.ok(
+    capturedPromptSingleType.includes('FILL_IN_THE_BLANK') &&
+      capturedPromptSingleType.includes('["FILL_IN_THE_BLANK"]'),
+    'Prompt gửi tới AI phải chỉ định rõ chỉ sinh loại câu hỏi FILL_IN_THE_BLANK'
+  );
+  assert.deepEqual(
+    singleTypeAdvGame.settings.adventureConfig.questionTypes,
+    ['FILL_IN_THE_BLANK'],
+    'adventureConfig.questionTypes phải lưu đúng ["FILL_IN_THE_BLANK"]'
+  );
+  assert.ok(
+    singleTypeAdvGame.questions.every((q: any) => q.type === 'FILL_IN_THE_BLANK'),
+    'Mọi câu hỏi trong game ADVENTURE phải đúng loại FILL_IN_THE_BLANK đã chọn'
+  );
+  console.log('✓ [Test 10] Chọn 1 loại câu hỏi (FILL_IN_THE_BLANK) cho ADVENTURE hoạt động chính xác');
+
+  // 11. Test chọn nhiều loại câu hỏi cho ADVENTURE (MULTIPLE_CHOICE + QUICK_BUTTON + FILL_IN_THE_BLANK) + Chơi qua các checkpoint + Mở lại từ Link/QR
+  let capturedPromptMultiType = '';
+  aiQuestionService.setProvider({
+    async generateJson(prompt: string) {
+      capturedPromptMultiType = prompt;
+      return {
+        adventureProposal: {
+          industryId: 'MOTORCYCLE_TRAFFIC',
+          themePresetId: 'theme_moto_garage',
+        },
+        questions: [
+          {
+            id: 'q_multi_1',
+            type: 'MULTIPLE_CHOICE',
+            question: 'Chu kỳ thay dầu nhớt động cơ là bao nhiêu km?',
+            choices: ['A. 1.000 km', 'B. 2.000 km', 'C. 3.000 km', 'D. 5.000 km'],
+            correctAnswer: 'B. 2.000 km',
+            explanation: '2.000 km.',
+            difficulty: 'MEDIUM',
+          },
+          {
+            id: 'q_multi_2',
+            type: 'QUICK_BUTTON',
+            question: 'Cần vệ sinh lọc gió và kiểm tra bugi đánh lửa khi bảo dưỡng định kỳ.',
+            choices: ['Đúng', 'Sai'],
+            correctAnswer: 'Đúng',
+            explanation: 'Đúng theo bước 3.',
+            difficulty: 'MEDIUM',
+          },
+          {
+            id: 'q_multi_3',
+            type: 'FILL_IN_THE_BLANK',
+            question: 'Kiểm tra điện áp ___ 12V tại cầu nâng.',
+            correctAnswer: 'ắc quy',
+            acceptedAlternatives: ['bình ắc quy'],
+            explanation: 'Kiểm tra điện áp ắc quy 12V.',
+            difficulty: 'MEDIUM',
+          },
+        ],
+      };
+    },
+  });
+
+  const multiTypeAdvRes = await request(app)
+    .post('/api/games/generate')
+    .set(authHeader)
+    .send({
+      sourceIds: [motoSource.sourceId],
+      gameType: 'ADVENTURE',
+      questionCount: 3,
+      timePerQuestion: 25,
+      difficulty: 'MEDIUM',
+      scoringMode: 'STANDARD',
+      title: 'Game Đi Cảnh Đa Dạng Loại Câu Hỏi',
+      adventureConfig: {
+        industryId: 'MOTORCYCLE_TRAFFIC',
+        aiDetectedIndustry: false,
+        questionTypes: ['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK'],
+      },
+    });
+  assert.equal(multiTypeAdvRes.status, 200, 'Tạo game ADVENTURE với nhiều loại câu hỏi phải thành công');
+  const multiTypeAdvGame = multiTypeAdvRes.body.data;
+  assert.ok(
+    capturedPromptMultiType.includes('"MULTIPLE_CHOICE", "QUICK_BUTTON", "FILL_IN_THE_BLANK"'),
+    'Prompt gửi tới AI phải chứa đủ 3 loại câu hỏi đã chọn'
+  );
+  assert.deepEqual(
+    multiTypeAdvGame.settings.adventureConfig.questionTypes,
+    ['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK'],
+    'adventureConfig.questionTypes phải lưu đúng 3 loại đã chọn'
+  );
+  assert.deepEqual(
+    multiTypeAdvGame.questions.map((q: any) => q.type),
+    ['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK'],
+    'Danh sách câu hỏi tại các checkpoint phải khớp đúng các loại đã chọn'
+  );
+
+  // Xuất bản game multi-type để kiểm tra mở lại qua Link/QR và chơi đủ 3 loại câu hỏi
+  await request(app)
+    .patch(`/api/games/${multiTypeAdvGame.gameId}/questions`)
+    .set(authHeader)
+    .send({
+      title: multiTypeAdvGame.title,
+      description: multiTypeAdvGame.description,
+      questions: multiTypeAdvGame.questions,
+      settings: multiTypeAdvGame.settings,
+      isPublic: true,
+    });
+
+  const reloadMultiRes = await request(app).get(`/api/games/${multiTypeAdvGame.gameId}?mode=public`);
+  assert.equal(reloadMultiRes.status, 200);
+  assert.deepEqual(
+    reloadMultiRes.body.data.settings.adventureConfig.questionTypes,
+    ['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK'],
+    'Mở lại game đã lưu từ Link/QR phải giữ nguyên danh sách questionTypes đã chọn'
+  );
+
+  const multiSessionCreate = await request(app)
+    .post('/api/games/sessions')
+    .send({ gameId: multiTypeAdvGame.gameId, publicPlay: true });
+  assert.equal(multiSessionCreate.status, 200);
+  const multiSessionId = multiSessionCreate.body.data.sessionId;
+  await request(app).post(`/api/games/sessions/${multiSessionId}/start`);
+
+  const mAns1 = await request(app)
+    .post(`/api/games/sessions/${multiSessionId}/answer`)
+    .send({ questionId: 'q_multi_1', answer: 'B. 2.000 km' });
+  assert.equal(mAns1.body.data.isCorrect, true, 'Trả lời MULTIPLE_CHOICE trong ADVENTURE phải đúng');
+  await request(app).post(`/api/games/sessions/${multiSessionId}/next`);
+
+  const mAns2 = await request(app)
+    .post(`/api/games/sessions/${multiSessionId}/answer`)
+    .send({ questionId: 'q_multi_2', answer: 'Đúng' });
+  assert.equal(mAns2.body.data.isCorrect, true, 'Trả lời QUICK_BUTTON trong ADVENTURE phải đúng');
+  await request(app).post(`/api/games/sessions/${multiSessionId}/next`);
+
+  const mAns3 = await request(app)
+    .post(`/api/games/sessions/${multiSessionId}/answer`)
+    .send({ questionId: 'q_multi_3', answer: 'bình ắc quy' });
+  assert.equal(
+    mAns3.body.data.isCorrect,
+    true,
+    'Trả lời FILL_IN_THE_BLANK (acceptedAlternatives) trong ADVENTURE phải đúng'
+  );
+  const mFinish = await request(app).post(`/api/games/sessions/${multiSessionId}/next`);
+  assert.equal(mFinish.body.data.finished, true);
+  assert.equal(mFinish.body.data.result.correctCount, 3);
+  assert.equal(mFinish.body.data.result.score, 300);
+  console.log(
+    '✓ [Test 11] Chọn nhiều loại câu hỏi (MC + Đúng/Sai + Điền từ), lưu/mở lại qua Link/QR và chấm điểm cả 3 checkpoint thành công'
+  );
+
+  // 12. Test AI tự thiết kế bối cảnh theo cả Ngành nghề ĐÃ CHỌN + Nội dung nguồn thực tế (Sa hình giao thông vs Gara; CyberLab vs DataCenter) + Hiển thị card trong Kho Game + Chặn nguồn rỗng
+  const trafficSafetyAnalyze = analyzeSourceContentForAdventure(
+    [
+      {
+        sourceId: 'src_traffic_safety',
+        sourceType: 'TEXT',
+        sourceName: 'Cẩm nang lái xe an toàn',
+        title: 'Luật giao thông đường bộ & Lái xe an toàn',
+        text: 'Người điều khiển xe máy tham gia giao thông phải đội mũ bảo hiểm đạt chuẩn, tuân thủ biển báo tốc độ, đi đúng làn đường và giảm tốc độ tại ngã tư.',
+        sections: [],
+        extractedAt: new Date().toISOString(),
+      },
+    ],
+    {
+      preferredIndustryId: 'MOTORCYCLE_TRAFFIC',
+      questionCount: 3,
+    }
+  );
+  assert.equal(trafficSafetyAnalyze.industryId, 'MOTORCYCLE_TRAFFIC');
+  assert.equal(
+    trafficSafetyAnalyze.themePresetId,
+    'theme_moto_circuit',
+    'Khi chọn MOTORCYCLE_TRAFFIC + nội dung luật giao thông/mũ bảo hiểm, AI phải tự thiết kế bối cảnh Sa hình lái xe an toàn (theme_moto_circuit)'
+  );
+  assert.equal(trafficSafetyAnalyze.avatarId, 'MOTO_RIDER');
+  assert.ok(
+    trafficSafetyAnalyze.obstacleTypes.includes('TRAFFIC_CONE') &&
+      trafficSafetyAnalyze.obstacleTypes.includes('BARRIER_GATE'),
+    'Chướng ngại vật phải phù hợp bối cảnh giao thông (cọc tiêu, rào chắn)'
+  );
+
+  const cyberSecurityAnalyze = analyzeSourceContentForAdventure(
+    [
+      {
+        sourceId: 'src_cyber_sec',
+        sourceType: 'TEXT',
+        sourceName: 'Đào tạo An ninh mạng',
+        title: 'Phòng chống Phishing & Bảo mật mật khẩu',
+        text: 'Nhận diện email lừa đảo phishing, bảo mật mật khẩu hai lớp MFA, phòng chống mã độc và lỗ hổng an ninh mạng trong doanh nghiệp.',
+        sections: [],
+        extractedAt: new Date().toISOString(),
+      },
+    ],
+    {
+      preferredIndustryId: 'IT_TECHNOLOGY',
+      questionCount: 3,
+    }
+  );
+  assert.equal(cyberSecurityAnalyze.industryId, 'IT_TECHNOLOGY');
+  assert.equal(
+    cyberSecurityAnalyze.themePresetId,
+    'theme_it_cyberlab',
+    'Khi chọn IT_TECHNOLOGY + nội dung bảo mật/phishing, AI phải tự thiết kế bối cảnh Phòng Lab An Ninh Mạng (theme_it_cyberlab)'
+  );
+  assert.equal(cyberSecurityAnalyze.avatarId, 'CYBER_BOT');
+  assert.ok(
+    cyberSecurityAnalyze.obstacleTypes.includes('BUG_DRONE') &&
+      cyberSecurityAnalyze.obstacleTypes.includes('SERVER_FIREWALL'),
+    'Chướng ngại vật phải phù hợp bối cảnh an ninh mạng (Bug Drone, Tường lửa)'
+  );
+
+  // Kiểm tra danh sách Kho Game (GET /api/games) trả về đầy đủ thông tin để render Card đồng bộ
+  const listGamesRes = await request(app).get('/api/games').set(authHeader);
+  assert.equal(listGamesRes.status, 200);
+  const savedCardItem = listGamesRes.body.data.games.find((g: any) => g.gameId === multiTypeAdvGame.gameId);
+  assert.ok(savedCardItem, 'Game ADVENTURE vừa tạo phải xuất hiện trong Kho Game');
+  assert.equal(savedCardItem.gameType, 'ADVENTURE');
+  assert.ok(
+    savedCardItem.adventureConfig &&
+      savedCardItem.adventureConfig.industryLabel &&
+      savedCardItem.adventureConfig.subEnvironment,
+    'Card game trong Kho Game phải có đủ industryLabel và subEnvironment'
+  );
+
+  // Kiểm tra nguồn rỗng phải báo lỗi rõ ràng, không tự bịa câu hỏi
+  const emptyIngestRes = await request(app)
+    .post('/api/ingest')
+    .set(authHeader)
+    .send({ sampleText: '   ' });
+  assert.ok(emptyIngestRes.status >= 400, 'Nguồn nội dung rỗng phải bị từ chối với mã lỗi 4xx');
+  console.log(
+    '✓ [Test 12] AI tự thiết kế bối cảnh theo Ngành nghề + Nội dung (Giao thông/Sa hình, IT/An ninh mạng), đồng bộ Card Kho Game và chặn nguồn rỗng thành công'
+  );
+
   // Cleanup test games created during test run
   await request(app).delete(`/api/games/${motoGame.gameId}`).set(authHeader);
   await request(app).delete(`/api/games/${classicGameRes.body.data.gameId}`).set(authHeader);
+  await request(app).delete(`/api/games/${singleTypeAdvGame.gameId}`).set(authHeader);
+  await request(app).delete(`/api/games/${multiTypeAdvGame.gameId}`).set(authHeader);
 
-  console.log('=== TẤT CẢ 9 BÀI KIỂM THỬ ADVENTURE GAME ĐỀU PASS 100% ===');
+  console.log('=== TẤT CẢ 12 BÀI KIỂM THỬ ADVENTURE GAME ĐỀU PASS 100% ===');
 }
 
 runAdventureGameTests().catch(err => {

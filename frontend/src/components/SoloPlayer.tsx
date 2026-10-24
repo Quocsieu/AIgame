@@ -88,7 +88,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     }, 1000);
   };
 
-  const initializeSession = async () => {
+  const initializeSession = async (forceStart?: boolean | unknown) => {
+    const isExplicitStart = forceStart === true;
     setIsLoading(true);
     setErrorMessage(null);
     setFinalResult(null);
@@ -108,11 +109,24 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           fetchGameById(gameId)
         );
         setLoadedSpec(fetched);
+        if (fetched?.gameType === 'ADVENTURE' && !isExplicitStart) {
+          const advSessionKey = targetGameId ? `active_solo_session_${targetGameId}` : null;
+          if (advSessionKey) sessionStorage.removeItem(advSessionKey);
+          setSessionId(null);
+          setIsLoading(false);
+          return;
+        }
       } catch {
         // Ignore if public play only allows session endpoints
       }
     }
     const sessionKey = targetGameId ? `active_solo_session_${targetGameId}` : null;
+    if ((initialSpec?.gameType === 'ADVENTURE' || loadedSpec?.gameType === 'ADVENTURE') && !isExplicitStart) {
+      if (sessionKey) sessionStorage.removeItem(sessionKey);
+      setSessionId(null);
+      setIsLoading(false);
+      return;
+    }
     const savedSessionId = sessionKey ? sessionStorage.getItem(sessionKey) : null;
 
     // Reload recovery: check if previous in-progress session exists
@@ -367,7 +381,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           mode="LIVE_SESSION"
           sessionStarted={Boolean(sessionId)}
           startingSession={isLoading}
-          onStartSession={initializeSession}
+          onStartSession={() => initializeSession(true)}
           currentQuestion={currentQuestion}
           currentQuestionIndex={currentQuestion ? currentQuestion.questionIndex : 0}
           totalQuestions={
@@ -380,7 +394,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           onSubmitAnswer={handleSubmitAnswer}
           onNextQuestion={handleNextQuestion}
           finalResult={finalResult}
-          onRestartSession={initializeSession}
+          onRestartSession={() => initializeSession(true)}
           onExit={handleLeave}
         />
       </div>

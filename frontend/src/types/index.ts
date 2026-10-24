@@ -84,6 +84,7 @@ export interface AdventureConfig {
   obstacleDensity: 'LOW' | 'MEDIUM' | 'HIGH';
   speedMultiplier: number;
   reducedMotion: boolean;
+  questionTypes?: QuestionType[];
   stages: AdventureStage[];
 }
 export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
