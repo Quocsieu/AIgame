@@ -1056,6 +1056,12 @@ export class AiQuestionService {
       });
     }
 
+    if (validatedQuestions.length < questionCount) {
+      generationDiagnostics.push(
+        `Người tạo cấu hình ${questionCount} câu nhưng nguồn dữ liệu thực tế chỉ trích xuất được ${validatedQuestions.length} câu hỏi hợp lệ (không tự nhân bản hoặc tạo câu hỏi giả).`
+      );
+    }
+
     const gameSpec: GameSpecification = {
       gameId,
       ...(context?.userId ? { ownerUserId: context.userId } : {}),

@@ -622,13 +622,164 @@ async function runAdventureGameTests() {
     '✓ [Test 12] AI tự thiết kế bối cảnh theo Ngành nghề + Nội dung (Giao thông/Sa hình, IT/An ninh mạng), đồng bộ Card Kho Game và chặn nguồn rỗng thành công'
   );
 
+  // 13. Test quản lý 100 câu hỏi đi cảnh, báo rõ khi chỉ có 60/100 câu hợp lệ (không nhân bản câu giả), chống nhấn lặp tính điểm 2 lần, và tạo phòng Multiplayer
+  aiQuestionService.setProvider({
+    async generateJson() {
+      return {
+        title: 'Đấu Trường 100 Câu Sa Hình Giao Thông Xe Máy',
+        description: 'Bộ 100 câu hỏi luật giao thông đường bộ và kỹ năng lái xe an toàn',
+        questions: Array.from({ length: 100 }, (_, idx) => ({
+          id: `q_100_${idx + 1}`,
+          type: idx % 2 === 0 ? 'MULTIPLE_CHOICE' : 'QUICK_BUTTON',
+          difficulty: 'MEDIUM',
+          question: `Câu hỏi sát hạch luật giao thông xe máy số ${idx + 1}: Quy tắc an toàn tại trạm kiểm soát ${idx + 1} là gì?`,
+          choices:
+            idx % 2 === 0
+              ? ['A. Giảm tốc độ và quan sát biển báo', 'B. Tăng tốc vượt ẩu', 'C. Đi sai làn đường', 'D. Không đội mũ bảo hiểm']
+              : ['Đúng', 'Sai'],
+          correctAnswer: idx % 2 === 0 ? 'A. Giảm tốc độ và quan sát biển báo' : 'Đúng',
+          explanation: `Giải thích quy tắc an toàn tại trạm ${idx + 1}.`,
+          sourceReference: {
+            sourceId: motoSource.sourceId,
+            sourceType: 'TXT',
+            sourceLocation: 'Luật Giao thông',
+            section: `Chặng ${(idx % 10) + 1}`,
+          },
+        })),
+      };
+    },
+  });
+
+  const hundredAdvRes = await request(app)
+    .post('/api/games/generate')
+    .set(authHeader)
+    .send({
+      sourceIds: [motoSource.sourceId],
+      gameType: 'ADVENTURE',
+      questionCount: 100,
+      timePerQuestion: 20,
+      difficulty: 'MEDIUM',
+      scoringMode: 'STANDARD',
+      title: 'Đấu Trường 100 Câu Sa Hình Giao Thông Xe Máy',
+      adventureConfig: {
+        industryId: 'MOTORCYCLE_TRAFFIC',
+        aiDetectedIndustry: false,
+        questionTypes: ['MULTIPLE_CHOICE', 'QUICK_BUTTON'],
+      },
+    });
+  assert.equal(hundredAdvRes.status, 200, 'Tạo game ADVENTURE 100 câu phải thành công');
+  const hundredGame = hundredAdvRes.body.data;
+  assert.equal(hundredGame.questions.length, 100, 'Game phải lưu đủ 100 câu hỏi hợp lệ');
+  assert.equal(hundredGame.settings.questionCount, 100);
+  assert.equal(hundredGame.settings.adventureConfig.stages.length, 100, 'Phải phân bổ đủ 100 checkpoint tương ứng 100 câu hỏi');
+
+  // Chống tính điểm 2 lần khi người chơi nhấn lặp trên cùng 1 câu hỏi
+  const hundredSessRes = await request(app)
+    .post('/api/games/sessions')
+    .set(authHeader)
+    .send({ gameId: hundredGame.gameId });
+  assert.equal(hundredSessRes.status, 200);
+  const hundredSessionId = hundredSessRes.body.data.sessionId;
+  await request(app).post(`/api/games/sessions/${hundredSessionId}/start`).set(authHeader);
+
+  const firstSubmit = await request(app)
+    .post(`/api/games/sessions/${hundredSessionId}/answer`)
+    .set(authHeader)
+    .send({ questionId: 'q_100_1', answer: 'A. Giảm tốc độ và quan sát biển báo' });
+  assert.equal(firstSubmit.status, 200);
+  assert.equal(firstSubmit.body.data.isCorrect, true);
+
+  const duplicateSubmit = await request(app)
+    .post(`/api/games/sessions/${hundredSessionId}/answer`)
+    .set(authHeader)
+    .send({ questionId: 'q_100_1', answer: 'A. Giảm tốc độ và quan sát biển báo' });
+  assert.equal(duplicateSubmit.status, 400, 'Nhấn lặp nộp đáp án lần 2 cho cùng 1 câu phải bị chặn');
+  assert.equal(duplicateSubmit.body.error.code, 'QUESTION_ALREADY_ANSWERED');
+
+  const summaryAfterDup = await request(app).get(`/api/games/sessions/${hundredSessionId}`).set(authHeader);
+  assert.equal(summaryAfterDup.body.data.score, 100, 'Điểm số chỉ được cộng đúng 1 lần (100đ)');
+  assert.equal(summaryAfterDup.body.data.correctCount, 1, 'Số câu đúng chỉ tính 1 lần');
+  await request(app).post(`/api/games/sessions/${hundredSessionId}/finish`).set(authHeader);
+
+  // Trường hợp cấu hình 100 câu nhưng nguồn chỉ tạo được 60 câu hợp lệ -> giữ đúng 60 câu, không nhân bản câu giả
+  aiQuestionService.setProvider({
+    async generateJson() {
+      return {
+        title: 'Game 60 Trên 100 Câu Hợp Lệ Thực Tế',
+        description: 'Kiểm tra xử lý nguồn chỉ đủ 60 câu hợp lệ',
+        questions: Array.from({ length: 60 }, (_, idx) => ({
+          id: `q_60_${idx + 1}`,
+          type: 'QUICK_BUTTON',
+          difficulty: 'MEDIUM',
+          question: `Tình huống thực tế ngành sản xuất công nghiệp số ${idx + 1}: Phải tuân thủ quy chuẩn 5S và PPE tại dây chuyền ${idx + 1}.`,
+          choices: ['Đúng', 'Sai'],
+          correctAnswer: 'Đúng',
+          sourceReference: {
+            sourceId: motoSource.sourceId,
+            sourceType: 'TXT',
+            sourceLocation: 'Sổ tay nhà máy',
+          },
+        })),
+      };
+    },
+  });
+
+  const sixtyAdvRes = await request(app)
+    .post('/api/games/generate')
+    .set(authHeader)
+    .send({
+      sourceIds: [motoSource.sourceId],
+      gameType: 'ADVENTURE',
+      questionCount: 100,
+      timePerQuestion: 20,
+      difficulty: 'MEDIUM',
+      scoringMode: 'STANDARD',
+      title: 'Game 60 Trên 100 Câu Hợp Lệ Thực Tế',
+      adventureConfig: {
+        industryId: 'MANUFACTURING_INDUSTRIAL',
+        aiDetectedIndustry: false,
+        questionTypes: ['QUICK_BUTTON'],
+      },
+    });
+  assert.equal(sixtyAdvRes.status, 200);
+  const sixtyGame = sixtyAdvRes.body.data;
+  assert.equal(sixtyGame.questions.length, 60, 'Chỉ lưu đúng 60 câu hợp lệ, tuyệt đối không nhân bản câu giả để đủ 100');
+  assert.equal(sixtyGame.settings.questionCount, 60);
+  assert.equal(sixtyGame.settings.adventureConfig.stages.length, 60);
+  assert.ok(
+    Array.isArray(sixtyGame.diagnostics) &&
+      sixtyGame.diagnostics.some((d: string) => d.includes('100') && d.includes('60')),
+    'Diagnostics phải ghi rõ số lượng câu hợp lệ thực tế (60/100)'
+  );
+
+  // Kiểm tra tạo phòng chơi nhiều người (Multiplayer Room) cho game ADVENTURE đã xuất bản
+  const roomCreateRes = await request(app)
+    .post('/api/rooms')
+    .set(authHeader)
+    .send({
+      gameId: multiTypeAdvGame.gameId,
+      capacity: 20,
+    });
+  assert.equal(roomCreateRes.status, 200, 'Tạo phòng chơi nhiều người với game ADVENTURE phải thành công');
+  assert.ok(roomCreateRes.body.data.roomCode && roomCreateRes.body.data.joinUrl);
+  await request(app)
+    .post(`/api/rooms/${roomCreateRes.body.data.roomCode}/close`)
+    .set(authHeader)
+    .send({ hostToken: roomCreateRes.body.data.hostToken });
+
+  await request(app).delete(`/api/games/${hundredGame.gameId}`).set(authHeader);
+  await request(app).delete(`/api/games/${sixtyGame.gameId}`).set(authHeader);
+  console.log(
+    '✓ [Test 13] Hỗ trợ 100 câu đi cảnh, giữ đúng 60/100 câu hợp lệ (không tạo câu giả), chống nhấn lặp tính điểm 2 lần và tương thích Phòng chơi nhiều người thành công'
+  );
+
   // Cleanup test games created during test run
   await request(app).delete(`/api/games/${motoGame.gameId}`).set(authHeader);
   await request(app).delete(`/api/games/${classicGameRes.body.data.gameId}`).set(authHeader);
   await request(app).delete(`/api/games/${singleTypeAdvGame.gameId}`).set(authHeader);
   await request(app).delete(`/api/games/${multiTypeAdvGame.gameId}`).set(authHeader);
 
-  console.log('=== TẤT CẢ 12 BÀI KIỂM THỬ ADVENTURE GAME ĐỀU PASS 100% ===');
+  console.log('=== TẤT CẢ 13 BÀI KIỂM THỬ ADVENTURE GAME ĐỀU PASS 100% ===');
 }
 
 runAdventureGameTests().catch(err => {

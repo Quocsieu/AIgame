@@ -56,6 +56,10 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
   const [playerScore, setPlayerScore] = useState(0);
   const [playerStreak, setPlayerStreak] = useState(0);
+  const [playerCorrectCount, setPlayerCorrectCount] = useState(0);
+  const [playerWrongCount, setPlayerWrongCount] = useState(0);
+  const submittingLockRef = useRef(false);
+  const answeredQuestionIdsRef = useRef<Set<string>>(new Set());
   const [timeLeft, setTimeLeft] = useState(20);
 
   const timerRef = useRef<number | null>(null);
@@ -89,7 +93,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   };
 
   const initializeSession = async (forceStart?: boolean | unknown) => {
-    const isExplicitStart = forceStart === true;
+    const isExplicitStart = forceStart === true || forceStart === 'RESTART';
+    const isForceRestart = forceStart === 'RESTART';
     setIsLoading(true);
     setErrorMessage(null);
     setFinalResult(null);
@@ -98,6 +103,10 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     setTextAnswerInput('');
     setPlayerScore(0);
     setPlayerStreak(0);
+    setPlayerCorrectCount(0);
+    setPlayerWrongCount(0);
+    submittingLockRef.current = false;
+    answeredQuestionIdsRef.current.clear();
     stopTimer();
 
     const targetGameId = gameId || initialSpec?.gameId;
@@ -109,7 +118,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           fetchGameById(gameId)
         );
         setLoadedSpec(fetched);
-        if (fetched?.gameType === 'ADVENTURE' && !isExplicitStart) {
+        if (fetched?.gameType === 'ADVENTURE' && !isExplicitStart && !(targetGameId && sessionStorage.getItem(`active_solo_session_${targetGameId}`))) {
           const advSessionKey = targetGameId ? `active_solo_session_${targetGameId}` : null;
           if (advSessionKey) sessionStorage.removeItem(advSessionKey);
           setSessionId(null);
@@ -121,7 +130,10 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       }
     }
     const sessionKey = targetGameId ? `active_solo_session_${targetGameId}` : null;
-    if ((initialSpec?.gameType === 'ADVENTURE' || loadedSpec?.gameType === 'ADVENTURE') && !isExplicitStart) {
+    if (isForceRestart && sessionKey) {
+      sessionStorage.removeItem(sessionKey);
+    }
+    if ((initialSpec?.gameType === 'ADVENTURE' || loadedSpec?.gameType === 'ADVENTURE') && !isExplicitStart && !(sessionKey && sessionStorage.getItem(sessionKey))) {
       if (sessionKey) sessionStorage.removeItem(sessionKey);
       setSessionId(null);
       setIsLoading(false);
@@ -149,6 +161,29 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           setCurrentQuestion(q);
           setPlayerScore(summary.score || 0);
           setPlayerStreak(summary.currentStreak || 0);
+          setPlayerCorrectCount((summary as any).correctCount || 0);
+          setPlayerWrongCount((summary as any).wrongCount || 0);
+          if (summary.state === 'QUESTION_ANSWERED') {
+            const adv = await advancePracticeSession(savedSessionId);
+            if (adv.finished && adv.result) {
+              setSessionId(savedSessionId);
+              setFinalResult(adv.result);
+              if (sessionKey) sessionStorage.removeItem(sessionKey);
+        if ((initialSpec?.gameType === 'ADVENTURE' || loadedSpec?.gameType === 'ADVENTURE') && !isExplicitStart) {
+          setSessionId(null);
+          setIsLoading(false);
+          return;
+        }
+              setIsLoading(false);
+              return;
+            } else if (adv.question) {
+              setSessionId(savedSessionId);
+              setCurrentQuestion(adv.question);
+              startCountdown(adv.question.timePerQuestion || 20);
+              setIsLoading(false);
+              return;
+            }
+          }
           const questionTime = q.timePerQuestion || 20;
           startCountdown(questionTime);
           setIsLoading(false);
@@ -157,6 +192,11 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       } catch {
         // Stale or abandoned session in storage, clear and recreate
         if (sessionKey) sessionStorage.removeItem(sessionKey);
+        if ((initialSpec?.gameType === 'ADVENTURE' || loadedSpec?.gameType === 'ADVENTURE') && !isExplicitStart) {
+          setSessionId(null);
+          setIsLoading(false);
+          return;
+        }
       }
     }
 
@@ -200,7 +240,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   }, [gameId, initialSpec]);
 
   const handleSubmitAnswer = async (answerVal?: string) => {
-    if (!sessionId || !currentQuestion || questionFeedback || isSubmitting) return;
+    if (!sessionId || !currentQuestion || questionFeedback || isSubmitting || submittingLockRef.current || answeredQuestionIdsRef.current.has(currentQuestion.id)) return;
 
     const finalAnswer = (answerVal !== undefined ? answerVal : (selectedChoice || textAnswerInput)).trim();
     if (!finalAnswer) {
@@ -208,6 +248,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       return;
     }
 
+    submittingLockRef.current = true;
     setIsSubmitting(true);
     stopTimer();
 
@@ -216,9 +257,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         questionId: currentQuestion.id,
         answer: finalAnswer,
       });
+      answeredQuestionIdsRef.current.add(currentQuestion.id);
       setQuestionFeedback(res);
       setPlayerScore((prev) => prev + res.pointsEarned);
       setPlayerStreak((prev) => (res.isCorrect ? prev + 1 : 0));
+      setPlayerCorrectCount((prev) => prev + (res.isCorrect ? 1 : 0));
+      setPlayerWrongCount((prev) => prev + (res.isCorrect ? 0 : 1));
     } catch (err: any) {
       if (err.message?.includes('abandoned') || err.message?.includes('đã bị kết thúc')) {
         toast.warning('Phiên luyện tập này đã được kết thúc bởi người tạo. Đang chuyển hướng...', 'Phiên đã đóng');
@@ -227,6 +271,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         toast.error(err.message || 'Không thể gửi câu trả lời.', 'Lỗi nộp bài');
       }
     } finally {
+      submittingLockRef.current = false;
       setIsSubmitting(false);
     }
   };
@@ -389,12 +434,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           }
           timeRemaining={timeLeft}
           liveScore={playerScore}
+          liveCorrectCount={playerCorrectCount}
+          liveWrongCount={playerWrongCount}
           questionFeedback={questionFeedback}
           submittingAnswer={isSubmitting}
           onSubmitAnswer={handleSubmitAnswer}
           onNextQuestion={handleNextQuestion}
           finalResult={finalResult}
-          onRestartSession={() => initializeSession(true)}
+          onRestartSession={() => initializeSession('RESTART')}
           onExit={handleLeave}
         />
       </div>

@@ -62,7 +62,7 @@ export class GameSession {
     this.currentQuestionIndex = 0;
     this.timer.start(
       this.specification.settings.timePerQuestion +
-        (this.specification.gameType === 'ADVENTURE' ? 120 : 0)
+        (this.specification.gameType === 'ADVENTURE' ? 600 : 0)
     );
 
     return this.getCurrentClientQuestion();
@@ -161,8 +161,12 @@ export class GameSession {
       );
     }
 
-    const responseTimeMs = this.timer.getResponseTimeMs();
+    const rawResponseTimeMs = this.timer.getResponseTimeMs();
     const timeLimitMs = this.specification.settings.timePerQuestion * 1000;
+    const responseTimeMs =
+      this.specification.gameType === 'ADVENTURE'
+        ? Math.min(rawResponseTimeMs, timeLimitMs)
+        : rawResponseTimeMs;
 
     // Validate answer using specific game-type handler
     const handler = getHandler(currentQuestion.type);
@@ -270,7 +274,7 @@ export class GameSession {
       this.state = 'QUESTION_ACTIVE';
       this.timer.start(
       this.specification.settings.timePerQuestion +
-        (this.specification.gameType === 'ADVENTURE' ? 120 : 0)
+        (this.specification.gameType === 'ADVENTURE' ? 600 : 0)
     );
 
       return {

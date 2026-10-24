@@ -186,7 +186,7 @@ export const MixedQuestionDistributionSchema = z.object({
 export type MixedQuestionDistribution = z.infer<typeof MixedQuestionDistributionSchema>;
 
 export const GameSettingsSchema = z.object({
-  questionCount: z.number().int().min(1).max(20).default(5),
+  questionCount: z.number().int().min(1).max(100).default(5),
   timePerQuestion: z.number().int().min(5).max(120).default(20),
   scoringMode: ScoringModeEnum.default('STANDARD'),
   mixedDistribution: MixedQuestionDistributionSchema.optional(),
@@ -227,7 +227,7 @@ export const GenerateGameRequestSchema = z.object({
   gameType: GameTypeEnum,
   difficulty: DifficultyEnum.optional(),
   scoringMode: ScoringModeEnum.optional(),
-  questionCount: z.number().int().min(1).max(20).default(5).optional(),
+  questionCount: z.number().int().min(1).max(100).default(5).optional(),
   timePerQuestion: z.number().int().min(5).max(120).default(20).optional(),
   title: z.string().trim().min(1, 'Tên game không được để trống').max(100, 'Tên game không được vượt quá 100 ký tự').optional(),
   topicFocus: z.string().trim().max(300).optional(),
@@ -246,7 +246,7 @@ export type GenerateGameRequest = z.infer<typeof GenerateGameRequestSchema>;
 export const UpdateGameQuestionsRequestSchema = z.object({
   title: z.string().trim().min(1, 'Tên game không được để trống').max(100, 'Tên game không được vượt quá 100 ký tự').optional(),
   description: z.string().trim().max(1000).optional(),
-  questions: z.array(GameQuestionSchema).min(1).max(20),
+  questions: z.array(GameQuestionSchema).min(1).max(100),
   settings: z
     .object({
       timePerQuestion: z.number().int().min(5).max(120).optional(),

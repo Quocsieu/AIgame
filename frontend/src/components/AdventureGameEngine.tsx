@@ -88,6 +88,8 @@ export interface AdventureGameEngineProps {
   totalQuestions?: number;
   timeRemaining?: number;
   liveScore?: number;
+  liveCorrectCount?: number;
+  liveWrongCount?: number;
   questionFeedback?: PracticeQuestionResult | null;
   submittingAnswer?: boolean;
   onSubmitAnswer?: (answer: string) => void;
@@ -103,6 +105,81 @@ const GRAVITY = 1750;
 const JUMP_VELOCITY = -650;
 const BASE_MOVE_SPEED = 285;
 
+function getIndustryGameplayProfile(config: AdventureConfig) {
+  if (config.industryId === 'MOTORCYCLE_TRAFFIC') {
+    if (config.themePresetId === 'theme_moto_circuit') {
+      return {
+        mechanicTitle: 'Sa Hình & Xử Lý Tình Huống Giao Thông',
+        autoMoveOn: 'Xe tự chạy: BẬT',
+        autoMoveOff: 'Xe tự chạy: TẠM DỪNG',
+        actionVerb: 'NÉ VẬT CẢN',
+        clearFloatingText: '+15 AN TOÀN GIAO THÔNG',
+        checkpointAction: 'Mở trạm sát hạch chặng',
+      };
+    }
+    return {
+      mechanicTitle: 'Quy Trình Kỹ Thuật & Bảo Dưỡng Xưởng Dịch Vụ',
+      autoMoveOn: 'Di chuyển khoang xưởng: BẬT',
+      autoMoveOff: 'Di chuyển khoang xưởng: TẠM DỪNG',
+      actionVerb: 'VƯỢT VẬT CẢN',
+      clearFloatingText: '+15 KỸ THUẬT XƯỞNG',
+      checkpointAction: 'Mở trạm chẩn đoán chặng',
+    };
+  }
+  if (config.industryId === 'IT_TECHNOLOGY') {
+    return {
+      mechanicTitle: 'Tuần Tra Hạ Tầng Số & Xử Lý Sự Cố An Ninh Mạng',
+      autoMoveOn: 'Tuần tra hệ thống: BẬT',
+      autoMoveOff: 'Tuần tra hệ thống: TẠM DỪNG',
+      actionVerb: 'VƯỢT FIREWALL',
+      clearFloatingText: '+15 CHẶN SỰ CỐ',
+      checkpointAction: 'Xử lý sự cố Node',
+    };
+  }
+  if (config.industryId === 'MANUFACTURING_INDUSTRIAL') {
+    return {
+      mechanicTitle: 'Vận Hành Dây Chuyền, Kho Vận & Kiểm Định 5S/QA',
+      autoMoveOn: 'Tiến trình dây chuyền: BẬT',
+      autoMoveOff: 'Tiến trình dây chuyền: TẠM DỪNG',
+      actionVerb: 'VƯỢT KIỆN HÀNG',
+      clearFloatingText: '+15 AN TOÀN 5S',
+      checkpointAction: 'Kiểm định chốt QA/QC',
+    };
+  }
+  if (config.industryId === 'HEALTHCARE_TRAINING') {
+    return {
+      mechanicTitle: 'Phân Luồng Lâm Sàng & Xử Trí Tình Huống Y Khoa',
+      autoMoveOn: 'Di chuyển ca trực: BẬT',
+      autoMoveOff: 'Di chuyển ca trực: TẠM DỪNG',
+      actionVerb: 'VƯỢT THIẾT BỊ',
+      clearFloatingText: '+15 AN TOÀN LÂM SÀNG',
+      checkpointAction: 'Mở ca lâm sàng chặng',
+    };
+  }
+  if (
+    config.industryId === 'BUSINESS_SALES' ||
+    config.industryId === 'FINANCE_BANKING' ||
+    config.industryId === 'FNB_HOSPITALITY'
+  ) {
+    return {
+      mechanicTitle: 'Hành Trình Tư Vấn Khách Hàng & Xử Lý Tình Huống',
+      autoMoveOn: 'Tiến trình tư vấn: BẬT',
+      autoMoveOff: 'Tiến trình tư vấn: TẠM DỪNG',
+      actionVerb: 'VƯỢT RÀO CẢN',
+      clearFloatingText: '+15 KỸ NĂNG TƯ VẤN',
+      checkpointAction: 'Mở điểm chạm tư vấn',
+    };
+  }
+  return {
+    mechanicTitle: 'Hành Trình Khám Phá & Chinh Phục Học Phần',
+    autoMoveOn: 'Hành trình học tập: BẬT',
+    autoMoveOff: 'Hành trình học tập: TẠM DỪNG',
+    actionVerb: 'NHẢY VƯỢT',
+    clearFloatingText: '+15 ĐIỂM KỸ NĂNG',
+    checkpointAction: 'Mở thử thách học phần',
+  };
+}
+
 export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   game,
   adventureConfig: propAdventureConfig,
@@ -115,6 +192,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   totalQuestions: liveTotalQuestions,
   timeRemaining: liveTimeRemaining = 20,
   liveScore = 0,
+  liveCorrectCount = 0,
+  liveWrongCount = 0,
   questionFeedback: liveQuestionFeedback,
   submittingAnswer = false,
   onSubmitAnswer,
@@ -124,6 +203,11 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   onExit,
 }) => {
   const effectiveConfig = useMemo(() => {
+    const raw = propAdventureConfig || game.settings?.adventureConfig;
+    return syncAdventureStagesWithQuestions(raw, game.questions || []);
+  }, [propAdventureConfig, game.settings?.adventureConfig, game.questions]);
+  const gameplayProfile = useMemo(() => getIndustryGameplayProfile(effectiveConfig), [effectiveConfig]);
+  useMemo(() => {
     const raw = propAdventureConfig || game.settings?.adventureConfig;
     return syncAdventureStagesWithQuestions(raw, game.questions || []);
   }, [propAdventureConfig, game.settings?.adventureConfig, game.questions]);
@@ -140,6 +224,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   const [previewFinished, setPreviewFinished] = useState<boolean>(false);
   const [previewScore, setPreviewScore] = useState<number>(0);
   const [previewCorrectCount, setPreviewCorrectCount] = useState<number>(0);
+  const [previewWrongCount, setPreviewWrongCount] = useState<number>(0);
   const [previewStreak, setPreviewStreak] = useState<number>(0);
   const [previewMaxStreak, setPreviewMaxStreak] = useState<number>(0);
   const [previewTimeRemaining, setPreviewTimeRemaining] = useState<number>(
@@ -249,7 +334,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   }, [mode, liveCurrentQuestion, game.questions, activeStageIndex, previewStageIdx]);
 
   const activeTimeRemaining =
-    mode === 'LIVE_SESSION' ? liveTimeRemaining : previewTimeRemaining;
+    previewTimeRemaining;
 
   // World geometry calculation
   const checkpointPositions = useMemo(() => {
@@ -362,18 +447,25 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   useEffect(() => {
     const unlocked = activeFeedback ? activeStageIndex + 1 : activeStageIndex;
     physicsRef.current.unlockedStageCount = unlocked;
+    if (activeStageIndex > 0 && checkpointPositions[activeStageIndex - 1]) {
+      const minX = checkpointPositions[activeStageIndex - 1] + 40;
+      if (physicsRef.current.playerX < minX) {
+        physicsRef.current.playerX = minX;
+      }
+    }
   }, [activeStageIndex, activeFeedback]);
 
   // Reset question input when stage changes
   useEffect(() => {
     setSelectedChoice('');
     setTextAnswer('');
+    setPreviewTimeRemaining(game.settings?.timePerQuestion || 20);
   }, [activeStageIndex, activeQuestion?.id]);
 
   // Preview countdown timer when checkpoint question modal is open
   useEffect(() => {
-    if (mode !== 'CREATOR_PREVIEW') return;
-    if (!activeModalOpen || previewFeedback || previewFinished) return;
+    if (!activeModalOpen || Boolean(activeFeedback) || isJourneyFinished) return;
+    if (!activeModalOpen || Boolean(activeFeedback) || isJourneyFinished) return;
 
     const timer = window.setInterval(() => {
       setPreviewTimeRemaining(prev => {
@@ -498,6 +590,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       } else {
         playWrongSound();
         setPreviewStreak(0);
+        setPreviewWrongCount(prev => prev + 1);
       }
 
       setPreviewFeedback({
@@ -976,7 +1069,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           obs.cleared = true;
           setSkillBonusScore(prev => prev + 15);
           setObstaclesClearedCount(prev => prev + 1);
-          spawnFloatingText(obs.x, -obs.height - 25, '+15 VƯỢT CẢN', '#38BDF8');
+          spawnFloatingText(obs.x, -obs.height - 25, gameplayProfile.clearFloatingText, '#38BDF8');
         }
 
         const horizontalOverlap = playerRight > obsLeft + 4 && playerLeft < obsRight - 4;
@@ -1282,6 +1375,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     effectiveConfig.stages[activeStageIndex] || effectiveConfig.stages[0];
   const currentQuizScore = mode === 'LIVE_SESSION' ? liveScore : previewScore;
   const totalDisplayScore = currentQuizScore + skillBonusScore;
+  const currentCorrectCount = mode === 'LIVE_SESSION' ? liveCorrectCount : previewCorrectCount;
+  const currentWrongCount = mode === 'LIVE_SESSION' ? liveWrongCount : previewWrongCount;
+  const currentAnsweredCount = currentCorrectCount + currentWrongCount;
   const accentHex = effectiveConfig.palette.accentColor || '#F59E0B';
 
   return (
@@ -1376,6 +1472,27 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>Chặng</span>
             <strong style={{ fontSize: '15px', color: '#f8fafc', fontWeight: 700 }}>
               {Math.min(totalStages, activeStageIndex + 1)}/{totalStages}
+            </strong>
+          </div>
+
+          <div
+            style={{
+              padding: '6px 14px',
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: '6px',
+              borderRight: '1px solid #222d42',
+            }}
+          >
+            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>Đã trả lời</span>
+            <strong style={{ fontSize: '14px', color: '#f8fafc', fontWeight: 700 }}>
+              {currentAnsweredCount}/{totalStages}
+            </strong>
+            <span style={{ fontSize: '11px', color: '#3fc07a', fontWeight: 600 }}>
+              ({currentCorrectCount}Đ·{currentWrongCount}S)
+            </span>
+          </div>
+          <div style={{ display: 'none' }}><strong>
             </strong>
           </div>
 
@@ -1613,7 +1730,10 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   marginBottom: '6px',
                 }}
               >
-                {effectiveConfig.industryLabel} · {effectiveConfig.subEnvironment}
+                {effectiveConfig.industryLabel} · {effectiveConfig.subEnvironment} · {totalStages} câu hỏi thực tế
+                <div style={{ fontSize: '12px', color: accentHex, marginTop: '4px', fontWeight: 700 }}>
+                  Cơ chế: {gameplayProfile.mechanicTitle}
+                </div>
               </div>
               <h2
                 style={{
@@ -1722,7 +1842,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 cursor: 'pointer',
               }}
             >
-              {autoCruise ? 'Xe tự chạy: BẬT' : 'Xe tự chạy: TẠM DỪNG'}
+              {autoCruise ? gameplayProfile.autoMoveOn : gameplayProfile.autoMoveOff}
             </button>
 
             {/* Right Primary Jump Action */}
@@ -1743,7 +1863,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     cursor: 'pointer',
                   }}
                 >
-                  Mở câu hỏi chặng {nearCheckpointIndex + 1}
+                  {gameplayProfile.checkpointAction} #{nearCheckpointIndex + 1}
                 </button>
               )}
 
@@ -1773,7 +1893,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   gap: '8px',
                 }}
               >
-                <span>NHẢY</span>
+                <span>{gameplayProfile.actionVerb}</span>
                 <span
                   style={{
                     fontSize: '11px',

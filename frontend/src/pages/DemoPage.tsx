@@ -575,7 +575,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       setRoomCode('');
       setIsModeModalOpen(false);
       toast.success(
-        `Đã tạo thành công bộ câu hỏi "${spec.title}" (${spec.questions.length} câu)! Bạn có thể xem trước nội dung hoặc bắt đầu chơi khi sẵn sàng.`,
+        spec.questions.length < questionCount
+          ? `Đã tạo thành công "${spec.title}" với ${spec.questions.length}/${questionCount} câu hỏi hợp lệ trích xuất từ nguồn thực tế (không tự nhân bản câu giả).`
+          : `Đã tạo thành công bộ câu hỏi "${spec.title}" (${spec.questions.length} câu)! Bạn có thể xem trước nội dung hoặc bắt đầu chơi khi sẵn sàng.`,
         'Tạo game thành công'
       );
       setCurrentStep(4);
@@ -2539,15 +2541,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       2. Số Lượng Câu Hỏi: {questionCount} câu
                     </label>
                     <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                      (1 - 20)
+                      (1 - 100)
                     </span>
                   </div>
                   <input
                     type="number"
                     min={1}
-                    max={20}
+                    max={100}
                     value={questionCount}
-                    onChange={(e) => setQuestionCount(Math.min(20, Math.max(1, parseInt(e.target.value, 10) || 5)))}
+                    onChange={(e) => setQuestionCount(Math.min(100, Math.max(1, parseInt(e.target.value, 10) || 5)))}
                     style={{
                       width: '100%',
                       backgroundColor: 'var(--bg-input)',
