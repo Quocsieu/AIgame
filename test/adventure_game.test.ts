@@ -779,7 +779,148 @@ async function runAdventureGameTests() {
   await request(app).delete(`/api/games/${singleTypeAdvGame.gameId}`).set(authHeader);
   await request(app).delete(`/api/games/${multiTypeAdvGame.gameId}`).set(authHeader);
 
-  console.log('=== TẤT CẢ 13 BÀI KIỂM THỬ ADVENTURE GAME ĐỀU PASS 100% ===');
+  // 14. Test chọn Gameplay Archetype động theo Ngành nghề + Nội dung nguồn (cùng ngành MOTORCYCLE_TRAFFIC nhưng 3 nội dung khác nhau sinh ra 3 Gameplay Engine khác nhau)
+  const motoTrafficAnalysis = analyzeSourceContentForAdventure(
+    [
+      {
+        sourceId: 'src_moto_traffic_14',
+        sourceType: 'TXT',
+        sourceName: 'luat-giao-thong.txt',
+        sourceLocation: 'inline',
+        title: 'Luật giao thông đường bộ và kỹ năng lái xe an toàn',
+        text: 'Người điều khiển xe máy tham gia giao thông phải đội mũ bảo hiểm, tuân thủ biển báo, tốc độ, giữ khoảng cách và làn đường tại ngã tư.',
+        sections: [],
+        extractedItems: [],
+        diagnostics: [],
+      },
+    ],
+    { preferredIndustryId: 'MOTORCYCLE_TRAFFIC', questionCount: 5 }
+  );
+  assert.equal(motoTrafficAnalysis.themePresetId, 'theme_moto_circuit');
+  assert.equal(motoTrafficAnalysis.gameplayArchetype, 'TRAFFIC_RUNNER_SIM');
+  assert.equal(motoTrafficAnalysis.controlScheme, 'RUNNER_JUMP_CHECKPOINT');
+  assert.equal(motoTrafficAnalysis.questionTriggerMode, 'CHECKPOINT_GATE');
+
+  const motoGarageAnalysis = analyzeSourceContentForAdventure(
+    [
+      {
+        sourceId: 'src_moto_garage_14',
+        sourceType: 'TXT',
+        sourceName: 'bao-duong-dong-co.txt',
+        sourceLocation: 'inline',
+        title: 'Quy trình bảo dưỡng động cơ và chẩn đoán kỹ thuật xe máy',
+        text: 'Kỹ thuật viên tại xưởng dịch vụ gara thực hiện kiểm tra dầu nhớt, bugi, phanh, lốp, ắc quy và sửa chữa động cơ định kỳ.',
+        sections: [],
+        extractedItems: [],
+        diagnostics: [],
+      },
+    ],
+    { preferredIndustryId: 'MOTORCYCLE_TRAFFIC', questionCount: 5 }
+  );
+  assert.equal(motoGarageAnalysis.themePresetId, 'theme_moto_garage');
+  assert.equal(motoGarageAnalysis.gameplayArchetype, 'DIAGNOSTIC_WORKBENCH_SIM');
+  assert.equal(motoGarageAnalysis.controlScheme, 'WORKBENCH_NODE_INSPECT');
+  assert.equal(motoGarageAnalysis.questionTriggerMode, 'COMPONENT_DIAGNOSIS');
+
+  const motoSalesAnalysis = analyzeSourceContentForAdventure(
+    [
+      {
+        sourceId: 'src_moto_sales_14',
+        sourceType: 'TXT',
+        sourceName: 'tu-van-ban-xe-showroom.txt',
+        sourceLocation: 'inline',
+        title: 'Quy trình tư vấn bán hàng tại Showroom xe máy',
+        text: 'Chuyên viên showroom thực hiện tư vấn khách hàng mua xe máy, báo giá, giới thiệu chương trình khuyến mãi, trả góp, chốt đơn và chăm sóc khách hàng.',
+        sections: [],
+        extractedItems: [],
+        diagnostics: [],
+      },
+    ],
+    { preferredIndustryId: 'MOTORCYCLE_TRAFFIC', questionCount: 5 }
+  );
+  assert.equal(motoSalesAnalysis.themePresetId, 'theme_biz_retail');
+  assert.equal(motoSalesAnalysis.gameplayArchetype, 'SCENARIO_DECISION_SIM');
+  assert.equal(motoSalesAnalysis.controlScheme, 'SCENARIO_CASE_DECISION');
+  assert.equal(motoSalesAnalysis.questionTriggerMode, 'CASE_CONSULTATION');
+
+  // Kiểm tra các ngành khác: CNTT An ninh mạng -> CYBER_DEFENSE_CONSOLE_SIM, Sản xuất QA/QC -> DIAGNOSTIC_WORKBENCH_SIM, Y tế -> SCENARIO_DECISION_SIM
+  const cyberSocAnalysis = analyzeSourceContentForAdventure(
+    [
+      {
+        sourceId: 'src_cyber_14',
+        sourceType: 'TXT',
+        sourceName: 'soc-security.txt',
+        sourceLocation: 'inline',
+        title: 'Phòng chống Phishing và Xử lý Sự cố An ninh mạng SOC',
+        text: 'Chuyên gia an ninh mạng giám sát hệ thống bảo mật, phát hiện email phishing, mã độc, lỗ hổng xác thực mật khẩu.',
+        sections: [],
+        extractedItems: [],
+        diagnostics: [],
+      },
+    ],
+    { preferredIndustryId: 'IT_TECHNOLOGY', questionCount: 5 }
+  );
+  assert.equal(cyberSocAnalysis.gameplayArchetype, 'CYBER_DEFENSE_CONSOLE_SIM');
+  assert.equal(cyberSocAnalysis.controlScheme, 'SOC_NODE_TRIAGE');
+  assert.equal(cyberSocAnalysis.questionTriggerMode, 'INCIDENT_CONTAINMENT');
+
+  const mfgQaAnalysis = analyzeSourceContentForAdventure(
+    [
+      {
+        sourceId: 'src_mfg_qa_14',
+        sourceType: 'TXT',
+        sourceName: 'qa-qc-factory.txt',
+        sourceLocation: 'inline',
+        title: 'Kiểm soát chất lượng dây chuyền QA/QC và 5S nhà máy',
+        text: 'Kỹ sư vận hành máy tại nhà máy sản xuất kiểm định chất lượng QA, QC, tuân thủ an toàn lao động PPE và 5S.',
+        sections: [],
+        extractedItems: [],
+        diagnostics: [],
+      },
+    ],
+    { preferredIndustryId: 'MANUFACTURING_INDUSTRIAL', questionCount: 5 }
+  );
+  assert.equal(mfgQaAnalysis.gameplayArchetype, 'DIAGNOSTIC_WORKBENCH_SIM');
+  assert.equal(mfgQaAnalysis.controlScheme, 'WORKBENCH_NODE_INSPECT');
+
+  const medClinicalAnalysis = analyzeSourceContentForAdventure(
+    [
+      {
+        sourceId: 'src_med_14',
+        sourceType: 'TXT',
+        sourceName: 'clinical-safety.txt',
+        sourceLocation: 'inline',
+        title: 'Đào tạo quy trình lâm sàng và kiểm soát nhiễm khuẩn bệnh viện',
+        text: 'Bác sĩ và điều dưỡng thực hiện sàng lọc bệnh nhân, chẩn đoán lâm sàng và kiểm soát nhiễm khuẩn tại bệnh viện.',
+        sections: [],
+        extractedItems: [],
+        diagnostics: [],
+      },
+    ],
+    { preferredIndustryId: 'HEALTHCARE_TRAINING', questionCount: 5 }
+  );
+  assert.equal(medClinicalAnalysis.gameplayArchetype, 'SCENARIO_DECISION_SIM');
+  assert.equal(medClinicalAnalysis.controlScheme, 'SCENARIO_CASE_DECISION');
+
+  // Kiểm tra sanitizeAdventureConfig chặn giá trị gameplayArchetype không hợp lệ từ AI
+  const sanitizedInvalidArchetype = sanitizeAdventureConfig(
+    {
+      industryId: 'IT_TECHNOLOGY',
+      themePresetId: 'theme_it_cyberlab',
+      gameplayArchetype: 'FAKE_3D_VR_SHOOTER',
+      controlScheme: 'INVALID_VR_GLOVE',
+      questionTriggerMode: 'INVALID_TRIGGER',
+    },
+    cyberSocAnalysis
+  );
+  assert.equal(sanitizedInvalidArchetype.gameplayArchetype, 'CYBER_DEFENSE_CONSOLE_SIM');
+  assert.equal(sanitizedInvalidArchetype.controlScheme, 'SOC_NODE_TRIAGE');
+  assert.equal(sanitizedInvalidArchetype.questionTriggerMode, 'INCIDENT_CONTAINMENT');
+  console.log(
+    '✓ [Test 14] Phân tách 4 Gameplay Archetype thực tế (TRAFFIC_RUNNER_SIM, DIAGNOSTIC_WORKBENCH_SIM, CYBER_DEFENSE_CONSOLE_SIM, SCENARIO_DECISION_SIM) theo Ngành nghề + Nội dung nguồn thành công'
+  );
+
+  console.log('=== TẤT CẢ 14 BÀI KIỂM THỬ ADVENTURE GAME ĐỀU PASS 100% ===');
 }
 
 runAdventureGameTests().catch(err => {

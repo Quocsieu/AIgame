@@ -2839,6 +2839,18 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                           <span style={{ color: 'var(--text-primary)', fontWeight: 800 }}>{adventureConfig.avatarLabel}</span>
                         </div>
                         <div>
+                          <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>Cơ chế Gameplay: </span>
+                          <span style={{ color: 'var(--text-primary)', fontWeight: 800 }}>
+                            {adventureConfig.gameplayArchetype === 'TRAFFIC_RUNNER_SIM'
+                              ? 'Runner Lộ trình & Giao thông'
+                              : adventureConfig.gameplayArchetype === 'DIAGNOSTIC_WORKBENCH_SIM'
+                                ? 'Bàn Chẩn đoán Kỹ thuật & QA'
+                                : adventureConfig.gameplayArchetype === 'CYBER_DEFENSE_CONSOLE_SIM'
+                                  ? 'Trung tâm Điều hành SOC'
+                                  : 'Mô phỏng Hồ sơ Tình huống'}
+                          </span>
+                        </div>
+                        <div>
                           <span style={{ color: 'var(--game-mc)', fontWeight: 800 }}>▲ Trắc nghiệm: </span>
                           <span style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
                             {generatedSpec.questions.filter(q => q.type === 'MULTIPLE_CHOICE').length} câu

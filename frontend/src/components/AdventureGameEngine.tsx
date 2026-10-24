@@ -106,6 +106,74 @@ const JUMP_VELOCITY = -650;
 const BASE_MOVE_SPEED = 285;
 
 function getIndustryGameplayProfile(config: AdventureConfig) {
+  const archetype = config.gameplayArchetype || 'DIAGNOSTIC_WORKBENCH_SIM';
+  if (archetype === 'TRAFFIC_RUNNER_SIM') {
+    return {
+      archetypeId: 'TRAFFIC_RUNNER_SIM' as const,
+      archetypeBadge: 'RUNNER MÔ PHỎNG LỘ TRÌNH',
+      mechanicTitle:
+        config.industryId === 'MANUFACTURING_INDUSTRIAL'
+          ? 'Điều Phối Lộ Trình Kho Vận & Xử Lý Vật Cản Logistics'
+          : 'Sa Hình Lộ Trình & Xử Lý Tình Huống Giao Thông Thực Tế',
+      autoMoveOn: 'Phương tiện tự chạy: BẬT',
+      autoMoveOff: 'Phương tiện tự chạy: TẠM DỪNG',
+      actionVerb: 'NHẢY NÉ VẬT CẢN',
+      clearFloatingText: '+15 AN TOÀN LỘ TRÌNH',
+      checkpointAction: 'Mở chốt sát hạch chặng',
+      clearedMetricLabel: 'Vật cản vượt qua',
+      continueLabel: 'Tiếp tục di chuyển sang chặng kế tiếp (Space)',
+    };
+  }
+  if (archetype === 'DIAGNOSTIC_WORKBENCH_SIM') {
+    return {
+      archetypeId: 'DIAGNOSTIC_WORKBENCH_SIM' as const,
+      archetypeBadge: 'BÀN CHẨN ĐOÁN KỸ THUẬT',
+      mechanicTitle:
+        config.industryId === 'MANUFACTURING_INDUSTRIAL'
+          ? 'Kiểm Định Trạm Máy Dây Chuyền & Xử Lý Lỗi QA/QC - 5S'
+          : 'Chẩn Đoán Bộ Phận Kỹ Thuật & Sửa Chữa Bảo Dưỡng Xưởng',
+      autoMoveOn: 'Máy quét chẩn đoán: SẴN SÀNG',
+      autoMoveOff: 'Máy quét chẩn đoán: TẠM DỪNG',
+      actionVerb: 'QUÉT CHẨN ĐOÁN BỘ PHẬN',
+      clearFloatingText: '+15 KỸ THUẬT CHẨN ĐOÁN',
+      checkpointAction: 'Mở phiếu chẩn đoán cụm',
+      clearedMetricLabel: 'Bộ phận đã chẩn đoán',
+      continueLabel: 'Xác nhận & Chuyển sang cụm kỹ thuật kế tiếp (Space)',
+    };
+  }
+  if (archetype === 'CYBER_DEFENSE_CONSOLE_SIM') {
+    return {
+      archetypeId: 'CYBER_DEFENSE_CONSOLE_SIM' as const,
+      archetypeBadge: 'TRUNG TÂM ĐIỀU HÀNH SOC',
+      mechanicTitle: 'Giám Sát Sơ Đồ Node Mạng, Cô Lập Đe Dọa & Phản Ứng Sự Cố SOC',
+      autoMoveOn: 'Radar giám sát SIEM: BẬT',
+      autoMoveOff: 'Radar giám sát SIEM: TẠM DỪNG',
+      actionVerb: 'CÔ LẬP & PHÂN TÍCH NODE',
+      clearFloatingText: '+15 CHẶN SỰ CỐ SOC',
+      checkpointAction: 'Mở phiếu phản ứng Node',
+      clearedMetricLabel: 'Node mạng đã cô lập',
+      continueLabel: 'Hoàn tất xử lý & Chuyển sang Node kế tiếp (Space)',
+    };
+  }
+  return {
+    archetypeId: 'SCENARIO_DECISION_SIM' as const,
+    archetypeBadge: 'BÀN HỒ SƠ TÌNH HUỐNG',
+    mechanicTitle:
+      config.industryId === 'HEALTHCARE_TRAINING'
+        ? 'Mô Phỏng Hồ Sơ Ca Đào Tạo Lâm Sàng & Quyết Định An Toàn Y Khoa'
+        : config.industryId === 'BUSINESS_SALES' || config.themePresetId === 'theme_biz_retail'
+          ? 'Mô Phỏng Tư Vấn Khách Hàng, Showroom & Ra Quyết Định Chốt Deal'
+          : 'Mô Phỏng Phân Tích Hồ Sơ Tình Huống & Ra Quyết Định Chuyên Môn',
+    autoMoveOn: 'Luồng hồ sơ tình huống: SẴN SÀNG',
+    autoMoveOff: 'Luồng hồ sơ tình huống: TẠM DỪNG',
+    actionVerb: 'TIẾP NHẬN & RA QUYẾT ĐỊNH',
+    clearFloatingText: '+15 NGHIỆP VỤ CHUYÊN MÔN',
+    checkpointAction: 'Mở hồ sơ tình huống',
+    clearedMetricLabel: 'Hồ sơ đã thẩm định',
+    continueLabel: 'Xác nhận quyết định & Mở hồ sơ kế tiếp (Space)',
+  };
+}
+function _legacyIndustryProfilePlaceholder(config: AdventureConfig) {
   if (config.industryId === 'MOTORCYCLE_TRAFFIC') {
     if (config.themePresetId === 'theme_moto_circuit') {
       return {
@@ -211,6 +279,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     const raw = propAdventureConfig || game.settings?.adventureConfig;
     return syncAdventureStagesWithQuestions(raw, game.questions || []);
   }, [propAdventureConfig, game.settings?.adventureConfig, game.questions]);
+
+  const isRunnerArchetype = (effectiveConfig.gameplayArchetype || 'DIAGNOSTIC_WORKBENCH_SIM') === 'TRAFFIC_RUNNER_SIM';
+  const inspectedStagesRef = useRef<Set<number>>(new Set());
 
   const totalStages = Math.max(
     1,
@@ -529,10 +600,17 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
   const handleOpenCheckpointModal = useCallback(() => {
     if (!activeQuestion) return;
+    if (!isRunnerArchetype && !inspectedStagesRef.current.has(activeStageIndex)) {
+      inspectedStagesRef.current.add(activeStageIndex);
+      setSkillBonusScore(prev => prev + 15);
+      setObstaclesClearedCount(prev => prev + 1);
+      playClickSound();
+      setTimeout(() => setShowHowToPlay(false), 800);
+    }
     setActiveModalOpen(true);
     physicsRef.current.keys.left = false;
     physicsRef.current.keys.right = false;
-  }, [activeQuestion]);
+  }, [activeQuestion, isRunnerArchetype, activeStageIndex]);
 
   // Handle Answer Submission (both Live Session and Creator Preview)
   const handleAnswerSubmit = useCallback(
@@ -648,6 +726,11 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     setAutoCruise(true);
     const isLastStage = activeStageIndex + 1 >= totalStages;
 
+    if (!isRunnerArchetype && isLastStage) {
+      setReachedFinishGate(true);
+      return;
+    }
+
     if (mode === 'LIVE_SESSION') {
       if (!isLastStage && onNextQuestion) {
         onNextQuestion();
@@ -724,7 +807,11 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
       if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
         e.preventDefault();
-        triggerJump();
+        if (isRunnerArchetype) {
+          triggerJump();
+        } else {
+          handleOpenCheckpointModal();
+        }
       } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
         physicsRef.current.keys.right = true;
       } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
@@ -766,7 +853,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
   // Main 60fps Canvas Physics & Rendering Loop
   useEffect(() => {
-    if (isJourneyFinished) return;
+    if (isJourneyFinished || !isRunnerArchetype) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -1363,6 +1450,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     setObstaclesClearedCount(0);
     setObstaclesHitCount(0);
     setEnergyPercent(100);
+    inspectedStagesRef.current.clear();
+    setPreviewWrongCount(0);
     setReachedFinishGate(false);
     setActiveModalOpen(false);
     setAutoCruise(true);
@@ -1519,7 +1608,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               gap: '6px',
             }}
           >
-            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>Vượt qua</span>
+            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>{gameplayProfile.clearedMetricLabel}</span>
             <strong style={{ fontSize: '15px', color: '#3fc07a', fontWeight: 700 }}>
               {obstaclesClearedCount}
             </strong>
@@ -1599,7 +1688,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         <div
           style={{
             height: '100%',
-            width: `${playerProgressPercent}%`,
+            width: `${isRunnerArchetype ? playerProgressPercent : Math.min(100, Math.round((currentAnsweredCount / totalStages) * 100))}%`,
             backgroundColor: accentHex,
             transition: 'width 120ms linear',
           }}
@@ -1631,17 +1720,378 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           }
         }}
       >
-        <canvas
-          ref={canvasRef}
-          width={canvasSize.width}
-          height={canvasSize.height}
-          style={{
-            width: '100%',
-            height: '100%',
-            display: 'block',
-            touchAction: 'none',
-          }}
-        />
+        {isRunnerArchetype ? (
+          <canvas
+            ref={canvasRef}
+            width={canvasSize.width}
+            height={canvasSize.height}
+            style={{
+              width: '100%',
+              height: '100%',
+              display: 'block',
+              touchAction: 'none',
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: '100%',
+              height: '100%',
+              overflowY: 'auto',
+              padding: '24px 24px 104px 24px',
+              background: `radial-gradient(circle at 85% 15%, ${effectiveConfig.palette.horizonGlow}18 0%, #090d16 65%)`,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '18px',
+            }}
+          >
+            {/* Interactive Archetype Header Banner */}
+            <div
+              style={{
+                maxWidth: '1180px',
+                width: '100%',
+                margin: '0 auto',
+                backgroundColor: '#111726',
+                border: '1px solid #222d42',
+                borderRadius: '10px',
+                padding: '16px 20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '14px',
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                  <span
+                    style={{
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      backgroundColor: `${accentHex}22`,
+                      border: `1px solid ${accentHex}66`,
+                      color: accentHex,
+                      fontSize: '11px',
+                      fontWeight: 700,
+                      letterSpacing: '0.04em',
+                    }}
+                  >
+                    {gameplayProfile.archetypeBadge}
+                  </span>
+                  <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
+                    {effectiveConfig.subEnvironment} · Vai trò: {effectiveConfig.avatarLabel}
+                  </span>
+                </div>
+                <div style={{ fontSize: '16px', fontWeight: 700, color: '#f8fafc' }}>
+                  {gameplayProfile.mechanicTitle}
+                </div>
+                <div style={{ fontSize: '12.5px', color: '#94a3b8', marginTop: '2px' }}>
+                  {effectiveConfig.winConditionSummary}
+                </div>
+              </div>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '16px',
+                  backgroundColor: '#0b0f19',
+                  border: '1px solid #1e293b',
+                  borderRadius: '8px',
+                  padding: '10px 16px',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>
+                    {gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
+                      ? 'Độ toàn vẹn kỹ thuật'
+                      : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
+                        ? 'Chỉ số An toàn SOC'
+                        : 'Chỉ số Nghiệp vụ'}
+                  </div>
+                  <div style={{ fontSize: '18px', fontWeight: 700, color: '#3fc07a' }}>
+                    {energyPercent}%
+                  </div>
+                </div>
+                <div style={{ width: '1px', height: '28px', backgroundColor: '#1e293b' }} />
+                <div>
+                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>Điểm thao tác</div>
+                  <div style={{ fontSize: '18px', fontWeight: 700, color: accentHex }}>
+                    +{skillBonusScore}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Two-Column Interactive Simulation Workspace */}
+            <div
+              style={{
+                maxWidth: '1180px',
+                width: '100%',
+                margin: '0 auto',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
+                gap: '18px',
+                flex: 1,
+              }}
+            >
+              {/* Left Column: Interactive Schematic / Node Topology / Case Pipeline (Windowed 6 stages) */}
+              <div
+                style={{
+                  backgroundColor: '#111726',
+                  border: '1px solid #222d42',
+                  borderRadius: '10px',
+                  padding: '18px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                    {gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
+                      ? 'Sơ đồ Cụm Kỹ thuật & Trạm Kiểm định'
+                      : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
+                        ? 'Bản đồ Node Hạ tầng & Cảnh báo SIEM'
+                        : 'Danh sách Hồ sơ Tình huống Thực hành'}
+                  </div>
+                  <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                    Hoàn thành {currentAnsweredCount}/{totalStages}
+                  </span>
+                </div>
+
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+                    gap: '10px',
+                  }}
+                >
+                  {(() => {
+                    const windowSize = 6;
+                    const startIdx = Math.max(
+                      0,
+                      Math.min(
+                        activeStageIndex - 1,
+                        Math.max(0, totalStages - windowSize)
+                      )
+                    );
+                    const visibleStages = effectiveConfig.stages.slice(
+                      startIdx,
+                      startIdx + windowSize
+                    );
+                    const interactiveObjs = effectiveConfig.interactiveObjects || [];
+                    return visibleStages.map(st => {
+                      const idx = st.stageIndex;
+                      const isDone = idx < activeStageIndex;
+                      const isCurrent = idx === activeStageIndex;
+                      const objName =
+                        interactiveObjs[idx % Math.max(1, interactiveObjs.length)] ||
+                        st.checkpointTitle;
+                      const codePrefix =
+                        gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
+                          ? 'DIAG'
+                          : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
+                            ? 'NODE'
+                            : 'CASE';
+
+                      return (
+                        <button
+                          key={idx}
+                          type="button"
+                          disabled={!isCurrent}
+                          onClick={() => {
+                            if (isCurrent) handleOpenCheckpointModal();
+                          }}
+                          style={{
+                            textAlign: 'left',
+                            padding: '14px',
+                            borderRadius: '8px',
+                            backgroundColor: isCurrent
+                              ? '#162038'
+                              : isDone
+                                ? '#0f1f1c'
+                                : '#0b0f19',
+                            border: `1.5px solid ${
+                              isCurrent ? accentHex : isDone ? '#3fc07a' : '#1e293b'
+                            }`,
+                            color: '#f8fafc',
+                            cursor: isCurrent ? 'pointer' : 'default',
+                            opacity: !isCurrent && !isDone ? 0.65 : 1,
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '6px',
+                            transition: 'border-color 150ms ease',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                            <span
+                              style={{
+                                fontSize: '11px',
+                                fontWeight: 700,
+                                fontVariantNumeric: 'tabular-nums',
+                                color: isCurrent ? accentHex : isDone ? '#3fc07a' : '#64748B',
+                              }}
+                            >
+                              {codePrefix}-{String(idx + 1).padStart(2, '0')}
+                            </span>
+                            <span
+                              style={{
+                                padding: '2px 7px',
+                                borderRadius: '4px',
+                                fontSize: '10.5px',
+                                fontWeight: 700,
+                                backgroundColor: isDone
+                                  ? '#172a1d'
+                                  : isCurrent
+                                    ? `${accentHex}28`
+                                    : '#161f30',
+                                color: isDone ? '#3fc07a' : isCurrent ? accentHex : '#94a3b8',
+                              }}
+                            >
+                              {isDone
+                                ? gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
+                                  ? 'ĐẠT CHUẨN (OK)'
+                                  : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
+                                    ? 'ĐÃ BẢO VỆ'
+                                    : 'ĐÃ XỬ LÝ'
+                                : isCurrent
+                                  ? gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
+                                    ? 'CẦN CHẨN ĐOÁN'
+                                    : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
+                                      ? 'CẢNH BÁO SỰ CỐ'
+                                      : 'ĐANG MỞ HỒ SƠ'
+                                  : 'CHỜ TIẾP THEO'}
+                            </span>
+                          </div>
+                          <div style={{ fontSize: '14px', fontWeight: 700, color: '#f8fafc', lineHeight: 1.35 }}>
+                            {objName}
+                          </div>
+                          <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.35 }}>
+                            {st.checkpointTitle} · {st.zoneLabel}
+                          </div>
+                        </button>
+                      );
+                    });
+                  })()}
+                </div>
+              </div>
+
+              {/* Right Column: Active Station / SOC Console / Case Dossier Action Panel */}
+              <div
+                style={{
+                  backgroundColor: '#111726',
+                  border: '1px solid #222d42',
+                  borderRadius: '10px',
+                  padding: '20px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  gap: '16px',
+                }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        backgroundColor: '#161f30',
+                        border: '1px solid #26334d',
+                        color: accentHex,
+                        fontSize: '12px',
+                        fontWeight: 700,
+                      }}
+                    >
+                      Chặng {activeStageIndex + 1} / {totalStages} · {currentStageMeta?.zoneLabel}
+                    </span>
+                    <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+                      Thời gian câu hỏi: {game.settings?.timePerQuestion || 20}s
+                    </span>
+                  </div>
+
+                  <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#f8fafc' }}>
+                    {currentStageMeta?.checkpointTitle || `Nhiệm vụ Chặng ${activeStageIndex + 1}`}
+                  </h3>
+
+                  <div
+                    style={{
+                      backgroundColor: '#0b0f19',
+                      border: '1px solid #1e293b',
+                      borderRadius: '8px',
+                      padding: '14px 16px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                      fontSize: '13px',
+                      color: '#cbd5e1',
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, color: '#f8fafc' }}>
+                      {gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
+                        ? 'Thông số Máy quét Chẩn đoán Kỹ thuật:'
+                        : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
+                          ? 'Nhật ký Cảnh báo An ninh mạng (SIEM Log):'
+                          : 'Tóm tắt Bối cảnh & Yêu cầu Ra quyết định:'}
+                    </div>
+                    <div>
+                      • <strong>Đối tượng tương tác:</strong>{' '}
+                      {(effectiveConfig.interactiveObjects || [])[
+                        activeStageIndex % Math.max(1, (effectiveConfig.interactiveObjects || []).length)
+                      ] || currentStageMeta?.checkpointTitle}
+                    </div>
+                    <div>
+                      • <strong>Trạng thái hiện tại:</strong>{' '}
+                      {gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
+                        ? 'Phát hiện tín hiệu cần kiểm tra thông số kỹ thuật và xác nhận quy trình bảo dưỡng/QA.'
+                        : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
+                          ? 'Phát hiện lưu lượng bất thường tại Node mạng — yêu cầu cô lập và xác thực phương án bảo mật.'
+                          : 'Hồ sơ tình huống đang chờ chuyên viên phân tích dữ kiện và lựa chọn phương án xử lý.'}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <button
+                    type="button"
+                    onClick={handleOpenCheckpointModal}
+                    style={{
+                      width: '100%',
+                      minHeight: '52px',
+                      padding: '12px 20px',
+                      borderRadius: '8px',
+                      backgroundColor: accentHex,
+                      border: 'none',
+                      color: '#090d16',
+                      fontSize: '15px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '10px',
+                    }}
+                  >
+                    <span>{gameplayProfile.actionVerb} #{activeStageIndex + 1}</span>
+                    <span
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        padding: '2px 7px',
+                        borderRadius: '4px',
+                        backgroundColor: 'rgba(9, 13, 22, 0.2)',
+                        color: '#090d16',
+                      }}
+                    >
+                      Space
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Compact Integrated How-To-Play Banner (Auto-collapses after jumping) */}
         {showHowToPlay && isJourneyStarted && !isJourneyFinished && !activeModalOpen && (
@@ -1774,8 +2224,14 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 <div style={{ fontWeight: 700, color: '#f8fafc', fontSize: '13.5px', marginBottom: '2px' }}>
                   Hướng dẫn cách chơi ({effectiveConfig.avatarLabel}):
                 </div>
-                <div>• <strong>Tự động di chuyển:</strong> Phương tiện tự chạy về phía trước sau khi bạn bấm <strong>Bắt đầu</strong>.</div>
-                <div>• <strong>Trên máy tính (Desktop):</strong> Nhấn phím <strong>Space</strong> (hoặc mũi tên lên <strong>↑</strong>) để nhảy qua chướng ngại vật.</div>
+                <div>
+                  • <strong>Chế độ Gameplay ({gameplayProfile.archetypeBadge}):</strong>{' '}
+                  {effectiveConfig.winConditionSummary || gameplayProfile.mechanicTitle}
+                </div>
+                <div>
+                  • <strong>Thao tác chính:</strong> Nhấn phím <strong>Space</strong> hoặc chọn trực tiếp nút{' '}
+                  <strong>{gameplayProfile.actionVerb}</strong> trên màn hình tương tác.
+                </div>
                 <div>• <strong>Trên điện thoại / cảm ứng:</strong> Chạm nút <strong>NHẢY</strong> ở góc dưới phải hoặc chạm vào vùng chơi để nhảy.</div>
                 <div>• <strong>Trạm câu hỏi &amp; Về đích:</strong> Dừng tại các trạm kiểm tra (Checkpoint) để trả lời câu hỏi và hoàn thành đủ <strong>{totalStages} chặng</strong> để kết thúc hành trình.</div>
               </div>
@@ -1811,7 +2267,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         )}
 
         {/* ================= ONE-BUTTON JUMP CONTROL (BOTTOM RIGHT) ================= */}
-        {isJourneyStarted && !isJourneyFinished && !activeModalOpen && (
+        {isRunnerArchetype && isJourneyStarted && !isJourneyFinished && !activeModalOpen && (
           <div
             style={{
               position: 'absolute',
@@ -2186,7 +2642,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       }}
                     >
                       {activeStageIndex + 1 < totalStages
-                        ? 'Tiếp tục chạy sang chặng kế tiếp (Space)'
+                        ? gameplayProfile.continueLabel
                         : 'Tiến về đích (Space)'}
                     </button>
                   </div>
@@ -2282,7 +2738,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 </div>
 
                 <div style={{ padding: '14px 16px' }}>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>Vật cản vượt qua</div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>{gameplayProfile.clearedMetricLabel}</div>
                   <div
                     style={{
                       fontSize: '26px',

@@ -50,6 +50,30 @@ export const DecorStyleEnum = z.enum([
 ]);
 export type DecorStyle = z.infer<typeof DecorStyleEnum>;
 
+export const GameplayArchetypeEnum = z.enum([
+  'TRAFFIC_RUNNER_SIM',
+  'DIAGNOSTIC_WORKBENCH_SIM',
+  'CYBER_DEFENSE_CONSOLE_SIM',
+  'SCENARIO_DECISION_SIM',
+]);
+export type GameplayArchetype = z.infer<typeof GameplayArchetypeEnum>;
+
+export const ControlSchemeEnum = z.enum([
+  'RUNNER_JUMP_CHECKPOINT',
+  'WORKBENCH_NODE_INSPECT',
+  'SOC_NODE_TRIAGE',
+  'SCENARIO_CASE_DECISION',
+]);
+export type ControlScheme = z.infer<typeof ControlSchemeEnum>;
+
+export const QuestionTriggerModeEnum = z.enum([
+  'CHECKPOINT_GATE',
+  'COMPONENT_DIAGNOSIS',
+  'INCIDENT_CONTAINMENT',
+  'CASE_CONSULTATION',
+]);
+export type QuestionTriggerMode = z.infer<typeof QuestionTriggerModeEnum>;
+
 export const HexColorSchema = z
   .string()
   .regex(/^#[0-9A-Fa-f]{6}$/, 'Mã màu phải theo chuẩn Hex (#RRGGBB)');
@@ -144,6 +168,26 @@ export const AdventureConfigSchema = z.object({
     .min(1)
     .max(3)
     .default(['MULTIPLE_CHOICE', 'QUICK_BUTTON']),
+  gameplayArchetype: GameplayArchetypeEnum.default('DIAGNOSTIC_WORKBENCH_SIM'),
+  controlScheme: ControlSchemeEnum.default('WORKBENCH_NODE_INSPECT'),
+  questionTriggerMode: QuestionTriggerModeEnum.default('COMPONENT_DIAGNOSIS'),
+  winConditionSummary: z
+    .string()
+    .trim()
+    .min(1)
+    .max(240)
+    .default('Chẩn đoán chính xác các cụm kỹ thuật và hoàn thành toàn bộ phiếu kiểm tra chuyên môn'),
+  interactiveObjects: z
+    .array(z.string().trim().min(1).max(100))
+    .min(1)
+    .max(8)
+    .default([
+      'Cụm Động cơ & Dầu nhớt',
+      'Hệ thống Phanh & Lốp an toàn',
+      'Hệ thống Đánh lửa Bugi',
+      'Bình Ắc quy & Điện tử',
+      'Hệ thống Truyền động & Nhông xích',
+    ]),
   stages: z.array(AdventureStageSchema).default([]),
 });
 export type AdventureConfig = z.infer<typeof AdventureConfigSchema>;
@@ -161,6 +205,11 @@ export interface AdventureThemePreset {
   obstacleTypes: ObstacleType[];
   checkpointNames: string[];
   zoneLabels: string[];
+  gameplayArchetype: GameplayArchetype;
+  controlScheme: ControlScheme;
+  questionTriggerMode: QuestionTriggerMode;
+  winConditionSummary: string;
+  interactiveObjects: string[];
 }
 
 export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePreset> = {
@@ -201,6 +250,18 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePreset> = {
       'Trạm Đo Kiểm Điện Tử',
       'Cổng Bàn Giao Xe',
     ],
+    gameplayArchetype: 'DIAGNOSTIC_WORKBENCH_SIM',
+    controlScheme: 'WORKBENCH_NODE_INSPECT',
+    questionTriggerMode: 'COMPONENT_DIAGNOSIS',
+    winConditionSummary:
+      'Quét chẩn đoán các cụm kỹ thuật xe máy trên bàn máy và giải quyết chính xác toàn bộ phiếu bảo dưỡng',
+    interactiveObjects: [
+      'Cụm Động cơ & Dầu nhớt',
+      'Hệ thống Phanh & Lốp an toàn',
+      'Hệ thống Đánh lửa Bugi',
+      'Hệ thống Điện & Ắc quy',
+      'Bộ Truyền động & Nhông xích',
+    ],
   },
   theme_moto_circuit: {
     presetId: 'theme_moto_circuit',
@@ -238,6 +299,18 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePreset> = {
       'Đoạn Đường Trơn Trượt',
       'Giao Lộ Phức Tạp',
       'Trạm Về Đích',
+    ],
+    gameplayArchetype: 'TRAFFIC_RUNNER_SIM',
+    controlScheme: 'RUNNER_JUMP_CHECKPOINT',
+    questionTriggerMode: 'CHECKPOINT_GATE',
+    winConditionSummary:
+      'Điều khiển phương tiện vượt chướng ngại vật trên lộ trình và trả lời đúng các chốt sát hạch giao thông',
+    interactiveObjects: [
+      'Chốt Xuất phát & Mũ bảo hiểm',
+      'Giao lộ Tín hiệu Đèn',
+      'Cung đường Phanh khẩn cấp',
+      'Khu vực Điểm mù Giao thông',
+      'Cổng Sát hạch Về đích',
     ],
   },
   theme_biz_retail: {
@@ -277,6 +350,18 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePreset> = {
       'Phòng Đàm Phán',
       'Trung Tâm Dịch Vụ Khách Hàng',
     ],
+    gameplayArchetype: 'SCENARIO_DECISION_SIM',
+    controlScheme: 'SCENARIO_CASE_DECISION',
+    questionTriggerMode: 'CASE_CONSULTATION',
+    winConditionSummary:
+      'Tiếp nhận hồ sơ khách hàng tại từng quầy showroom, phân tích nhu cầu và đưa ra quyết định tư vấn tối ưu',
+    interactiveObjects: [
+      'Hồ sơ Khách hàng Mới',
+      'Khu Trưng bày Sản phẩm Chủ lực',
+      'Bảng So sánh Tính năng & Giá trị',
+      'Tình huống Xử lý Từ chối',
+      'Hợp đồng Chốt Deal & Hậu mãi',
+    ],
   },
   theme_biz_office: {
     presetId: 'theme_biz_office',
@@ -314,6 +399,18 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePreset> = {
       'Khối Kinh Doanh',
       'Khối Pháp Chế & Tài Chính',
       'Hội Trường Vinh Danh',
+    ],
+    gameplayArchetype: 'SCENARIO_DECISION_SIM',
+    controlScheme: 'SCENARIO_CASE_DECISION',
+    questionTriggerMode: 'CASE_CONSULTATION',
+    winConditionSummary:
+      'Thẩm định các hồ sơ vận hành thương mại và ra quyết định chiến lược đạt chuẩn KPI doanh nghiệp',
+    interactiveObjects: [
+      'Báo cáo Phân tích Thị trường',
+      'Hồ sơ Định vị Sản phẩm',
+      'Quy trình Tối ưu Bán hàng',
+      'Hồ sơ Quản trị Rủi ro & Pháp chế',
+      'Bảng Tổng kết Tăng trưởng KPI',
     ],
   },
   theme_mfg_factory: {
@@ -353,6 +450,18 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePreset> = {
       'Phòng Đo Kiểm Chuẩn',
       'Khu Đóng Gói & Logistics',
     ],
+    gameplayArchetype: 'DIAGNOSTIC_WORKBENCH_SIM',
+    controlScheme: 'WORKBENCH_NODE_INSPECT',
+    questionTriggerMode: 'COMPONENT_DIAGNOSIS',
+    winConditionSummary:
+      'Kiểm tra các trạm máy trên dây chuyền sản xuất, phát hiện lỗi kỹ thuật và xác nhận tiêu chuẩn QA/QC - 5S',
+    interactiveObjects: [
+      'Trạm Kiểm tra Bảo hộ PPE & 5S',
+      'Cụm Máy Gia công Cơ khí',
+      'Băng chuyền Lắp ráp Tự động',
+      'Bàn Đo kiểm Chất lượng QA/QC',
+      'Trạm Đóng gói & Xuất xưởng',
+    ],
   },
   theme_mfg_warehouse: {
     presetId: 'theme_mfg_warehouse',
@@ -390,6 +499,18 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePreset> = {
       'Băng Chuyền Phân Loại',
       'Trạm Kiểm Soát Mã Vạch',
       'Cổng Xuất Hàng',
+    ],
+    gameplayArchetype: 'TRAFFIC_RUNNER_SIM',
+    controlScheme: 'RUNNER_JUMP_CHECKPOINT',
+    questionTriggerMode: 'CHECKPOINT_GATE',
+    winConditionSummary:
+      'Điều phối lộ trình kho vận vượt các chướng ngại vật kiện hàng và xác nhận quy trình tại từng trạm kho',
+    interactiveObjects: [
+      'Cổng Nhập kho & Kiểm đếm',
+      'Hành lang Kệ cao tầng',
+      'Băng chuyền Phân loại',
+      'Trạm Kiểm soát Tồn kho',
+      'Bến Xuất hàng Logistics',
     ],
   },
   theme_it_datacenter: {
@@ -429,6 +550,18 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePreset> = {
       'Zero-Trust Security Zone',
       'Production Cloud Release',
     ],
+    gameplayArchetype: 'CYBER_DEFENSE_CONSOLE_SIM',
+    controlScheme: 'SOC_NODE_TRIAGE',
+    questionTriggerMode: 'INCIDENT_CONTAINMENT',
+    winConditionSummary:
+      'Giám sát bản đồ kiến trúc hệ thống Cloud/Server, cô lập các Node cảnh báo và xử lý sự cố hạ tầng số',
+    interactiveObjects: [
+      'Node 01: API Gateway & IAM',
+      'Node 02: Cụm Máy chủ Ứng dụng',
+      'Node 03: Cụm Cơ sở dữ liệu',
+      'Node 04: Tường lửa & Zero-Trust',
+      'Node 05: Pipeline CI/CD Production',
+    ],
   },
   theme_it_cyberlab: {
     presetId: 'theme_it_cyberlab',
@@ -466,6 +599,18 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePreset> = {
       'Kho Dữ Liệu Mã Hóa',
       'Phòng Lab Kiểm Thử',
       'Trung Tâm SOC',
+    ],
+    gameplayArchetype: 'CYBER_DEFENSE_CONSOLE_SIM',
+    controlScheme: 'SOC_NODE_TRIAGE',
+    questionTriggerMode: 'INCIDENT_CONTAINMENT',
+    winConditionSummary:
+      'Điểm chỉ các Node mạng đang bị tấn công trên bảng điều hành SOC, chặn mã độc và giải quyết phiếu phản ứng sự cố',
+    interactiveObjects: [
+      'Cổng Lọc Email Anti-Phishing',
+      'Trạm Xác thực Đa yếu tố (MFA)',
+      'Kho Dữ liệu Mã hóa (DLP)',
+      'Trạm Quét Lỗ hổng & EDR',
+      'Trung tâm Phản ứng Sự cố SOC',
     ],
   },
   theme_med_hospital: {
@@ -505,6 +650,18 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePreset> = {
       'Trung Tâm Dược Lâm Sàng',
       'Phòng Hội Chẩn Đa Chuyên Khoa',
     ],
+    gameplayArchetype: 'SCENARIO_DECISION_SIM',
+    controlScheme: 'SCENARIO_CASE_DECISION',
+    questionTriggerMode: 'CASE_CONSULTATION',
+    winConditionSummary:
+      'Tiếp nhận hồ sơ ca đào tạo lâm sàng, đánh giá dấu hiệu và đưa ra quyết định xử trí an toàn người bệnh',
+    interactiveObjects: [
+      'Hồ sơ Sàng lọc & Phân loại Ca',
+      'Phiếu Khám & Chẩn đoán Hình ảnh',
+      'Quy trình Kiểm soát Nhiễm khuẩn',
+      'Phiếu Cấp phát Thuốc An toàn',
+      'Biên bản Hội chẩn Chuyên môn',
+    ],
   },
   theme_med_academy: {
     presetId: 'theme_med_academy',
@@ -542,6 +699,18 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePreset> = {
       'Quầy Thực Hành Nhà Thuốc',
       'Trạm Phân Tích Đơn Thuốc',
       'Hội Đồng Đánh Giá',
+    ],
+    gameplayArchetype: 'SCENARIO_DECISION_SIM',
+    controlScheme: 'SCENARIO_CASE_DECISION',
+    questionTriggerMode: 'CASE_CONSULTATION',
+    winConditionSummary:
+      'Thẩm định các tình huống dược lý & tiêu chuẩn GPP/GMP để ra quyết định tư vấn dược an toàn',
+    interactiveObjects: [
+      'Hồ sơ Hoạt chất Dược lý',
+      'Phiếu Kiểm định Kho bảo quản GSP',
+      'Đơn thuốc Tư vấn Lâm sàng',
+      'Cảnh báo Tương tác & Chống chỉ định',
+      'Chứng nhận Thực hành Tốt GPP',
     ],
   },
   theme_edu_campus: {
@@ -581,6 +750,18 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePreset> = {
       'Khu Nghiên Cứu Ứng Dụng',
       'Quảng Trường Tốt Nghiệp',
     ],
+    gameplayArchetype: 'SCENARIO_DECISION_SIM',
+    controlScheme: 'SCENARIO_CASE_DECISION',
+    questionTriggerMode: 'CASE_CONSULTATION',
+    winConditionSummary:
+      'Phân tích từng hồ sơ tình huống học thuật - thực tiễn và hoàn thành toàn bộ quyết định chuyên môn',
+    interactiveObjects: [
+      'Hồ sơ Kiến thức Nền tảng',
+      'Chuyên đề Phân tích Trọng tâm',
+      'Tình huống Ứng dụng Thực tiễn',
+      'Báo cáo Tổng hợp Chuyên sâu',
+      'Hội đồng Đánh giá Cuối khóa',
+    ],
   },
 };
 
@@ -599,7 +780,7 @@ export const INDUSTRY_CATALOG: IndustryCatalogItem[] = [
     label: 'Xe máy, Bảo dưỡng & An toàn Giao thông',
     shortDesc: 'Gara kỹ thuật xe máy, phụ tùng, dầu nhớt hoặc sa hình lái xe an toàn',
     defaultPresetId: 'theme_moto_garage',
-    presetIds: ['theme_moto_garage', 'theme_moto_circuit'],
+    presetIds: ['theme_moto_garage', 'theme_moto_circuit', 'theme_biz_retail'],
     keywords: [
       'xe máy',
       'mô tô',
@@ -849,9 +1030,26 @@ export function analyzeSourceContentForAdventure(
       'làn đường',
       'ngã tư',
       'lái xe an toàn',
+      'luật giao thông',
+      'đèn tín hiệu',
     ].filter(w => combinedText.includes(w)).length;
-    selectedPresetId =
-      trafficHits > maintenanceHits ? 'theme_moto_circuit' : 'theme_moto_garage';
+    const salesHits = [
+      'bán xe',
+      'showroom',
+      'tư vấn khách hàng',
+      'tư vấn bán hàng',
+      'chốt đơn',
+      'báo giá',
+      'khuyến mãi',
+      'trả góp',
+      'chăm sóc khách hàng',
+    ].filter(w => combinedText.includes(w)).length;
+    if (salesHits >= 2 && salesHits > trafficHits && salesHits > maintenanceHits) {
+      selectedPresetId = 'theme_biz_retail';
+    } else {
+      selectedPresetId =
+        trafficHits > maintenanceHits ? 'theme_moto_circuit' : 'theme_moto_garage';
+    }
   } else if (presetLookupIndustryId === 'BUSINESS_SALES') {
     const officeHits = ['chiến lược', 'hợp đồng', 'quản trị', 'tài chính', 'kpi', 'vận hành'].filter(
       w => combinedText.includes(w)
@@ -940,9 +1138,36 @@ export function analyzeSourceContentForAdventure(
     obstacleDensity: 'MEDIUM',
     speedMultiplier: 1,
     reducedMotion: false,
+    gameplayArchetype: preset.gameplayArchetype,
+    controlScheme: preset.controlScheme,
+    questionTriggerMode: preset.questionTriggerMode,
+    winConditionSummary: preset.winConditionSummary,
+    interactiveObjects: preset.interactiveObjects,
     stages,
   });
 }
+
+const ARCHETYPE_MECHANIC_MAP: Record<
+  GameplayArchetype,
+  { controlScheme: ControlScheme; questionTriggerMode: QuestionTriggerMode }
+> = {
+  TRAFFIC_RUNNER_SIM: {
+    controlScheme: 'RUNNER_JUMP_CHECKPOINT',
+    questionTriggerMode: 'CHECKPOINT_GATE',
+  },
+  DIAGNOSTIC_WORKBENCH_SIM: {
+    controlScheme: 'WORKBENCH_NODE_INSPECT',
+    questionTriggerMode: 'COMPONENT_DIAGNOSIS',
+  },
+  CYBER_DEFENSE_CONSOLE_SIM: {
+    controlScheme: 'SOC_NODE_TRIAGE',
+    questionTriggerMode: 'INCIDENT_CONTAINMENT',
+  },
+  SCENARIO_DECISION_SIM: {
+    controlScheme: 'SCENARIO_CASE_DECISION',
+    questionTriggerMode: 'CASE_CONSULTATION',
+  },
+};
 
 export function sanitizeAdventureConfig(
   rawConfig: unknown,
@@ -1038,6 +1263,46 @@ export function sanitizeAdventureConfig(
     });
   }
 
+  const parsedArchetype = GameplayArchetypeEnum.safeParse(candidate.gameplayArchetype);
+  const gameplayArchetype: GameplayArchetype =
+    parsedArchetype.success &&
+    (!candidate.themePresetId ||
+      preset.gameplayArchetype === parsedArchetype.data ||
+      industryId === 'CUSTOM' ||
+      industryId === 'EDUCATION_GENERAL')
+      ? parsedArchetype.data
+      : preset.gameplayArchetype || fallback.gameplayArchetype;
+
+  const expectedMechanic = ARCHETYPE_MECHANIC_MAP[gameplayArchetype];
+  const parsedControlScheme = ControlSchemeEnum.safeParse(candidate.controlScheme);
+  const controlScheme: ControlScheme =
+    parsedControlScheme.success && parsedControlScheme.data === expectedMechanic.controlScheme
+      ? parsedControlScheme.data
+      : expectedMechanic.controlScheme;
+
+  const parsedTriggerMode = QuestionTriggerModeEnum.safeParse(candidate.questionTriggerMode);
+  const questionTriggerMode: QuestionTriggerMode =
+    parsedTriggerMode.success && parsedTriggerMode.data === expectedMechanic.questionTriggerMode
+      ? parsedTriggerMode.data
+      : expectedMechanic.questionTriggerMode;
+
+  const validInteractiveObjects: string[] = Array.isArray(candidate.interactiveObjects)
+    ? candidate.interactiveObjects
+        .filter((item: unknown): item is string => typeof item === 'string' && item.trim().length > 0)
+        .map(item => item.trim().slice(0, 100))
+        .slice(0, 8)
+    : [];
+  const interactiveObjects =
+    validInteractiveObjects.length > 0
+      ? validInteractiveObjects
+      : preset.interactiveObjects || fallback.interactiveObjects;
+
+  const winConditionSummary =
+    typeof candidate.winConditionSummary === 'string' &&
+    candidate.winConditionSummary.trim().length > 0
+      ? candidate.winConditionSummary.trim().slice(0, 240)
+      : preset.winConditionSummary || fallback.winConditionSummary;
+
   return AdventureConfigSchema.parse({
     version: 1,
     industryId,
@@ -1106,6 +1371,11 @@ export function sanitizeAdventureConfig(
         ? candidate.reducedMotion
         : fallback.reducedMotion,
     questionTypes,
+    gameplayArchetype,
+    controlScheme,
+    questionTriggerMode,
+    winConditionSummary,
+    interactiveObjects,
     stages,
   });
 }

@@ -5,6 +5,9 @@ import type {
   AvatarId,
   DecorStyle,
   GameQuestion,
+  GameplayArchetype,
+  ControlScheme,
+  QuestionTriggerMode,
   IndustryId,
   ObstacleType,
 } from '../types/index.js';
@@ -719,6 +722,97 @@ export function applyPresetToAdventureConfig(
   };
 }
 
+export function resolveGameplayArchetypeDetails(
+  presetId: string,
+  industryId: IndustryId
+): {
+  gameplayArchetype: GameplayArchetype;
+  controlScheme: ControlScheme;
+  questionTriggerMode: QuestionTriggerMode;
+  winConditionSummary: string;
+  interactiveObjects: string[];
+} {
+  if (presetId === 'theme_moto_circuit' || presetId === 'theme_mfg_warehouse') {
+    return {
+      gameplayArchetype: 'TRAFFIC_RUNNER_SIM',
+      controlScheme: 'RUNNER_JUMP_CHECKPOINT',
+      questionTriggerMode: 'CHECKPOINT_GATE',
+      winConditionSummary:
+        'Điều khiển phương tiện vượt chướng ngại vật trên lộ trình và hoàn thành các chốt sát hạch',
+      interactiveObjects: [
+        'Chốt Xuất phát & Kiểm tra An toàn',
+        'Giao lộ Tín hiệu & Phân làn',
+        'Đoạn đường Phanh khẩn cấp',
+        'Khu vực Quan sát Điểm mù',
+        'Trạm Sát hạch Về đích',
+      ],
+    };
+  }
+  if (
+    presetId === 'theme_moto_garage' ||
+    presetId === 'theme_mfg_factory' ||
+    industryId === 'MANUFACTURING_INDUSTRIAL'
+  ) {
+    return {
+      gameplayArchetype: 'DIAGNOSTIC_WORKBENCH_SIM',
+      controlScheme: 'WORKBENCH_NODE_INSPECT',
+      questionTriggerMode: 'COMPONENT_DIAGNOSIS',
+      winConditionSummary:
+        'Quét chẩn đoán từng cụm kỹ thuật/trạm máy trên bàn kỹ thuật và xử lý chính xác toàn bộ phiếu kiểm định',
+      interactiveObjects:
+        industryId === 'MANUFACTURING_INDUSTRIAL'
+          ? [
+              'Trạm Bảo hộ PPE & 5S',
+              'Cụm Máy Gia công Cơ khí',
+              'Băng chuyền Lắp ráp Tự động',
+              'Bàn Đo kiểm Chất lượng QA/QC',
+              'Trạm Đóng gói & Xuất xưởng',
+            ]
+          : [
+              'Cụm Động cơ & Dầu nhớt',
+              'Hệ thống Phanh & Lốp an toàn',
+              'Hệ thống Đánh lửa Bugi',
+              'Hệ thống Điện & Ắc quy',
+              'Bộ Truyền động & Nhông xích',
+            ],
+    };
+  }
+  if (
+    presetId === 'theme_it_cyberlab' ||
+    presetId === 'theme_it_datacenter' ||
+    industryId === 'IT_TECHNOLOGY'
+  ) {
+    return {
+      gameplayArchetype: 'CYBER_DEFENSE_CONSOLE_SIM',
+      controlScheme: 'SOC_NODE_TRIAGE',
+      questionTriggerMode: 'INCIDENT_CONTAINMENT',
+      winConditionSummary:
+        'Giám sát sơ đồ mạng SOC, cô lập các Node cảnh báo bảo mật và giải quyết phiếu phản ứng sự cố',
+      interactiveObjects: [
+        'Cổng Lọc Email Anti-Phishing',
+        'Trạm Xác thực Đa yếu tố (MFA)',
+        'Kho Dữ liệu Mã hóa (DLP)',
+        'Tường lửa WAF & Quét Lỗ hổng',
+        'Trung tâm Phản ứng Sự cố SOC',
+      ],
+    };
+  }
+  return {
+    gameplayArchetype: 'SCENARIO_DECISION_SIM',
+    controlScheme: 'SCENARIO_CASE_DECISION',
+    questionTriggerMode: 'CASE_CONSULTATION',
+    winConditionSummary:
+      'Tiếp nhận hồ sơ tình huống thực tế, phân tích dữ kiện chuyên môn và ra quyết định chuẩn xác',
+    interactiveObjects: [
+      'Hồ sơ Tình huống Chặng 1',
+      'Dữ kiện Phân tích Chuyên môn',
+      'Tiêu chuẩn Quy trình Nghiệp vụ',
+      'Phương án Xử lý Trọng tâm',
+      'Tổng kết & Đánh giá Chuẩn đầu ra',
+    ],
+  };
+}
+
 export function syncAdventureStagesWithQuestions(
   config: AdventureConfig | undefined,
   questions: GameQuestion[]
@@ -747,8 +841,17 @@ export function syncAdventureStagesWithQuestions(
     });
   }
 
+  const archetypeFallback = resolveGameplayArchetypeDetails(base.themePresetId, base.industryId);
   return {
     ...base,
+    gameplayArchetype: base.gameplayArchetype || archetypeFallback.gameplayArchetype,
+    controlScheme: base.controlScheme || archetypeFallback.controlScheme,
+    questionTriggerMode: base.questionTriggerMode || archetypeFallback.questionTriggerMode,
+    winConditionSummary: base.winConditionSummary || archetypeFallback.winConditionSummary,
+    interactiveObjects:
+      base.interactiveObjects && base.interactiveObjects.length > 0
+        ? base.interactiveObjects
+        : archetypeFallback.interactiveObjects,
     stages,
   };
 }

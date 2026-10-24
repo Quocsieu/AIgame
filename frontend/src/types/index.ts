@@ -41,6 +41,24 @@ export type DecorStyle =
   | 'HOSPITAL_WARD'
   | 'ACADEMY_CAMPUS';
 
+export type GameplayArchetype =
+  | 'TRAFFIC_RUNNER_SIM'
+  | 'DIAGNOSTIC_WORKBENCH_SIM'
+  | 'CYBER_DEFENSE_CONSOLE_SIM'
+  | 'SCENARIO_DECISION_SIM';
+
+export type ControlScheme =
+  | 'RUNNER_JUMP_CHECKPOINT'
+  | 'WORKBENCH_NODE_INSPECT'
+  | 'SOC_NODE_TRIAGE'
+  | 'SCENARIO_CASE_DECISION';
+
+export type QuestionTriggerMode =
+  | 'CHECKPOINT_GATE'
+  | 'COMPONENT_DIAGNOSIS'
+  | 'INCIDENT_CONTAINMENT'
+  | 'CASE_CONSULTATION';
+
 export interface AdventurePalette {
   skyTop: string;
   skyBottom: string;
@@ -85,6 +103,11 @@ export interface AdventureConfig {
   speedMultiplier: number;
   reducedMotion: boolean;
   questionTypes?: QuestionType[];
+  gameplayArchetype?: GameplayArchetype;
+  controlScheme?: ControlScheme;
+  questionTriggerMode?: QuestionTriggerMode;
+  winConditionSummary?: string;
+  interactiveObjects?: string[];
   stages: AdventureStage[];
 }
 export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
