@@ -1,4 +1,12 @@
 import { LIMITS } from '../config/limits.js';
+import {
+  ADVENTURE_THEME_PRESETS,
+  AdventureConfig,
+  analyzeSourceContentForAdventure,
+  INDUSTRY_CATALOG,
+  IndustryId,
+  sanitizeAdventureConfig,
+} from '../contracts/adventure.contract.js';
 import { CanonicalDocument } from '../contracts/canonical.contract.js';
 import {
   Difficulty,
@@ -518,6 +526,9 @@ export class AiQuestionService {
 
     const isQuickButton = gameType === 'QUICK_BUTTON';
     const isMixed = gameType === 'MIXED';
+    const isAdventure = gameType === 'ADVENTURE';
+    const presetIdsList = Object.keys(ADVENTURE_THEME_PRESETS).join('", "');
+    const industryIdsList = INDUSTRY_CATALOG.map(i => i.industryId).join('", "');
     const mixedCounts = isMixed ? calculateMixedTypeCounts(questionCount, options?.mixedDistribution) : null;
     const quickButtonInstruction = isQuickButton
       ? [
@@ -540,7 +551,18 @@ export class AiQuestionService {
             '- Đối với MULTIPLE_CHOICE: choices PHẢI có đúng 4 phương án, correctAnswer PHẢI khớp với một trong các phương án.',
             '',
           ].join('\n')
-        : '';
+        : isAdventure
+          ? [
+              'CRITICAL RULES FOR ADVENTURE GAME MODE (GAME ĐI CẢNH THEO NGÀNH NGHỀ):',
+              '- Phân tích nội dung nguồn để đề xuất cấu hình đi cảnh "adventureProposal" bám sát ngữ cảnh thực tế của tài liệu:',
+              `  + industryId: chọn 1 trong ["${industryIdsList}"]`,
+              `  + themePresetId: chọn 1 trong ["${presetIdsList}"] phù hợp nhất với bối cảnh cụ thể của tài liệu (Ví dụ: bảo dưỡng/phụ tùng xe máy -> "theme_moto_garage"; kỹ năng lái xe ngoài đường -> "theme_moto_circuit"; bán lẻ/tư vấn -> "theme_biz_retail"; nhà máy/an toàn lao động -> "theme_mfg_factory"; hạ tầng IT/cloud -> "theme_it_datacenter"; an ninh mạng -> "theme_it_cyberlab"; bệnh viện/lâm sàng -> "theme_med_hospital").`,
+              '  + environmentTitle, environmentSubtitle, learningObjective, aiReasoning: viết bằng tiếng Việt tự nhiên, phản ánh đúng nội dung nguồn.',
+              `- Danh sách "questions" gồm đúng ${questionCount} câu hỏi kiểm tra kiến thức thực chất từ tài liệu nguồn.`,
+              '- Mỗi câu hỏi trong "questions" PHẢI có trường "type" là "MULTIPLE_CHOICE" (đúng 4 lựa chọn ABCD) hoặc "QUICK_BUTTON" (choices: ["Đúng", "Sai"]). TUYỆT ĐỐI KHÔNG ghi type là "ADVENTURE" trong từng câu hỏi.',
+              '',
+            ].join('\n')
+          : '';
 
     const topicFocusInstruction =
       options?.topicFocus && options.topicFocus.trim().length > 0
@@ -548,7 +570,18 @@ export class AiQuestionService {
             `TOPIC FOCUS REQUIREMENT: Prioritize generating questions focused on "${options.topicFocus.trim()}" as long as facts are directly supported by the reference sources.`,
             '',
           ].join('\n')
-        : '';
+        : isAdventure
+          ? [
+              'CRITICAL RULES FOR ADVENTURE GAME MODE (GAME ĐI CẢNH THEO NGÀNH NGHỀ):',
+              '- Phân tích nội dung nguồn để đề xuất cấu hình đi cảnh "adventureProposal" bám sát ngữ cảnh thực tế của tài liệu:',
+              `  + industryId: chọn 1 trong ["${industryIdsList}"]`,
+              `  + themePresetId: chọn 1 trong ["${presetIdsList}"] phù hợp nhất với bối cảnh cụ thể của tài liệu (Ví dụ: bảo dưỡng/phụ tùng xe máy -> "theme_moto_garage"; kỹ năng lái xe ngoài đường -> "theme_moto_circuit"; bán lẻ/tư vấn -> "theme_biz_retail"; nhà máy/an toàn lao động -> "theme_mfg_factory"; hạ tầng IT/cloud -> "theme_it_datacenter"; an ninh mạng -> "theme_it_cyberlab"; bệnh viện/lâm sàng -> "theme_med_hospital").`,
+              '  + environmentTitle, environmentSubtitle, learningObjective, aiReasoning: viết bằng tiếng Việt tự nhiên, phản ánh đúng nội dung nguồn.',
+              `- Danh sách "questions" gồm đúng ${questionCount} câu hỏi kiểm tra kiến thức thực chất từ tài liệu nguồn.`,
+              '- Mỗi câu hỏi trong "questions" PHẢI có trường "type" là "MULTIPLE_CHOICE" (đúng 4 lựa chọn ABCD) hoặc "QUICK_BUTTON" (choices: ["Đúng", "Sai"]). TUYỆT ĐỐI KHÔNG ghi type là "ADVENTURE" trong từng câu hỏi.',
+              '',
+            ].join('\n')
+          : '';
 
     const schemaExample = isQuickButton
       ? `[
@@ -571,7 +604,7 @@ export class AiQuestionService {
       : `[
   {
     "id": "q_1",
-    "type": "${isMixed ? 'MULTIPLE_CHOICE" | "QUICK_BUTTON" | "FILL_IN_THE_BLANK" | "CROSSWORD' : gameType}",
+    "type": "${isMixed || isAdventure ? 'MULTIPLE_CHOICE' : gameType}",
     "question": "Nội dung câu hỏi bằng tiếng Việt?",
     "choices": ["A. Lựa chọn 1", "B. Lựa chọn 2", "C. Lựa chọn 3", "D. Lựa chọn 4"], // required for MULTIPLE_CHOICE (4 choices) or ["Đúng", "Sai"] for QUICK_BUTTON
     "correctAnswer": "A. Lựa chọn 1", // must match one choice for MULTIPLE_CHOICE
@@ -640,6 +673,7 @@ export class AiQuestionService {
         case 'QUICK_BUTTON': return 'Đúng / Sai';
         case 'CROSSWORD': return 'Ô chữ';
         case 'MIXED': return 'Hỗn hợp đa dạng';
+        case 'ADVENTURE': return 'Đi cảnh theo ngành nghề';
         default: return type;
       }
     };
@@ -757,7 +791,7 @@ export class AiQuestionService {
 
       // Resolve concrete question type for this item
       let itemQuestionType: QuestionType;
-      if (gameType === 'MIXED') {
+      if (gameType === 'MIXED' || gameType === 'ADVENTURE') {
         const rawType = typeof q.type === 'string' ? (q.type.trim().toUpperCase() as QuestionType) : undefined;
         if (rawType && validQuestionTypes.has(rawType)) {
           itemQuestionType = rawType;
@@ -768,7 +802,7 @@ export class AiQuestionService {
         } else if (q.crosswordClue || q.crosswordAnswer) {
           itemQuestionType = 'CROSSWORD';
         } else {
-          itemQuestionType = 'FILL_IN_THE_BLANK';
+          itemQuestionType = gameType === 'ADVENTURE' ? 'MULTIPLE_CHOICE' : 'FILL_IN_THE_BLANK';
         }
       } else {
         itemQuestionType = gameType;
@@ -979,6 +1013,38 @@ export class AiQuestionService {
         timePerQuestion: request.timePerQuestion || 20,
         scoringMode: request.scoringMode || 'STANDARD',
         ...(request.mixedDistribution ? { mixedDistribution: request.mixedDistribution } : {}),
+        ...(gameType === 'ADVENTURE'
+          ? {
+              adventureConfig: (() => {
+                const preferredIndustryId =
+                  request.adventureConfig && request.adventureConfig.aiDetectedIndustry === false
+                    ? request.adventureConfig.industryId
+                    : undefined;
+                const fallbackAdventure = analyzeSourceContentForAdventure(documents, {
+                  preferredIndustryId,
+                  customIndustryLabel: request.adventureConfig?.industryLabel,
+                  topicFocus: request.topicFocus,
+                  questionCount: validatedQuestions.length,
+                  questions: validatedQuestions,
+                });
+                const aiProposal =
+                  rawResponse && typeof rawResponse === 'object' && !Array.isArray(rawResponse)
+                    ? rawResponse.adventureProposal || rawResponse.adventureConfig
+                    : undefined;
+                const mergedRawConfig = {
+                  ...(aiProposal && typeof aiProposal === 'object' ? aiProposal : {}),
+                  ...(request.adventureConfig && typeof request.adventureConfig === 'object'
+                    ? request.adventureConfig
+                    : {}),
+                };
+                return sanitizeAdventureConfig(
+                  mergedRawConfig,
+                  fallbackAdventure,
+                  validatedQuestions
+                );
+              })(),
+            }
+          : {}),
       },
       sourceSummary: {
         sourceCount: documents.length,
@@ -994,6 +1060,19 @@ export class AiQuestionService {
     };
 
     return GameSpecificationSchema.parse(gameSpec);
+  }
+
+  public analyzeAdventureContext(
+    documents: CanonicalDocument[],
+    options?: {
+      preferredIndustryId?: IndustryId;
+      customIndustryLabel?: string;
+      topicFocus?: string;
+      questionCount?: number;
+      questions?: GameQuestion[];
+    }
+  ): AdventureConfig {
+    return analyzeSourceContentForAdventure(documents, options);
   }
 }
 

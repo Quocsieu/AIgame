@@ -1,5 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GameModeSelectionModal } from '../components/GameModeSelectionModal.js';
+import { AdventureThemeConfigurator } from '../components/AdventureThemeConfigurator.js';
+import {
+  buildDefaultAdventureConfig,
+  INDUSTRY_CATALOG,
+  syncAdventureStagesWithQuestions,
+} from '../config/adventureThemes.js';
 import { GameTypeSelector } from '../components/GameTypeSelector.js';
 import { useToast } from '../components/ToastContext.js';
 import {
@@ -41,6 +47,7 @@ import {
   fetchRoomQr,
   generateGame,
   ingestSources,
+  analyzeAdventureContextApi,
   saveEditedQuestions,
 } from '../services/api.js';
 import {
@@ -53,6 +60,8 @@ import {
   type IngestedSource,
   type MixedQuestionDistribution,
   type ProvenanceReference,
+  type AdventureConfig,
+  type IndustryId,
   type QuestionType,
   type ScoringMode,
 } from '../types/index.js';
@@ -93,6 +102,8 @@ const formatGameTypeLabel = (type: string): string => {
       return 'Ô chữ';
     case 'MIXED':
       return 'Hỗn hợp (Mixed)';
+    case 'ADVENTURE':
+      return 'Đi cảnh theo ngành nghề';
     default:
       return type;
   }
@@ -286,6 +297,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [isAdvancedSettingsOpen, setIsAdvancedSettingsOpen] = useState(false);
   const [showQuestionEditor, setShowQuestionEditor] = useState(false);
   const [savedForLater, setSavedForLater] = useState(false);
+  const [adventureIndustryMode, setAdventureIndustryMode] = useState<'AI_DETECT' | IndustryId>('AI_DETECT');
+  const [customIndustryName, setCustomIndustryName] = useState<string>('');
+  const [adventureConfig, setAdventureConfig] = useState<AdventureConfig>(() =>
+    buildDefaultAdventureConfig('theme_moto_garage', 5)
+  );
+  const [isReanalyzingAdventure, setIsReanalyzingAdventure] = useState<boolean>(false);
+  const [showAdventureFullscreenPreview, setShowAdventureFullscreenPreview] = useState<boolean>(false);
 
   useEffect(() => {
     if (initialSpec) {
@@ -295,9 +313,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       setScoringMode(initialSpec.settings.scoringMode);
       setTimePerQuestion(initialSpec.settings.timePerQuestion);
       setQuestionCount(initialSpec.questions.length);
+      if (initialSpec.settings?.adventureConfig) {
+        setAdventureConfig(
+          syncAdventureStagesWithQuestions(initialSpec.settings.adventureConfig, initialSpec.questions)
+        );
+      }
       setEditingQuestionIdx(null);
       setRoomCode('');
       setCurrentStep(4);
+      setShowAdventureFullscreenPreview(false);
     }
   }, [initialSpec]);
 
@@ -501,10 +525,28 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         sectionFilter: selectedSections.length > 0 ? selectedSections : undefined,
         title: customGameTitle.trim() || undefined,
         mixedDistribution: gameType === 'MIXED' ? mixedDistribution : undefined,
+        adventureConfig:
+          gameType === 'ADVENTURE'
+            ? adventureIndustryMode === 'AI_DETECT'
+              ? ({ aiDetectedIndustry: true } as any)
+              : ({
+                  industryId: adventureIndustryMode,
+                  industryLabel:
+                    adventureIndustryMode === 'CUSTOM'
+                      ? customIndustryName.trim() || 'Ngành nghề Tùy chỉnh'
+                      : INDUSTRY_CATALOG.find(i => i.industryId === adventureIndustryMode)?.label,
+                  aiDetectedIndustry: false,
+                } as any)
+            : undefined,
       });
 
       toast.removeToast(toastId);
       setGeneratedSpec(spec);
+      if (spec.settings?.adventureConfig) {
+        setAdventureConfig(
+          syncAdventureStagesWithQuestions(spec.settings.adventureConfig, spec.questions)
+        );
+      }
       setCustomGameTitle(spec.title);
       setEditingQuestionIdx(null);
       setRoomCode('');
@@ -514,6 +556,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         'Tạo game thành công'
       );
       setCurrentStep(4);
+      setShowAdventureFullscreenPreview(false);
+      if (spec.gameType === 'ADVENTURE') {
+        setShowAdventureFullscreenPreview(true);
+      }
       return spec;
     } catch (err: any) {
       toast.removeToast(toastId);
@@ -567,6 +613,19 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
     let primarySourceId: string | undefined = ingestedSources[0]?.sourceId;
 
+    if (!primarySourceId && hasTopic && !cleanUrls.length && !hasFiles) {
+      try {
+        setIsIngesting(true);
+        const sources = await ingestSources({ sampleText: topicFocus.trim() });
+        setIngestedSources(sources);
+        primarySourceId = sources[0]?.sourceId;
+      } catch (err: any) {
+        toast.error(err.message || 'Không thể xử lý nội dung chủ đề.', 'Lỗi nạp chủ đề');
+        return;
+      } finally {
+        setIsIngesting(false);
+      }
+    }
     if (!primarySourceId && (cleanUrls.length > 0 || hasFiles)) {
       const newSourceId = await handleIngest();
       if (!newSourceId) return;
@@ -638,6 +697,14 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             questionCount: spec!.questions.length,
             scoringMode,
             timePerQuestion,
+            ...(spec!.gameType === 'ADVENTURE'
+              ? {
+                  adventureConfig: syncAdventureStagesWithQuestions(
+                    adventureConfig,
+                    spec!.questions
+                  ),
+                }
+              : {}),
           },
         },
         capacity: 300,
@@ -779,7 +846,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     };
 
     const gType: QuestionType =
-      generatedSpec.gameType === 'MIXED' ? 'MULTIPLE_CHOICE' : generatedSpec.gameType;
+      generatedSpec.gameType === 'MIXED' || generatedSpec.gameType === 'ADVENTURE'
+        ? 'MULTIPLE_CHOICE'
+        : generatedSpec.gameType;
     const newIndex = generatedSpec.questions.length + 1;
     const newQuestion: GameQuestion = {
       id: `q_custom_${Date.now()}_${newIndex}`,
@@ -843,6 +912,14 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         questions: generatedSpec.questions,
         settings: {
           timePerQuestion,
+          ...(generatedSpec.gameType === 'ADVENTURE'
+            ? {
+                adventureConfig: syncAdventureStagesWithQuestions(
+                  adventureConfig,
+                  generatedSpec.questions
+                ),
+              }
+            : {}),
           scoringMode,
         },
         isPublic: nextIsPublic,
@@ -1714,6 +1791,121 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
           {/* Dưới thể loại trò chơi: Khi chọn Bộ đề hỗn hợp (MIXED) thì hiện ra bảng chọn tỉ lệ */}
           {gameType === 'MIXED' && renderMixedDistributionControl()}
+          {gameType === 'ADVENTURE' && (
+            <div
+              style={{
+                marginTop: '0.65rem',
+                backgroundColor: 'var(--bg-input)',
+                border: '1.5px solid rgba(245, 158, 11, 0.5)',
+                borderRadius: '12px',
+                padding: '0.85rem 0.95rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.55rem',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}>
+                <span style={{ fontSize: '0.82rem', fontWeight: 900, color: 'var(--accent-amber)' }}>
+                  🏍️ Ngành Nghề & Bối Cảnh Đi Cảnh
+                </span>
+                <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                  AI Tự Nhận Diện hoặc Chọn Sẵn
+                </span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: '0.35rem' }}>
+                <button
+                  type="button"
+                  onClick={() => setAdventureIndustryMode('AI_DETECT')}
+                  style={{
+                    textAlign: 'left',
+                    padding: '0.4rem 0.6rem',
+                    borderRadius: '6px',
+                    backgroundColor: adventureIndustryMode === 'AI_DETECT' ? 'var(--primary)' : 'var(--bg-card)',
+                    color: adventureIndustryMode === 'AI_DETECT' ? 'var(--primary-ink, #090d16)' : 'var(--text-primary)',
+                    border: '1px solid var(--border-strong)',
+                    fontSize: '0.75rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  AI Tự Nhận Diện
+                </button>
+                {INDUSTRY_CATALOG.map(ind => {
+                  const isSel = adventureIndustryMode === ind.industryId;
+                  return (
+                    <button
+                      key={`chip_${ind.industryId}`}
+                      type="button"
+                      onClick={() => setAdventureIndustryMode(ind.industryId)}
+                      style={{
+                        textAlign: 'left',
+                        padding: '0.4rem 0.6rem',
+                        borderRadius: '6px',
+                        backgroundColor: isSel ? 'var(--primary)' : 'var(--bg-card)',
+                        color: isSel ? 'var(--primary-ink, #090d16)' : 'var(--text-primary)',
+                        border: '1px solid var(--border-strong)',
+                        fontSize: '0.75rem',
+                        fontWeight: isSel ? 800 : 600,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                      title={ind.label}
+                    >
+                      {ind.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div>
+                <span style={{ display: 'none' }}>
+                </span>
+              </div>
+              <select
+                value={adventureIndustryMode}
+                onChange={e => setAdventureIndustryMode(e.target.value as 'AI_DETECT' | IndustryId)}
+                style={{
+                  width: '100%',
+                  backgroundColor: 'var(--bg-card)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '8px',
+                  padding: '0.5rem 0.65rem',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                }}
+              >
+                <option value="AI_DETECT">🤖 Để AI tự nhận diện ngành nghề & bối cảnh từ nội dung nguồn</option>
+                {INDUSTRY_CATALOG.map(ind => (
+                  <option key={ind.industryId} value={ind.industryId}>
+                    {ind.icon} {ind.label}
+                  </option>
+                ))}
+              </select>
+              {adventureIndustryMode === 'CUSTOM' && (
+                <input
+                  type="text"
+                  value={customIndustryName}
+                  onChange={e => setCustomIndustryName(e.target.value)}
+                  placeholder="Nhập tên ngành nghề tùy chỉnh của bạn..."
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'var(--bg-card)',
+                    border: '1px solid var(--border-strong)',
+                    borderRadius: '8px',
+                    padding: '0.45rem 0.65rem',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                  }}
+                />
+              )}
+              <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                Khi tạo game, hệ thống sẽ phân tích nội dung nguồn để dựng đường đi, nhân vật, vật cản có va chạm và các trạm câu hỏi khớp với ngữ cảnh thực tế.
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -2453,6 +2645,70 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   </div>
 
                   {/* Phân bổ loại câu hỏi nếu là MIXED */}
+                  {generatedSpec.gameType === 'ADVENTURE' && (
+                    <AdventureThemeConfigurator
+                      config={syncAdventureStagesWithQuestions(
+                        adventureConfig,
+                        generatedSpec.questions
+                      )}
+                      questions={generatedSpec.questions}
+                      gameTitle={generatedSpec.title}
+                      gameDescription={generatedSpec.description}
+                      timePerQuestion={timePerQuestion}
+                      isPreviewOpen={showAdventureFullscreenPreview}
+                      onTogglePreview={setShowAdventureFullscreenPreview}
+                      onChange={nextCfg => {
+                        setAdventureConfig(nextCfg);
+                        setGeneratedSpec(prev =>
+                          prev
+                            ? {
+                                ...prev,
+                                settings: {
+                                  ...prev.settings,
+                                  adventureConfig: nextCfg,
+                                },
+                              }
+                            : prev
+                        );
+                      }}
+                      reanalyzing={isReanalyzingAdventure}
+                      onReanalyze={async () => {
+                        try {
+                          setIsReanalyzingAdventure(true);
+                          const proposal = await analyzeAdventureContextApi({
+                            sourceIds: ingestedSources.map(s => s.sourceId),
+                            sources: ingestedSources,
+                            topicFocus: topicFocus.trim() || undefined,
+                            questionCount: generatedSpec.questions.length,
+                          });
+                          const synced = syncAdventureStagesWithQuestions(
+                            proposal,
+                            generatedSpec.questions
+                          );
+                          setAdventureConfig(synced);
+                          setGeneratedSpec(prev =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  settings: {
+                                    ...prev.settings,
+                                    adventureConfig: synced,
+                                  },
+                                }
+                              : prev
+                          );
+                          toast.success(
+                            `Đã cập nhật bối cảnh "${synced.subEnvironment}" (${synced.industryLabel}).`,
+                            'AI Đề xuất bối cảnh'
+                          );
+                        } catch (err: any) {
+                          toast.error(err.message || 'Không thể phân tích lại bối cảnh.');
+                        } finally {
+                          setIsReanalyzingAdventure(false);
+                        }
+                      }}
+                    />
+                  )}
                   {generatedSpec.gameType === 'MIXED' && (
                     <div
                       style={{

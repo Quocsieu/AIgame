@@ -72,6 +72,16 @@ export const SUPPORTED_GAME_TYPES: GameTypeOption[] = [
     icon: <SparklesIcon size={24} style={{ color: 'var(--game-mixed)' }} />,
     tags: ['Đa định dạng', 'Thử thách cao', 'Độc đáo'],
   },
+  {
+    id: 'ADVENTURE',
+    title: 'Đi Cảnh Theo Ngành Nghề',
+    subtitle: 'Điều khiển nhân vật hoặc phương tiện vượt chướng ngại vật 2D và chinh phục các trạm câu hỏi theo bối cảnh ngành nghề thực tế.',
+    badge: 'Mới • Đi cảnh 2D',
+    badgeColor: '#F59E0B',
+    accentColor: '#D97706',
+    icon: <StarIcon size={24} style={{ color: '#F59E0B' }} />,
+    tags: ['Đi cảnh 2D', 'Vượt vật cản', 'Theo ngành nghề'],
+  },
 ];
 
 interface GameTypeSelectorProps {

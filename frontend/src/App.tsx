@@ -88,7 +88,7 @@ export const AppContent: React.FC = () => {
 
     if (
       typeParam &&
-      ['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK', 'CROSSWORD', 'MIXED'].includes(
+      ['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK', 'CROSSWORD', 'MIXED', 'ADVENTURE'].includes(
         typeParam
       )
     ) {

@@ -1,6 +1,13 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import QRCode from 'qrcode';
 import {
+  ADVENTURE_THEME_PRESETS,
+  analyzeSourceContentForAdventure,
+  INDUSTRY_CATALOG,
+  IndustryIdEnum,
+  sanitizeAdventureConfig,
+} from '../contracts/adventure.contract.js';
+import {
   GameSpecificationSchema,
   GenerateGameRequestSchema,
   UpdateGameQuestionsRequestSchema,
@@ -214,6 +221,55 @@ gameRouter.post(
 );
 
 gameRouter.get(
+  '/adventure/catalog',
+  (_req: Request, res: Response, next: NextFunction) => {
+    try {
+      res.status(200).json(
+        createSuccessResponse({
+          industries: INDUSTRY_CATALOG,
+          themePresets: ADVENTURE_THEME_PRESETS,
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+gameRouter.post(
+  '/adventure/analyze',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const body = req.body || {};
+      const sourceIds: string[] = Array.isArray(body.sourceIds)
+        ? body.sourceIds
+        : typeof body.sourceId === 'string'
+          ? [body.sourceId]
+          : [];
+      const documents =
+        Array.isArray(body.sources) && body.sources.length > 0
+          ? body.sources
+          : sourceStore.getMany(sourceIds);
+
+      const parsedIndustry = IndustryIdEnum.safeParse(body.preferredIndustryId);
+      const preferredIndustryId = parsedIndustry.success ? parsedIndustry.data : undefined;
+
+      const proposal = analyzeSourceContentForAdventure(documents, {
+        preferredIndustryId,
+        customIndustryLabel:
+          typeof body.customIndustryLabel === 'string' ? body.customIndustryLabel : undefined,
+        topicFocus: typeof body.topicFocus === 'string' ? body.topicFocus : undefined,
+        questionCount: typeof body.questionCount === 'number' ? body.questionCount : 5,
+      });
+
+      res.status(200).json(createSuccessResponse(proposal));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+gameRouter.get(
   '/:gameId',
   (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -284,8 +340,8 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
 
     const { title, description, questions, settings, isPublic } = parseResult.data;
 
-    // Ensure all edited questions match the game's type unless gameType is MIXED
-    if (existing.gameType !== 'MIXED') {
+    // Ensure all edited questions match the game's type unless gameType is MIXED or ADVENTURE
+    if (existing.gameType !== 'MIXED' && existing.gameType !== 'ADVENTURE') {
       for (let i = 0; i < questions.length; i++) {
         if (questions[i].type !== existing.gameType) {
           throw new AppError(
@@ -316,6 +372,27 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
         ...(settings?.timePerQuestion !== undefined ? { timePerQuestion: settings.timePerQuestion } : {}),
         ...(settings?.scoringMode !== undefined ? { scoringMode: settings.scoringMode } : {}),
         ...(settings?.mixedDistribution !== undefined ? { mixedDistribution: settings.mixedDistribution } : {}),
+        ...(settings?.adventureConfig !== undefined
+          ? {
+              adventureConfig: sanitizeAdventureConfig(
+                settings.adventureConfig,
+                existing.settings.adventureConfig ||
+                  analyzeSourceContentForAdventure([], {
+                    questionCount: questions.length,
+                    questions,
+                  }),
+                questions
+              ),
+            }
+          : existing.settings.adventureConfig
+            ? {
+                adventureConfig: sanitizeAdventureConfig(
+                  existing.settings.adventureConfig,
+                  existing.settings.adventureConfig,
+                  questions
+                ),
+              }
+            : {}),
         questionCount: questions.length,
       },
     });

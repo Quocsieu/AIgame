@@ -13,12 +13,14 @@ import {
 import {
   advancePracticeSession,
   createPracticeSession,
+  fetchGameById,
   fetchPracticeResult,
   fetchPracticeSessionQuestion,
   fetchPracticeSessionSummary,
   startPracticeSession,
   submitPracticeAnswer,
 } from '../services/api.js';
+import { AdventureGameEngine } from './AdventureGameEngine.js';
 import type {
   GameSpecification,
   PracticeFinalResult,
@@ -41,6 +43,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [loadedSpec, setLoadedSpec] = useState<GameSpecification | null>(initialSpec || null);
 
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState<SanitizedQuestion | null>(null);
@@ -97,6 +100,18 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     stopTimer();
 
     const targetGameId = gameId || initialSpec?.gameId;
+    if (initialSpec) {
+      setLoadedSpec(initialSpec);
+    } else if (gameId && !loadedSpec) {
+      try {
+        const fetched = await fetchGameById(gameId, { mode: 'public' }).catch(() =>
+          fetchGameById(gameId)
+        );
+        setLoadedSpec(fetched);
+      } catch {
+        // Ignore if public play only allows session endpoints
+      }
+    }
     const sessionKey = targetGameId ? `active_solo_session_${targetGameId}` : null;
     const savedSessionId = sessionKey ? sessionStorage.getItem(sessionKey) : null;
 
@@ -338,6 +353,36 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             Quay lại
           </button>
         </div>
+      </div>
+    );
+  }
+
+  const activeGameSpec = loadedSpec || initialSpec;
+  if (activeGameSpec && activeGameSpec.gameType === 'ADVENTURE') {
+    return (
+      <div className="w-full h-full">
+        <AdventureGameEngine
+          game={activeGameSpec}
+          adventureConfig={activeGameSpec.settings?.adventureConfig}
+          mode="LIVE_SESSION"
+          sessionStarted={Boolean(sessionId)}
+          startingSession={isLoading}
+          onStartSession={initializeSession}
+          currentQuestion={currentQuestion}
+          currentQuestionIndex={currentQuestion ? currentQuestion.questionIndex : 0}
+          totalQuestions={
+            currentQuestion?.totalQuestions || activeGameSpec.questions?.length || 5
+          }
+          timeRemaining={timeLeft}
+          liveScore={playerScore}
+          questionFeedback={questionFeedback}
+          submittingAnswer={isSubmitting}
+          onSubmitAnswer={handleSubmitAnswer}
+          onNextQuestion={handleNextQuestion}
+          finalResult={finalResult}
+          onRestartSession={initializeSession}
+          onExit={handleLeave}
+        />
       </div>
     );
   }

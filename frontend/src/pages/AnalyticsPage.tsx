@@ -64,6 +64,8 @@ const formatGameTypeName = (type: string): string => {
       return 'Ô chữ';
     case 'MIXED':
       return 'Hỗn hợp (Mixed)';
+    case 'ADVENTURE':
+      return 'Đi cảnh theo ngành nghề';
     default:
       return type;
   }
@@ -490,7 +492,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const handleAddEditQuestion = () => {
     if (!activeGameSpec) return;
     const defaultType: QuestionType =
-      activeGameSpec.gameType === 'MIXED' ? 'MULTIPLE_CHOICE' : activeGameSpec.gameType;
+      activeGameSpec.gameType === 'MIXED' || activeGameSpec.gameType === 'ADVENTURE'
+        ? 'MULTIPLE_CHOICE'
+        : activeGameSpec.gameType;
     const fallbackRef = activeGameSpec.questions[0]?.sourceReference || {
       sourceId: activeGameSpec.sourceSummary?.sources?.[0]?.sourceId || 'src_manual',
       sourceType: activeGameSpec.sourceSummary?.sources?.[0]?.sourceType || 'FILE',
@@ -763,6 +767,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               <option value="QUICK_BUTTON">Đúng / Sai</option>
               <option value="CROSSWORD">Ô chữ</option>
               <option value="MIXED">Hỗn hợp</option>
+              <option value="ADVENTURE">Đi cảnh theo ngành nghề</option>
             </select>
 
             {/* Status Filter */}

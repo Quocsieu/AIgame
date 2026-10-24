@@ -3,12 +3,14 @@ import type {
   AdminAiLogRecord,
   AdminOverviewStats,
   AdminUserRecord,
+  AdventureConfig,
   AiObservabilitySummary,
   AuthenticatedUser,
   CreateRoomResponse,
   Difficulty,
   GameQuestion,
   GameSpecification,
+  IndustryId,
   IngestedSource,
   LearningAnalyticsSummary,
   MixedQuestionDistribution,
@@ -226,6 +228,7 @@ export async function generateGame(params: {
   sectionFilter?: string[];
   title?: string;
   mixedDistribution?: MixedQuestionDistribution;
+  adventureConfig?: Partial<AdventureConfig>;
 }): Promise<GameSpecification> {
   const res = await fetch(`${API_BASE_URL}/games/generate`, {
     method: 'POST',
@@ -377,6 +380,26 @@ export async function fetchGameById(
   return data.data;
 }
 
+export async function analyzeAdventureContextApi(params: {
+  sourceIds?: string[];
+  sources?: IngestedSource[];
+  preferredIndustryId?: IndustryId;
+  customIndustryLabel?: string;
+  topicFocus?: string;
+  questionCount?: number;
+}): Promise<AdventureConfig> {
+  const res = await fetch(`${API_BASE_URL}/games/adventure/analyze`, {
+    method: 'POST',
+    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(params),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể phân tích bối cảnh đi cảnh.');
+  }
+  return data.data;
+}
+
 export async function saveEditedQuestions(
   gameId: string,
   params: {
@@ -387,6 +410,7 @@ export async function saveEditedQuestions(
       timePerQuestion?: number;
       scoringMode?: ScoringMode;
       mixedDistribution?: MixedQuestionDistribution;
+      adventureConfig?: Partial<AdventureConfig>;
     };
     isPublic?: boolean;
   }

@@ -1,5 +1,91 @@
 export type QuestionType = 'MULTIPLE_CHOICE' | 'FILL_IN_THE_BLANK' | 'QUICK_BUTTON' | 'CROSSWORD';
-export type GameType = QuestionType | 'MIXED';
+export type GameType = QuestionType | 'MIXED' | 'ADVENTURE';
+
+export type IndustryId =
+  | 'MOTORCYCLE_TRAFFIC'
+  | 'BUSINESS_SALES'
+  | 'MANUFACTURING_INDUSTRIAL'
+  | 'IT_TECHNOLOGY'
+  | 'HEALTHCARE_TRAINING'
+  | 'FINANCE_BANKING'
+  | 'FNB_HOSPITALITY'
+  | 'EDUCATION_GENERAL'
+  | 'CUSTOM';
+
+export type AvatarId =
+  | 'MOTO_RIDER'
+  | 'SALES_ADVISOR'
+  | 'FACTORY_ENGINEER'
+  | 'CYBER_BOT'
+  | 'MEDICAL_MEDIC'
+  | 'EXPLORER_RUNNER';
+
+export type ObstacleType =
+  | 'TRAFFIC_CONE'
+  | 'OIL_BARREL'
+  | 'TIRE_STACK'
+  | 'BARRIER_GATE'
+  | 'CARGO_CRATE'
+  | 'FORKLIFT_PALLET'
+  | 'SERVER_FIREWALL'
+  | 'BUG_DRONE'
+  | 'BIOHAZARD_CART'
+  | 'MEDICAL_SCREEN';
+
+export type DecorStyle =
+  | 'GARAGE_WORKSHOP'
+  | 'CITY_STREET'
+  | 'CORPORATE_PLAZA'
+  | 'FACTORY_PLANT'
+  | 'CYBER_DATACENTER'
+  | 'HOSPITAL_WARD'
+  | 'ACADEMY_CAMPUS';
+
+export interface AdventurePalette {
+  skyTop: string;
+  skyBottom: string;
+  horizonGlow: string;
+  groundTop: string;
+  groundBottom: string;
+  roadSurface: string;
+  roadLine: string;
+  accentColor: string;
+  buildingPrimary: string;
+  buildingSecondary: string;
+}
+
+export interface AdventureStage {
+  stageIndex: number;
+  questionId?: string;
+  checkpointTitle: string;
+  zoneLabel: string;
+  obstacleType: ObstacleType;
+  hintBanner?: string;
+}
+
+export interface AdventureConfig {
+  version: number;
+  industryId: IndustryId;
+  industryLabel: string;
+  subEnvironment: string;
+  learningObjective: string;
+  aiDetectedIndustry: boolean;
+  aiConfidence: number;
+  aiReasoning: string;
+  proposalConfirmed: boolean;
+  themePresetId: string;
+  environmentTitle: string;
+  environmentSubtitle: string;
+  decorStyle: DecorStyle;
+  avatarId: AvatarId;
+  avatarLabel: string;
+  palette: AdventurePalette;
+  obstacleTypes: ObstacleType[];
+  obstacleDensity: 'LOW' | 'MEDIUM' | 'HIGH';
+  speedMultiplier: number;
+  reducedMotion: boolean;
+  stages: AdventureStage[];
+}
 export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 export type ScoringMode = 'STANDARD' | 'SPEED_BONUS' | 'STREAK';
 export type SourceType = 'WEBSITE' | 'DOCX' | 'XLSX' | 'PDF' | 'TXT' | 'MARKDOWN' | 'CSV';
@@ -99,9 +185,11 @@ export interface GameSpecification {
     timePerQuestion: number;
     scoringMode: ScoringMode;
     mixedDistribution?: MixedQuestionDistribution;
+    adventureConfig?: AdventureConfig;
   };
   sourceSummary?: {
     sourceCount: number;
+  adventureConfig?: AdventureConfig;
     sources: {
       sourceId: string;
       sourceType: SourceType;
@@ -295,6 +383,7 @@ export interface PersistedGameSummary {
   timePerQuestion: number;
   scoringMode: ScoringMode;
   sourceCount: number;
+  adventureConfig?: AdventureConfig;
   generatedAt: string;
   createdAt: string;
   updatedAt: string;

@@ -92,6 +92,20 @@ contentRouter.post(
         size: f.size,
       }));
 
+      if (
+        files.length === 0 &&
+        typeof req.body?.sampleText === 'string' &&
+        req.body.sampleText.trim().length > 0
+      ) {
+        const buf = Buffer.from(req.body.sampleText.trim(), 'utf-8');
+        files.push({
+          originalname: 'sample_reference.txt',
+          mimetype: 'text/plain',
+          buffer: buf,
+          size: buf.length,
+        });
+      }
+
       const result = await ingestionService.ingest({
         urls,
         files,

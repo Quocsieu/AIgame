@@ -1,10 +1,16 @@
 import { z } from 'zod';
 import {
+  AdventureConfigSchema,
+  IndustryIdEnum,
+} from './adventure.contract.js';
+import {
   CanonicalDocument,
   CanonicalDocumentSchema,
   ProvenanceReferenceSchema,
   SourceTypeEnum,
 } from './canonical.contract.js';
+
+export * from './adventure.contract.js';
 
 export const QuestionTypeEnum = z.enum([
   'MULTIPLE_CHOICE',
@@ -20,6 +26,7 @@ export const GameTypeEnum = z.enum([
   'QUICK_BUTTON',
   'CROSSWORD',
   'MIXED',
+  'ADVENTURE',
 ]);
 export type GameType = z.infer<typeof GameTypeEnum>;
 
@@ -183,6 +190,7 @@ export const GameSettingsSchema = z.object({
   timePerQuestion: z.number().int().min(5).max(120).default(20),
   scoringMode: ScoringModeEnum.default('STANDARD'),
   mixedDistribution: MixedQuestionDistributionSchema.optional(),
+  adventureConfig: AdventureConfigSchema.optional(),
 });
 export type GameSettings = z.infer<typeof GameSettingsSchema>;
 
@@ -225,6 +233,10 @@ export const GenerateGameRequestSchema = z.object({
   topicFocus: z.string().trim().max(300).optional(),
   sectionFilter: z.array(z.string().trim().min(1)).optional(),
   mixedDistribution: MixedQuestionDistributionSchema.optional(),
+  industryId: IndustryIdEnum.optional(),
+  customIndustryName: z.string().trim().max(120).optional(),
+  adventureSelectionMode: z.enum(['AI_DETECT', 'MANUAL']).optional(),
+  adventureConfig: AdventureConfigSchema.optional(),
 }).refine(data => data.sourceId || (data.sourceIds && data.sourceIds.length > 0) || (data.sources && data.sources.length > 0), {
   message: 'Either "sourceId", "sourceIds", or "sources" must be provided.',
   path: ['sourceId'],
@@ -240,11 +252,9 @@ export const UpdateGameQuestionsRequestSchema = z.object({
       timePerQuestion: z.number().int().min(5).max(120).optional(),
       scoringMode: ScoringModeEnum.optional(),
       mixedDistribution: MixedQuestionDistributionSchema.optional(),
+      adventureConfig: AdventureConfigSchema.optional(),
     })
     .optional(),
   isPublic: z.boolean().optional(),
 });
 export type UpdateGameQuestionsRequest = z.infer<typeof UpdateGameQuestionsRequestSchema>;
-
-
-

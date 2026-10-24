@@ -1,4 +1,5 @@
 import { LIMITS } from '../config/limits.js';
+import { AdventureConfig } from '../contracts/adventure.contract.js';
 import { CanonicalDocument } from '../contracts/canonical.contract.js';
 import {
   GameQuestion,
@@ -37,6 +38,7 @@ export interface PersistedGameSummary {
   questionCount: number;
   timePerQuestion: number;
   scoringMode: ScoringMode;
+  adventureConfig?: AdventureConfig;
   sourceCount: number;
   generatedAt: string;
   createdAt: string;
@@ -50,6 +52,7 @@ export interface PersistedPracticeSessionRecord {
   gameTitle: string;
   gameType: GameType;
   scoringMode: ScoringMode;
+  adventureConfig?: AdventureConfig;
   state: string;
   totalQuestions: number;
   answeredQuestions: number;
@@ -74,6 +77,7 @@ export interface PersistedRoomHistoryRecord {
   gameTitle: string;
   gameType: GameType;
   scoringMode: ScoringMode;
+  adventureConfig?: AdventureConfig;
   state: string;
   playerCount: number;
   totalQuestions: number;
@@ -509,6 +513,7 @@ export class PersistenceRepository {
         questionCount: Number(settings.questionCount || 0),
         timePerQuestion: Number(settings.timePerQuestion || 20),
         scoringMode: (settings.scoringMode || 'STANDARD') as ScoringMode,
+        ...(settings.adventureConfig ? { adventureConfig: settings.adventureConfig } : {}),
         sourceCount: Number(sourceSummary.sourceCount || 0),
         generatedAt: String(row.generated_at),
         createdAt: String(row.created_at),
@@ -565,6 +570,7 @@ export class PersistenceRepository {
     gameTitle: string;
     gameType: GameType;
     scoringMode: ScoringMode;
+  adventureConfig?: AdventureConfig;
     state: string;
     totalQuestions: number;
     answeredQuestions: number;
@@ -725,6 +731,7 @@ export class PersistenceRepository {
     gameTitle: string;
     gameType: GameType;
     scoringMode: ScoringMode;
+  adventureConfig?: AdventureConfig;
     state: string;
     playerCount: number;
     totalQuestions: number;

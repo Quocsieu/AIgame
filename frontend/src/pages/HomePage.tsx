@@ -198,6 +198,32 @@ const GAME_FORMATS: FormatMeta[] = [
     accent: 'var(--accent-lime)',
     illustration: <MixedIllustration />,
   },
+  {
+    type: 'ADVENTURE',
+    title: 'Đi cảnh theo ngành nghề',
+    badge: 'Đi cảnh 2D',
+    accent: '#F59E0B',
+    illustration: (
+      <svg viewBox="0 0 200 115" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: '100%', height: '100%', display: 'block' }}>
+        <rect width="200" height="115" rx="10" fill="#0F172A" />
+        <rect x="0" y="84" width="200" height="31" rx="4" fill="#1E293B" />
+        <line x1="12" y1="98" x2="40" y2="98" stroke="#FACC15" strokeWidth="3" strokeDasharray="8 6" />
+        <line x1="65" y1="98" x2="105" y2="98" stroke="#FACC15" strokeWidth="3" strokeDasharray="8 6" />
+        <line x1="130" y1="98" x2="175" y2="98" stroke="#FACC15" strokeWidth="3" strokeDasharray="8 6" />
+        {/* Rider / Vehicle */}
+        <circle cx="42" cy="78" r="8" fill="#334155" stroke="#F97316" strokeWidth="2.5" />
+        <circle cx="68" cy="78" r="8" fill="#334155" stroke="#F97316" strokeWidth="2.5" />
+        <path d="M38 72L50 58H66L72 72H38Z" fill="#F97316" />
+        <circle cx="54" cy="48" r="7" fill="#F8FAFC" />
+        {/* Obstacle */}
+        <path d="M110 84L118 62L126 84H110Z" fill="#EF4444" />
+        {/* Checkpoint Gate */}
+        <rect x="154" y="34" width="6" height="50" fill="#10B981" />
+        <rect x="142" y="22" width="44" height="16" rx="4" fill="#064E3B" stroke="#10B981" strokeWidth="1.5" />
+        <text x="164" y="33" textAnchor="middle" fill="#34D399" fontSize="8" fontWeight="900">TRẠM #1</text>
+      </svg>
+    ),
+  },
 ];
 
 export const HomePage: React.FC<HomePageProps> = ({
