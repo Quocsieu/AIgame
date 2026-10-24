@@ -196,6 +196,52 @@ sessionRouter.post('/:sessionId/next', (req: Request, res: Response, next: NextF
 });
 
 /**
+ * POST /api/games/sessions/:sessionId/end
+ * POST /api/games/sessions/:sessionId/abandon
+ * Safely ends an active practice session and releases game delete locks.
+ * Authorized for session owner, game owner, or Admin.
+ */
+function handleEndSession(req: Request, res: Response, next: NextFunction) {
+  try {
+    const sessionId = String(req.params.sessionId);
+    const session = gameEngine.getSession(sessionId);
+
+    const gameId = session.specification.gameId;
+    const storedSpec = gameStore.get(gameId);
+    const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+    const gameOwnerUserId =
+      storedSpec?.ownerUserId ?? ownerInfo?.ownerUserId ?? session.specification.ownerUserId ?? null;
+
+    const currentUserId = req.user?.userId ?? null;
+    const isAdmin = req.user?.role === 'ADMIN';
+    const isSessionOwner = Boolean(session.ownerUserId && currentUserId === session.ownerUserId);
+    const isGameOwner = Boolean(gameOwnerUserId && currentUserId === gameOwnerUserId);
+    const isUnowned = !session.ownerUserId && !gameOwnerUserId;
+
+    if (!isAdmin && !isSessionOwner && !isGameOwner && !isUnowned) {
+      throw new AppError(
+        'ACCESS_DENIED',
+        'Bạn không có quyền kết thúc phiên luyện tập này.',
+        403
+      );
+    }
+
+    const summary = gameEngine.endSession(sessionId);
+    res.status(200).json(
+      createSuccessResponse({
+        ended: true,
+        session: summary,
+      })
+    );
+  } catch (err) {
+    next(err);
+  }
+}
+
+sessionRouter.post('/:sessionId/end', handleEndSession);
+sessionRouter.post('/:sessionId/abandon', handleEndSession);
+
+/**
  * GET /api/games/sessions/:sessionId/result
  * Returns final game result. Throws if game is not finished yet.
  */

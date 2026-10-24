@@ -23,6 +23,56 @@ export const gameRouter = Router();
 // Mount Day 3 Game Session Router
 gameRouter.use('/sessions', sessionRouter);
 
+export interface GameActiveStatus {
+  gameId: string;
+  hasActiveSession: boolean;
+  activeSessionCount: number;
+  activeSessions: Array<{
+    sessionId: string;
+    state: string;
+    startedAt: string | null;
+  }>;
+  hasActiveRoom: boolean;
+  activeRoomCount: number;
+  activeRooms: Array<{
+    roomId: string;
+    roomCode: string;
+    state: string;
+    playerCount: number;
+    createdAt: number;
+  }>;
+  isDeletable: boolean;
+}
+
+export function computeGameActiveStatus(gameId: string): GameActiveStatus {
+  const activeSessions = sessionStore.getActiveSessionsForGame(gameId);
+  const activeRooms = roomStore.getActiveRoomsForGame(gameId);
+
+  const hasActiveSession = activeSessions.length > 0;
+  const hasActiveRoom = activeRooms.length > 0;
+
+  return {
+    gameId,
+    hasActiveSession,
+    activeSessionCount: activeSessions.length,
+    activeSessions: activeSessions.map((s) => ({
+      sessionId: s.sessionId,
+      state: s.state,
+      startedAt: s.startedAt,
+    })),
+    hasActiveRoom,
+    activeRoomCount: activeRooms.length,
+    activeRooms: activeRooms.map((r) => ({
+      roomId: r.roomId,
+      roomCode: r.roomCode,
+      state: r.state,
+      playerCount: r.players.size,
+      createdAt: r.createdAt,
+    })),
+    isDeletable: !hasActiveSession && !hasActiveRoom,
+  };
+}
+
 function buildSoloPlayUrl(req: Request, gameId: string): string {
   const frontendUrl = (process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
   if (frontendUrl) {
@@ -72,7 +122,17 @@ gameRouter.get(
         offset,
       });
 
-      res.status(200).json(createSuccessResponse(result));
+      const enrichedGames = result.games.map((game) => ({
+        ...game,
+        activeStatus: computeGameActiveStatus(game.gameId),
+      }));
+
+      res.status(200).json(
+        createSuccessResponse({
+          ...result,
+          games: enrichedGames,
+        })
+      );
     } catch (err) {
       next(err);
     }
@@ -322,7 +382,7 @@ gameRouter.delete(
           deletedCount++;
         } catch (err: any) {
           // Continue deleting other games if a single game deletion encounters an unexpected error
-          logger.error(`[DeleteAllGames] Failed to delete game "${gameId}":`, err);
+          console.error(`[DeleteAllGames] Failed to delete game "${gameId}":`, err);
         }
       }
 
@@ -386,6 +446,37 @@ gameRouter.delete(
     }
   }
 );
+
+/**
+ * GET /api/games/:gameId/status
+ * Returns active sessions and rooms for a specific game, along with deletable status.
+ */
+gameRouter.get('/:gameId/status', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const gameId = String(req.params.gameId || '');
+    const spec = gameStore.get(gameId);
+    const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+    if (!spec && !ownerInfo) {
+      throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+    }
+
+    const ownerUserId = spec?.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+    const isPublic = spec?.isPublic ?? ownerInfo?.isPublic ?? false;
+
+    authService.assertResourceAccess({
+      resourceType: 'bộ câu hỏi',
+      ownerUserId,
+      currentUser: req.user,
+      mode: 'read',
+      isPublic,
+    });
+
+    const activeStatus = computeGameActiveStatus(gameId);
+    res.status(200).json(createSuccessResponse(activeStatus));
+  } catch (err) {
+    next(err);
+  }
+});
 
 /**
  * GET /api/games/:gameId/qr

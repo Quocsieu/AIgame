@@ -72,6 +72,20 @@ export class MultiplayerRoomStore {
     return false;
   }
 
+  public getActiveRoomsForGame(gameId: string, now: number = Date.now()): MultiplayerRoom[] {
+    const active: MultiplayerRoom[] = [];
+    for (const room of this.roomsById.values()) {
+      if (
+        room.gameSpecification.gameId === gameId &&
+        this.isRoomActive(room) &&
+        now - room.updatedAt <= this.ttlMs
+      ) {
+        active.push(room);
+      }
+    }
+    return active;
+  }
+
   /**
    * Generates a 6-character uppercase room code avoiding ambiguous characters.
    * Guarantees uniqueness among active rooms.

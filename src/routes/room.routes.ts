@@ -5,6 +5,7 @@ import { rejectGuestOrPlayerWrite } from '../middleware/auth.middleware.js';
 import { roomCreateRateLimiter } from '../middleware/rateLimiter.js';
 import { roomService } from '../multiplayer/room.service.js';
 import { CreateRoomRequestSchema } from '../multiplayer/room.types.js';
+import { multiplayerWsServer } from '../multiplayer/room.websocket.js';
 import { authService } from '../services/auth.service.js';
 import { quotaService } from '../services/quota.service.js';
 import { persistenceRepo } from '../storage/persistence.repository.js';
@@ -136,6 +137,59 @@ roomRouter.get('/:roomCode/qr', async (req: Request, res: Response, next: NextFu
         roomCode: room.roomCode,
         joinUrl,
         qrDataUrl,
+      })
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/rooms/:roomCode/close
+ * Safely closes an active multiplayer room and releases locks.
+ * Authorized for host (via hostToken), room owner, game owner, or Admin.
+ */
+roomRouter.post('/:roomCode/close', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const roomCode = String(req.params.roomCode).trim().toUpperCase();
+    const room = roomService.getRoomByCode(roomCode);
+
+    const providedHostToken =
+      (req.headers['x-host-token'] as string | undefined) ||
+      (req.body?.hostToken as string | undefined) ||
+      '';
+
+    const isHostTokenValid = Boolean(providedHostToken && providedHostToken === room.hostToken);
+
+    const storedSpec = gameStore.get(room.gameId);
+    const ownerInfo = persistenceRepo.getGameOwnerInfo(room.gameId);
+    const gameOwnerUserId =
+      storedSpec?.ownerUserId ?? ownerInfo?.ownerUserId ?? room.gameSpecification.ownerUserId ?? null;
+
+    const currentUserId = req.user?.userId ?? null;
+    const isAdmin = req.user?.role === 'ADMIN';
+    const isRoomOwner = Boolean(room.ownerUserId && currentUserId === room.ownerUserId);
+    const isGameOwner = Boolean(gameOwnerUserId && currentUserId === gameOwnerUserId);
+
+    if (!isHostTokenValid && !isAdmin && !isRoomOwner && !isGameOwner) {
+      throw new AppError(
+        'ACCESS_DENIED',
+        'Bạn không có quyền đóng phòng chơi này. Yêu cầu token của chủ phòng hoặc quyền quản lý bộ câu hỏi.',
+        403
+      );
+    }
+
+    room.close();
+    multiplayerWsServer.broadcastRoomClosed(
+      room.roomCode,
+      'Phòng chơi đã được đóng bởi chủ phòng hoặc người quản trị.'
+    );
+
+    res.status(200).json(
+      createSuccessResponse({
+        closed: true,
+        roomCode: room.roomCode,
+        state: room.state,
       })
     );
   } catch (err) {

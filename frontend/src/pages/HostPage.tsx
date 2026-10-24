@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from '../components/ToastContext.js';
 import { GameSocketClient, ConnectionStatus } from '../services/socket.js';
-import { fetchRoomQr } from '../services/api.js';
+import { fetchRoomQr, closeMultiplayerRoom } from '../services/api.js';
 import {
   AlertTriangleIcon,
   ArrowLeftIcon,
@@ -312,7 +312,14 @@ export const HostPage: React.FC<HostPageProps> = ({
     }
   };
 
-  const handleCancelRoom = () => {
+  const handleCancelRoom = async () => {
+    if (roomCode) {
+      try {
+        await closeMultiplayerRoom(roomCode, hostToken);
+      } catch {
+        // Continue clean cleanup even if server call fails
+      }
+    }
     handleRestart();
   };
 

@@ -337,6 +337,11 @@ export class GameSession {
   public abandon(): void {
     this.state = 'ABANDONED';
     this.finishedAt = new Date().toISOString();
+    try {
+      this.persistSessionState();
+    } catch {
+      // Graceful fallback if SQLite persistence is unavailable
+    }
   }
 
   /**

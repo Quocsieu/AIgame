@@ -22,11 +22,14 @@ import {
   XMarkIcon,
 } from '../components/Icons.js';
 import {
+  closeMultiplayerRoom,
   createRoom,
   deleteAllSavedGames,
   deleteSavedGame,
   downloadGameExport,
+  endPracticeSession,
   fetchCurrentUser,
+  fetchGameActiveStatus,
   fetchGameById,
   fetchGameQr,
   fetchRoomQr,
@@ -172,6 +175,20 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
   const [isModeModalOpen, setIsModeModalOpen] = useState(false);
   const [modeModalSpec, setModeModalSpec] = useState<GameSpecification | null>(null);
+
+  // Modal Kết thúc phiên chơi đơn
+  const [confirmEndSessionModal, setConfirmEndSessionModal] = useState<{
+    game: PersistedGameSummary;
+    sessionId: string;
+  } | null>(null);
+  const [isEndingSession, setIsEndingSession] = useState(false);
+
+  // Modal Đóng phòng chơi trực tiếp
+  const [confirmCloseRoomModal, setConfirmCloseRoomModal] = useState<{
+    game: PersistedGameSummary;
+    roomCode: string;
+  } | null>(null);
+  const [isClosingRoom, setIsClosingRoom] = useState(false);
 
   useEffect(() => {
     fetchCurrentUser()
@@ -380,6 +397,44 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       await loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter);
     } finally {
       setIsDeleting(false);
+    }
+  };
+
+  const handleExecuteEndSession = async () => {
+    if (!confirmEndSessionModal) return;
+    const { game, sessionId } = confirmEndSessionModal;
+    setIsEndingSession(true);
+    try {
+      await endPracticeSession(sessionId);
+      toast.success(
+        `Đã kết thúc phiên luyện tập chơi đơn cho "${game.title}". Bạn có thể tiếp tục quản lý hoặc xóa game.`,
+        'Kết thúc phiên thành công'
+      );
+      setConfirmEndSessionModal(null);
+      await loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter);
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể kết thúc phiên luyện tập.', 'Lỗi kết thúc phiên');
+    } finally {
+      setIsEndingSession(false);
+    }
+  };
+
+  const handleExecuteCloseRoom = async () => {
+    if (!confirmCloseRoomModal) return;
+    const { game, roomCode } = confirmCloseRoomModal;
+    setIsClosingRoom(true);
+    try {
+      await closeMultiplayerRoom(roomCode);
+      toast.success(
+        `Đã đóng phòng chơi trực tiếp (PIN: ${roomCode}) cho "${game.title}".`,
+        'Đóng phòng thành công'
+      );
+      setConfirmCloseRoomModal(null);
+      await loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter);
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể đóng phòng chơi trực tiếp.', 'Lỗi đóng phòng');
+    } finally {
+      setIsClosingRoom(false);
     }
   };
 
@@ -1889,6 +1944,110 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             {g.questionCount} câu
                           </span>
                         ) : null}
+
+                        {/* Active Solo Session Indicator */}
+                        {g.activeStatus?.hasActiveSession && (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <span
+                              style={{
+                                backgroundColor: 'rgba(249, 115, 22, 0.15)',
+                                color: 'var(--accent-orange, #f97316)',
+                                border: '1px solid rgba(249, 115, 22, 0.35)',
+                                padding: '0.12rem 0.45rem',
+                                borderRadius: '6px',
+                                fontSize: '0.72rem',
+                                fontWeight: 800,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                              }}
+                              title="Bộ câu hỏi đang có phiên luyện tập chơi đơn hoạt động"
+                            >
+                              <span>🟠 Chơi đơn</span>
+                              <span style={{ opacity: 0.85 }}>({g.activeStatus.activeSessionCount})</span>
+                            </span>
+                            {g.activeStatus.activeSessions?.[0] && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setConfirmEndSessionModal({
+                                    game: g,
+                                    sessionId: g.activeStatus!.activeSessions[0].sessionId,
+                                  })
+                                }
+                                style={{
+                                  backgroundColor: 'rgba(249, 115, 22, 0.12)',
+                                  color: 'var(--accent-orange, #f97316)',
+                                  border: '1px solid rgba(249, 115, 22, 0.4)',
+                                  borderRadius: '5px',
+                                  padding: '0.1rem 0.4rem',
+                                  fontSize: '0.68rem',
+                                  fontWeight: 800,
+                                  cursor: 'pointer',
+                                }}
+                                title="Kết thúc phiên chơi đơn để giải phóng khóa xóa game"
+                              >
+                                Kết thúc
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Active Multiplayer Room Indicator */}
+                        {g.activeStatus?.hasActiveRoom && (
+                          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
+                            <span
+                              style={{
+                                backgroundColor: 'rgba(168, 85, 247, 0.15)',
+                                color: 'var(--accent-purple, #a855f7)',
+                                border: '1px solid rgba(168, 85, 247, 0.35)',
+                                padding: '0.12rem 0.45rem',
+                                borderRadius: '6px',
+                                fontSize: '0.72rem',
+                                fontWeight: 800,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                              }}
+                              title={`Phòng đang mở. Mã PIN: ${g.activeStatus.activeRooms?.map((r) => r.roomCode).join(', ')}`}
+                            >
+                              <span>🟣 Chơi nhóm</span>
+                              {g.activeStatus.activeRooms?.[0] && (
+                                <span style={{ opacity: 0.9 }}>
+                                  (PIN: {g.activeStatus.activeRooms[0].roomCode} •{' '}
+                                  {g.activeStatus.activeRooms[0].state === 'WAITING'
+                                    ? 'Đang chờ'
+                                    : 'Đang đấu'}
+                                  )
+                                </span>
+                              )}
+                            </span>
+                            {g.activeStatus.activeRooms?.[0] && (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  setConfirmCloseRoomModal({
+                                    game: g,
+                                    roomCode: g.activeStatus!.activeRooms[0].roomCode,
+                                  })
+                                }
+                                style={{
+                                  backgroundColor: 'rgba(168, 85, 247, 0.12)',
+                                  color: 'var(--accent-purple, #a855f7)',
+                                  border: '1px solid rgba(168, 85, 247, 0.4)',
+                                  borderRadius: '5px',
+                                  padding: '0.1rem 0.4rem',
+                                  fontSize: '0.68rem',
+                                  fontWeight: 800,
+                                  cursor: 'pointer',
+                                }}
+                                title="Đóng phòng chơi trực tiếp để giải phóng khóa xóa game"
+                              >
+                                Đóng phòng
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -1950,19 +2109,34 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         <button
                           type="button"
                           onClick={() => handleOpenDeleteModal(g)}
+                          title={
+                            !g.activeStatus?.isDeletable && (g.activeStatus?.hasActiveSession || g.activeStatus?.hasActiveRoom)
+                              ? 'Bộ câu hỏi đang có phiên/phòng hoạt động. Hãy kết thúc trước khi xóa.'
+                              : 'Xóa bộ câu hỏi'
+                          }
                           style={{
-                            backgroundColor: 'rgba(244, 63, 94, 0.12)',
-                            color: 'var(--accent-rose)',
-                            border: '1px solid var(--accent-rose)',
+                            backgroundColor: !g.activeStatus?.isDeletable && (g.activeStatus?.hasActiveSession || g.activeStatus?.hasActiveRoom)
+                              ? 'rgba(100, 116, 139, 0.12)'
+                              : 'rgba(244, 63, 94, 0.12)',
+                            color: !g.activeStatus?.isDeletable && (g.activeStatus?.hasActiveSession || g.activeStatus?.hasActiveRoom)
+                              ? 'var(--text-muted)'
+                              : 'var(--accent-rose)',
+                            border: `1px solid ${!g.activeStatus?.isDeletable && (g.activeStatus?.hasActiveSession || g.activeStatus?.hasActiveRoom) ? 'var(--border-subtle)' : 'var(--accent-rose)'}`,
                             borderRadius: '6px',
                             padding: '0 0.55rem',
                             height: '32px',
                             fontWeight: 700,
                             fontSize: '0.78rem',
                             cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.25rem',
                           }}
                         >
-                          Xóa
+                          {!g.activeStatus?.isDeletable && (g.activeStatus?.hasActiveSession || g.activeStatus?.hasActiveRoom) ? (
+                            <LockIcon size={12} />
+                          ) : null}
+                          <span>Xóa</span>
                         </button>
                         <button
                           type="button"
@@ -2536,9 +2710,100 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               </div>
             </div>
 
-            <p style={{ margin: '0 0 1.5rem 0', fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            <p style={{ margin: '0 0 1.25rem 0', fontSize: '0.85rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
               Toàn bộ nội dung câu hỏi, phương án trả lời và cài đặt của bộ câu hỏi này sẽ bị xóa hoàn toàn khỏi cơ sở dữ liệu.
             </p>
+
+            {/* Cảnh báo chi tiết nếu game đang có phiên hoạt động */}
+            {(!confirmDeleteGame.activeStatus?.isDeletable &&
+              (confirmDeleteGame.activeStatus?.hasActiveSession ||
+                confirmDeleteGame.activeStatus?.hasActiveRoom)) && (
+              <div
+                style={{
+                  backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                  border: '1px solid rgba(245, 158, 11, 0.35)',
+                  borderRadius: '12px',
+                  padding: '0.85rem 1rem',
+                  marginBottom: '1.25rem',
+                  fontSize: '0.84rem',
+                  color: 'var(--accent-amber)',
+                  lineHeight: 1.5,
+                }}
+              >
+                <div style={{ fontWeight: 800, marginBottom: '0.4rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <span>⚠️</span>
+                  <span>Bộ câu hỏi đang được sử dụng và tạm khóa xóa:</span>
+                </div>
+                {confirmDeleteGame.activeStatus?.hasActiveSession && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '0.5rem',
+                      marginBottom: confirmDeleteGame.activeStatus.hasActiveRoom ? '0.35rem' : 0,
+                    }}
+                  >
+                    <span>
+                      • Đang có <strong>{confirmDeleteGame.activeStatus.activeSessionCount}</strong> phiên luyện tập chơi đơn
+                    </span>
+                    {confirmDeleteGame.activeStatus.activeSessions?.[0] && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const sessId = confirmDeleteGame.activeStatus!.activeSessions[0].sessionId;
+                          const g = confirmDeleteGame;
+                          setConfirmDeleteGame(null);
+                          setConfirmEndSessionModal({ game: g, sessionId: sessId });
+                        }}
+                        style={{
+                          backgroundColor: 'rgba(249, 115, 22, 0.18)',
+                          color: 'var(--accent-orange, #f97316)',
+                          border: '1px solid rgba(249, 115, 22, 0.4)',
+                          borderRadius: '6px',
+                          padding: '0.2rem 0.55rem',
+                          fontSize: '0.74rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Kết thúc phiên đơn
+                      </button>
+                    )}
+                  </div>
+                )}
+                {confirmDeleteGame.activeStatus?.hasActiveRoom && (
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem' }}>
+                    <span>
+                      • Đang có phòng chơi trực tiếp (PIN: <strong>{confirmDeleteGame.activeStatus.activeRooms?.[0]?.roomCode}</strong>)
+                    </span>
+                    {confirmDeleteGame.activeStatus.activeRooms?.[0] && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const rCode = confirmDeleteGame.activeStatus!.activeRooms[0].roomCode;
+                          const g = confirmDeleteGame;
+                          setConfirmDeleteGame(null);
+                          setConfirmCloseRoomModal({ game: g, roomCode: rCode });
+                        }}
+                        style={{
+                          backgroundColor: 'rgba(168, 85, 247, 0.18)',
+                          color: 'var(--accent-purple, #a855f7)',
+                          border: '1px solid rgba(168, 85, 247, 0.4)',
+                          borderRadius: '6px',
+                          padding: '0.2rem 0.55rem',
+                          fontSize: '0.74rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Đóng phòng chơi
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
               <button
@@ -2590,6 +2855,263 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     <TrashIcon size={16} />
                     <span>Xác nhận xóa vĩnh viễn</span>
                   </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Xác Nhận Kết Thúc Phiên Chơi Đơn */}
+      {confirmEndSessionModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem',
+            backdropFilter: 'blur(4px)',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '2px solid rgba(249, 115, 22, 0.5)',
+              borderRadius: '20px',
+              padding: '1.75rem',
+              maxWidth: '480px',
+              width: '100%',
+              boxShadow: '0 25px 50px -12px rgba(249, 115, 22, 0.25)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '1.25rem' }}>
+              <div
+                style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(249, 115, 22, 0.15)',
+                  color: 'var(--accent-orange, #f97316)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  fontSize: '1.25rem',
+                }}
+              >
+                🟠
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                  Kết Thúc Phiên Chơi Đơn
+                </h3>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                  Giải phóng khóa hoạt động cho bộ câu hỏi
+                </span>
+              </div>
+            </div>
+
+            <p style={{ margin: '0 0 1rem 0', fontSize: '0.88rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+              Bạn có chắc chắn muốn kết thúc phiên luyện tập chơi đơn cho <strong>"{confirmEndSessionModal.game.title}"</strong> không?
+            </p>
+
+            <div
+              style={{
+                backgroundColor: 'var(--bg-input)',
+                borderRadius: '10px',
+                padding: '0.75rem 0.9rem',
+                fontSize: '0.82rem',
+                color: 'var(--text-secondary)',
+                lineHeight: 1.45,
+                marginBottom: '1.25rem',
+              }}
+            >
+              ℹ️ Phiên chơi đơn sẽ được chuyển sang trạng thái kết thúc an toàn. Điểm số và lịch sử đã hoàn thành vẫn được lưu trữ trong cơ sở dữ liệu. Khóa ngăn xóa bộ câu hỏi sẽ được mở khi không còn phiên hoặc phòng nào khác hoạt động.
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                disabled={isEndingSession}
+                onClick={() => setConfirmEndSessionModal(null)}
+                style={{
+                  backgroundColor: 'var(--bg-card)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '10px',
+                  padding: '0.6rem 1.15rem',
+                  minHeight: '42px',
+                  fontWeight: 700,
+                  fontSize: '0.88rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                disabled={isEndingSession}
+                onClick={handleExecuteEndSession}
+                style={{
+                  backgroundColor: 'var(--accent-orange, #f97316)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '10px',
+                  padding: '0.6rem 1.25rem',
+                  minHeight: '42px',
+                  fontWeight: 800,
+                  fontSize: '0.88rem',
+                  cursor: isEndingSession ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                {isEndingSession ? (
+                  <>
+                    <SpinnerIcon size={16} />
+                    <span>Đang kết thúc...</span>
+                  </>
+                ) : (
+                  <span>Xác nhận kết thúc phiên</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Xác Nhận Đóng Phòng Chơi Trực Tiếp */}
+      {confirmCloseRoomModal && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            backgroundColor: 'rgba(0, 0, 0, 0.7)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000,
+            padding: '1rem',
+            backdropFilter: 'blur(4px)',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '2px solid rgba(168, 85, 247, 0.5)',
+              borderRadius: '20px',
+              padding: '1.75rem',
+              maxWidth: '480px',
+              width: '100%',
+              boxShadow: '0 25px 50px -12px rgba(168, 85, 247, 0.25)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', marginBottom: '1.25rem' }}>
+              <div
+                style={{
+                  width: '42px',
+                  height: '42px',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(168, 85, 247, 0.15)',
+                  color: 'var(--accent-purple, #a855f7)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  fontSize: '1.25rem',
+                }}
+              >
+                🟣
+              </div>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                  Đóng Phòng Chơi Trực Tiếp
+                </h3>
+                <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
+                  Mã PIN phòng: <strong>{confirmCloseRoomModal.roomCode}</strong>
+                </span>
+              </div>
+            </div>
+
+            <p style={{ margin: '0 0 1rem 0', fontSize: '0.88rem', color: 'var(--text-primary)', lineHeight: 1.5 }}>
+              Bạn có chắc chắn muốn đóng phòng chơi trực tiếp (PIN: <strong>{confirmCloseRoomModal.roomCode}</strong>) của <strong>"{confirmCloseRoomModal.game.title}"</strong> không?
+            </p>
+
+            <div
+              style={{
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.25)',
+                borderRadius: '10px',
+                padding: '0.75rem 0.9rem',
+                fontSize: '0.82rem',
+                color: 'var(--accent-rose)',
+                lineHeight: 1.45,
+                marginBottom: '1.25rem',
+              }}
+            >
+              ⚠️ Phòng chơi sẽ được đóng ngay lập tức. Người chơi trong phòng sẽ nhận thông báo phòng đã kết thúc và được đưa về màn hình nhập PIN.
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem' }}>
+              <button
+                type="button"
+                disabled={isClosingRoom}
+                onClick={() => setConfirmCloseRoomModal(null)}
+                style={{
+                  backgroundColor: 'var(--bg-card)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '10px',
+                  padding: '0.6rem 1.15rem',
+                  minHeight: '42px',
+                  fontWeight: 700,
+                  fontSize: '0.88rem',
+                  cursor: 'pointer',
+                }}
+              >
+                Hủy bỏ
+              </button>
+              <button
+                type="button"
+                disabled={isClosingRoom}
+                onClick={handleExecuteCloseRoom}
+                style={{
+                  backgroundColor: 'var(--accent-purple, #a855f7)',
+                  color: '#ffffff',
+                  border: 'none',
+                  borderRadius: '10px',
+                  padding: '0.6rem 1.25rem',
+                  minHeight: '42px',
+                  fontWeight: 800,
+                  fontSize: '0.88rem',
+                  cursor: isClosingRoom ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                {isClosingRoom ? (
+                  <>
+                    <SpinnerIcon size={16} />
+                    <span>Đang đóng phòng...</span>
+                  </>
+                ) : (
+                  <span>Xác nhận đóng phòng</span>
                 )}
               </button>
             </div>

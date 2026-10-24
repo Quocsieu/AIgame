@@ -12,6 +12,7 @@ import type {
   IngestedSource,
   LearningAnalyticsSummary,
   MixedQuestionDistribution,
+  GameActiveStatus,
   PersistedGameSummary,
   PersistedPracticeSessionRecord,
   PracticeFinalResult,
@@ -296,6 +297,49 @@ export async function deleteSavedGame(gameId: string): Promise<void> {
   if (!data.success) {
     throw new Error(data.error?.message || 'Không thể xóa bộ câu hỏi.');
   }
+}
+
+export async function fetchGameActiveStatus(gameId: string): Promise<GameActiveStatus> {
+  const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/status`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể tải trạng thái hoạt động của game.');
+  }
+  return data.data;
+}
+
+export async function endPracticeSession(sessionId: string): Promise<{ ended: boolean; session: any }> {
+  const res = await fetch(`${API_BASE_URL}/games/sessions/${encodeURIComponent(sessionId)}/end`, {
+    method: 'POST',
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể kết thúc phiên luyện tập.');
+  }
+  return data.data;
+}
+
+export async function closeMultiplayerRoom(
+  roomCode: string,
+  hostToken?: string
+): Promise<{ closed: boolean; roomCode: string }> {
+  const headers = buildAuthHeaders();
+  if (hostToken) {
+    headers['x-host-token'] = hostToken;
+  }
+  const res = await fetch(`${API_BASE_URL}/rooms/${encodeURIComponent(roomCode)}/close`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ hostToken }),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể đóng phòng chơi trực tiếp.');
+  }
+  return data.data;
 }
 
 export async function deleteAllSavedGames(): Promise<{

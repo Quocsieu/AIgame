@@ -725,6 +725,13 @@ export class MultiplayerWebSocketServer {
     }
   }
 
+  public broadcastRoomClosed(roomCode: string, reason?: string): void {
+    this.broadcastToRoom(roomCode, {
+      type: 'room.closed' as any,
+      reason: reason || 'Phòng chơi đã được đóng bởi chủ phòng.',
+    } as any);
+  }
+
   public send(ws: WebSocket, message: OutboundMessage): void {
     if (ws.readyState === WebSocket.OPEN) {
       try {

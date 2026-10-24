@@ -84,6 +84,20 @@ export class GameSessionStore {
     return false;
   }
 
+  public getActiveSessionsForGame(gameId: string, now: number = Date.now()): GameSession[] {
+    const active: GameSession[] = [];
+    for (const entry of this.entries.values()) {
+      if (
+        entry.session.specification.gameId === gameId &&
+        this.isSessionActive(entry.session) &&
+        now - entry.updatedAt <= this.ttlMs
+      ) {
+        active.push(entry.session);
+      }
+    }
+    return active;
+  }
+
   public cleanupExpired(now: number = Date.now(), ttlMs: number = this.ttlMs): number {
     let cleaned = 0;
     for (const [sessionId, entry] of this.entries.entries()) {

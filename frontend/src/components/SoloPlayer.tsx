@@ -191,7 +191,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       setPlayerScore((prev) => prev + res.pointsEarned);
       setPlayerStreak((prev) => (res.isCorrect ? prev + 1 : 0));
     } catch (err: any) {
-      toast.error(err.message || 'Không thể gửi câu trả lời.', 'Lỗi nộp bài');
+      if (err.message?.includes('abandoned') || err.message?.includes('đã bị kết thúc')) {
+        toast.warning('Phiên luyện tập này đã được kết thúc bởi người tạo. Đang chuyển hướng...', 'Phiên đã đóng');
+        setTimeout(() => handleLeave(), 1500);
+      } else {
+        toast.error(err.message || 'Không thể gửi câu trả lời.', 'Lỗi nộp bài');
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -218,7 +223,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         startCountdown(qTime);
       }
     } catch (err: any) {
-      toast.error(err.message || 'Không thể tải câu hỏi tiếp theo.', 'Lỗi chuyển câu');
+      if (err.message?.includes('abandoned') || err.message?.includes('đã bị kết thúc')) {
+        toast.warning('Phiên luyện tập này đã được kết thúc bởi người tạo. Đang chuyển hướng...', 'Phiên đã đóng');
+        setTimeout(() => handleLeave(), 1500);
+      } else {
+        toast.error(err.message || 'Không thể tải câu hỏi tiếp theo.', 'Lỗi chuyển câu');
+      }
     } finally {
       setIsLoading(false);
     }

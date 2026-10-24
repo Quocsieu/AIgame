@@ -131,6 +131,19 @@ export class GameEngine {
   }
 
   /**
+   * Safely ends/abandons an active game session and releases locks.
+   * Handles idempotent calls gracefully.
+   */
+  public endSession(sessionId: string): GameSessionSummary {
+    const session = this.getSession(sessionId);
+    if (session.state !== 'FINISHED' && session.state !== 'ABANDONED') {
+      session.abandon();
+      sessionStore.save(session);
+    }
+    return session.getSummary();
+  }
+
+  /**
    * Retrieves the final GameResult once the game is finished (from memory or SQLite history).
    */
   public getResult(sessionId: string): GameResult {

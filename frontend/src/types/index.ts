@@ -259,6 +259,31 @@ export interface UserQuotaSummary {
   };
 }
 
+export interface GameActiveSessionItem {
+  sessionId: string;
+  state: string;
+  startedAt: string | null;
+}
+
+export interface GameActiveRoomItem {
+  roomId: string;
+  roomCode: string;
+  state: string;
+  playerCount: number;
+  createdAt: number;
+}
+
+export interface GameActiveStatus {
+  gameId: string;
+  hasActiveSession: boolean;
+  activeSessionCount: number;
+  activeSessions: GameActiveSessionItem[];
+  hasActiveRoom: boolean;
+  activeRoomCount: number;
+  activeRooms: GameActiveRoomItem[];
+  isDeletable: boolean;
+}
+
 export interface PersistedGameSummary {
   gameId: string;
   ownerUserId: string | null;
@@ -273,6 +298,7 @@ export interface PersistedGameSummary {
   generatedAt: string;
   createdAt: string;
   updatedAt: string;
+  activeStatus?: GameActiveStatus;
 }
 
 export interface PersistedPracticeSessionRecord {
