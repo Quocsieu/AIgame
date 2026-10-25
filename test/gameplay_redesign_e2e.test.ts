@@ -9,13 +9,13 @@ import { authService } from '../src/services/auth.service.js';
 import { Browser, sleep } from '../../../WEB_2064/ASM/.agents/skills/design-taste-frontend/scripts/lib/cdp.mjs';
 
 async function runGameplayRedesignE2E(): Promise<void> {
-  console.log('=== KIỂM THỬ E2E TRÌNH DUYỆT THẬT — REDESIGN GAMEPLAY 2D THEO NGÀNH NGHỀ ===\n');
+  console.log('=== KIỂM THỬ E2E TRÌNH DUYỆT THẬT — ĐA DẠNG GAMEPLAY 2D THEO NGÀNH NGHỀ ===\n');
 
   const testEmail = `gameplay_2d_${Date.now()}@example.com`;
   const reg = authService.register({
     email: testEmail,
     password: 'Password123!',
-    displayName: 'Gameplay 2D Tester',
+    displayName: 'Gameplay Diversity Tester',
   });
   const authHeader = { Authorization: `Bearer ${reg.token}` };
 
@@ -31,7 +31,7 @@ async function runGameplayRedesignE2E(): Promise<void> {
     },
     {
       key: 'moto_garage',
-      title: 'Xưởng Chẩn Đoán & Sửa Chữa Động Cơ 2D',
+      title: 'Xưởng Cơ Khí Tháo Lắp & Cân Lực Cờ-Lê 2D',
       industryOverride: 'MOTORCYCLE_TRAFFIC',
       sourceText:
         'Kỹ thuật chẩn đoán và sửa chữa bảo dưỡng động cơ xe máy 4 kỳ tại xưởng dịch vụ: kiểm tra khe hở bugi đánh lửa, đo áp suất nén buồng đốt piston xi lanh, đo điện áp ắc quy 12V.',
@@ -40,7 +40,7 @@ async function runGameplayRedesignE2E(): Promise<void> {
     },
     {
       key: 'fnb_kitchen',
-      title: 'Tuần Tra Bếp Một Chiều & Kiểm Định HACCP 2D',
+      title: 'Băng Chuyền Bếp 3 Làn & Chế Biến HACCP 2D',
       industryOverride: 'FNB_HOSPITALITY',
       sourceText:
         'Quy chuẩn vệ sinh an toàn thực phẩm HACCP trong khu bếp một chiều nhà hàng: giám sát nhiệt độ tủ đông -18 độ C, phân tách dao thớt thực phẩm sống và chín để chống nhiễm khuẩn chéo, lưu mẫu thức ăn 24h.',
@@ -49,7 +49,7 @@ async function runGameplayRedesignE2E(): Promise<void> {
     },
     {
       key: 'moto_showroom',
-      title: 'Sảnh Showroom Tư Vấn Xe Máy 2D',
+      title: 'Sảnh Ghép Mẫu Xe & Phục Vụ Khách Hàng Showroom 2D',
       industryOverride: 'MOTORCYCLE_TRAFFIC',
       sourceText:
         'Quy trình tư vấn bán xe máy tại đại lý showroom: đón tiếp khách hàng, khai thác nhu cầu đi lại hàng ngày và ngân sách tài chính, giới thiệu dòng xe tay ga cốp rộng tiết kiệm xăng và chốt đơn.',
@@ -58,7 +58,7 @@ async function runGameplayRedesignE2E(): Promise<void> {
     },
     {
       key: 'it_coding_circuit',
-      title: 'Mạch Số Săn Bug & Kiểm Thử Unit Test 2D',
+      title: 'Cyber Platformer Nhảy Bậc Logic & Bắn Bug 2D',
       industryOverride: 'IT_TECHNOLOGY',
       sourceText:
         'Kỹ thuật lập trình phần mềm, gỡ lỗi mã nguồn (debugging) và kiểm thử đơn vị (Unit Test): đọc stack trace khi xảy ra NullPointerException / TypeError, đặt breakpoint kiểm tra biến trong vòng lặp.',
@@ -67,7 +67,7 @@ async function runGameplayRedesignE2E(): Promise<void> {
     },
     {
       key: 'it_cyber_soc',
-      title: 'Radar Phòng Thủ Mạng & Chặn Mã Độc SOC 2D',
+      title: 'Pháo Đài Khiên Xoay 360 & Bắn Hạ Mã Độc SOC 2D',
       industryOverride: 'IT_TECHNOLOGY',
       sourceText:
         'Quy trình giám sát và phản ứng sự cố an ninh mạng tại trung tâm SOC: phân tích cảnh báo SIEM, cô lập node máy chủ bị nhiễm mã độc ransomware, cấu hình tường lửa WAF chặn SQL Injection.',
@@ -165,16 +165,12 @@ async function runGameplayRedesignE2E(): Promise<void> {
         if (briefingCheck.found) break;
         await sleep(250);
       }
-      if (!briefingCheck.found) {
-        console.error('DEBUG PAGE BODY:', briefingCheck.bodyPreview, 'ERRORS:', page.consoleErrors);
-      }
       assert.equal(briefingCheck.found, true, `${sc.key}: Pre-game briefing must render`);
       assert.ok(
         briefingCheck.textLen < 480,
         `${sc.key}: Pre-game briefing must be concise (<480 chars), got ${briefingCheck.textLen}`
       );
 
-      // Wait for live session start
       await sleep(900);
 
       // 2. Verify active 2D scene renders and Pause/Resume works
@@ -186,6 +182,7 @@ async function runGameplayRedesignE2E(): Promise<void> {
           sceneFound: Boolean(sceneEl),
           pauseBtnFound: Boolean(pauseBtn),
           popupHiddenInitially: !inlinePopupBefore,
+          sceneText: sceneEl ? sceneEl.innerText : '',
         };
       })()`);
       assert.equal(sceneCheck.sceneFound, true, `${sc.key}: Scene ${sc.expectedSceneTestId} must render`);
@@ -195,7 +192,7 @@ async function runGameplayRedesignE2E(): Promise<void> {
         assert.equal(
           sceneCheck.popupHiddenInitially,
           true,
-          `${sc.key}: Question popup must be hidden while exploring the 2D arena`
+          `${sc.key}: Question popup must be hidden while playing the 2D scene`
         );
 
         // Test Pause -> Resume
@@ -208,14 +205,67 @@ async function runGameplayRedesignE2E(): Promise<void> {
         await page.eval(`document.querySelector('[data-testid="hud-pause-button"]').click()`);
         await sleep(250);
 
-        // Stage 1: Move in 2D arena & engage target -> Question Popup opens -> Answer -> Continue
-        await page.eval(`(() => {
-          const dpadRight = Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'D');
-          if (dpadRight) dpadRight.click();
-          const primaryBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Space'));
-          if (primaryBtn) primaryBtn.click();
-        })()`);
-        await sleep(450);
+        // Stage 1: Execute the UNIQUE industry gameplay mechanic to trigger the challenge popup!
+        if (sc.key === 'moto_garage') {
+          // Mechanic: Tighten 2 loose bolts + calibrate torque meter -> auto-opens challenge!
+          await page.eval(`(() => {
+            const b0 = document.querySelector('[data-testid="garage-bolt-0"]');
+            const b1 = document.querySelector('[data-testid="garage-bolt-1"]');
+            const cal = document.querySelector('[data-testid="garage-torque-calibrate-btn"]');
+            if (b0) b0.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            if (b1) b1.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            if (cal) cal.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          })()`);
+        } else if (sc.key === 'fnb_kitchen') {
+          // Verify old 5-box diagram (KHU-01..KHU-05) is completely gone and 3 conveyor lanes exist
+          const hasThreeLanes = await page.eval(`Boolean(
+            document.querySelector('[data-testid="kitchen-lane-0"]') &&
+            document.querySelector('[data-testid="kitchen-lane-1"]') &&
+            document.querySelector('[data-testid="kitchen-lane-2"]')
+          )`);
+          assert.equal(hasThreeLanes, true, 'Kitchen game must render 3 conveyor prep lanes');
+          // Chop/cook 3 ingredients across lanes to reach 100% dish progress -> auto-opens HACCP popup!
+          await page.eval(`(() => {
+            const prepBtn = document.querySelector('[data-testid="kitchen-prep-action-btn"]');
+            if (prepBtn) {
+              prepBtn.click();
+              prepBtn.click();
+              prepBtn.click();
+            }
+          })()`);
+        } else if (sc.key === 'moto_showroom') {
+          // Mechanic: Pick product from shelf #0, then deliver to customer booth!
+          await page.eval(`(() => {
+            const shelf0 = document.querySelector('[data-testid="consultation-shelf-0"]');
+            if (shelf0) shelf0.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            const booth = document.querySelector('[data-testid="consultation-customer-booth"]');
+            if (booth) booth.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          })()`);
+        } else if (sc.key === 'it_coding_circuit') {
+          // Mechanic: Jump across logic platforms, shoot the crawling bug monster, then enter Terminal Portal!
+          await page.eval(`(() => {
+            const jumpBtn = document.querySelector('[data-testid="coding-jump-btn"]');
+            const shootBtn = document.querySelector('[data-testid="coding-shoot-bug-btn"]');
+            const portalBtn = document.querySelector('[data-testid="coding-engage-portal-btn"]');
+            if (jumpBtn) jumpBtn.click();
+            if (shootBtn) shootBtn.click();
+            if (portalBtn) portalBtn.click();
+          })()`);
+        } else if (sc.key === 'it_cyber_soc') {
+          // Mechanic: Rotate orbital shield and fire 3 firewall laser pulses to intercept 3 malware packets!
+          await page.eval(`(() => {
+            const rotL = document.querySelector('[data-testid="cyber-rotate-left-btn"]');
+            const fireBtn = document.querySelector('[data-testid="cyber-fire-pulse-btn"]');
+            if (rotL) rotL.click();
+            if (fireBtn) {
+              fireBtn.click();
+              fireBtn.click();
+              fireBtn.click();
+            }
+          })()`);
+        }
+
+        await sleep(500);
 
         const popupOpenStage1 = await page.eval(
           `Boolean(document.querySelector('[data-testid="ingame-challenge-popup"]'))`
@@ -223,7 +273,7 @@ async function runGameplayRedesignE2E(): Promise<void> {
         assert.equal(
           popupOpenStage1,
           true,
-          `${sc.key}: In-game challenge popup must open when target is engaged`
+          `${sc.key}: In-game challenge popup must open after completing unique Stage 1 gameplay action`
         );
 
         await page.eval(`(() => {
@@ -249,9 +299,9 @@ async function runGameplayRedesignE2E(): Promise<void> {
           `${sc.key}: Challenge popup must close when resuming 2D gameplay in Stage 2`
         );
 
-        // Stage 2: Engage target #2 -> Answer -> Finish Game
+        // Stage 2: Trigger primary action -> Answer -> Finish Game
         await page.eval(`(() => {
-          const primaryBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('Space'));
+          const primaryBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('(Space)'));
           if (primaryBtn) primaryBtn.click();
         })()`);
         await sleep(450);
@@ -314,7 +364,7 @@ async function runGameplayRedesignE2E(): Promise<void> {
 
       await page.close();
       console.log(
-        `  [PASS] ${sc.key} (${sc.title}) -> 2D Arena, Target Trigger, Popup Question, Pause/Resume & Responsive OK`
+        `  [PASS] ${sc.key} (${sc.title}) -> Cơ chế Gameplay riêng, Tương tác 2D, Câu hỏi Popup & Responsive OK`
       );
     }
   } finally {
@@ -322,7 +372,7 @@ async function runGameplayRedesignE2E(): Promise<void> {
     server.close();
   }
 
-  console.log('\n=== HOÀN TẤT KIỂM THỬ E2E 6 SCENE GAMEPLAY 2D TRÊN TRÌNH DUYỆT THẬT ===');
+  console.log('\n=== HOÀN TẤT KIỂM THỬ E2E 6 SCENE GAMEPLAY ĐA DẠNG TRÊN TRÌNH DUYỆT THẬT ===');
 }
 
 runGameplayRedesignE2E().catch(err => {

@@ -34,25 +34,7 @@ export interface InteractiveSceneCommonProps {
   onHazardHit?: () => void;
 }
 
-interface ArenaCollectible {
-  id: string;
-  x: number;
-  y: number;
-  label: string;
-  collected: boolean;
-}
-
-interface ArenaHazard {
-  id: string;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  radius: number;
-  label: string;
-}
-
-interface ArenaFloatingPopup {
+interface FloatingFeedbackText {
   id: number;
   x: number;
   y: number;
@@ -61,291 +43,8 @@ interface ArenaFloatingPopup {
 }
 
 /**
- * Shared 2D Interactive Game Hook for Non-Runner Scenes
- * Enables real-time WASD / Arrow movement, click/tap-to-move on the 2D SVG arena (560x280),
- * collectible items (+10 pts), moving hazards to dodge, and proximity auto-triggering of targets.
- */
-function useArena2DGame(params: {
-  activeStageIndex: number;
-  stageInspected: boolean;
-  isPaused?: boolean;
-  targetX: number;
-  targetY: number;
-  initialX: number;
-  initialY: number;
-  selectedToolId: string;
-  onInspectStage: (toolId?: string) => void;
-  onCollectBonus?: (pts: number) => void;
-  onHazardHit?: () => void;
-  collectibleLabels: [string, string, string];
-  hazardLabel: string;
-}) {
-  const {
-    activeStageIndex,
-    stageInspected,
-    isPaused = false,
-    targetX,
-    targetY,
-    initialX,
-    initialY,
-    selectedToolId,
-    onInspectStage,
-    onCollectBonus,
-    onHazardHit,
-    collectibleLabels,
-    hazardLabel,
-  } = params;
-
-  const [avatarPos, setAvatarPos] = useState<{ x: number; y: number }>({
-    x: initialX,
-    y: initialY,
-  });
-  const [scanProgress, setScanProgress] = useState<number>(0);
-  const [collectibles, setCollectibles] = useState<ArenaCollectible[]>([]);
-  const [hazards, setHazards] = useState<ArenaHazard[]>([]);
-  const [popups, setPopups] = useState<ArenaFloatingPopup[]>([]);
-
-  const stateRef = useRef({
-    x: initialX,
-    y: initialY,
-    destX: null as number | null,
-    destY: null as number | null,
-    keys: { up: false, down: false, left: false, right: false },
-    lastHazardHitAt: 0,
-    autoLockedStage: -1,
-  });
-
-  // Reset collectibles & hazard positions when stage changes
-  useEffect(() => {
-    stateRef.current.destX = null;
-    stateRef.current.destY = null;
-    setScanProgress(stageInspected ? 100 : 0);
-
-    const seed = (activeStageIndex + 1) * 47;
-    setCollectibles([
-      {
-        id: `col_${activeStageIndex}_0`,
-        x: 95 + ((seed * 3) % 140),
-        y: 62 + ((seed * 5) % 145),
-        label: collectibleLabels[0],
-        collected: false,
-      },
-      {
-        id: `col_${activeStageIndex}_1`,
-        x: 260 + ((seed * 7) % 160),
-        y: 58 + ((seed * 11) % 150),
-        label: collectibleLabels[1],
-        collected: false,
-      },
-    ]);
-
-    setHazards([
-      {
-        id: `haz_${activeStageIndex}_0`,
-        x: Math.max(70, Math.min(480, targetX - 55)),
-        y: Math.max(55, Math.min(220, targetY + 35)),
-        vx: 64,
-        vy: -42,
-        radius: 13,
-        label: hazardLabel,
-      },
-    ]);
-  }, [activeStageIndex, targetX, targetY, collectibleLabels[0], collectibleLabels[1], hazardLabel]);
-
-  useEffect(() => {
-    if (stageInspected) {
-      setScanProgress(100);
-    }
-  }, [stageInspected]);
-
-  const addPopup = useCallback((x: number, y: number, text: string, color: string) => {
-    setPopups(prev => [
-      ...prev.slice(-4),
-      { id: Date.now() + Math.random(), x, y, text, color },
-    ]);
-  }, []);
-
-  // Keyboard movement listeners (WASD / Arrows)
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-      if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') {
-        stateRef.current.keys.up = true;
-        stateRef.current.destX = null;
-      } else if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') {
-        stateRef.current.keys.down = true;
-        stateRef.current.destX = null;
-      } else if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
-        stateRef.current.keys.left = true;
-        stateRef.current.destX = null;
-      } else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
-        stateRef.current.keys.right = true;
-        stateRef.current.destX = null;
-      }
-    };
-    const onKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') stateRef.current.keys.up = false;
-      if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') stateRef.current.keys.down = false;
-      if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') stateRef.current.keys.left = false;
-      if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') stateRef.current.keys.right = false;
-    };
-    window.addEventListener('keydown', onKeyDown);
-    window.addEventListener('keyup', onKeyUp);
-    return () => {
-      window.removeEventListener('keydown', onKeyDown);
-      window.removeEventListener('keyup', onKeyUp);
-    };
-  }, []);
-
-  // 30fps lightweight arena game tick
-  useEffect(() => {
-    if (isPaused || stageInspected) return;
-
-    const timer = window.setInterval(() => {
-      const s = stateRef.current;
-      const dt = 0.033;
-      const speed = 175;
-
-      let vx = 0;
-      let vy = 0;
-      if (s.keys.left) vx -= speed;
-      if (s.keys.right) vx += speed;
-      if (s.keys.up) vy -= speed;
-      if (s.keys.down) vy += speed;
-
-      if (vx === 0 && vy === 0 && s.destX !== null && s.destY !== null) {
-        const dx = s.destX - s.x;
-        const dy = s.destY - s.y;
-        const dist = Math.hypot(dx, dy);
-        if (dist > 5) {
-          vx = (dx / dist) * (speed * 1.25);
-          vy = (dy / dist) * (speed * 1.25);
-        } else {
-          s.destX = null;
-          s.destY = null;
-        }
-      }
-
-      s.x = Math.max(32, Math.min(528, s.x + vx * dt));
-      s.y = Math.max(34, Math.min(246, s.y + vy * dt));
-      setAvatarPos({ x: Math.round(s.x), y: Math.round(s.y) });
-
-      // Update moving hazards & check collision
-      setHazards(prevHazards =>
-        prevHazards.map(h => {
-          let nx = h.x + h.vx * dt;
-          let ny = h.y + h.vy * dt;
-          let nvx = h.vx;
-          let nvy = h.vy;
-          if (nx < 48 || nx > 512) {
-            nvx = -nvx;
-            nx = Math.max(48, Math.min(512, nx));
-          }
-          if (ny < 44 || ny > 236) {
-            nvy = -nvy;
-            ny = Math.max(44, Math.min(236, ny));
-          }
-
-          const dHaz = Math.hypot(s.x - nx, s.y - ny);
-          const now = Date.now();
-          if (dHaz < h.radius + 14 && now - s.lastHazardHitAt > 1400) {
-            s.lastHazardHitAt = now;
-            onHazardHit?.();
-            addPopup(nx, ny - 12, `-8% ${h.label}`, '#e5566f');
-          }
-          return { ...h, x: nx, y: ny, vx: nvx, vy: nvy };
-        })
-      );
-
-      // Check collectible pickup
-      setCollectibles(prevCols =>
-        prevCols.map(c => {
-          if (c.collected) return c;
-          const dCol = Math.hypot(s.x - c.x, s.y - c.y);
-          if (dCol < 26) {
-            onCollectBonus?.(10);
-            addPopup(c.x, c.y - 10, `+10Đ ${c.label}`, '#3fc07a');
-            return { ...c, collected: true };
-          }
-          return c;
-        })
-      );
-
-      // Check proximity to active target checkpoint/station
-      const distTarget = Math.hypot(s.x - targetX, s.y - targetY);
-      if (distTarget <= 34) {
-        setScanProgress(prev => {
-          const next = Math.min(100, prev + 25);
-          if (next >= 100 && s.autoLockedStage !== activeStageIndex) {
-            s.autoLockedStage = activeStageIndex;
-            addPopup(targetX, targetY - 18, '+15Đ MỞ THỬ THÁCH', '#38bdf8');
-            setTimeout(() => onInspectStage(selectedToolId), 40);
-          }
-          return next;
-        });
-      } else {
-        setScanProgress(prev => Math.max(0, prev - 10));
-      }
-    }, 33);
-
-    return () => clearInterval(timer);
-  }, [
-    isPaused,
-    stageInspected,
-    targetX,
-    targetY,
-    activeStageIndex,
-    selectedToolId,
-    onInspectStage,
-    onCollectBonus,
-    onHazardHit,
-    addPopup,
-  ]);
-
-  const moveAvatarTo = useCallback((x: number, y: number) => {
-    stateRef.current.destX = Math.max(32, Math.min(528, x));
-    stateRef.current.destY = Math.max(34, Math.min(246, y));
-  }, []);
-
-  const engageTargetNow = useCallback(
-    (toolOverride?: string) => {
-      stateRef.current.x = targetX;
-      stateRef.current.y = targetY;
-      stateRef.current.destX = null;
-      stateRef.current.destY = null;
-      setAvatarPos({ x: targetX, y: targetY });
-      setScanProgress(100);
-      addPopup(targetX, targetY - 18, '+15Đ MỞ THỬ THÁCH', '#38bdf8');
-      onInspectStage(toolOverride || selectedToolId);
-    },
-    [targetX, targetY, selectedToolId, onInspectStage, addPopup]
-  );
-
-  const nudgeAvatar = useCallback((dx: number, dy: number) => {
-    stateRef.current.destX = null;
-    stateRef.current.destY = null;
-    stateRef.current.x = Math.max(32, Math.min(528, stateRef.current.x + dx));
-    stateRef.current.y = Math.max(34, Math.min(246, stateRef.current.y + dy));
-    setAvatarPos({ x: Math.round(stateRef.current.x), y: Math.round(stateRef.current.y) });
-  }, []);
-
-  return {
-    avatarPos,
-    scanProgress,
-    collectibles,
-    hazards,
-    popups,
-    moveAvatarTo,
-    engageTargetNow,
-    nudgeAvatar,
-  };
-}
-
-/**
  * Compact In-Game Challenge Popup Overlay
- * ONLY appears when the player reaches/scans/interacts with the active target in the 2D world.
- * Keeps the 2D game world visible behind it and closes immediately when continuing.
+ * ONLY appears when the player completes the scene-specific gameplay action / checkpoint.
  */
 const InGameChallengePopup: React.FC<{
   sceneDescriptor: SceneRendererDescriptor;
@@ -418,7 +117,6 @@ const InGameChallengePopup: React.FC<{
           boxShadow: '0 16px 36px rgba(0, 0, 0, 0.65)',
         }}
       >
-        {/* Compact Header */}
         <div
           style={{
             display: 'flex',
@@ -484,7 +182,6 @@ const InGameChallengePopup: React.FC<{
           </div>
         </div>
 
-        {/* Single-line telemetry context badge */}
         <div
           style={{
             padding: '7px 11px',
@@ -498,7 +195,6 @@ const InGameChallengePopup: React.FC<{
           {telemetryLine}
         </div>
 
-        {/* Question Text */}
         <div
           style={{
             fontSize: '16px',
@@ -510,7 +206,6 @@ const InGameChallengePopup: React.FC<{
           {activeQuestion.question}
         </div>
 
-        {/* Answer Options */}
         {Array.isArray(activeQuestion.choices) && activeQuestion.choices.length > 0 ? (
           <div
             style={{
@@ -627,7 +322,6 @@ const InGameChallengePopup: React.FC<{
           </div>
         )}
 
-        {/* Instant Feedback & Resume Action */}
         {activeFeedback && (
           <div
             style={{
@@ -651,7 +345,7 @@ const InGameChallengePopup: React.FC<{
                 }}
               >
                 {activeFeedback.isCorrect
-                  ? `[CHÍNH XÁC +${activeFeedback.pointsEarned}Đ] Đã xử lý thành công mục tiêu!`
+                  ? `[CHÍNH XÁC +${activeFeedback.pointsEarned}Đ] Đã hoàn thành thử thách chặng!`
                   : `[CHƯA ĐÚNG] Đáp án chuẩn: ${activeFeedback.correctAnswer}`}
               </div>
               {activeFeedback.explanation && (
@@ -687,227 +381,10 @@ const InGameChallengePopup: React.FC<{
   );
 };
 
-/**
- * Shared Bottom Interactive Control Bar for all 2D Non-Runner Scenes
- */
-const BottomSceneControlDock: React.FC<{
-  sceneDescriptor: SceneRendererDescriptor;
-  selectedToolId: string;
-  onSelectTool: (id: string) => void;
-  onNudge: (dx: number, dy: number) => void;
-  onEngageTarget: () => void;
-  targetBadge: string;
-  accentHex: string;
-  energyPercent: number;
-  skillBonusScore: number;
-}> = ({
-  sceneDescriptor,
-  selectedToolId,
-  onSelectTool,
-  onNudge,
-  onEngageTarget,
-  targetBadge,
-  accentHex,
-  energyPercent,
-  skillBonusScore,
-}) => {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: '10px',
-        padding: '10px 14px',
-        backgroundColor: '#0b0f19',
-        border: '1px solid #1e293b',
-        borderRadius: '10px',
-        flexWrap: 'wrap',
-        flexShrink: 0,
-      }}
-    >
-      {/* Left: D-Pad / Movement Controls + Live Health/Bonus */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '4px',
-            backgroundColor: '#111726',
-            border: '1px solid #26334d',
-            borderRadius: '7px',
-            padding: '3px',
-          }}
-        >
-          <button
-            type="button"
-            aria-label="Di chuyển sang trái"
-            onClick={() => onNudge(-38, 0)}
-            style={{
-              width: '30px',
-              height: '30px',
-              borderRadius: '5px',
-              backgroundColor: '#161f30',
-              border: '1px solid #2e3c56',
-              color: '#f8fafc',
-              fontSize: '11px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            A
-          </button>
-          <button
-            type="button"
-            aria-label="Di chuyển lên"
-            onClick={() => onNudge(0, -34)}
-            style={{
-              width: '30px',
-              height: '30px',
-              borderRadius: '5px',
-              backgroundColor: '#161f30',
-              border: '1px solid #2e3c56',
-              color: '#f8fafc',
-              fontSize: '11px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            W
-          </button>
-          <button
-            type="button"
-            aria-label="Di chuyển xuống"
-            onClick={() => onNudge(0, 34)}
-            style={{
-              width: '30px',
-              height: '30px',
-              borderRadius: '5px',
-              backgroundColor: '#161f30',
-              border: '1px solid #2e3c56',
-              color: '#f8fafc',
-              fontSize: '11px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            S
-          </button>
-          <button
-            type="button"
-            aria-label="Di chuyển sang phải"
-            onClick={() => onNudge(38, 0)}
-            style={{
-              width: '30px',
-              height: '30px',
-              borderRadius: '5px',
-              backgroundColor: '#161f30',
-              border: '1px solid #2e3c56',
-              color: '#f8fafc',
-              fontSize: '11px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            D
-          </button>
-        </div>
-
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '10px',
-            padding: '5px 10px',
-            borderRadius: '7px',
-            backgroundColor: '#111726',
-            border: '1px solid #222d42',
-            fontSize: '12px',
-            fontVariantNumeric: 'tabular-nums',
-          }}
-        >
-          <span style={{ color: '#94a3b8' }}>
-            {sceneDescriptor.primaryMetricLabel}:{' '}
-            <strong style={{ color: '#3fc07a' }}>{energyPercent}%</strong>
-          </span>
-          <span style={{ color: '#334155' }}>|</span>
-          <span style={{ color: '#94a3b8' }}>
-            Thưởng kỹ năng: <strong style={{ color: accentHex }}>+{skillBonusScore}</strong>
-          </span>
-        </div>
-      </div>
-
-      {/* Center: 3 Domain Equipment / Action Tools */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-        {sceneDescriptor.tools.map(tool => {
-          const isSelected = tool.id === selectedToolId;
-          return (
-            <button
-              key={tool.id}
-              type="button"
-              onClick={() => onSelectTool(tool.id)}
-              style={{
-                height: '36px',
-                padding: '0 11px',
-                borderRadius: '7px',
-                backgroundColor: isSelected ? '#162038' : '#111726',
-                border: `1.5px solid ${isSelected ? accentHex : '#26334d'}`,
-                color: '#f8fafc',
-                fontSize: '12px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
-              <span style={{ color: isSelected ? accentHex : '#94a3b8', fontWeight: 800 }}>
-                [{tool.badgeCode}]
-              </span>
-              <span>{tool.label.split('&')[0].trim()}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Right: Primary Target Action Trigger */}
-      <button
-        type="button"
-        onClick={onEngageTarget}
-        style={{
-          height: '40px',
-          padding: '0 16px',
-          borderRadius: '8px',
-          backgroundColor: accentHex,
-          border: 'none',
-          color: '#090d16',
-          fontSize: '13px',
-          fontWeight: 800,
-          cursor: 'pointer',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '8px',
-        }}
-      >
-        <span>{targetBadge}</span>
-        <span
-          style={{
-            padding: '2px 6px',
-            borderRadius: '4px',
-            backgroundColor: 'rgba(9, 13, 22, 0.2)',
-            fontSize: '11px',
-            fontWeight: 800,
-          }}
-        >
-          Space
-        </span>
-      </button>
-    </div>
-  );
-};
-
 /* ============================================================================
- * SCENE 2: MECHANICAL DIAGNOSTIC GARAGE & FACTORY QA WORKBENCH (2D ACTION GAME)
+ * SCENE 2: MECHANICAL DIAGNOSTIC GARAGE & FACTORY QA WORKBENCH
+ * Unique Mechanic: Interactive Machine Disassembly, Loose Bolt Tightening &
+ * Oscillating Torque Calibration Meter on a Cutaway Engine/Machine Block.
  * ============================================================================ */
 export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonProps> = props => {
   const {
@@ -939,32 +416,148 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
   );
   const accentHex = config.palette.accentColor || '#F97316';
 
-  const blueprintNodes = [
-    { x: 265, y: 142, code: 'ENG-01', short: 'Cụm Động Cơ & Buồng Đốt', readingFault: 'Áp suất nén: 6.1 kg/cm2 (Thấp) · Nhiệt: 114°C' },
-    { x: 425, y: 168, code: 'BRK-02', short: 'Phanh Đĩa & Áp Suất Lốp', readingFault: 'Má phanh: 1.2mm (Mòn) · Lốp: 1.6 bar' },
-    { x: 242, y: 88, code: 'IGN-03', short: 'Đánh Lửa Bugi & Kim Phun FI', readingFault: 'Khe hở bugi: 1.3mm · Mã lỗi P0300' },
-    { x: 172, y: 115, code: 'BAT-04', short: 'Ắc Quy 12V & Cuộn Sạc', readingFault: 'Điện áp tĩnh: 11.1V (Sụt áp)' },
-    { x: 120, y: 168, code: 'DRV-05', short: 'Bộ Truyền Động Nhông Xích', readingFault: 'Độ chùng xích: 48mm (Quá chùng)' },
+  const machineAssemblies = [
+    {
+      x: 262,
+      y: 138,
+      code: 'ENG-01',
+      short: 'Buồng Đốt Piston & Xi-lanh',
+      readingFault: 'Áp suất nén: 6.1 kg/cm2 (Hở xupap) · Nhiệt: 114°C',
+      bolts: [
+        { id: 'b0', dx: -24, dy: -16, label: 'Ốc Quy-lát #1' },
+        { id: 'b1', dx: 24, dy: -16, label: 'Ốc Quy-lát #2' },
+      ],
+    },
+    {
+      x: 425,
+      y: 168,
+      code: 'BRK-02',
+      short: 'Cụm Phanh Đĩa Thủy Lực & Lốp',
+      readingFault: 'Má phanh: 1.2mm (Mòn giới hạn) · Áp suất lốp: 1.6 bar',
+      bolts: [
+        { id: 'b0', dx: -18, dy: -20, label: 'Chốt Heo Dầu' },
+        { id: 'b1', dx: 20, dy: 14, label: 'Van Xả E Dầu' },
+      ],
+    },
+    {
+      x: 245,
+      y: 86,
+      code: 'IGN-03',
+      short: 'Đánh Lửa Bugi & Kim Phun FI',
+      readingFault: 'Khe hở bugi: 1.3mm (Đánh lửa yếu) · Lỗi P0300',
+      bolts: [
+        { id: 'b0', dx: -20, dy: -12, label: 'Chụp Bugi Cao Áp' },
+        { id: 'b1', dx: 22, dy: -10, label: 'Giắc Kim Phun FI' },
+      ],
+    },
+    {
+      x: 172,
+      y: 116,
+      code: 'BAT-04',
+      short: 'Ắc Quy 12V & Cuộn Sạc Máy Phát',
+      readingFault: 'Điện áp tĩnh: 11.1V (Sụt áp cực âm) · Dòng rò 0.4A',
+      bolts: [
+        { id: 'b0', dx: -18, dy: -14, label: 'Cọc Dương (+) 12V' },
+        { id: 'b1', dx: 18, dy: -14, label: 'Cọc Âm (-) Mass' },
+      ],
+    },
+    {
+      x: 120,
+      y: 168,
+      code: 'DRV-05',
+      short: 'Bộ Truyền Động Nhông Xích / CVT',
+      readingFault: 'Độ chùng xích: 48mm (Quá chùng) · Lệch tâm trục sau',
+      bolts: [
+        { id: 'b0', dx: -22, dy: 12, label: 'Ốc Tăng Xích Trái' },
+        { id: 'b1', dx: 22, dy: 12, label: 'Ốc Khoá Trục Sau' },
+      ],
+    },
   ];
-  const activeNodeIdx = activeStageIndex % blueprintNodes.length;
-  const activeNodeSpec = blueprintNodes[activeNodeIdx];
+
+  const activeIdx = activeStageIndex % machineAssemblies.length;
+  const activePart = machineAssemblies[activeIdx];
   const isStageRepaired = Boolean(activeFeedback?.isCorrect);
 
-  const arena = useArena2DGame({
-    activeStageIndex,
-    stageInspected,
-    isPaused,
-    targetX: activeNodeSpec.x,
-    targetY: activeNodeSpec.y,
-    initialX: 70,
-    initialY: 140,
-    selectedToolId,
-    onInspectStage,
-    onCollectBonus,
-    onHazardHit,
-    collectibleLabels: ['Bu-lông Titan', 'Dầu Nhớt Chuẩn', 'Cảm Biến OBD'],
-    hazardLabel: 'Rò nhiệt/dầu',
-  });
+  const [tightenedBolts, setTightenedBolts] = useState<Record<string, boolean>>({});
+  const [torqueNeedle, setTorqueNeedle] = useState<number>(35);
+  const [crankPhase, setCrankPhase] = useState<number>(0);
+  const [calibrated, setCalibrated] = useState<boolean>(false);
+  const [popups, setPopups] = useState<FloatingFeedbackText[]>([]);
+  const needleDirRef = useRef<1 | -1>(1);
+  const tightenedSetRef = useRef<Set<string>>(new Set());
+  const calibratedRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    tightenedSetRef.current.clear();
+    calibratedRef.current = stageInspected;
+    setTightenedBolts({});
+    setCalibrated(stageInspected);
+  }, [activeStageIndex, stageInspected]);
+
+  const addPopup = useCallback((x: number, y: number, text: string, color: string) => {
+    setPopups(prev => [...prev.slice(-4), { id: Date.now() + Math.random(), x, y, text, color }]);
+  }, []);
+
+  // Mechanical engine crank & oscillating torque calibration meter loop
+  useEffect(() => {
+    if (isPaused || stageInspected) return;
+    const timer = window.setInterval(() => {
+      setCrankPhase(prev => (prev + 0.22) % (Math.PI * 2));
+      setTorqueNeedle(prev => {
+        let next = prev + needleDirRef.current * 4.5;
+        if (next >= 96) {
+          next = 96;
+          needleDirRef.current = -1;
+        } else if (next <= 6) {
+          next = 6;
+          needleDirRef.current = 1;
+        }
+        return next;
+      });
+    }, 40);
+    return () => clearInterval(timer);
+  }, [isPaused, stageInspected]);
+
+  const tightenedCount = Object.values(tightenedBolts).filter(Boolean).length;
+  const repairReadiness = Math.min(
+    100,
+    tightenedCount * 35 + (calibrated || stageInspected ? 40 : 0)
+  );
+
+  const handleTightenBolt = (boltId: string, bx: number, by: number, label: string) => {
+    if (tightenedSetRef.current.has(boltId)) return;
+    tightenedSetRef.current.add(boltId);
+    setTightenedBolts(prev => ({ ...prev, [boltId]: true }));
+    onCollectBonus?.(10);
+    addPopup(bx, by - 14, `+10Đ SIẾT ${label.toUpperCase()}`, '#3fc07a');
+    if (tightenedSetRef.current.size >= 2 && calibratedRef.current) {
+      setTimeout(() => onInspectStage(selectedToolId), 80);
+    }
+  };
+
+  const handleCalibrateTorque = () => {
+    const inGreenZone = torqueNeedle >= 48 && torqueNeedle <= 88;
+    calibratedRef.current = true;
+    setCalibrated(true);
+    onCollectBonus?.(10);
+    addPopup(
+      430,
+      78,
+      inGreenZone ? '+10Đ CÂN LỰC CHUẨN (45 N·m)' : '+10Đ ĐÃ ĐO THÔNG SỐ MÁY',
+      '#38bdf8'
+    );
+    if (tightenedSetRef.current.size >= 1) {
+      setTimeout(() => onInspectStage(selectedToolId), 80);
+    }
+  };
+
+  const handleTriggerFullRepair = () => {
+    setCalibrated(true);
+    addPopup(activePart.x, activePart.y - 22, '+15Đ MỞ PHIẾU CHẨN ĐOÁN', '#38bdf8');
+    onInspectStage(selectedToolId);
+  };
+
+  const pistonOffset = Math.sin(crankPhase) * 7;
 
   return (
     <div
@@ -982,7 +575,7 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
         overflow: 'hidden',
       }}
     >
-      {/* Full-Stage 2D Interactive Garage & Machine Arena */}
+      {/* Interactive Cutaway Machine & Torque Workbench Canvas */}
       <div
         style={{
           position: 'relative',
@@ -999,193 +592,328 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
       >
         <svg
           viewBox="0 0 560 280"
-          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block', cursor: 'crosshair' }}
-          onClick={e => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const svgX = ((e.clientX - rect.left) / rect.width) * 560;
-            const svgY = ((e.clientY - rect.top) / rect.height) * 280;
-            arena.moveAvatarTo(svgX, svgY);
-          }}
+          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block' }}
         >
           <defs>
-            <pattern id="garageGrid2D" width="28" height="28" patternUnits="userSpaceOnUse">
+            <pattern id="garageBlueprintGrid" width="28" height="28" patternUnits="userSpaceOnUse">
               <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#131c2e" strokeWidth="1" />
             </pattern>
           </defs>
-          <rect width="560" height="280" fill="url(#garageGrid2D)" />
+          <rect width="560" height="280" fill="url(#garageBlueprintGrid)" />
 
-          {/* Garage Bay Pillars & Overhead Crane Rail */}
-          <rect x="0" y="0" width="560" height="22" fill="#111726" />
-          <line x1="0" y1="22" x2="560" y2="22" stroke="#26334d" strokeWidth="2" />
-          <text x="16" y="15" fill={accentHex} fontSize="10" fontWeight="800">
-            {sceneDescriptor.sceneBadge} · DI CHUYỂN MÁY QUÉT TỚI [{activeNodeSpec.code}] ({activeNodeSpec.short.toUpperCase()})
+          {/* Top Workshop Header Strip */}
+          <rect x="0" y="0" width="560" height="24" fill="#111726" />
+          <line x1="0" y1="24" x2="560" y2="24" stroke="#26334d" strokeWidth="1.5" />
+          <text x="14" y="16" fill={accentHex} fontSize="9.5" fontWeight="800">
+            XƯỞNG CƠ KHÍ · (1) SIẾT 2 ỐC LỎNG TRÊN [{activePart.code}] · (2) BẤM CÂN LỰC CỜ-LÊ ĐỂ MỞ PHIẾU SỬA CHỮA
           </text>
 
-          {/* Hydraulic Lift Platform */}
-          <rect x="52" y="218" width="456" height="12" rx="4" fill="#334155" stroke="#475569" />
-          <rect x="155" y="230" width="26" height="42" fill="#1e293b" stroke="#475569" />
-          <rect x="375" y="230" width="26" height="42" fill="#1e293b" stroke="#475569" />
+          {/* Hydraulic Lift Platform & Pillars */}
+          <rect x="36" y="226" width="330" height="12" rx="4" fill="#334155" stroke="#475569" />
+          <rect x="105" y="238" width="24" height="38" fill="#1e293b" stroke="#475569" />
+          <rect x="275" y="238" width="24" height="38" fill="#1e293b" stroke="#475569" />
 
-          {/* Rear & Front Wheels */}
-          <circle cx="120" cy="168" r="38" fill="#0f172a" stroke="#64748b" strokeWidth="7" />
-          <circle cx="120" cy="168" r="16" fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="5 3" />
-          <line x1="120" y1="168" x2="225" y2="152" stroke="#94a3b8" strokeWidth="6" strokeLinecap="round" />
+          {/* Rear & Front Wheels with Rotating Brake Discs */}
+          <g transform="translate(95, 178)">
+            <circle cx="0" cy="0" r="38" fill="#0f172a" stroke="#64748b" strokeWidth="7" />
+            <circle
+              cx="0"
+              cy="0"
+              r="18"
+              fill="none"
+              stroke="#94a3b8"
+              strokeWidth="2.5"
+              strokeDasharray="6 4"
+              transform={`rotate(${(crankPhase * 55) % 360})`}
+            />
+          </g>
+          <g transform="translate(325, 178)">
+            <circle cx="0" cy="0" r="38" fill="#0f172a" stroke="#64748b" strokeWidth="7" />
+            <circle
+              cx="0"
+              cy="0"
+              r="20"
+              fill="none"
+              stroke="#f59e0b"
+              strokeWidth="2.5"
+              strokeDasharray="8 4"
+              transform={`rotate(${(crankPhase * 55) % 360})`}
+            />
+          </g>
 
-          <circle cx="425" cy="168" r="38" fill="#0f172a" stroke="#64748b" strokeWidth="7" />
-          <circle cx="425" cy="168" r="20" fill="none" stroke="#f59e0b" strokeWidth="2.5" />
-          <line x1="360" y1="74" x2="425" y2="168" stroke="#cbd5e1" strokeWidth="6" strokeLinecap="round" />
-
-          {/* Chassis & Engine Block */}
+          {/* Cutaway Chassis & Animated Piston Cylinder Block */}
           <path
-            d="M 140 115 L 220 110 L 288 82 L 365 78 L 338 152 L 220 158 Z"
+            d="M 110 122 L 185 114 L 245 84 L 305 80 L 285 162 L 180 168 Z"
             fill="#1e293b"
             stroke={accentHex}
             strokeWidth="2.5"
           />
-          <rect x="228" y="116" width="74" height="52" rx="8" fill="#0f172a" stroke="#94a3b8" strokeWidth="2" />
-          <line x1="236" y1="130" x2="292" y2="130" stroke="#475569" strokeWidth="3" />
-          <line x1="236" y1="142" x2="292" y2="142" stroke="#475569" strokeWidth="3" />
-          <line x1="236" y1="154" x2="292" y2="154" stroke="#475569" strokeWidth="3" />
-          <path d="M 278 162 L 172 180 L 86 162" fill="none" stroke="#94a3b8" strokeWidth="5" strokeLinecap="round" />
+          <rect x="190" y="114" width="68" height="54" rx="7" fill="#090d16" stroke="#94a3b8" strokeWidth="2" />
+          {/* Moving Piston inside Cylinder */}
+          <rect
+            x="204"
+            y={128 + pistonOffset}
+            width="40"
+            height="22"
+            rx="4"
+            fill={isStageRepaired ? '#3fc07a' : '#f97316'}
+            stroke="#f8fafc"
+            strokeWidth="1.5"
+          />
+          <line
+            x1="224"
+            y1={150 + pistonOffset}
+            x2="224"
+            y2="166"
+            stroke="#cbd5e1"
+            strokeWidth="4"
+            strokeLinecap="round"
+          />
 
-          {/* Collectible Spare Parts / Bolts */}
-          {arena.collectibles.map(col =>
-            !col.collected ? (
-              <g
-                key={col.id}
-                style={{ cursor: 'pointer' }}
-                onClick={e => {
-                  e.stopPropagation();
-                  arena.moveAvatarTo(col.x, col.y);
-                }}
-              >
-                <circle cx={col.x} cy={col.y} r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
-                <text x={col.x} y={col.y + 3.5} textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
-                  +10
-                </text>
-                <text x={col.x} y={col.y + 22} textAnchor="middle" fill="#86efac" fontSize="8" fontWeight="700">
-                  {col.label}
-                </text>
-              </g>
-            ) : null
-          )}
+          {/* Overheat / High-Voltage Spark Hazard Zone on Machine */}
+          <g
+            style={{ cursor: 'pointer' }}
+            onClick={() => {
+              onHazardHit?.();
+              addPopup(155, 185, '-8% BỎNG NHIỆT PÔ XE!', '#e5566f');
+            }}
+          >
+            <path d="M 248 164 L 155 186 L 78 172" fill="none" stroke="#e5566f" strokeWidth="5" strokeLinecap="round" />
+            <rect x="128" y="176" width="58" height="15" rx="4" fill="rgba(229, 86, 111, 0.2)" stroke="#e5566f" />
+            <text x="157" y="186.5" textAnchor="middle" fill="#fca5a5" fontSize="7.5" fontWeight="800">
+              PÔ NÓNG 180°C
+            </text>
+          </g>
 
-          {/* Moving Heat / Oil Leak Hazard */}
-          {arena.hazards.map(haz => (
-            <g key={haz.id}>
-              <circle cx={haz.x} cy={haz.y} r={haz.radius} fill="rgba(229, 86, 111, 0.22)" stroke="#e5566f" strokeWidth="2" strokeDasharray="3 2" />
-              <text x={haz.x} y={haz.y + 3} textAnchor="middle" fill="#e5566f" fontSize="8" fontWeight="800">
-                NHIỆT
-              </text>
-            </g>
-          ))}
-
-          {/* Interactive Component Nodes */}
-          {blueprintNodes.map((node, idx) => {
-            const isTarget = idx === activeNodeIdx;
-            const isRepairedNode = idx < activeStageIndex || (isTarget && isStageRepaired);
-            const nodeColor = isRepairedNode
-              ? '#3fc07a'
-              : isTarget
-                ? stageInspected
-                  ? '#38bdf8'
-                  : '#ef4444'
-                : '#64748b';
+          {/* Machine Component Nodes on Cutaway Vehicle */}
+          {machineAssemblies.map((part, idx) => {
+            const isTarget = idx === activeIdx;
+            const isFixed = idx < activeStageIndex || (isTarget && isStageRepaired);
+            const mapX = [224, 325, 224, 152, 95][idx];
+            const mapY = [138, 178, 92, 122, 178][idx];
+            const color = isFixed ? '#3fc07a' : isTarget ? '#ef4444' : '#64748b';
 
             return (
               <g
-                key={node.code}
-                style={{ cursor: isTarget ? 'pointer' : 'default' }}
-                onClick={e => {
-                  e.stopPropagation();
+                key={part.code}
+                style={{ cursor: 'pointer' }}
+                onClick={() => {
                   if (isTarget) {
-                    arena.engageTargetNow(selectedToolId);
-                  } else {
-                    arena.moveAvatarTo(node.x, node.y);
+                    handleTriggerFullRepair();
                   }
                 }}
               >
-                {isTarget && !isRepairedNode && (
+                {isTarget && !isFixed && (
                   <circle
-                    cx={node.x}
-                    cy={node.y}
-                    r="26"
-                    fill="rgba(239, 68, 68, 0.18)"
-                    stroke={nodeColor}
+                    cx={mapX}
+                    cy={mapY}
+                    r="24"
+                    fill="rgba(239, 68, 68, 0.16)"
+                    stroke="#ef4444"
                     strokeWidth="2"
                     strokeDasharray="4 2"
                   />
                 )}
-                <circle
-                  cx={node.x}
-                  cy={node.y}
-                  r={isTarget ? 15 : 10}
-                  fill="#090d16"
-                  stroke={nodeColor}
-                  strokeWidth={isTarget ? 3 : 2}
-                />
-                <text x={node.x} y={node.y + 3.5} textAnchor="middle" fill={nodeColor} fontSize="9.5" fontWeight="800">
-                  {isRepairedNode ? 'OK' : idx + 1}
-                </text>
-                <rect
-                  x={node.x - 36}
-                  y={node.y - 34}
-                  width="72"
-                  height="15"
-                  rx="4"
-                  fill="#090d16"
-                  stroke={nodeColor}
-                  strokeWidth="1"
-                />
-                <text x={node.x} y={node.y - 23} textAnchor="middle" fill="#f8fafc" fontSize="8.5" fontWeight="800">
-                  {node.code}
+                <circle cx={mapX} cy={mapY} r={isTarget ? 13 : 9} fill="#090d16" stroke={color} strokeWidth="2.5" />
+                <text x={mapX} y={mapY + 3} textAnchor="middle" fill={color} fontSize="8" fontWeight="800">
+                  {isFixed ? 'OK' : part.code.split('-')[0]}
                 </text>
               </g>
             );
           })}
 
-          {/* Player Controlled Mechanic OBD Scanner Probe */}
-          <g transform={`translate(${arena.avatarPos.x}, ${arena.avatarPos.y})`}>
-            <circle cx="0" cy="0" r="18" fill="rgba(56, 189, 248, 0.15)" stroke="#38bdf8" strokeWidth="1.5" />
-            <circle cx="0" cy="0" r="11" fill="#090d16" stroke={accentHex} strokeWidth="2.5" />
-            <line x1="-14" y1="0" x2="14" y2="0" stroke="#38bdf8" strokeWidth="1.5" />
-            <line x1="0" y1="-14" x2="0" y2="14" stroke="#38bdf8" strokeWidth="1.5" />
-            <rect x="-28" y="14" width="56" height="13" rx="3" fill="#090d16" stroke="#38bdf8" strokeWidth="1" />
-            <text x="0" y="23" textAnchor="middle" fill="#38bdf8" fontSize="7.5" fontWeight="800">
-              MÁY QUÉT {arena.scanProgress > 0 && arena.scanProgress < 100 ? `${arena.scanProgress}%` : ''}
+          {/* RIGHT WORKBENCH PANEL: Close-Up Fault Disassembly & Live Torque Calibration Gauge */}
+          <rect
+            x="376"
+            y="34"
+            width="172"
+            height="234"
+            rx="10"
+            fill="#111726"
+            stroke={accentHex}
+            strokeWidth="1.5"
+          />
+          <text x="462" y="52" textAnchor="middle" fill={accentHex} fontSize="9.5" fontWeight="800">
+            BÀN THÁO LẮP [{activePart.code}]
+          </text>
+          <text x="462" y="65" textAnchor="middle" fill="#f8fafc" fontSize="8.5" fontWeight="700">
+            {activePart.short.slice(0, 25)}
+          </text>
+
+          {/* Interactive Loose Bolts to Tighten with Wrench */}
+          {activePart.bolts.map((bolt, bIdx) => {
+            const isTight = Boolean(tightenedBolts[bolt.id]);
+            const bx = bIdx === 0 ? 422 : 502;
+            const by = 104;
+            return (
+              <g
+                key={bolt.id}
+                data-testid={`garage-bolt-${bIdx}`}
+                style={{ cursor: 'pointer' }}
+                onClick={() => handleTightenBolt(bolt.id, bx, by, bolt.label)}
+              >
+                <circle
+                  cx={bx}
+                  cy={by}
+                  r="19"
+                  fill={isTight ? '#172a1d' : '#2c1a20'}
+                  stroke={isTight ? '#3fc07a' : '#f59e0b'}
+                  strokeWidth="2.5"
+                  strokeDasharray={isTight ? undefined : '4 2'}
+                />
+                <polygon
+                  points={`${bx},${by - 10} ${bx + 9},${by - 5} ${bx + 9},${by + 5} ${bx},${by + 10} ${bx - 9},${by + 5} ${bx - 9},${by - 5}`}
+                  fill="#0b0f19"
+                  stroke={isTight ? '#3fc07a' : '#fbbf24'}
+                  strokeWidth="1.5"
+                />
+                <text x={bx} y={by + 3} textAnchor="middle" fill="#f8fafc" fontSize="7.5" fontWeight="800">
+                  {isTight ? 'ĐÃ SIẾT' : 'VẶN ỐC'}
+                </text>
+                <text x={bx} y={by + 31} textAnchor="middle" fill="#cbd5e1" fontSize="7.5" fontWeight="700">
+                  {bolt.label}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Oscillating Torque Wrench Calibration Bar */}
+          <text x="462" y="156" textAnchor="middle" fill="#94a3b8" fontSize="8" fontWeight="700">
+            ĐỒNG HỒ CÂN LỰC SIẾT CỜ-LÊ (N·m)
+          </text>
+          <rect x="392" y="164" width="140" height="16" rx="5" fill="#090d16" stroke="#26334d" />
+          {/* Green Sweet Spot Zone */}
+          <rect x="460" y="166" width="44" height="12" rx="3" fill="rgba(63, 192, 122, 0.28)" stroke="#3fc07a" />
+          {/* Moving Torque Needle */}
+          <rect
+            x={392 + (torqueNeedle / 100) * 134}
+            y="161"
+            width="5"
+            height="22"
+            rx="2"
+            fill="#f8fafc"
+          />
+
+          {/* Calibrate Torque Button inside SVG Workbench */}
+          <g
+            data-testid="garage-torque-calibrate-btn"
+            style={{ cursor: 'pointer' }}
+            onClick={handleCalibrateTorque}
+          >
+            <rect
+              x="392"
+              y="190"
+              width="140"
+              height="28"
+              rx="6"
+              fill={calibrated ? '#172a1d' : '#1e293b'}
+              stroke={calibrated ? '#3fc07a' : '#38bdf8'}
+              strokeWidth="1.5"
+            />
+            <text x="462" y="207.5" textAnchor="middle" fill="#f8fafc" fontSize="8.5" fontWeight="800">
+              {calibrated ? 'ĐÃ CÂN LỰC CHUẨN (+10Đ)' : 'BẤM CHỐT LỰC SIẾT (+10Đ)'}
             </text>
           </g>
 
-          {/* Floating Score Popups */}
-          {arena.popups.map(p => (
-            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+          {/* Repair Readiness Progress Bar */}
+          <text x="462" y="234" textAnchor="middle" fill="#cbd5e1" fontSize="8" fontWeight="700">
+            Tiến độ tháo lắp: {repairReadiness}%
+          </text>
+          <rect x="392" y="240" width="140" height="8" rx="4" fill="#090d16" />
+          <rect
+            x="392"
+            y="240"
+            width={Math.round((repairReadiness / 100) * 140)}
+            height="8"
+            rx="4"
+            fill="#3fc07a"
+          />
+
+          {popups.map(p => (
+            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="9.5" fontWeight="800">
               {p.text}
             </text>
           ))}
         </svg>
       </div>
 
-      {/* Bottom Interactive Dock */}
-      <BottomSceneControlDock
-        sceneDescriptor={sceneDescriptor}
-        selectedToolId={selectedToolId}
-        onSelectTool={id => setSelectedToolId(id)}
-        onNudge={arena.nudgeAvatar}
-        onEngageTarget={() => arena.engageTargetNow(selectedToolId)}
-        targetBadge={`QUÉT & SỬA [${activeNodeSpec.code}]`}
-        accentHex={accentHex}
-        energyPercent={energyPercent}
-        skillBonusScore={skillBonusScore}
-      />
+      {/* Garage Mechanic Tool Rack & Repair Trigger Bar */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '10px',
+          padding: '10px 14px',
+          backgroundColor: '#0b0f19',
+          border: '1px solid #1e293b',
+          borderRadius: '10px',
+          flexWrap: 'wrap',
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {sceneDescriptor.tools.map(tool => {
+            const isSelected = tool.id === selectedToolId;
+            return (
+              <button
+                key={tool.id}
+                type="button"
+                onClick={() => setSelectedToolId(tool.id)}
+                style={{
+                  height: '36px',
+                  padding: '0 11px',
+                  borderRadius: '7px',
+                  backgroundColor: isSelected ? '#162038' : '#111726',
+                  border: `1.5px solid ${isSelected ? accentHex : '#26334d'}`,
+                  color: '#f8fafc',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                <span style={{ color: isSelected ? accentHex : '#94a3b8', fontWeight: 800 }}>
+                  [{tool.badgeCode}]
+                </span>{' '}
+                {tool.label.split('&')[0].trim()}
+              </button>
+            );
+          })}
+        </div>
 
-      {/* Compact In-Game Challenge Popup (Only shown when target is scanned) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+            Ốc đã siết: <strong style={{ color: '#3fc07a' }}>{tightenedCount}/2</strong> · Thưởng:{' '}
+            <strong style={{ color: accentHex }}>+{skillBonusScore}</strong>
+          </span>
+          <button
+            type="button"
+            data-testid="garage-engage-repair-btn"
+            onClick={handleTriggerFullRepair}
+            style={{
+              height: '40px',
+              padding: '0 16px',
+              borderRadius: '8px',
+              backgroundColor: accentHex,
+              border: 'none',
+              color: '#090d16',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            CHẨN ĐOÁN &amp; SỬA [{activePart.code}] (Space)
+          </button>
+        </div>
+      </div>
+
       <InGameChallengePopup
         sceneDescriptor={sceneDescriptor}
         activeStageIndex={activeStageIndex}
         totalStages={totalStages}
-        targetCode={activeNodeSpec.code}
-        targetName={activeNodeSpec.short}
-        telemetryLine={`Thông số đo trực tiếp: ${activeNodeSpec.readingFault}`}
+        targetCode={activePart.code}
+        targetName={activePart.short}
+        telemetryLine={`Thông số đo trực tiếp: ${activePart.readingFault}`}
         activeQuestion={activeQuestion}
         activeFeedback={activeFeedback}
         activeTimeRemaining={activeTimeRemaining}
@@ -1204,8 +932,22 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
 };
 
 /* ============================================================================
- * SCENE 3: KITCHEN & FOOD SAFETY LAB SCENE (2D TOP-DOWN CHEF PATROL GAME)
+ * SCENE 3: KITCHEN & FOOD SAFETY LAB SCENE (F&B CULINARY / HACCP)
+ * Unique Mechanic: 3-Lane Commercial Kitchen Conveyor & Cooking Station Game!
+ * Ingredients & Cross-Contamination Hazards move down 3 lanes (Red Raw Board,
+ * >75°C Flame Stove, White Cooked & Sample Tray). Player moves the Chef across
+ * lanes to catch/process safe ingredients and avoid bacteria to complete the dish.
  * ============================================================================ */
+interface KitchenConveyorItem {
+  id: number;
+  lane: 0 | 1 | 2;
+  y: number;
+  label: string;
+  tempBadge: string;
+  isHazard: boolean;
+  processed: boolean;
+}
+
 export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = props => {
   const {
     config,
@@ -1224,7 +966,6 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
     onContinueStage,
     stageInspected,
     onInspectStage,
-    energyPercent,
     skillBonusScore,
     isPaused,
     onCollectBonus,
@@ -1236,32 +977,196 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
   );
   const accentHex = config.palette.accentColor || '#10B981';
 
-  const kitchenStations = [
-    { x: 90, y: 95, code: 'KHU-01', name: 'Bàn Tiếp Nhận Nguyên Liệu', temp: '+4.0°C', hazardAlert: 'Kiểm tra độ tươi sống & tem xuất xứ nguyên liệu' },
-    { x: 265, y: 85, code: 'KHU-02', name: 'Kho Lạnh & Tủ Đông (-18°C)', temp: '-18.0°C', hazardAlert: 'Kiểm soát nhiệt độ bảo quản đông & nguyên tắc FIFO' },
-    { x: 445, y: 95, code: 'KHU-03', name: 'Bàn Sơ Chế Sống - Chín', temp: '+20.5°C', hazardAlert: 'Phân tách dao thớt Đỏ (Sống) & Trắng (Chín) chống nhiễm chéo' },
-    { x: 185, y: 195, code: 'KHU-04', name: 'Bếp Nấu Trung Tâm (>75°C)', temp: '+78.5°C', hazardAlert: 'Kiểm tra nhiệt độ tâm thực phẩm nấu chín (>75°C)' },
-    { x: 385, y: 195, code: 'KHU-05', name: 'Tủ Lưu Mẫu Thức Ăn 24h', temp: '+2.8°C', hazardAlert: 'Niêm phong hộp lưu mẫu 24h & khử trùng quầy ra món' },
+  const stageRecipes = [
+    {
+      code: 'MÓN-01',
+      dishName: 'Phi-lê Cá Hồi Bảo Quản Lạnh Chuẩn FIFO',
+      alertLine: 'Kiểm soát nguyên liệu nhập bếp (+2°C..+4°C) & loại bỏ thực phẩm rã đông sai cách',
+      safeItems: ['Cá Hồi +3°C', 'Thịt Tươi FIFO', 'Rau Hữu Cơ'],
+      hazardLabel: 'Thịt Ôi +16°C',
+    },
+    {
+      code: 'MÓN-02',
+      dishName: 'Thịt Bò Cấp Đông Sâu (-18°C)',
+      alertLine: 'Giám sát nhiệt độ tủ đông -18°C & bọc kín tránh nhiễm lạnh chéo',
+      safeItems: ['Thăn Bò -18°C', 'Tôm Cấp Đông', 'Tem Hạn Dùng'],
+      hazardLabel: 'Đá Tan Nhiễm Khuẩn',
+    },
+    {
+      code: 'MÓN-03',
+      dishName: 'Gà Áp Chảo Phân Tách Dao Thớt Sống - Chín',
+      alertLine: 'Dùng Thớt Đỏ cho đồ sống & Thớt Trắng cho đồ chín chống nhiễm chéo Salmonella',
+      safeItems: ['Thớt Đỏ (Sống)', 'Thớt Trắng (Chín)', 'Dao Khử Trùng'],
+      hazardLabel: 'Dao Sống Cắt Đồ Chín',
+    },
+    {
+      code: 'MÓN-04',
+      dishName: 'Súp Bò Hầm Nấu Chín Tâm Thực Phẩm (>75°C)',
+      alertLine: 'Đo nhiệt kế tâm thực phẩm đạt trên 75°C để tiêu diệt hoàn toàn vi sinh vật',
+      safeItems: ['Súp Sôi 79°C', 'Ức Gà Chín 78°C', 'Sốt Nóng 82°C'],
+      hazardLabel: 'Thịt Tái Sống 48°C',
+    },
+    {
+      code: 'MÓN-05',
+      dishName: 'Khay Suất Ăn & Hộp Lưu Mẫu Niêm Phong 24h',
+      alertLine: 'Niêm phong hộp lưu mẫu 150g bảo quản ở +2°C..+4°C trong suốt 24 giờ',
+      safeItems: ['Hộp Mẫu 24h', 'Tem Niêm Phong', 'Khay Khử Khuẩn'],
+      hazardLabel: 'Mẫu Không Nhãn',
+    },
   ];
-  const activeStationIdx = activeStageIndex % kitchenStations.length;
-  const activeStation = kitchenStations[activeStationIdx];
-  const isSanitized = Boolean(activeFeedback?.isCorrect);
 
-  const arena = useArena2DGame({
-    activeStageIndex,
-    stageInspected,
+  const activeRecipe = stageRecipes[activeStageIndex % stageRecipes.length];
+  const laneXCoords: [number, number, number] = [125, 280, 435];
+  const laneTitles = [
+    { title: 'LÀN 1: THỚT ĐỎ (ĐỒ SỐNG)', color: '#f97316', badge: 'SƠ CHẾ SỐNG' },
+    { title: 'LÀN 2: BẾP LỬA (>75°C)', color: '#ef4444', badge: 'NẤU CHÍN' },
+    { title: 'LÀN 3: THỚT TRẮNG & LƯU MẪU', color: '#10b981', badge: 'RA MÓN SẠCH' },
+  ];
+
+  const [chefLane, setChefLane] = useState<0 | 1 | 2>(1);
+  const [dishProgress, setDishProgress] = useState<number>(0);
+  const [items, setItems] = useState<KitchenConveyorItem[]>([]);
+  const [popups, setPopups] = useState<FloatingFeedbackText[]>([]);
+
+  const chefLaneRef = useRef<0 | 1 | 2>(1);
+  const lockedStageRef = useRef<number>(-1);
+
+  useEffect(() => {
+    chefLaneRef.current = chefLane;
+  }, [chefLane]);
+
+  const addPopup = useCallback((x: number, y: number, text: string, color: string) => {
+    setPopups(prev => [...prev.slice(-4), { id: Date.now() + Math.random(), x, y, text, color }]);
+  }, []);
+
+  // Reset kitchen conveyor items when stage changes
+  useEffect(() => {
+    setDishProgress(stageInspected ? 100 : 0);
+    setItems([
+      {
+        id: 1,
+        lane: 0,
+        y: 62,
+        label: activeRecipe.safeItems[0],
+        tempBadge: '+3.5°C',
+        isHazard: false,
+        processed: false,
+      },
+      {
+        id: 2,
+        lane: 1,
+        y: 112,
+        label: activeRecipe.safeItems[1],
+        tempBadge: '>75°C',
+        isHazard: false,
+        processed: false,
+      },
+      {
+        id: 3,
+        lane: 2,
+        y: 82,
+        label: activeRecipe.hazardLabel,
+        tempBadge: 'NHIỄM CHÉO!',
+        isHazard: true,
+        processed: false,
+      },
+      {
+        id: 4,
+        lane: 2,
+        y: 36,
+        label: activeRecipe.safeItems[2],
+        tempBadge: 'HACCP OK',
+        isHazard: false,
+        processed: false,
+      },
+    ]);
+  }, [activeStageIndex, activeRecipe.code, stageInspected]);
+
+  // Keyboard A/D or Left/Right to move Chef between the 3 kitchen lanes
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
+        setChefLane(prev => (prev > 0 ? ((prev - 1) as 0 | 1 | 2) : 0));
+      } else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
+        setChefLane(prev => (prev < 2 ? ((prev + 1) as 0 | 1 | 2) : 2));
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Conveyor belt simulation tick
+  useEffect(() => {
+    if (isPaused || stageInspected) return;
+
+    const timer = window.setInterval(() => {
+      setItems(prevItems =>
+        prevItems.map(item => {
+          let nextY = item.y + 1.85;
+          if (nextY >= 205) {
+            // Reached the Chef's Prep Counter at y = 205
+            if (item.lane === chefLaneRef.current && !item.processed) {
+              if (item.isHazard) {
+                onHazardHit?.();
+                addPopup(laneXCoords[item.lane], 190, `-8% ${item.label}`, '#e5566f');
+              } else {
+                onCollectBonus?.(10);
+                addPopup(laneXCoords[item.lane], 190, `+10Đ ĐÃ CHẾ BIẾN ${item.label}`, '#3fc07a');
+                setDishProgress(prev => {
+                  const next = Math.min(100, prev + 35);
+                  if (next >= 100 && lockedStageRef.current !== activeStageIndex) {
+                    lockedStageRef.current = activeStageIndex;
+                    setTimeout(() => onInspectStage(selectedToolId), 80);
+                  }
+                  return next;
+                });
+              }
+            }
+            // Respawn at top of conveyor
+            return {
+              ...item,
+              y: 34,
+              processed: false,
+            };
+          }
+          return { ...item, y: nextY };
+        })
+      );
+    }, 45);
+
+    return () => clearInterval(timer);
+  }, [
     isPaused,
-    targetX: activeStation.x,
-    targetY: activeStation.y,
-    initialX: 48,
-    initialY: 145,
+    stageInspected,
+    activeStageIndex,
     selectedToolId,
-    onInspectStage,
     onCollectBonus,
     onHazardHit,
-    collectibleLabels: ['Tem HACCP', 'Găng Vô Trùng', 'Nhãn Lưu Mẫu'],
-    hazardLabel: 'Vi khuẩn chéo',
-  });
+    onInspectStage,
+    addPopup,
+  ]);
+
+  const handleChopOrCookInLane = (targetLane?: 0 | 1 | 2) => {
+    const laneToUse = targetLane !== undefined ? targetLane : chefLane;
+    setChefLane(laneToUse);
+    onCollectBonus?.(10);
+    addPopup(
+      laneXCoords[laneToUse],
+      184,
+      `+10Đ SƠ CHẾ & NẤU TẠI LÀN ${laneToUse + 1}`,
+      '#3fc07a'
+    );
+    setDishProgress(prev => {
+      const next = Math.min(100, prev + 40);
+      if (next >= 100 && lockedStageRef.current !== activeStageIndex) {
+        lockedStageRef.current = activeStageIndex;
+        setTimeout(() => onInspectStage(selectedToolId), 90);
+      }
+      return next;
+    });
+  };
 
   return (
     <div
@@ -1279,7 +1184,7 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
         overflow: 'hidden',
       }}
     >
-      {/* Full-Stage 2D One-Way Kitchen Floor Arena */}
+      {/* 3-Lane Commercial Kitchen Conveyor & Prep Station Canvas */}
       <div
         style={{
           position: 'relative',
@@ -1296,146 +1201,291 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
       >
         <svg
           viewBox="0 0 560 280"
-          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block', cursor: 'pointer' }}
-          onClick={e => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const svgX = ((e.clientX - rect.left) / rect.width) * 560;
-            const svgY = ((e.clientY - rect.top) / rect.height) * 280;
-            arena.moveAvatarTo(svgX, svgY);
-          }}
+          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block' }}
         >
           <defs>
-            <pattern id="kitchenTileGrid" width="32" height="32" patternUnits="userSpaceOnUse">
-              <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#122128" strokeWidth="1" />
+            <pattern id="kitchenFloorTiles" width="28" height="28" patternUnits="userSpaceOnUse">
+              <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#112228" strokeWidth="1" />
             </pattern>
           </defs>
-          <rect width="560" height="280" fill="url(#kitchenTileGrid)" />
+          <rect width="560" height="280" fill="url(#kitchenFloorTiles)" />
 
-          {/* Top Banner */}
-          <rect x="0" y="0" width="560" height="22" fill="#111726" />
-          <text x="16" y="15" fill={accentHex} fontSize="10" fontWeight="800">
-            {sceneDescriptor.sceneBadge} · DI CHUYỂN ĐẦU BẾP TỚI [{activeStation.code}] ({activeStation.name.toUpperCase()})
+          {/* Top Order Ticket & Dish Progress Bar */}
+          <rect x="0" y="0" width="560" height="26" fill="#111726" />
+          <text x="14" y="17" fill={accentHex} fontSize="9.5" fontWeight="800">
+            BẾP CHẾ BIẾN [{activeRecipe.code}] {activeRecipe.dishName.toUpperCase()} · TIẾN ĐỘ MÓN: {dishProgress}%
           </text>
-
-          {/* 1-Way Kitchen Flow Arrows */}
-          <path
-            d="M 90 95 L 265 85 L 445 95 L 185 195 L 385 195"
-            fill="none"
-            stroke="#1e293b"
-            strokeWidth="4"
-            strokeDasharray="6 4"
+          <rect x="440" y="7" width="106" height="12" rx="4" fill="#090d16" stroke="#26334d" />
+          <rect
+            x="442"
+            y="9"
+            width={Math.round((dishProgress / 100) * 102)}
+            height="8"
+            rx="3"
+            fill="#3fc07a"
           />
 
-          {/* Kitchen Stations */}
-          {kitchenStations.map((st, idx) => {
-            const isTarget = idx === activeStationIdx;
-            const isPassed = idx < activeStageIndex || (isTarget && isSanitized);
-            const stColor = isPassed ? '#3fc07a' : isTarget ? '#f59e0b' : '#475569';
+          {/* 3 Vertical Kitchen Conveyor Belts & Prep Stations */}
+          {([0, 1, 2] as const).map(laneIdx => {
+            const cx = laneXCoords[laneIdx];
+            const meta = laneTitles[laneIdx];
+            const isChefHere = chefLane === laneIdx;
 
             return (
               <g
-                key={st.code}
+                key={laneIdx}
+                data-testid={`kitchen-lane-${laneIdx}`}
                 style={{ cursor: 'pointer' }}
-                onClick={e => {
-                  e.stopPropagation();
-                  if (isTarget) {
-                    arena.engageTargetNow(selectedToolId);
-                  } else {
-                    arena.moveAvatarTo(st.x, st.y);
-                  }
-                }}
+                onClick={() => handleChopOrCookInLane(laneIdx)}
               >
+                {/* Conveyor Track */}
                 <rect
-                  x={st.x - 58}
-                  y={st.y - 28}
-                  width="116"
-                  height="56"
+                  x={cx - 62}
+                  y="32"
+                  width="124"
+                  height="168"
                   rx="8"
-                  fill={isTarget ? '#122924' : '#111726'}
-                  stroke={stColor}
-                  strokeWidth={isTarget ? 2.5 : 1.5}
+                  fill="#0e1624"
+                  stroke={isChefHere ? meta.color : '#1e293b'}
+                  strokeWidth={isChefHere ? 2 : 1.2}
                 />
-                <text x={st.x - 48} y={st.y - 12} fill={stColor} fontSize="9" fontWeight="800">
-                  {st.code} · {st.temp}
+                {[55, 85, 115, 145, 175].map(ry => (
+                  <line
+                    key={ry}
+                    x1={cx - 54}
+                    y1={ry}
+                    x2={cx + 54}
+                    y2={ry}
+                    stroke="#1e293b"
+                    strokeWidth="2"
+                    strokeDasharray="6 4"
+                  />
+                ))}
+
+                {/* Top Lane Header */}
+                <rect x={cx - 58} y="35" width="116" height="18" rx="4" fill="#111726" />
+                <text x={cx} y="47" textAnchor="middle" fill={meta.color} fontSize="8" fontWeight="800">
+                  {meta.title}
                 </text>
-                <text x={st.x} y={st.y + 4} textAnchor="middle" fill="#f8fafc" fontSize="9.5" fontWeight="700">
-                  {st.name.slice(0, 18)}
-                </text>
-                <text x={st.x} y={st.y + 19} textAnchor="middle" fill={isPassed ? '#3fc07a' : '#fbbf24'} fontSize="8" fontWeight="800">
-                  {isPassed ? '[ĐẠT HACCP]' : isTarget ? '[CẦN ĐO KIỂM]' : '[CHỜ KIỂM TRA]'}
+
+                {/* Bottom Stainless Steel Prep Station (Red Board / Flame Stove / White Tray) */}
+                <rect
+                  x={cx - 64}
+                  y="202"
+                  width="128"
+                  height="48"
+                  rx="8"
+                  fill={isChefHere ? '#152824' : '#111726'}
+                  stroke={meta.color}
+                  strokeWidth={isChefHere ? 2.5 : 1.5}
+                />
+                {laneIdx === 0 && (
+                  <rect x={cx - 36} y="209" width="72" height="16" rx="4" fill="#7f1d1d" stroke="#ef4444" />
+                )}
+                {laneIdx === 1 && (
+                  <g>
+                    <circle cx={cx - 18} cy="217" r="9" fill="#451a03" stroke="#f97316" strokeWidth="2" />
+                    <circle cx={cx + 18} cy="217" r="9" fill="#451a03" stroke="#f97316" strokeWidth="2" />
+                  </g>
+                )}
+                {laneIdx === 2 && (
+                  <rect x={cx - 36} y="209" width="72" height="16" rx="4" fill="#e2e8f0" stroke="#3fc07a" />
+                )}
+                <text x={cx} y="241" textAnchor="middle" fill="#f8fafc" fontSize="8.5" fontWeight="800">
+                  {meta.badge} {isChefHere ? '(ĐANG ĐỨNG)' : '(CHẠM CHỌN)'}
                 </text>
               </g>
             );
           })}
 
-          {/* Collectibles */}
-          {arena.collectibles.map(col =>
-            !col.collected ? (
+          {/* Falling Ingredients & Cross-Contamination Hazards on the 3 Belts */}
+          {items.map(item => {
+            const ix = laneXCoords[item.lane];
+            const boxColor = item.isHazard ? '#e5566f' : '#3fc07a';
+            const fillBg = item.isHazard ? '#2c1a20' : '#132820';
+
+            return (
               <g
-                key={col.id}
+                key={item.id}
                 style={{ cursor: 'pointer' }}
                 onClick={e => {
                   e.stopPropagation();
-                  arena.moveAvatarTo(col.x, col.y);
+                  if (item.isHazard) {
+                    // Clicking a hazard discards it into the bio-trash bin!
+                    onCollectBonus?.(10);
+                    addPopup(ix, item.y, '+10Đ ĐÃ LOẠI BỎ MẦM KHUẨN!', '#38bdf8');
+                    setItems(prev => prev.map(it => (it.id === item.id ? { ...it, y: 34 } : it)));
+                  } else {
+                    handleChopOrCookInLane(item.lane);
+                  }
                 }}
               >
-                <circle cx={col.x} cy={col.y} r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
-                <text x={col.x} y={col.y + 3.5} textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
-                  +10
+                <rect
+                  x={ix - 46}
+                  y={item.y - 16}
+                  width="92"
+                  height="32"
+                  rx="7"
+                  fill={fillBg}
+                  stroke={boxColor}
+                  strokeWidth="2"
+                />
+                <text x={ix} y={item.y - 2} textAnchor="middle" fill="#f8fafc" fontSize="8.5" fontWeight="800">
+                  {item.label}
                 </text>
-                <text x={col.x} y={col.y + 22} textAnchor="middle" fill="#86efac" fontSize="8" fontWeight="700">
-                  {col.label}
+                <text x={ix} y={item.y + 10} textAnchor="middle" fill={boxColor} fontSize="7.5" fontWeight="800">
+                  {item.isHazard ? '[!] HỦY NGAY' : `${item.tempBadge} (+10Đ)`}
                 </text>
               </g>
-            ) : null
-          )}
+            );
+          })}
 
-          {/* Moving Cross-Contamination Hazard */}
-          {arena.hazards.map(haz => (
-            <g key={haz.id}>
-              <circle cx={haz.x} cy={haz.y} r={haz.radius} fill="rgba(229, 86, 111, 0.22)" stroke="#e5566f" strokeWidth="2" />
-              <text x={haz.x} y={haz.y + 3} textAnchor="middle" fill="#e5566f" fontSize="7.5" fontWeight="800">
-                KHUẨN
-              </text>
-            </g>
-          ))}
-
-          {/* Player Chef / QA Inspector Avatar */}
-          <g transform={`translate(${arena.avatarPos.x}, ${arena.avatarPos.y})`}>
-            <circle cx="0" cy="0" r="15" fill="#0f172a" stroke="#3fc07a" strokeWidth="2.5" />
-            <rect x="-8" y="-12" width="16" height="8" rx="3" fill="#f8fafc" />
-            <text x="0" y="6" textAnchor="middle" fill="#3fc07a" fontSize="8" fontWeight="800">
-              QA
+          {/* Player Chef Avatar at the Active Prep Station */}
+          <g transform={`translate(${laneXCoords[chefLane]}, 258)`}>
+            <circle cx="0" cy="0" r="16" fill="#0f172a" stroke="#3fc07a" strokeWidth="2.5" />
+            {/* Chef Toque Hat */}
+            <rect x="-10" y="-15" width="20" height="9" rx="4" fill="#f8fafc" />
+            <text x="0" y="5" textAnchor="middle" fill="#3fc07a" fontSize="8" fontWeight="800">
+              CHEF
             </text>
           </g>
 
-          {arena.popups.map(p => (
-            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+          {popups.map(p => (
+            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="9.5" fontWeight="800">
               {p.text}
             </text>
           ))}
         </svg>
       </div>
 
-      <BottomSceneControlDock
-        sceneDescriptor={sceneDescriptor}
-        selectedToolId={selectedToolId}
-        onSelectTool={id => setSelectedToolId(id)}
-        onNudge={arena.nudgeAvatar}
-        onEngageTarget={() => arena.engageTargetNow(selectedToolId)}
-        targetBadge={`ĐO KIỂM [${activeStation.code}]`}
-        accentHex={accentHex}
-        energyPercent={energyPercent}
-        skillBonusScore={skillBonusScore}
-      />
+      {/* Kitchen Controls & Serving Inspection Bar */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '10px',
+          padding: '10px 14px',
+          backgroundColor: '#0b0f19',
+          border: '1px solid #1e293b',
+          borderRadius: '10px',
+          flexWrap: 'wrap',
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => setChefLane(prev => (prev > 0 ? ((prev - 1) as 0 | 1 | 2) : 0))}
+            style={{
+              height: '36px',
+              padding: '0 11px',
+              borderRadius: '7px',
+              backgroundColor: '#161f30',
+              border: '1px solid #2e3c56',
+              color: '#f8fafc',
+              fontSize: '12px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            ← Làn Trái (A)
+          </button>
+          <button
+            type="button"
+            data-testid="kitchen-prep-action-btn"
+            onClick={() => handleChopOrCookInLane()}
+            style={{
+              height: '36px',
+              padding: '0 13px',
+              borderRadius: '7px',
+              backgroundColor: '#172a1d',
+              border: '1.5px solid #3fc07a',
+              color: '#3fc07a',
+              fontSize: '12px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            Sơ Chế / Nấu Món (+10Đ)
+          </button>
+          <button
+            type="button"
+            onClick={() => setChefLane(prev => (prev < 2 ? ((prev + 1) as 0 | 1 | 2) : 2))}
+            style={{
+              height: '36px',
+              padding: '0 11px',
+              borderRadius: '7px',
+              backgroundColor: '#161f30',
+              border: '1px solid #2e3c56',
+              color: '#f8fafc',
+              fontSize: '12px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            Làn Phải (D) →
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {sceneDescriptor.tools.map(tool => {
+            const isSelected = tool.id === selectedToolId;
+            return (
+              <button
+                key={tool.id}
+                type="button"
+                onClick={() => setSelectedToolId(tool.id)}
+                style={{
+                  height: '34px',
+                  padding: '0 10px',
+                  borderRadius: '6px',
+                  backgroundColor: isSelected ? '#162038' : '#111726',
+                  border: `1px solid ${isSelected ? accentHex : '#26334d'}`,
+                  color: '#f8fafc',
+                  fontSize: '11.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                [{tool.badgeCode}]
+              </button>
+            );
+          })}
+          <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+            Thưởng bếp: <strong style={{ color: accentHex }}>+{skillBonusScore}</strong>
+          </span>
+          <button
+            type="button"
+            data-testid="kitchen-engage-haccp-btn"
+            onClick={() => {
+              setDishProgress(100);
+              onInspectStage(selectedToolId);
+            }}
+            style={{
+              height: '40px',
+              padding: '0 16px',
+              borderRadius: '8px',
+              backgroundColor: accentHex,
+              border: 'none',
+              color: '#090d16',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            KIỂM ĐỊNH &amp; RA MÓN [{activeRecipe.code}] (Space)
+          </button>
+        </div>
+      </div>
 
       <InGameChallengePopup
         sceneDescriptor={sceneDescriptor}
         activeStageIndex={activeStageIndex}
         totalStages={totalStages}
-        targetCode={activeStation.code}
-        targetName={`${activeStation.name} (${activeStation.temp})`}
-        telemetryLine={activeStation.hazardAlert}
+        targetCode={activeRecipe.code}
+        targetName={activeRecipe.dishName}
+        telemetryLine={activeRecipe.alertLine}
         activeQuestion={activeQuestion}
         activeFeedback={activeFeedback}
         activeTimeRemaining={activeTimeRemaining}
@@ -1455,6 +1505,10 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
 
 /* ============================================================================
  * SCENE 4: CUSTOMER CONSULTATION, SHOWROOM, RESTAURANT SERVICE & NEGOTIATION
+ * Unique Mechanic: Fetch-Match-Deliver Showroom / Dining Hall Floor Game!
+ * Player checks the Customer's Order Bubble on the right, picks up the matching
+ * Product / Menu Dish / Proposal from the 3 Display Shelves on the left, carries
+ * it across the hall (dodging a patrolling service cart), and delivers it!
  * ============================================================================ */
 export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonProps> = props => {
   const {
@@ -1474,7 +1528,6 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
     onContinueStage,
     stageInspected,
     onInspectStage,
-    energyPercent,
     skillBonusScore,
     isPaused,
     onCollectBonus,
@@ -1487,50 +1540,107 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
   const variant = sceneDescriptor.consultationVariant || 'BUSINESS_NEGOTIATION';
   const accentHex = config.palette.accentColor || '#0EA5E9';
 
-  const stationPoints =
+  const shelfCatalog =
     variant === 'SHOWROOM_MOTO'
       ? [
-          { x: 105, y: 95, code: 'QUẦY-01', name: 'Anh Minh Hoàng', note: 'Tìm xe đi phố tiết kiệm xăng, cốp rộng' },
-          { x: 280, y: 85, code: 'KHU-GA', name: 'Chị Thanh Thảo', note: 'Tư vấn xe tay ga SmartKey & trả góp' },
-          { x: 450, y: 95, code: 'KHU-ABS', name: 'Anh Quốc Tuấn', note: 'So sánh phanh ABS/CBS & đi đường đèo' },
-          { x: 185, y: 195, code: 'BÀN-VIP', name: 'Gia đình Anh Kiên', note: 'Tư vấn giá lăn bánh & ưu đãi đăng ký' },
-          { x: 390, y: 195, code: 'BÀN-GIAO', name: 'Bàn Giao Xe Mới', note: 'Hướng dẫn sổ bảo hành & bảo dưỡng định kỳ' },
+          { idx: 0, code: 'XE-GA', label: 'Xe Tay Ga Cốp 37L SmartKey', y: 74 },
+          { idx: 1, code: 'XE-ABS', label: 'Xe Thể Thao Phanh ABS 2 Kênh', y: 144 },
+          { idx: 2, code: 'GÓI-VIP', label: 'Hồ Sơ Trả Góp 0% & Sổ Bảo Hành', y: 214 },
         ]
       : variant === 'RESTAURANT_DINING'
         ? [
-            { x: 105, y: 95, code: 'BÀN-01', name: 'Gia đình Chị Lan', note: 'Lưu ý dị ứng đậu phộng & hải sản có vỏ' },
-            { x: 280, y: 85, code: 'BÀN-VIP', name: 'Anh Đức & Đối tác', note: 'Phục vụ Fine Dining, xử lý món chính ra trễ' },
-            { x: 450, y: 95, code: 'BÀN-08', name: 'Nhóm Thực khách Trẻ', note: 'Tư vấn món đặc sản Signature & tách VAT' },
-            { x: 185, y: 195, code: 'QUẦY-RA', name: 'Quầy Kiểm Món', note: 'Kiểm tra nhiệt độ & thứ tự khai vị - món chính' },
-            { x: 390, y: 195, code: 'LỄ-TÂN', name: 'Quầy Chăm Sóc Khách', note: 'Lắng nghe phản hồi & tiễn thực khách' },
+            { idx: 0, code: 'MENU-AN', label: 'Thực Đơn Không Đậu Phộng/Hải Sản', y: 74 },
+            { idx: 1, code: 'MÓN-VIP', label: 'Khay Bít-tết Nóng & Rượu Vang', y: 144 },
+            { idx: 2, code: 'VOUCHER', label: 'Tráng Miệng Miễn Phí & Hóa Đơn VAT', y: 214 },
           ]
         : [
-            { x: 105, y: 95, code: 'TRẠM-01', name: 'Ông Trần Bảo Nam', note: 'Phân tích Pain Points & cam kết SLA 99.9%' },
-            { x: 280, y: 85, code: 'TRẠM-02', name: 'Bà Nguyễn Mai Anh', note: 'Thương lượng chi phí ROI & lộ trình triển khai' },
-            { x: 450, y: 95, code: 'TRẠM-03', name: 'Hội Đồng Thẩm Định', note: 'Giải trình bảo mật & điều khoản nghiệm thu' },
-            { x: 185, y: 195, code: 'TRẠM-04', name: 'Ban Pháp Chế', note: 'Chốt điều khoản hợp đồng thương mại Win-Win' },
-            { x: 390, y: 195, code: 'TRẠM-05', name: 'Lễ Ký Kết Hợp Đồng', note: 'Xác nhận bàn giao & chăm sóc sau bán hàng' },
+            { idx: 0, code: 'SLA-99', label: 'Hồ Sơ Kiến Trúc & Cam Kết SLA 99.9%', y: 74 },
+            { idx: 1, code: 'BẢNG-ROI', label: 'Báo Cáo Hoàn Vốn ROI & Tối Ưu Chi Phí', y: 144 },
+            { idx: 2, code: 'HỢP-ĐỒNG', label: 'Bản Thảo Hợp Đồng Thương Mại Win-Win', y: 214 },
           ];
 
-  const activeIdx = activeStageIndex % stationPoints.length;
-  const activeCustomer = stationPoints[activeIdx];
-  const isResolved = Boolean(activeFeedback?.isCorrect);
+  const customerQueue =
+    variant === 'SHOWROOM_MOTO'
+      ? [
+          { code: 'KHÁCH-01', name: 'Anh Minh Hoàng', need: 'Cần xe đi phố tiết kiệm xăng, cốp rộng', wantShelf: 0 },
+          { code: 'KHÁCH-02', name: 'Anh Quốc Tuấn', need: 'Cần xe phanh ABS an toàn đi đường đèo', wantShelf: 1 },
+          { code: 'KHÁCH-03', name: 'Gia đình Chị Thảo', need: 'Cần tư vấn gói trả góp & bảo dưỡng định kỳ', wantShelf: 2 },
+        ]
+      : variant === 'RESTAURANT_DINING'
+        ? [
+            { code: 'BÀN-01', name: 'Gia đình Chị Lan', need: 'Thực khách dị ứng đậu phộng & hải sản có vỏ', wantShelf: 0 },
+            { code: 'BÀN-VIP', name: 'Anh Đức & Đối tác', need: 'Phục vụ món chính Fine Dining đúng nhiệt độ', wantShelf: 1 },
+            { code: 'BÀN-08', name: 'Nhóm Thực khách Trẻ', need: 'Hỗ trợ quà tráng miệng khi món trễ & xuất VAT', wantShelf: 2 },
+          ]
+        : [
+            { code: 'ĐỐI-TÁC-1', name: 'Ông Trần Bảo Nam', need: 'Yêu cầu cam kết SLA 99.9% & bảo mật dữ liệu', wantShelf: 0 },
+            { code: 'ĐỐI-TÁC-2', name: 'Bà Nguyễn Mai Anh', need: 'Cần chứng minh hiệu quả đầu tư ROI trong 6 tháng', wantShelf: 1 },
+            { code: 'ĐỐI-TÁC-3', name: 'Ban Pháp Chế B2B', need: 'Thống nhất điều khoản nghiệm thu hợp đồng Win-Win', wantShelf: 2 },
+          ];
 
-  const arena = useArena2DGame({
-    activeStageIndex,
-    stageInspected,
-    isPaused,
-    targetX: activeCustomer.x,
-    targetY: activeCustomer.y,
-    initialX: 48,
-    initialY: 145,
-    selectedToolId,
-    onInspectStage,
-    onCollectBonus,
-    onHazardHit,
-    collectibleLabels: ['Hồ Sơ VIP', 'Catalog Chuẩn', 'Voucher Ưu Đãi'],
-    hazardLabel: 'Ồn/Quá tải',
-  });
+  const activeCustomer = customerQueue[activeStageIndex % customerQueue.length];
+  const requiredShelf = shelfCatalog[activeCustomer.wantShelf];
+
+  const [advisorPos, setAdvisorPos] = useState<{ x: number; y: number }>({ x: 225, y: 144 });
+  const [carryingIdx, setCarryingIdx] = useState<number | null>(null);
+  const [cartY, setCartY] = useState<number>(65);
+  const [patience, setPatience] = useState<number>(100);
+  const [popups, setPopups] = useState<FloatingFeedbackText[]>([]);
+  const cartDirRef = useRef<1 | -1>(1);
+
+  useEffect(() => {
+    setCarryingIdx(null);
+    setAdvisorPos({ x: 220, y: 144 });
+    setPatience(100);
+  }, [activeStageIndex]);
+
+  const addPopup = useCallback((x: number, y: number, text: string, color: string) => {
+    setPopups(prev => [...prev.slice(-4), { id: Date.now() + Math.random(), x, y, text, color }]);
+  }, []);
+
+  // Patrolling service cart & customer patience tick
+  useEffect(() => {
+    if (isPaused || stageInspected) return;
+    const timer = window.setInterval(() => {
+      setCartY(prev => {
+        let next = prev + cartDirRef.current * 3.6;
+        if (next >= 225) {
+          next = 225;
+          cartDirRef.current = -1;
+        } else if (next <= 52) {
+          next = 52;
+          cartDirRef.current = 1;
+        }
+        return next;
+      });
+      setPatience(prev => Math.max(25, prev - 0.15));
+    }, 50);
+    return () => clearInterval(timer);
+  }, [isPaused, stageInspected]);
+
+  const handlePickShelfItem = (shelfIdx: number) => {
+    const shelf = shelfCatalog[shelfIdx];
+    setAdvisorPos({ x: 175, y: shelf.y });
+    setCarryingIdx(shelfIdx);
+    onCollectBonus?.(10);
+    const isMatched = shelfIdx === activeCustomer.wantShelf;
+    addPopup(
+      140,
+      shelf.y - 16,
+      isMatched ? `+10Đ ĐÃ LẤY ĐÚNG [${shelf.code}]` : `+10Đ ĐÃ CẦM [${shelf.code}]`,
+      isMatched ? '#3fc07a' : '#38bdf8'
+    );
+  };
+
+  const handleDeliverToCustomer = () => {
+    if (carryingIdx === null) {
+      setCarryingIdx(activeCustomer.wantShelf);
+      onCollectBonus?.(10);
+    }
+    setAdvisorPos({ x: 375, y: 144 });
+    addPopup(435, 92, `+15Đ GIAO [${requiredShelf.code}] & TƯ VẤN`, '#3fc07a');
+    onInspectStage(selectedToolId);
+  };
 
   return (
     <div
@@ -1548,7 +1658,7 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
         overflow: 'hidden',
       }}
     >
-      {/* Full-Stage 2D Showroom / Dining Floor Arena */}
+      {/* Fetch-Match-Deliver Showroom / Dining Service Hall */}
       <div
         style={{
           position: 'relative',
@@ -1565,127 +1675,259 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
       >
         <svg
           viewBox="0 0 560 280"
-          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block', cursor: 'pointer' }}
-          onClick={e => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const svgX = ((e.clientX - rect.left) / rect.width) * 560;
-            const svgY = ((e.clientY - rect.top) / rect.height) * 280;
-            arena.moveAvatarTo(svgX, svgY);
-          }}
+          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block' }}
         >
           <defs>
-            <pattern id="showroomFloorGrid" width="36" height="36" patternUnits="userSpaceOnUse">
-              <path d="M 36 0 L 0 0 0 36" fill="none" stroke="#151e30" strokeWidth="1" />
+            <pattern id="hallCarpetGrid" width="32" height="32" patternUnits="userSpaceOnUse">
+              <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#141e30" strokeWidth="1" />
             </pattern>
           </defs>
-          <rect width="560" height="280" fill="url(#showroomFloorGrid)" />
+          <rect width="560" height="280" fill="url(#hallCarpetGrid)" />
 
-          <rect x="0" y="0" width="560" height="22" fill="#111726" />
-          <text x="16" y="15" fill={accentHex} fontSize="10" fontWeight="800">
-            {sceneDescriptor.sceneBadge} · DI CHUYỂN TỚI [{activeCustomer.code}] {activeCustomer.name.toUpperCase()}
+          {/* Top Service Header */}
+          <rect x="0" y="0" width="560" height="24" fill="#111726" />
+          <text x="14" y="16" fill={accentHex} fontSize="9.5" fontWeight="800">
+            SẢNH PHỤC VỤ · (1) LẤY [{requiredShelf.code}] TRÊN KỆ TRÁI · (2) MANG SANG BÀN [{activeCustomer.code}] BÊN PHẢI
           </text>
 
-          {/* Customer / Table Stations */}
-          {stationPoints.map((pt, idx) => {
-            const isTarget = idx === activeIdx;
-            const isDone = idx < activeStageIndex || (isTarget && isResolved);
-            const stColor = isDone ? '#3fc07a' : isTarget ? accentHex : '#475569';
-
+          {/* LEFT ZONE: 3 Product / Menu Display Shelves */}
+          <text x="88" y="40" textAnchor="middle" fill="#94a3b8" fontSize="8.5" fontWeight="800">
+            KỆ TRƯNG BÀY / QUẦY MÓN
+          </text>
+          {shelfCatalog.map(shelf => {
+            const isRequired = shelf.idx === activeCustomer.wantShelf;
+            const isPicked = carryingIdx === shelf.idx;
             return (
               <g
-                key={pt.code}
+                key={shelf.code}
+                data-testid={`consultation-shelf-${shelf.idx}`}
                 style={{ cursor: 'pointer' }}
-                onClick={e => {
-                  e.stopPropagation();
-                  if (isTarget) {
-                    arena.engageTargetNow(selectedToolId);
-                  } else {
-                    arena.moveAvatarTo(pt.x, pt.y);
-                  }
-                }}
+                onClick={() => handlePickShelfItem(shelf.idx)}
               >
                 <rect
-                  x={pt.x - 58}
-                  y={pt.y - 28}
-                  width="116"
-                  height="56"
-                  rx="10"
-                  fill={isTarget ? '#162038' : '#111726'}
-                  stroke={stColor}
-                  strokeWidth={isTarget ? 2.5 : 1.5}
+                  x="16"
+                  y={shelf.y - 24}
+                  width="144"
+                  height="48"
+                  rx="8"
+                  fill={isPicked ? '#172a1d' : isRequired ? '#162038' : '#111726'}
+                  stroke={isPicked ? '#3fc07a' : isRequired ? accentHex : '#26334d'}
+                  strokeWidth={isRequired || isPicked ? 2.2 : 1.5}
                 />
-                <text x={pt.x} y={pt.y - 11} textAnchor="middle" fill={stColor} fontSize="9" fontWeight="800">
-                  {pt.code} · {isDone ? 'HÀI LÒNG' : isTarget ? 'ĐANG CHỜ TƯ VẤN' : 'TIẾP THEO'}
+                <text
+                  x="26"
+                  y={shelf.y - 7}
+                  fill={isPicked ? '#3fc07a' : isRequired ? accentHex : '#cbd5e1'}
+                  fontSize="8.5"
+                  fontWeight="800"
+                >
+                  [{shelf.code}] {isRequired ? '· KHÁCH CẦN' : ''}
                 </text>
-                <text x={pt.x} y={pt.y + 5} textAnchor="middle" fill="#f8fafc" fontSize="10" fontWeight="700">
-                  {pt.name}
+                <text x="26" y={shelf.y + 8} fill="#f8fafc" fontSize="8" fontWeight="700">
+                  {shelf.label.slice(0, 24)}
                 </text>
-                <text x={pt.x} y={pt.y + 19} textAnchor="middle" fill="#94a3b8" fontSize="7.5" fontWeight="600">
-                  {pt.note.slice(0, 26)}...
+                <text x="26" y={shelf.y + 19} fill="#3fc07a" fontSize="7.5" fontWeight="800">
+                  {isPicked ? '[ĐANG CẦM TRÊN TAY]' : 'CHẠM ĐỂ LẤY (+10Đ)'}
                 </text>
               </g>
             );
           })}
 
-          {/* Collectible Catalogs / Vouchers */}
-          {arena.collectibles.map(col =>
-            !col.collected ? (
-              <g
-                key={col.id}
-                style={{ cursor: 'pointer' }}
-                onClick={e => {
-                  e.stopPropagation();
-                  arena.moveAvatarTo(col.x, col.y);
-                }}
-              >
-                <circle cx={col.x} cy={col.y} r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
-                <text x={col.x} y={col.y + 3.5} textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
-                  +10
-                </text>
-                <text x={col.x} y={col.y + 22} textAnchor="middle" fill="#86efac" fontSize="8" fontWeight="700">
-                  {col.label}
-                </text>
-              </g>
-            ) : null
-          )}
-
-          {/* Moving Distraction / Rush Hazard */}
-          {arena.hazards.map(haz => (
-            <g key={haz.id}>
-              <circle cx={haz.x} cy={haz.y} r={haz.radius} fill="rgba(229, 86, 111, 0.22)" stroke="#e5566f" strokeWidth="2" />
-              <text x={haz.x} y={haz.y + 3} textAnchor="middle" fill="#e5566f" fontSize="7.5" fontWeight="800">
-                TRỄ
-              </text>
-            </g>
-          ))}
-
-          {/* Player Advisor / Server Avatar */}
-          <g transform={`translate(${arena.avatarPos.x}, ${arena.avatarPos.y})`}>
-            <circle cx="0" cy="0" r="15" fill="#0f172a" stroke={accentHex} strokeWidth="2.5" />
-            <text x="0" y="3.5" textAnchor="middle" fill="#f8fafc" fontSize="8" fontWeight="800">
-              PRO
+          {/* CENTER AISLE: Moving Service Cart Obstacle */}
+          <line x1="280" y1="36" x2="280" y2="255" stroke="#1e293b" strokeWidth="2" strokeDasharray="5 5" />
+          <g
+            style={{ cursor: 'pointer' }}
+            onClick={() => {
+              onHazardHit?.();
+              addPopup(280, cartY - 12, '-8% VA XE ĐẨY SẢNH!', '#e5566f');
+            }}
+          >
+            <rect
+              x="254"
+              y={cartY - 16}
+              width="52"
+              height="32"
+              rx="6"
+              fill="rgba(229, 86, 111, 0.2)"
+              stroke="#e5566f"
+              strokeWidth="2"
+            />
+            <text x="280" y={cartY + 3} textAnchor="middle" fill="#fca5a5" fontSize="7.5" fontWeight="800">
+              XE ĐẨY
             </text>
           </g>
 
-          {arena.popups.map(p => (
-            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+          {/* Player Advisor Avatar Carrying Item Across Hall */}
+          <g
+            transform={`translate(${advisorPos.x}, ${advisorPos.y})`}
+            style={{ cursor: 'pointer' }}
+            onClick={handleDeliverToCustomer}
+          >
+            <circle cx="0" cy="0" r="18" fill="#0f172a" stroke={accentHex} strokeWidth="2.5" />
+            <text x="0" y="3" textAnchor="middle" fill="#f8fafc" fontSize="8" fontWeight="800">
+              PRO
+            </text>
+            {carryingIdx !== null && (
+              <g transform="translate(0, -28)">
+                <rect x="-34" y="-10" width="68" height="16" rx="4" fill="#172a1d" stroke="#3fc07a" strokeWidth="1.5" />
+                <text x="0" y="1" textAnchor="middle" fill="#3fc07a" fontSize="7.5" fontWeight="800">
+                  {shelfCatalog[carryingIdx]?.code}
+                </text>
+              </g>
+            )}
+          </g>
+
+          {/* RIGHT ZONE: Active Customer Booth with Request Bubble & Patience Bar */}
+          <g
+            data-testid="consultation-customer-booth"
+            style={{ cursor: 'pointer' }}
+            onClick={handleDeliverToCustomer}
+          >
+            <rect
+              x="384"
+              y="46"
+              width="160"
+              height="198"
+              rx="12"
+              fill="#111726"
+              stroke={activeFeedback?.isCorrect ? '#3fc07a' : accentHex}
+              strokeWidth="2"
+            />
+            <text x="464" y="68" textAnchor="middle" fill={accentHex} fontSize="9.5" fontWeight="800">
+              {activeCustomer.code} · {activeCustomer.name}
+            </text>
+
+            {/* Customer Order Speech Bubble */}
+            <rect x="396" y="78" width="136" height="54" rx="8" fill="#090d16" stroke="#26334d" />
+            <text x="464" y="94" textAnchor="middle" fill="#fbbf24" fontSize="8.5" fontWeight="800">
+              YÊU CẦU: [{requiredShelf.code}]
+            </text>
+            <text x="464" y="109" textAnchor="middle" fill="#e2e8f0" fontSize="7.5" fontWeight="600">
+              {activeCustomer.need.slice(0, 28)}
+            </text>
+            <text x="464" y="121" textAnchor="middle" fill="#94a3b8" fontSize="7.5">
+              {activeCustomer.need.slice(28, 56)}
+            </text>
+
+            {/* Customer Avatar & Table */}
+            <circle cx="464" cy="160" r="18" fill="#1e293b" stroke="#f8fafc" strokeWidth="2" />
+            <text x="464" y="163" textAnchor="middle" fill="#f8fafc" fontSize="8" fontWeight="800">
+              VIP
+            </text>
+
+            {/* Patience Meter */}
+            <text x="464" y="196" textAnchor="middle" fill="#94a3b8" fontSize="8" fontWeight="700">
+              Độ kiên nhẫn chờ phục vụ: {Math.round(patience)}%
+            </text>
+            <rect x="404" y="202" width="120" height="8" rx="4" fill="#090d16" />
+            <rect
+              x="404"
+              y="202"
+              width={Math.round((patience / 100) * 120)}
+              height="8"
+              rx="4"
+              fill={patience > 50 ? '#3fc07a' : '#f59e0b'}
+            />
+
+            <rect x="404" y="216" width="120" height="20" rx="5" fill={accentHex} />
+            <text x="464" y="229" textAnchor="middle" fill="#090d16" fontSize="8.5" fontWeight="800">
+              GIAO [{requiredShelf.code}] &amp; TƯ VẤN
+            </text>
+          </g>
+
+          {popups.map(p => (
+            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="9.5" fontWeight="800">
               {p.text}
             </text>
           ))}
         </svg>
       </div>
 
-      <BottomSceneControlDock
-        sceneDescriptor={sceneDescriptor}
-        selectedToolId={selectedToolId}
-        onSelectTool={id => setSelectedToolId(id)}
-        onNudge={arena.nudgeAvatar}
-        onEngageTarget={() => arena.engageTargetNow(selectedToolId)}
-        targetBadge={`TƯ VẤN [${activeCustomer.code}]`}
-        accentHex={accentHex}
-        energyPercent={energyPercent}
-        skillBonusScore={skillBonusScore}
-      />
+      {/* Bottom Showroom Shelf Picker & Delivery Action Bar */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '10px',
+          padding: '10px 14px',
+          backgroundColor: '#0b0f19',
+          border: '1px solid #1e293b',
+          borderRadius: '10px',
+          flexWrap: 'wrap',
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          {shelfCatalog.map(shelf => (
+            <button
+              key={shelf.code}
+              type="button"
+              onClick={() => handlePickShelfItem(shelf.idx)}
+              style={{
+                height: '36px',
+                padding: '0 11px',
+                borderRadius: '7px',
+                backgroundColor: carryingIdx === shelf.idx ? '#172a1d' : '#161f30',
+                border: `1.5px solid ${carryingIdx === shelf.idx ? '#3fc07a' : '#2e3c56'}`,
+                color: '#f8fafc',
+                fontSize: '12px',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Lấy [{shelf.code}] (+10Đ)
+            </button>
+          ))}
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {sceneDescriptor.tools.map(tool => {
+            const isSelected = tool.id === selectedToolId;
+            return (
+              <button
+                key={tool.id}
+                type="button"
+                onClick={() => setSelectedToolId(tool.id)}
+                style={{
+                  height: '34px',
+                  padding: '0 9px',
+                  borderRadius: '6px',
+                  backgroundColor: isSelected ? '#162038' : '#111726',
+                  border: `1px solid ${isSelected ? accentHex : '#26334d'}`,
+                  color: '#f8fafc',
+                  fontSize: '11.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                [{tool.badgeCode}]
+              </button>
+            );
+          })}
+          <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+            Thưởng: <strong style={{ color: accentHex }}>+{skillBonusScore}</strong>
+          </span>
+          <button
+            type="button"
+            data-testid="consultation-deliver-btn"
+            onClick={handleDeliverToCustomer}
+            style={{
+              height: '40px',
+              padding: '0 16px',
+              borderRadius: '8px',
+              backgroundColor: accentHex,
+              border: 'none',
+              color: '#090d16',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            GIAO HÀNG &amp; TƯ VẤN [{activeCustomer.code}] (Space)
+          </button>
+        </div>
+      </div>
 
       <InGameChallengePopup
         sceneDescriptor={sceneDescriptor}
@@ -1693,7 +1935,7 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
         totalStages={totalStages}
         targetCode={activeCustomer.code}
         targetName={activeCustomer.name}
-        telemetryLine={`Nhu cầu & Băn khoăn: ${activeCustomer.note}`}
+        telemetryLine={`Yêu cầu khách hàng: ${activeCustomer.need}`}
         activeQuestion={activeQuestion}
         activeFeedback={activeFeedback}
         activeTimeRemaining={activeTimeRemaining}
@@ -1712,7 +1954,11 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
 };
 
 /* ============================================================================
- * SCENE 5: CODING IDE & SOFTWARE DEBUGGER (2D DIGITAL CIRCUIT BUG HUNTER GAME)
+ * SCENE 5: CODING IDE & SOFTWARE DEBUGGER
+ * Unique Mechanic: 2D Side-View Cyber Platformer Game!
+ * Player controls CodeBot with real gravity, jumping across multi-tier logic
+ * platforms (if/else, for-loop, async/await), shooting Compile Lasers at
+ * crawling Red Bugs, collecting Binary Data Orbs, and reaching the Terminal Portal!
  * ============================================================================ */
 export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = props => {
   const {
@@ -1732,7 +1978,6 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
     onContinueStage,
     stageInspected,
     onInspectStage,
-    energyPercent,
     skillBonusScore,
     isPaused,
     onCollectBonus,
@@ -1744,32 +1989,187 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
   );
   const accentHex = config.palette.accentColor || '#3B82F6';
 
-  const circuitModules = [
-    { x: 100, y: 90, code: 'MOD-01', name: 'types_guard.ts', bug: 'TypeError: Undefined payload input' },
-    { x: 275, y: 80, code: 'MOD-02', name: 'loop_engine.ts', bug: 'Infinite Loop: Missing exit condition' },
-    { x: 450, y: 90, code: 'MOD-03', name: 'null_handler.ts', bug: 'NullReferenceException on Line 06' },
-    { x: 185, y: 195, code: 'MOD-04', name: 'async_worker.ts', bug: 'Unhandled Promise Rejection / Race Bug' },
-    { x: 390, y: 195, code: 'MOD-05', name: 'unit_suite.spec.ts', bug: 'Assertion Failed: Edge case boundary' },
+  const stageModules = [
+    { code: 'MOD-01', name: 'types_guard.ts', bug: 'TypeError: Undefined payload input' },
+    { code: 'MOD-02', name: 'loop_engine.ts', bug: 'Infinite Loop: Missing exit condition' },
+    { code: 'MOD-03', name: 'null_handler.ts', bug: 'NullReferenceException on Line 06' },
+    { code: 'MOD-04', name: 'async_worker.ts', bug: 'Unhandled Promise Rejection / Race Bug' },
+    { code: 'MOD-05', name: 'unit_suite.spec.ts', bug: 'Assertion Failed: Edge case boundary' },
   ];
-  const activeModIdx = activeStageIndex % circuitModules.length;
-  const activeMod = circuitModules[activeModIdx];
-  const isPatched = Boolean(activeFeedback?.isCorrect);
+  const activeMod = stageModules[activeStageIndex % stageModules.length];
 
-  const arena = useArena2DGame({
-    activeStageIndex,
-    stageInspected,
-    isPaused,
-    targetX: activeMod.x,
-    targetY: activeMod.y,
-    initialX: 46,
-    initialY: 145,
-    selectedToolId,
-    onInspectStage,
-    onCollectBonus,
-    onHazardHit,
-    collectibleLabels: ['Clean Token', 'Cache Hit', 'Type Guard'],
-    hazardLabel: 'Memory Leak',
+  // Platforms in the 560x280 2D side-view world
+  const platforms = [
+    { x1: 20, x2: 540, y: 246, label: 'MAIN_THREAD_GROUND()' },
+    { x1: 110, x2: 235, y: 192, label: 'if (payload !== null)' },
+    { x1: 255, x2: 385, y: 144, label: 'for (let i = 0; i < len; i++)' },
+    { x1: 395, x2: 530, y: 98, label: 'await runUnitSuite()' },
+  ];
+
+  const [botPos, setBotPos] = useState<{ x: number; y: number }>({ x: 58, y: 246 });
+  const [bugX, setBugX] = useState<number>(315);
+  const [bugAlive, setBugAlive] = useState<boolean>(true);
+  const [laserBeam, setLaserBeam] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
+  const [orbsCollected, setOrbsCollected] = useState<[boolean, boolean]>([false, false]);
+  const [popups, setPopups] = useState<FloatingFeedbackText[]>([]);
+
+  const physRef = useRef({
+    x: 58,
+    y: 246,
+    vx: 0,
+    vy: 0,
+    grounded: true,
+    keys: { left: false, right: false },
+    bugDir: 1 as 1 | -1,
+    portalTriggeredStage: -1,
   });
+
+  useEffect(() => {
+    physRef.current.x = 58;
+    physRef.current.y = 246;
+    physRef.current.vx = 0;
+    physRef.current.vy = 0;
+    physRef.current.grounded = true;
+    setBotPos({ x: 58, y: 246 });
+    setBugAlive(true);
+    setOrbsCollected([false, false]);
+  }, [activeStageIndex]);
+
+  const addPopup = useCallback((x: number, y: number, text: string, color: string) => {
+    setPopups(prev => [...prev.slice(-4), { id: Date.now() + Math.random(), x, y, text, color }]);
+  }, []);
+
+  const triggerBotJump = useCallback(() => {
+    const p = physRef.current;
+    if (p.grounded) {
+      p.vy = -255;
+      p.grounded = false;
+    } else {
+      p.vy = -220;
+    }
+    p.vx = 115;
+  }, []);
+
+  // Keyboard listeners for 2D Platformer
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') physRef.current.keys.left = true;
+      if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') physRef.current.keys.right = true;
+      if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') {
+        e.preventDefault();
+        triggerBotJump();
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') physRef.current.keys.left = false;
+      if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') physRef.current.keys.right = false;
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, [triggerBotJump]);
+
+  // 30fps Platformer Physics & Bug Patrol Loop
+  useEffect(() => {
+    if (isPaused || stageInspected) return;
+    const timer = window.setInterval(() => {
+      const p = physRef.current;
+      const dt = 0.035;
+
+      if (p.keys.left) p.vx = -150;
+      else if (p.keys.right) p.vx = 150;
+      else p.vx *= 0.82;
+
+      const prevY = p.y;
+      p.x = Math.max(32, Math.min(525, p.x + p.vx * dt));
+      p.vy += 680 * dt;
+      p.y += p.vy * dt;
+      p.grounded = false;
+
+      // Platform landing check
+      for (const plat of platforms) {
+        if (p.x >= plat.x1 - 10 && p.x <= plat.x2 + 10) {
+          if (prevY <= plat.y + 4 && p.y >= plat.y && p.vy >= 0) {
+            p.y = plat.y;
+            p.vy = 0;
+            p.grounded = true;
+            break;
+          }
+        }
+      }
+
+      if (p.y > 246) {
+        p.y = 246;
+        p.vy = 0;
+        p.grounded = true;
+      }
+
+      setBotPos({ x: Math.round(p.x), y: Math.round(p.y) });
+
+      // Patrol Bug on Platform 2 (x: 265..375, y: 144)
+      setBugX(prevBx => {
+        let nextBx = prevBx + p.bugDir * 2.8;
+        if (nextBx > 372) {
+          nextBx = 372;
+          p.bugDir = -1;
+        } else if (nextBx < 268) {
+          nextBx = 268;
+          p.bugDir = 1;
+        }
+        return nextBx;
+      });
+
+      // Check Binary Data Orb pickup
+      setOrbsCollected(prev => {
+        const next: [boolean, boolean] = [prev[0], prev[1]];
+        if (!next[0] && Math.hypot(p.x - 172, p.y - 16 - 168) < 28) {
+          next[0] = true;
+          onCollectBonus?.(10);
+          addPopup(172, 152, '+10Đ DATA BIT [1]', '#3fc07a');
+        }
+        if (!next[1] && Math.hypot(p.x - 320, p.y - 16 - 118) < 28) {
+          next[1] = true;
+          onCollectBonus?.(10);
+          addPopup(320, 102, '+10Đ DATA BIT [0]', '#3fc07a');
+        }
+        return next;
+      });
+
+      // Check reaching Terminal Portal on top-right platform (x=475, y=98)
+      if (Math.hypot(p.x - 475, p.y - 98) < 34 && p.portalTriggeredStage !== activeStageIndex) {
+        p.portalTriggeredStage = activeStageIndex;
+        addPopup(475, 62, '+15Đ MỞ TERMINAL PORTAL', '#38bdf8');
+        setTimeout(() => onInspectStage(selectedToolId), 60);
+      }
+    }, 35);
+
+    return () => clearInterval(timer);
+  }, [isPaused, stageInspected, activeStageIndex, selectedToolId, onCollectBonus, onInspectStage, addPopup]);
+
+  const handleShootBugLaser = () => {
+    if (!bugAlive) {
+      triggerBotJump();
+      return;
+    }
+    setLaserBeam({ x1: botPos.x + 12, y1: botPos.y - 16, x2: bugX, y2: 132 });
+    setBugAlive(false);
+    onCollectBonus?.(10);
+    addPopup(bugX, 114, '+10Đ ĐÃ DIỆT BUG RUNTIME!', '#3fc07a');
+    setTimeout(() => setLaserBeam(null), 280);
+  };
+
+  const handleReachPortalNow = () => {
+    physRef.current.x = 475;
+    physRef.current.y = 98;
+    setBotPos({ x: 475, y: 98 });
+    addPopup(475, 62, '+15Đ MỞ BẢN VÁ CODE PATCH', '#38bdf8');
+    onInspectStage(selectedToolId);
+  };
 
   return (
     <div
@@ -1787,7 +2187,7 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
         overflow: 'hidden',
       }}
     >
-      {/* Full-Stage 2D Digital Code Grid & Bug Hunter Arena */}
+      {/* 2D Side-Scrolling Cyber Code Platformer Canvas */}
       <div
         style={{
           position: 'relative',
@@ -1804,142 +2204,293 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
       >
         <svg
           viewBox="0 0 560 280"
-          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block', cursor: 'crosshair' }}
-          onClick={e => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const svgX = ((e.clientX - rect.left) / rect.width) * 560;
-            const svgY = ((e.clientY - rect.top) / rect.height) * 280;
-            arena.moveAvatarTo(svgX, svgY);
-          }}
+          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block' }}
         >
           <defs>
-            <pattern id="codeCircuitGrid" width="28" height="28" patternUnits="userSpaceOnUse">
+            <pattern id="cyberPlatformGrid" width="28" height="28" patternUnits="userSpaceOnUse">
               <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#111a2e" strokeWidth="1" />
             </pattern>
           </defs>
-          <rect width="560" height="280" fill="url(#codeCircuitGrid)" />
+          <rect width="560" height="280" fill="url(#cyberPlatformGrid)" />
 
-          <rect x="0" y="0" width="560" height="22" fill="#0d1322" />
-          <text x="16" y="15" fill={accentHex} fontSize="10" fontWeight="800">
-            {sceneDescriptor.sceneBadge} · ĐIỀU KHIỂN DEBUG BOT BẮT BUG TẠI [{activeMod.code}] ({activeMod.name})
+          {/* Top Status Strip */}
+          <rect x="0" y="0" width="560" height="24" fill="#0d1322" />
+          <text x="14" y="16" fill={accentHex} fontSize="9.5" fontWeight="800">
+            CYBER PLATFORMER [{activeMod.code}] · NHẢY BẬC THỀM LOGIC, BẮN HẠ BUG &amp; TỚI CỔNG TERMINAL ({activeMod.name})
           </text>
 
-          {/* Digital Execution Bus Tracks */}
-          <path
-            d="M 100 90 L 275 80 L 450 90 L 185 195 L 390 195"
-            fill="none"
-            stroke="#1e293b"
-            strokeWidth="5"
-          />
-          <path
-            d="M 100 90 L 275 80 L 450 90 L 185 195 L 390 195"
-            fill="none"
-            stroke="#38bdf8"
-            strokeWidth="1.5"
-            strokeDasharray="6 6"
-          />
-
-          {/* Code Execution Modules / Bug Targets */}
-          {circuitModules.map((mod, idx) => {
-            const isTarget = idx === activeModIdx;
-            const isFixed = idx < activeStageIndex || (isTarget && isPatched);
-            const nodeColor = isFixed ? '#3fc07a' : isTarget ? '#ef4444' : '#475569';
-
-            return (
-              <g
-                key={mod.code}
-                style={{ cursor: 'pointer' }}
-                onClick={e => {
-                  e.stopPropagation();
-                  if (isTarget) {
-                    arena.engageTargetNow(selectedToolId);
-                  } else {
-                    arena.moveAvatarTo(mod.x, mod.y);
-                  }
-                }}
+          {/* Elevated Code Logic Platforms */}
+          {platforms.map((plat, idx) => (
+            <g
+              key={plat.label}
+              style={{ cursor: 'pointer' }}
+              onClick={() => {
+                physRef.current.x = (plat.x1 + plat.x2) / 2;
+                physRef.current.y = plat.y;
+                setBotPos({ x: Math.round(physRef.current.x), y: plat.y });
+              }}
+            >
+              <rect
+                x={plat.x1}
+                y={plat.y}
+                width={plat.x2 - plat.x1}
+                height={idx === 0 ? 22 : 12}
+                rx="4"
+                fill={idx === 0 ? '#111726' : '#162038'}
+                stroke={idx === 3 ? '#3fc07a' : accentHex}
+                strokeWidth="1.5"
+              />
+              <text
+                x={(plat.x1 + plat.x2) / 2}
+                y={plat.y + (idx === 0 ? 14 : 9)}
+                textAnchor="middle"
+                fill="#94a3b8"
+                fontSize="7.5"
+                fontWeight="700"
               >
-                <rect
-                  x={mod.x - 56}
-                  y={mod.y - 28}
-                  width="112"
-                  height="56"
-                  rx="8"
-                  fill={isTarget ? '#191224' : '#0d1322'}
-                  stroke={nodeColor}
-                  strokeWidth={isTarget ? 2.5 : 1.5}
-                />
-                <text x={mod.x} y={mod.y - 11} textAnchor="middle" fill={nodeColor} fontSize="9" fontWeight="800">
-                  {mod.code} · {isFixed ? 'TEST PASS' : isTarget ? 'BUG ACTIVE!' : 'QUEUED'}
-                </text>
-                <text x={mod.x} y={mod.y + 4} textAnchor="middle" fill="#f8fafc" fontSize="9.5" fontWeight="700">
-                  {mod.name}
-                </text>
-                <text x={mod.x} y={mod.y + 18} textAnchor="middle" fill={isFixed ? '#3fc07a' : '#fca5a5'} fontSize="7.5" fontWeight="700">
-                  {isFixed ? '[BUILD GREEN]' : mod.bug.slice(0, 24)}
-                </text>
-              </g>
-            );
-          })}
-
-          {/* Collectible Clean Data Tokens */}
-          {arena.collectibles.map(col =>
-            !col.collected ? (
-              <g
-                key={col.id}
-                style={{ cursor: 'pointer' }}
-                onClick={e => {
-                  e.stopPropagation();
-                  arena.moveAvatarTo(col.x, col.y);
-                }}
-              >
-                <circle cx={col.x} cy={col.y} r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
-                <text x={col.x} y={col.y + 3.5} textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
-                  +10
-                </text>
-                <text x={col.x} y={col.y + 22} textAnchor="middle" fill="#86efac" fontSize="8" fontWeight="700">
-                  {col.label}
-                </text>
-              </g>
-            ) : null
-          )}
-
-          {/* Moving Memory Leak Glitch Hazard */}
-          {arena.hazards.map(haz => (
-            <g key={haz.id}>
-              <circle cx={haz.x} cy={haz.y} r={haz.radius} fill="rgba(229, 86, 111, 0.24)" stroke="#e5566f" strokeWidth="2" />
-              <text x={haz.x} y={haz.y + 3} textAnchor="middle" fill="#e5566f" fontSize="7.5" fontWeight="800">
-                GLITCH
+                {plat.label}
               </text>
             </g>
           ))}
 
-          {/* Player Debugger Bot */}
-          <g transform={`translate(${arena.avatarPos.x}, ${arena.avatarPos.y})`}>
-            <rect x="-15" y="-15" width="30" height="30" rx="7" fill="#090d16" stroke="#38bdf8" strokeWidth="2.5" />
-            <text x="0" y="3.5" textAnchor="middle" fill="#38bdf8" fontSize="8" fontWeight="800">
-              DBG
+          {/* Syntax Spike Hazard on Ground Floor */}
+          <g
+            style={{ cursor: 'pointer' }}
+            onClick={() => {
+              onHazardHit?.();
+              addPopup(235, 224, '-8% LỖI MEMORY LEAK!', '#e5566f');
+            }}
+          >
+            <polygon
+              points="210,246 220,228 230,246 240,228 250,246 260,228 270,246"
+              fill="#e5566f"
+            />
+            <text x="240" y="222" textAnchor="middle" fill="#fca5a5" fontSize="7.5" fontWeight="800">
+              MEMORY LEAK
             </text>
           </g>
 
-          {arena.popups.map(p => (
-            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+          {/* Collectible Binary Data Orbs (0/1) */}
+          {!orbsCollected[0] && (
+            <g
+              style={{ cursor: 'pointer' }}
+              onClick={() => {
+                setOrbsCollected(prev => [true, prev[1]]);
+                onCollectBonus?.(10);
+                addPopup(172, 152, '+10Đ DATA BIT [1]', '#3fc07a');
+              }}
+            >
+              <circle cx="172" cy="168" r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
+              <text x="172" y="171.5" textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
+                +10
+              </text>
+            </g>
+          )}
+          {!orbsCollected[1] && (
+            <g
+              style={{ cursor: 'pointer' }}
+              onClick={() => {
+                setOrbsCollected(prev => [prev[0], true]);
+                onCollectBonus?.(10);
+                addPopup(320, 102, '+10Đ DATA BIT [0]', '#3fc07a');
+              }}
+            >
+              <circle cx="320" cy="118" r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
+              <text x="320" y="121.5" textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
+                +10
+              </text>
+            </g>
+          )}
+
+          {/* Crawling Red Bug Monster on Platform 2 */}
+          {bugAlive && (
+            <g
+              style={{ cursor: 'pointer' }}
+              onClick={handleShootBugLaser}
+            >
+              <rect x={bugX - 18} y="120" width="36" height="22" rx="6" fill="#2c1a20" stroke="#ef4444" strokeWidth="2" />
+              <text x={bugX} y="134" textAnchor="middle" fill="#ef4444" fontSize="8" fontWeight="800">
+                BUG!
+              </text>
+            </g>
+          )}
+
+          {/* Compile Laser Beam */}
+          {laserBeam && (
+            <line
+              x1={laserBeam.x1}
+              y1={laserBeam.y1}
+              x2={laserBeam.x2}
+              y2={laserBeam.y2}
+              stroke="#38bdf8"
+              strokeWidth="3.5"
+            />
+          )}
+
+          {/* Terminal Portal Gate on Top-Right Platform */}
+          <g
+            style={{ cursor: 'pointer' }}
+            onClick={handleReachPortalNow}
+          >
+            <rect
+              x="435"
+              y="44"
+              width="82"
+              height="52"
+              rx="8"
+              fill="#111726"
+              stroke={activeFeedback?.isCorrect ? '#3fc07a' : '#38bdf8'}
+              strokeWidth="2.5"
+            />
+            <text x="476" y="63" textAnchor="middle" fill="#38bdf8" fontSize="8.5" fontWeight="800">
+              PORTAL [{activeMod.code}]
+            </text>
+            <text x="476" y="76" textAnchor="middle" fill="#f8fafc" fontSize="8" fontWeight="700">
+              {activeMod.name}
+            </text>
+            <text x="476" y="88" textAnchor="middle" fill="#3fc07a" fontSize="7.5" fontWeight="800">
+              [CHẠM MỞ PATCH]
+            </text>
+          </g>
+
+          {/* Player CodeBot Avatar */}
+          <g transform={`translate(${botPos.x}, ${botPos.y - 16})`}>
+            <rect x="-15" y="-16" width="30" height="32" rx="7" fill="#090d16" stroke="#38bdf8" strokeWidth="2.5" />
+            <rect x="-9" y="-10" width="18" height="8" rx="2" fill="#38bdf8" />
+            <text x="0" y="9" textAnchor="middle" fill="#f8fafc" fontSize="7.5" fontWeight="800">
+              BOT
+            </text>
+          </g>
+
+          {popups.map(p => (
+            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="9.5" fontWeight="800">
               {p.text}
             </text>
           ))}
         </svg>
       </div>
 
-      <BottomSceneControlDock
-        sceneDescriptor={sceneDescriptor}
-        selectedToolId={selectedToolId}
-        onSelectTool={id => setSelectedToolId(id)}
-        onNudge={arena.nudgeAvatar}
-        onEngageTarget={() => arena.engageTargetNow(selectedToolId)}
-        targetBadge={`KHÓA BUG [${activeMod.code}]`}
-        accentHex={accentHex}
-        energyPercent={energyPercent}
-        skillBonusScore={skillBonusScore}
-      />
+      {/* Platformer Action Bar */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '10px',
+          padding: '10px 14px',
+          backgroundColor: '#0b0f19',
+          border: '1px solid #1e293b',
+          borderRadius: '10px',
+          flexWrap: 'wrap',
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            onClick={() => {
+              physRef.current.x = Math.max(36, physRef.current.x - 45);
+              setBotPos({ x: Math.round(physRef.current.x), y: Math.round(physRef.current.y) });
+            }}
+            style={{
+              height: '36px',
+              padding: '0 11px',
+              borderRadius: '7px',
+              backgroundColor: '#161f30',
+              border: '1px solid #2e3c56',
+              color: '#f8fafc',
+              fontSize: '12px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            ← Chạy Trái (A)
+          </button>
+          <button
+            type="button"
+            data-testid="coding-jump-btn"
+            onClick={triggerBotJump}
+            style={{
+              height: '36px',
+              padding: '0 13px',
+              borderRadius: '7px',
+              backgroundColor: '#162038',
+              border: '1.5px solid #38bdf8',
+              color: '#38bdf8',
+              fontSize: '12px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            Nhảy Bậc Thềm (W / ↑)
+          </button>
+          <button
+            type="button"
+            data-testid="coding-shoot-bug-btn"
+            onClick={handleShootBugLaser}
+            style={{
+              height: '36px',
+              padding: '0 13px',
+              borderRadius: '7px',
+              backgroundColor: '#172a1d',
+              border: '1.5px solid #3fc07a',
+              color: '#3fc07a',
+              fontSize: '12px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            Bắn Tia Diệt Bug (+10Đ)
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {sceneDescriptor.tools.map(tool => {
+            const isSelected = tool.id === selectedToolId;
+            return (
+              <button
+                key={tool.id}
+                type="button"
+                onClick={() => setSelectedToolId(tool.id)}
+                style={{
+                  height: '34px',
+                  padding: '0 9px',
+                  borderRadius: '6px',
+                  backgroundColor: isSelected ? '#162038' : '#111726',
+                  border: `1px solid ${isSelected ? accentHex : '#26334d'}`,
+                  color: '#f8fafc',
+                  fontSize: '11.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                [{tool.badgeCode}]
+              </button>
+            );
+          })}
+          <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+            Thưởng code: <strong style={{ color: accentHex }}>+{skillBonusScore}</strong>
+          </span>
+          <button
+            type="button"
+            data-testid="coding-engage-portal-btn"
+            onClick={handleReachPortalNow}
+            style={{
+              height: '40px',
+              padding: '0 16px',
+              borderRadius: '8px',
+              backgroundColor: accentHex,
+              border: 'none',
+              color: '#090d16',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            NẠP PATCH [{activeMod.code}] (Space)
+          </button>
+        </div>
+      </div>
 
       <InGameChallengePopup
         sceneDescriptor={sceneDescriptor}
@@ -1966,8 +2517,19 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
 };
 
 /* ============================================================================
- * SCENE 6: CYBER DEFENSE SOC RADAR & THREAT INTERCEPTOR (2D ACTIVE DEFENSE GAME)
+ * SCENE 6: CYBER DEFENSE SOC RADAR & THREAT INTERCEPTOR
+ * Unique Mechanic: 360° Orbital Core Shield & Active Malware Interceptor Game!
+ * Incoming Malware Missiles (Ransomware, SQLi, DDoS, Phishing) fly from the
+ * outer perimeter toward the central CORE VAULT. Player rotates the Orbital
+ * Firewall Shield and fires Pulse Lasers to destroy packets before impact!
  * ============================================================================ */
+interface IncomingThreatPacket {
+  id: number;
+  angle: number;
+  dist: number;
+  label: string;
+}
+
 export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = props => {
   const {
     config,
@@ -1986,7 +2548,6 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
     onContinueStage,
     stageInspected,
     onInspectStage,
-    energyPercent,
     skillBonusScore,
     isPaused,
     onCollectBonus,
@@ -1998,32 +2559,147 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
   );
   const accentHex = config.palette.accentColor || '#10B981';
 
-  const socNodes = [
-    { x: 95, y: 138, id: 'NODE-01', name: 'Mail Gateway', threat: 'Phishing & Spoofing Payload' },
-    { x: 220, y: 78, id: 'NODE-02', name: 'IAM / MFA Auth', threat: 'Brute-force Credential Attack' },
-    { x: 220, y: 198, id: 'NODE-03', name: 'App Cluster WAF', threat: 'SQLi / XSS Injection Vector' },
-    { x: 355, y: 138, id: 'NODE-04', name: 'Encrypted Vault', threat: 'Ransomware Data Exfiltration' },
-    { x: 475, y: 138, id: 'NODE-05', name: 'Core SIEM/SOAR', threat: 'Zero-Day Privilege Escalation' },
+  const socWaves = [
+    { id: 'WAVE-01', name: 'Mail Gateway', threat: 'Phishing & Spoofing Payload', packetTag: 'PHISHING' },
+    { id: 'WAVE-02', name: 'IAM / MFA Auth', threat: 'Brute-force Credential Attack', packetTag: 'BRUTE-FORCE' },
+    { id: 'WAVE-03', name: 'App Cluster WAF', threat: 'SQLi / XSS Injection Vector', packetTag: 'SQL-INJECT' },
+    { id: 'WAVE-04', name: 'Encrypted Vault', threat: 'Ransomware Data Exfiltration', packetTag: 'RANSOMWARE' },
+    { id: 'WAVE-05', name: 'Core SIEM/SOAR', threat: 'Zero-Day Privilege Escalation', packetTag: 'ZERO-DAY' },
   ];
-  const targetNodeIdx = activeStageIndex % socNodes.length;
-  const targetNode = socNodes[targetNodeIdx];
-  const isNodeSecured = Boolean(activeFeedback?.isCorrect);
+  const activeWave = socWaves[activeStageIndex % socWaves.length];
 
-  const arena = useArena2DGame({
-    activeStageIndex,
-    stageInspected,
+  const [shieldAngle, setShieldAngle] = useState<number>(0);
+  const [interceptedCount, setInterceptedCount] = useState<number>(0);
+  const [packets, setPackets] = useState<IncomingThreatPacket[]>([
+    { id: 1, angle: 0.4, dist: 122, label: activeWave.packetTag },
+    { id: 2, angle: 2.4, dist: 138, label: 'DDOS-SYN' },
+    { id: 3, angle: 4.5, dist: 152, label: 'MALWARE' },
+  ]);
+  const [laserTarget, setLaserTarget] = useState<{ x: number; y: number } | null>(null);
+  const [popups, setPopups] = useState<FloatingFeedbackText[]>([]);
+
+  const shieldAngleRef = useRef<number>(0);
+  const lockedWaveRef = useRef<number>(-1);
+
+  useEffect(() => {
+    shieldAngleRef.current = shieldAngle;
+  }, [shieldAngle]);
+
+  useEffect(() => {
+    setInterceptedCount(stageInspected ? 3 : 0);
+    setPackets([
+      { id: 1, angle: 0.4, dist: 122, label: activeWave.packetTag },
+      { id: 2, angle: 2.4, dist: 138, label: 'DDOS-SYN' },
+      { id: 3, angle: 4.5, dist: 152, label: 'MALWARE' },
+    ]);
+  }, [activeStageIndex, activeWave.packetTag, stageInspected]);
+
+  const addPopup = useCallback((x: number, y: number, text: string, color: string) => {
+    setPopups(prev => [...prev.slice(-4), { id: Date.now() + Math.random(), x, y, text, color }]);
+  }, []);
+
+  // Keyboard A/D or Left/Right rotates the Orbital Firewall Shield
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
+        setShieldAngle(prev => prev - 0.55);
+      } else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
+        setShieldAngle(prev => prev + 0.55);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // Radial Malware Missile Approach & Orbital Shield Collision Loop
+  useEffect(() => {
+    if (isPaused || stageInspected) return;
+
+    const timer = window.setInterval(() => {
+      setPackets(prev =>
+        prev.map(pkt => {
+          const nextDist = pkt.dist - 2.1;
+          // Check Orbital Shield Ring at radius 48..58
+          if (nextDist <= 56 && nextDist >= 42) {
+            const diff = Math.atan2(
+              Math.sin(pkt.angle - shieldAngleRef.current),
+              Math.cos(pkt.angle - shieldAngleRef.current)
+            );
+            if (Math.abs(diff) <= 1.05) {
+              // Blocked by Orbital Firewall Shield!
+              const px = 280 + Math.cos(pkt.angle) * 52;
+              const py = 148 + Math.sin(pkt.angle) * 52;
+              onCollectBonus?.(10);
+              addPopup(px, py - 10, `+10Đ CHẶN ${pkt.label}`, '#3fc07a');
+              setInterceptedCount(c => {
+                const nextC = c + 1;
+                if (nextC >= 3 && lockedWaveRef.current !== activeStageIndex) {
+                  lockedWaveRef.current = activeStageIndex;
+                  setTimeout(() => onInspectStage(selectedToolId), 80);
+                }
+                return nextC;
+              });
+              return { ...pkt, dist: 145, angle: (pkt.angle + 2.1) % (Math.PI * 2) };
+            }
+          }
+          // Check Core Vault impact at radius <= 28
+          if (nextDist <= 28) {
+            onHazardHit?.();
+            addPopup(280, 112, `-8% THỦNG TƯỜNG LỬA (${pkt.label})`, '#e5566f');
+            return { ...pkt, dist: 148, angle: (pkt.angle + 1.7) % (Math.PI * 2) };
+          }
+          return { ...pkt, dist: nextDist };
+        })
+      );
+    }, 45);
+
+    return () => clearInterval(timer);
+  }, [
     isPaused,
-    targetX: targetNode.x,
-    targetY: targetNode.y,
-    initialX: 46,
-    initialY: 138,
+    stageInspected,
+    activeStageIndex,
     selectedToolId,
-    onInspectStage,
     onCollectBonus,
     onHazardHit,
-    collectibleLabels: ['Cyber Key', 'Zero-Trust Token', 'Patch Hash'],
-    hazardLabel: 'Mã độc DDoS',
-  });
+    onInspectStage,
+    addPopup,
+  ]);
+
+  const handleFireFirewallPulse = (targetPacket?: IncomingThreatPacket) => {
+    const pkt = targetPacket || packets[0];
+    if (!pkt) return;
+    const px = 280 + Math.cos(pkt.angle) * pkt.dist;
+    const py = 148 + Math.sin(pkt.angle) * pkt.dist;
+    setShieldAngle(pkt.angle);
+    setLaserTarget({ x: px, y: py });
+    setTimeout(() => setLaserTarget(null), 240);
+
+    onCollectBonus?.(10);
+    addPopup(px, py - 12, `+10Đ BẮN HẠ ${pkt.label}`, '#3fc07a');
+    setPackets(prev =>
+      prev.map(it =>
+        it.id === pkt.id ? { ...it, dist: 148, angle: (it.angle + 1.9) % (Math.PI * 2) } : it
+      )
+    );
+    setInterceptedCount(c => {
+      const nextC = c + 1;
+      if (nextC >= 3 && lockedWaveRef.current !== activeStageIndex) {
+        lockedWaveRef.current = activeStageIndex;
+        setTimeout(() => onInspectStage(selectedToolId), 90);
+      }
+      return nextC;
+    });
+  };
+
+  // Compute Orbital Shield Arc SVG path around (280, 148) with radius 52
+  const arcStart = shieldAngle - 0.95;
+  const arcEnd = shieldAngle + 0.95;
+  const sx1 = 280 + Math.cos(arcStart) * 52;
+  const sy1 = 148 + Math.sin(arcStart) * 52;
+  const sx2 = 280 + Math.cos(arcEnd) * 52;
+  const sy2 = 148 + Math.sin(arcEnd) * 52;
 
   return (
     <div
@@ -2041,7 +2717,7 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
         overflow: 'hidden',
       }}
     >
-      {/* Full-Stage 2D Active Network Defense Radar Arena */}
+      {/* 360° Orbital Core Shield & Malware Interceptor Canvas */}
       <div
         style={{
           position: 'relative',
@@ -2063,156 +2739,234 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
             const rect = e.currentTarget.getBoundingClientRect();
             const svgX = ((e.clientX - rect.left) / rect.width) * 560;
             const svgY = ((e.clientY - rect.top) / rect.height) * 280;
-            arena.moveAvatarTo(svgX, svgY);
+            const angle = Math.atan2(svgY - 148, svgX - 280);
+            setShieldAngle(angle);
           }}
         >
           <defs>
-            <pattern id="socRadarGrid" width="28" height="28" patternUnits="userSpaceOnUse">
+            <pattern id="socCoreGrid" width="28" height="28" patternUnits="userSpaceOnUse">
               <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#0d1f26" strokeWidth="1" />
             </pattern>
           </defs>
-          <rect width="560" height="280" fill="url(#socRadarGrid)" />
+          <rect width="560" height="280" fill="url(#socCoreGrid)" />
 
-          {/* Radar Concentric Rings */}
-          <circle cx="280" cy="145" r="110" fill="none" stroke="#0f2930" strokeWidth="1" strokeDasharray="4 4" />
-          <circle cx="280" cy="145" r="65" fill="none" stroke="#0f2930" strokeWidth="1" strokeDasharray="4 4" />
-
-          <rect x="0" y="0" width="560" height="22" fill="#0c1420" />
-          <text x="16" y="15" fill={accentHex} fontSize="10" fontWeight="800">
-            {sceneDescriptor.sceneBadge} · ĐIỀU KHIỂN KHIÊN SOC CÔ LẬP [{targetNode.id}] ({targetNode.name.toUpperCase()})
+          <rect x="0" y="0" width="560" height="24" fill="#0c1420" />
+          <text x="14" y="16" fill={accentHex} fontSize="9.5" fontWeight="800">
+            PHÁO ĐÀI SOC [{activeWave.id}] · XOAY KHIÊN (A/D) &amp; BẮN HẠ 3 ĐỢT MÃ ĐỘC ({Math.min(3, interceptedCount)}/3) ĐỂ KHÓA {activeWave.name.toUpperCase()}
           </text>
 
-          {/* Network Topology Fiber Links */}
-          <line x1="95" y1="138" x2="220" y2="78" stroke="#1e293b" strokeWidth="3.5" />
-          <line x1="95" y1="138" x2="220" y2="198" stroke="#1e293b" strokeWidth="3.5" />
-          <line x1="220" y1="78" x2="355" y2="138" stroke="#1e293b" strokeWidth="3.5" />
-          <line x1="220" y1="198" x2="355" y2="138" stroke="#1e293b" strokeWidth="3.5" />
-          <line x1="355" y1="138" x2="475" y2="138" stroke="#1e293b" strokeWidth="3.5" />
+          {/* Radar Concentric Perimeter Rings */}
+          <circle cx="280" cy="148" r="120" fill="none" stroke="#112a32" strokeWidth="1.2" strokeDasharray="4 4" />
+          <circle cx="280" cy="148" r="85" fill="none" stroke="#112a32" strokeWidth="1.2" strokeDasharray="4 4" />
+          <circle cx="280" cy="148" r="52" fill="none" stroke="#163840" strokeWidth="1.5" />
 
-          {/* Network Nodes */}
-          {socNodes.map((node, idx) => {
-            const isTarget = idx === targetNodeIdx;
-            const isProtected = idx < activeStageIndex || (isTarget && isNodeSecured);
-            const color = isProtected
-              ? '#3fc07a'
-              : isTarget
-                ? stageInspected
-                  ? '#f59e0b'
-                  : '#ef4444'
-                : '#38bdf8';
+          {/* Rotating Orbital Firewall Shield Arc */}
+          <path
+            d={`M ${sx1} ${sy1} A 52 52 0 0 1 ${sx2} ${sy2}`}
+            fill="none"
+            stroke="#3fc07a"
+            strokeWidth="7"
+            strokeLinecap="round"
+          />
 
+          {/* Laser Interceptor Beam */}
+          {laserTarget && (
+            <line
+              x1="280"
+              y1="148"
+              x2={laserTarget.x}
+              y2={laserTarget.y}
+              stroke="#38bdf8"
+              strokeWidth="4"
+            />
+          )}
+
+          {/* Central Protected CORE VAULT */}
+          <g
+            style={{ cursor: 'pointer' }}
+            onClick={() => onInspectStage(selectedToolId)}
+          >
+            <circle
+              cx="280"
+              cy="148"
+              r="28"
+              fill="#0b1320"
+              stroke={activeFeedback?.isCorrect ? '#3fc07a' : '#38bdf8'}
+              strokeWidth="3"
+            />
+            <text x="280" y="145" textAnchor="middle" fill="#f8fafc" fontSize="8.5" fontWeight="800">
+              CORE VAULT
+            </text>
+            <text x="280" y="156" textAnchor="middle" fill="#3fc07a" fontSize="7.5" fontWeight="800">
+              {Math.min(3, interceptedCount)}/3 LOCKED
+            </text>
+          </g>
+
+          {/* Incoming Malware Missiles Flying Toward Core */}
+          {packets.map(pkt => {
+            const px = 280 + Math.cos(pkt.angle) * pkt.dist;
+            const py = 148 + Math.sin(pkt.angle) * pkt.dist;
             return (
               <g
-                key={node.id}
+                key={pkt.id}
                 style={{ cursor: 'pointer' }}
                 onClick={e => {
                   e.stopPropagation();
-                  if (isTarget) {
-                    arena.engageTargetNow(selectedToolId);
-                  } else {
-                    arena.moveAvatarTo(node.x, node.y);
-                  }
+                  handleFireFirewallPulse(pkt);
                 }}
               >
-                {isTarget && !isProtected && (
-                  <circle
-                    cx={node.x}
-                    cy={node.y}
-                    r="34"
-                    fill="rgba(239, 68, 68, 0.16)"
-                    stroke={color}
-                    strokeWidth="2"
-                    strokeDasharray="5 3"
-                  />
-                )}
-                <circle
-                  cx={node.x}
-                  cy={node.y}
-                  r="24"
-                  fill="#0b1320"
-                  stroke={color}
-                  strokeWidth="3"
+                <line
+                  x1={px}
+                  y1={py}
+                  x2={280 + Math.cos(pkt.angle) * (pkt.dist + 18)}
+                  y2={148 + Math.sin(pkt.angle) * (pkt.dist + 18)}
+                  stroke="#ef4444"
+                  strokeWidth="2.5"
                 />
-                <text x={node.x} y={node.y - 2} textAnchor="middle" fill={color} fontSize="9.5" fontWeight="800">
-                  {node.id}
-                </text>
-                <text x={node.x} y={node.y + 10} textAnchor="middle" fill="#cbd5e1" fontSize="7.5" fontWeight="700">
-                  {isProtected ? 'SHIELD ON' : isTarget ? 'ATTACK!' : 'ONLINE'}
-                </text>
-                <text x={node.x} y={node.y + 38} textAnchor="middle" fill="#e2e8f0" fontSize="9.5" fontWeight="700">
-                  {node.name}
+                <circle cx={px} cy={py} r="14" fill="#2c1a20" stroke="#ef4444" strokeWidth="2" />
+                <text x={px} y={py + 3} textAnchor="middle" fill="#fca5a5" fontSize="7" fontWeight="800">
+                  {pkt.label.slice(0, 6)}
                 </text>
               </g>
             );
           })}
 
-          {/* Collectible Cyber Security Tokens */}
-          {arena.collectibles.map(col =>
-            !col.collected ? (
-              <g
-                key={col.id}
-                style={{ cursor: 'pointer' }}
-                onClick={e => {
-                  e.stopPropagation();
-                  arena.moveAvatarTo(col.x, col.y);
-                }}
-              >
-                <circle cx={col.x} cy={col.y} r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
-                <text x={col.x} y={col.y + 3.5} textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
-                  +10
-                </text>
-                <text x={col.x} y={col.y + 22} textAnchor="middle" fill="#86efac" fontSize="8" fontWeight="700">
-                  {col.label}
-                </text>
-              </g>
-            ) : null
-          )}
-
-          {/* Moving Malware / DDoS Packet */}
-          {arena.hazards.map(haz => (
-            <g key={haz.id}>
-              <circle cx={haz.x} cy={haz.y} r={haz.radius} fill="rgba(229, 86, 111, 0.25)" stroke="#e5566f" strokeWidth="2" />
-              <text x={haz.x} y={haz.y + 3} textAnchor="middle" fill="#e5566f" fontSize="7.5" fontWeight="800">
-                DDOS
-              </text>
-            </g>
-          ))}
-
-          {/* Player SOC Shield Drone */}
-          <g transform={`translate(${arena.avatarPos.x}, ${arena.avatarPos.y})`}>
-            <circle cx="0" cy="0" r="16" fill="#060b12" stroke="#3fc07a" strokeWidth="2.5" />
-            <text x="0" y="3.5" textAnchor="middle" fill="#3fc07a" fontSize="8" fontWeight="800">
-              SOC
-            </text>
-          </g>
-
-          {arena.popups.map(p => (
-            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+          {popups.map(p => (
+            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="9.5" fontWeight="800">
               {p.text}
             </text>
           ))}
         </svg>
       </div>
 
-      <BottomSceneControlDock
-        sceneDescriptor={sceneDescriptor}
-        selectedToolId={selectedToolId}
-        onSelectTool={id => setSelectedToolId(id)}
-        onNudge={arena.nudgeAvatar}
-        onEngageTarget={() => arena.engageTargetNow(selectedToolId)}
-        targetBadge={`CÔ LẬP [${targetNode.id}]`}
-        accentHex={accentHex}
-        energyPercent={energyPercent}
-        skillBonusScore={skillBonusScore}
-      />
+      {/* Orbital Shield & Turret Controls */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: '10px',
+          padding: '10px 14px',
+          backgroundColor: '#0b0f19',
+          border: '1px solid #1e293b',
+          borderRadius: '10px',
+          flexWrap: 'wrap',
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            data-testid="cyber-rotate-left-btn"
+            onClick={() => setShieldAngle(prev => prev - 0.65)}
+            style={{
+              height: '36px',
+              padding: '0 11px',
+              borderRadius: '7px',
+              backgroundColor: '#161f30',
+              border: '1px solid #2e3c56',
+              color: '#f8fafc',
+              fontSize: '12px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            ↺ Xoay Khiên Trái (A)
+          </button>
+          <button
+            type="button"
+            data-testid="cyber-fire-pulse-btn"
+            onClick={() => handleFireFirewallPulse()}
+            style={{
+              height: '36px',
+              padding: '0 13px',
+              borderRadius: '7px',
+              backgroundColor: '#172a1d',
+              border: '1.5px solid #3fc07a',
+              color: '#3fc07a',
+              fontSize: '12px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            Bắn Xung Chặn Mã Độc (+10Đ)
+          </button>
+          <button
+            type="button"
+            data-testid="cyber-rotate-right-btn"
+            onClick={() => setShieldAngle(prev => prev + 0.65)}
+            style={{
+              height: '36px',
+              padding: '0 11px',
+              borderRadius: '7px',
+              backgroundColor: '#161f30',
+              border: '1px solid #2e3c56',
+              color: '#f8fafc',
+              fontSize: '12px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            Xoay Khiên Phải (D) ↻
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+          {sceneDescriptor.tools.map(tool => {
+            const isSelected = tool.id === selectedToolId;
+            return (
+              <button
+                key={tool.id}
+                type="button"
+                onClick={() => setSelectedToolId(tool.id)}
+                style={{
+                  height: '34px',
+                  padding: '0 9px',
+                  borderRadius: '6px',
+                  backgroundColor: isSelected ? '#162038' : '#111726',
+                  border: `1px solid ${isSelected ? accentHex : '#26334d'}`,
+                  color: '#f8fafc',
+                  fontSize: '11.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                [{tool.badgeCode}]
+              </button>
+            );
+          })}
+          <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
+            Đã chặn: <strong style={{ color: '#3fc07a' }}>{interceptedCount}</strong> · Thưởng:{' '}
+            <strong style={{ color: accentHex }}>+{skillBonusScore}</strong>
+          </span>
+          <button
+            type="button"
+            data-testid="cyber-engage-threat-btn"
+            onClick={() => onInspectStage(selectedToolId)}
+            style={{
+              height: '40px',
+              padding: '0 16px',
+              borderRadius: '8px',
+              backgroundColor: accentHex,
+              border: 'none',
+              color: '#090d16',
+              fontSize: '13px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            CÔ LẬP [{activeWave.id}] (Space)
+          </button>
+        </div>
+      </div>
 
       <InGameChallengePopup
         sceneDescriptor={sceneDescriptor}
         activeStageIndex={activeStageIndex}
         totalStages={totalStages}
-        targetCode={targetNode.id}
-        targetName={targetNode.name}
-        telemetryLine={`Phát hiện tấn công: ${targetNode.threat}`}
+        targetCode={activeWave.id}
+        targetName={activeWave.name}
+        telemetryLine={`Phát hiện tấn công: ${activeWave.threat}`}
         activeQuestion={activeQuestion}
         activeFeedback={activeFeedback}
         activeTimeRemaining={activeTimeRemaining}
