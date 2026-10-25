@@ -13,6 +13,14 @@ import {
   OBSTACLE_METADATA,
   syncAdventureStagesWithQuestions,
 } from '../config/adventureThemes.js';
+import { resolveSceneRendererDescriptor } from './AdventureSceneRegistry.js';
+import {
+  MechanicalDiagnosticGarageScene,
+  KitchenFoodSafetyLabScene,
+  CustomerConsultationShowroomScene,
+  CodingIdeDebuggerScene,
+  CyberDefenseSocRadarScene,
+} from './AdventureInteractiveScenes.js';
 
 function playTone(freq: number, durationSec: number, type: OscillatorType = 'sine'): void {
   try {
@@ -275,13 +283,14 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     return syncAdventureStagesWithQuestions(raw, game.questions || []);
   }, [propAdventureConfig, game.settings?.adventureConfig, game.questions]);
   const gameplayProfile = useMemo(() => getIndustryGameplayProfile(effectiveConfig), [effectiveConfig]);
-  useMemo(() => {
-    const raw = propAdventureConfig || game.settings?.adventureConfig;
-    return syncAdventureStagesWithQuestions(raw, game.questions || []);
-  }, [propAdventureConfig, game.settings?.adventureConfig, game.questions]);
+  const sceneDescriptor = useMemo(
+    () => resolveSceneRendererDescriptor(effectiveConfig),
+    [effectiveConfig]
+  );
 
-  const isRunnerArchetype = (effectiveConfig.gameplayArchetype || 'DIAGNOSTIC_WORKBENCH_SIM') === 'TRAFFIC_RUNNER_SIM';
+  const isRunnerArchetype = sceneDescriptor.sceneId === 'TRAFFIC_ROAD_RUNNER_SCENE';
   const inspectedStagesRef = useRef<Set<number>>(new Set());
+  const [stageInspected, setStageInspected] = useState<boolean>(false);
 
   const totalStages = Math.max(
     1,
@@ -526,6 +535,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     setPreviewStreak(0);
     setPreviewMaxStreak(0);
     setActiveModalOpen(false);
+    setStageInspected(false);
+    inspectedStagesRef.current.clear();
     setSelectedChoice('');
     setTextAnswer('');
     setSkillBonusScore(0);
@@ -556,17 +567,18 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     }
   }, [activeStageIndex, activeFeedback]);
 
-  // Reset question input when stage changes
+  // Reset question input and stage inspection state when stage changes
   useEffect(() => {
     setSelectedChoice('');
     setTextAnswer('');
+    setStageInspected(inspectedStagesRef.current.has(activeStageIndex));
     setPreviewTimeRemaining(game.settings?.timePerQuestion || 20);
   }, [activeStageIndex, activeQuestion?.id]);
 
-  // Preview countdown timer when checkpoint question modal is open
+  // Preview countdown timer when checkpoint question modal or inline non-runner question is active
   useEffect(() => {
-    if (!activeModalOpen || Boolean(activeFeedback) || isJourneyFinished) return;
-    if (!activeModalOpen || Boolean(activeFeedback) || isJourneyFinished) return;
+    const isChallengeActive = isRunnerArchetype ? activeModalOpen : stageInspected;
+    if (!isChallengeActive || Boolean(activeFeedback) || isJourneyFinished) return;
 
     const timer = window.setInterval(() => {
       setPreviewTimeRemaining(prev => {
@@ -578,7 +590,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [mode, activeModalOpen, previewFeedback, previewFinished]);
+  }, [mode, isRunnerArchetype, activeModalOpen, stageInspected, previewFeedback, previewFinished, activeFeedback, isJourneyFinished]);
 
   const spawnFloatingText = useCallback(
     (worldX: number, worldY: number, text: string, color: string) => {
@@ -628,19 +640,27 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     }
   }, [activeModalOpen]);
 
-  const handleOpenCheckpointModal = useCallback(() => {
+  const handleInspectCurrentStage = useCallback(() => {
     if (!activeQuestion) return;
-    if (!isRunnerArchetype && !inspectedStagesRef.current.has(activeStageIndex)) {
+    if (!inspectedStagesRef.current.has(activeStageIndex)) {
       inspectedStagesRef.current.add(activeStageIndex);
       setSkillBonusScore(prev => prev + 15);
       setObstaclesClearedCount(prev => prev + 1);
       playClickSound();
-      setTimeout(() => setShowHowToPlay(false), 800);
+    }
+    setStageInspected(true);
+  }, [activeQuestion, activeStageIndex]);
+
+  const handleOpenCheckpointModal = useCallback(() => {
+    if (!activeQuestion) return;
+    if (!isRunnerArchetype) {
+      handleInspectCurrentStage();
+      return;
     }
     setActiveModalOpen(true);
     physicsRef.current.keys.left = false;
     physicsRef.current.keys.right = false;
-  }, [activeQuestion, isRunnerArchetype, activeStageIndex]);
+  }, [activeQuestion, isRunnerArchetype, handleInspectCurrentStage]);
 
   // Handle Answer Submission (both Live Session and Creator Preview)
   const handleAnswerSubmit = useCallback(
@@ -699,6 +719,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         playWrongSound();
         setPreviewStreak(0);
         setPreviewWrongCount(prev => prev + 1);
+        setEnergyPercent(prev => Math.max(10, prev - 15));
       }
 
       setPreviewFeedback({
@@ -740,6 +761,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       spawnFloatingText(cpX, -110, `+${liveQuestionFeedback.pointsEarned} ĐIỂM`, '#3fc07a');
     } else {
       playWrongSound();
+      setEnergyPercent(prev => Math.max(10, prev - 15));
     }
   }, [
     mode,
@@ -772,7 +794,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         setPreviewTimeRemaining(game.settings?.timePerQuestion || 20);
       }
     }
-  }, [activeStageIndex, totalStages, mode, onNextQuestion, game.settings?.timePerQuestion]);
+  }, [activeStageIndex, totalStages, isRunnerArchetype, mode, onNextQuestion, game.settings?.timePerQuestion]);
 
   // When player reaches the Finish Gate after unlocking the last stage
   useEffect(() => {
@@ -797,7 +819,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     previewFinished,
   ]);
 
-  // Keyboard Listeners (Space / Up / W jump, 1-4 answer shortcuts, Enter continue, Left/Right optional)
+  // Keyboard Listeners (Space / Up / W jump or inspect, 1-4 answer shortcuts, Enter continue, Left/Right optional)
   useEffect(() => {
     if (isJourneyFinished) return;
 
@@ -805,9 +827,40 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       if (!isJourneyStarted) return;
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') {
-        if (e.key === 'Enter' && activeModalOpen && !activeFeedback) {
+        if (e.key === 'Enter' && (activeModalOpen || stageInspected) && !activeFeedback) {
           e.preventDefault();
           handleAnswerSubmit();
+        }
+        return;
+      }
+
+      // Non-runner inline challenge shortcuts
+      if (!isRunnerArchetype) {
+        if (activeFeedback && (e.key === 'Enter' || e.key === ' ')) {
+          e.preventDefault();
+          handleContinueJourney();
+          return;
+        }
+        if (
+          stageInspected &&
+          !activeFeedback &&
+          activeQuestion &&
+          Array.isArray(activeQuestion.choices) &&
+          ['1', '2', '3', '4'].includes(e.key)
+        ) {
+          const idx = Number(e.key) - 1;
+          const choice = activeQuestion.choices[idx];
+          if (choice) {
+            e.preventDefault();
+            setSelectedChoice(choice);
+            handleAnswerSubmit(choice);
+          }
+          return;
+        }
+        if (!stageInspected && (e.key === ' ' || e.key === 'Enter' || e.key === 'e' || e.key === 'E')) {
+          e.preventDefault();
+          handleInspectCurrentStage();
+          return;
         }
         return;
       }
@@ -837,11 +890,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
       if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
         e.preventDefault();
-        if (isRunnerArchetype) {
-          triggerJump();
-        } else {
-          handleOpenCheckpointModal();
-        }
+        triggerJump();
       } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
         physicsRef.current.keys.right = true;
       } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
@@ -871,11 +920,14 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   }, [
     isJourneyStarted,
     isJourneyFinished,
+    isRunnerArchetype,
+    stageInspected,
     activeModalOpen,
     activeFeedback,
     activeQuestion,
     nearCheckpointIndex,
     triggerJump,
+    handleInspectCurrentStage,
     handleOpenCheckpointModal,
     handleAnswerSubmit,
     handleContinueJourney,
@@ -1638,7 +1690,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               gap: '6px',
             }}
           >
-            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>{gameplayProfile.clearedMetricLabel}</span>
+            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>{sceneDescriptor.clearedMetricLabel}</span>
             <strong style={{ fontSize: '15px', color: '#3fc07a', fontWeight: 700 }}>
               {obstaclesClearedCount}
             </strong>
@@ -1750,455 +1802,146 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           }
         }}
       >
-        {isRunnerArchetype ? (
-          <canvas
-            ref={canvasRef}
-            width={canvasSize.width}
-            height={canvasSize.height}
-            style={{
-              width: '100%',
-              height: '100%',
-              display: 'block',
-              touchAction: 'none',
-            }}
-          />
-        ) : (
-          <div
-            style={{
-              width: '100%',
-              height: '100%',
-              overflowY: 'auto',
-              padding: '24px 24px 104px 24px',
-              background: `radial-gradient(circle at 85% 15%, ${effectiveConfig.palette.horizonGlow}18 0%, #090d16 65%)`,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '18px',
-            }}
-          >
-            {/* Interactive Archetype Header Banner */}
-            <div
-              style={{
-                maxWidth: '1180px',
-                width: '100%',
-                margin: '0 auto',
-                backgroundColor: '#111726',
-                border: '1px solid #222d42',
-                borderRadius: '10px',
-                padding: '16px 20px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: '14px',
-              }}
-            >
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
-                  <span
-                    style={{
-                      padding: '3px 8px',
-                      borderRadius: '4px',
-                      backgroundColor: `${accentHex}22`,
-                      border: `1px solid ${accentHex}66`,
-                      color: accentHex,
-                      fontSize: '11px',
-                      fontWeight: 700,
-                      letterSpacing: '0.04em',
-                    }}
-                  >
-                    {gameplayProfile.archetypeBadge}
-                  </span>
-                  <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
-                    {effectiveConfig.subEnvironment} · Vai trò: {effectiveConfig.avatarLabel}
-                  </span>
-                </div>
-                <div style={{ fontSize: '16px', fontWeight: 700, color: '#f8fafc' }}>
-                  {gameplayProfile.mechanicTitle}
-                </div>
-                <div style={{ fontSize: '12.5px', color: '#94a3b8', marginTop: '2px' }}>
-                  {effectiveConfig.winConditionSummary}
-                </div>
-              </div>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '16px',
-                  backgroundColor: '#0b0f19',
-                  border: '1px solid #1e293b',
-                  borderRadius: '8px',
-                  padding: '10px 16px',
-                  fontVariantNumeric: 'tabular-nums',
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>
-                    {gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
-                      ? 'Độ toàn vẹn kỹ thuật'
-                      : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
-                        ? 'Chỉ số An toàn SOC'
-                        : 'Chỉ số Nghiệp vụ'}
-                  </div>
-                  <div style={{ fontSize: '18px', fontWeight: 700, color: '#3fc07a' }}>
-                    {energyPercent}%
-                  </div>
-                </div>
-                <div style={{ width: '1px', height: '28px', backgroundColor: '#1e293b' }} />
-                <div>
-                  <div style={{ fontSize: '11px', color: '#94a3b8' }}>Điểm thao tác</div>
-                  <div style={{ fontSize: '18px', fontWeight: 700, color: accentHex }}>
-                    +{skillBonusScore}
-                  </div>
-                </div>
-              </div>
-            </div>
+        {(() => {
+          const commonSceneProps = {
+            config: effectiveConfig,
+            sceneDescriptor,
+            activeStageIndex,
+            totalStages,
+            activeQuestion,
+            activeFeedback: activeFeedback || null,
+            activeTimeRemaining,
+            submittingAnswer,
+            selectedChoice,
+            onSelectChoice: setSelectedChoice,
+            textAnswer,
+            onChangeTextAnswer: setTextAnswer,
+            onSubmitAnswer: handleAnswerSubmit,
+            onContinueStage: handleContinueJourney,
+            stageInspected,
+            onInspectStage: () => handleInspectCurrentStage(),
+            energyPercent,
+            skillBonusScore,
+            answeredCount: currentAnsweredCount,
+            correctCount: currentCorrectCount,
+            wrongCount: currentWrongCount,
+          };
 
-            {/* Two-Column Interactive Simulation Workspace */}
-            <div
-              style={{
-                maxWidth: '1180px',
-                width: '100%',
-                margin: '0 auto',
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))',
-                gap: '18px',
-                flex: 1,
-              }}
-            >
-              {/* Left Column: Interactive Schematic / Node Topology / Case Pipeline (Windowed 6 stages) */}
-              <div
-                style={{
-                  backgroundColor: '#111726',
-                  border: '1px solid #222d42',
-                  borderRadius: '10px',
-                  padding: '18px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ fontSize: '13px', fontWeight: 700, color: '#f8fafc', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                    {gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
-                      ? 'Sơ đồ Cụm Kỹ thuật & Trạm Kiểm định'
-                      : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
-                        ? 'Bản đồ Node Hạ tầng & Cảnh báo SIEM'
-                        : 'Danh sách Hồ sơ Tình huống Thực hành'}
-                  </div>
-                  <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
-                    Hoàn thành {currentAnsweredCount}/{totalStages}
-                  </span>
-                </div>
-
-                <div
+          switch (sceneDescriptor.sceneId) {
+            case 'TRAFFIC_ROAD_RUNNER_SCENE':
+              return (
+                <canvas
+                  data-testid="scene-traffic-road-runner"
+                  ref={canvasRef}
+                  width={canvasSize.width}
+                  height={canvasSize.height}
                   style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-                    gap: '10px',
+                    width: '100%',
+                    height: '100%',
+                    display: 'block',
+                    touchAction: 'none',
                   }}
-                >
-                  {(() => {
-                    const windowSize = 6;
-                    const startIdx = Math.max(
-                      0,
-                      Math.min(
-                        activeStageIndex - 1,
-                        Math.max(0, totalStages - windowSize)
-                      )
-                    );
-                    const visibleStages = effectiveConfig.stages.slice(
-                      startIdx,
-                      startIdx + windowSize
-                    );
-                    const interactiveObjs = effectiveConfig.interactiveObjects || [];
-                    return visibleStages.map(st => {
-                      const idx = st.stageIndex;
-                      const isDone = idx < activeStageIndex;
-                      const isCurrent = idx === activeStageIndex;
-                      const objName =
-                        interactiveObjs[idx % Math.max(1, interactiveObjs.length)] ||
-                        st.checkpointTitle;
-                      const codePrefix =
-                        gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
-                          ? 'DIAG'
-                          : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
-                            ? 'NODE'
-                            : 'CASE';
+                />
+              );
+            case 'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE':
+              return <MechanicalDiagnosticGarageScene {...commonSceneProps} />;
+            case 'KITCHEN_FOOD_SAFETY_LAB_SCENE':
+              return <KitchenFoodSafetyLabScene {...commonSceneProps} />;
+            case 'CODING_IDE_DEBUGGER_SCENE':
+              return <CodingIdeDebuggerScene {...commonSceneProps} />;
+            case 'CYBER_DEFENSE_SOC_RADAR_SCENE':
+              return <CyberDefenseSocRadarScene {...commonSceneProps} />;
+            case 'CUSTOMER_CONSULTATION_SHOWROOM_SCENE':
+            default:
+              return <CustomerConsultationShowroomScene {...commonSceneProps} />;
+          }
+        })()}
 
-                      return (
-                        <button
-                          key={idx}
-                          type="button"
-                          disabled={!isCurrent}
-                          onClick={() => {
-                            if (isCurrent) handleOpenCheckpointModal();
-                          }}
-                          style={{
-                            textAlign: 'left',
-                            padding: '14px',
-                            borderRadius: '8px',
-                            backgroundColor: isCurrent
-                              ? '#162038'
-                              : isDone
-                                ? '#0f1f1c'
-                                : '#0b0f19',
-                            border: `1.5px solid ${
-                              isCurrent ? accentHex : isDone ? '#3fc07a' : '#1e293b'
-                            }`,
-                            color: '#f8fafc',
-                            cursor: isCurrent ? 'pointer' : 'default',
-                            opacity: !isCurrent && !isDone ? 0.65 : 1,
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '6px',
-                            transition: 'border-color 150ms ease',
-                          }}
-                        >
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                            <span
-                              style={{
-                                fontSize: '11px',
-                                fontWeight: 700,
-                                fontVariantNumeric: 'tabular-nums',
-                                color: isCurrent ? accentHex : isDone ? '#3fc07a' : '#64748B',
-                              }}
-                            >
-                              {codePrefix}-{String(idx + 1).padStart(2, '0')}
-                            </span>
-                            <span
-                              style={{
-                                padding: '2px 7px',
-                                borderRadius: '4px',
-                                fontSize: '10.5px',
-                                fontWeight: 700,
-                                backgroundColor: isDone
-                                  ? '#172a1d'
-                                  : isCurrent
-                                    ? `${accentHex}28`
-                                    : '#161f30',
-                                color: isDone ? '#3fc07a' : isCurrent ? accentHex : '#94a3b8',
-                              }}
-                            >
-                              {isDone
-                                ? gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
-                                  ? 'ĐẠT CHUẨN (OK)'
-                                  : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
-                                    ? 'ĐÃ BẢO VỆ'
-                                    : 'ĐÃ XỬ LÝ'
-                                : isCurrent
-                                  ? gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
-                                    ? 'CẦN CHẨN ĐOÁN'
-                                    : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
-                                      ? 'CẢNH BÁO SỰ CỐ'
-                                      : 'ĐANG MỞ HỒ SƠ'
-                                  : 'CHỜ TIẾP THEO'}
-                            </span>
-                          </div>
-                          <div style={{ fontSize: '14px', fontWeight: 700, color: '#f8fafc', lineHeight: 1.35 }}>
-                            {objName}
-                          </div>
-                          <div style={{ fontSize: '12px', color: '#94a3b8', lineHeight: 1.35 }}>
-                            {st.checkpointTitle} · {st.zoneLabel}
-                          </div>
-                        </button>
-                      );
-                    });
-                  })()}
-                </div>
-              </div>
-
-              {/* Right Column: Active Station / SOC Console / Case Dossier Action Panel */}
-              <div
-                style={{
-                  backgroundColor: '#111726',
-                  border: '1px solid #222d42',
-                  borderRadius: '10px',
-                  padding: '20px',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
-                  gap: '16px',
-                }}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <span
-                      style={{
-                        padding: '4px 10px',
-                        borderRadius: '6px',
-                        backgroundColor: '#161f30',
-                        border: '1px solid #26334d',
-                        color: accentHex,
-                        fontSize: '12px',
-                        fontWeight: 700,
-                      }}
-                    >
-                      Chặng {activeStageIndex + 1} / {totalStages} · {currentStageMeta?.zoneLabel}
-                    </span>
-                    <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
-                      Thời gian câu hỏi: {game.settings?.timePerQuestion || 20}s
-                    </span>
-                  </div>
-
-                  <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 700, color: '#f8fafc' }}>
-                    {currentStageMeta?.checkpointTitle || `Nhiệm vụ Chặng ${activeStageIndex + 1}`}
-                  </h3>
-
-                  <div
-                    style={{
-                      backgroundColor: '#0b0f19',
-                      border: '1px solid #1e293b',
-                      borderRadius: '8px',
-                      padding: '14px 16px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '8px',
-                      fontSize: '13px',
-                      color: '#cbd5e1',
-                      lineHeight: 1.5,
-                    }}
-                  >
-                    <div style={{ fontWeight: 700, color: '#f8fafc' }}>
-                      {gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
-                        ? 'Thông số Máy quét Chẩn đoán Kỹ thuật:'
-                        : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
-                          ? 'Nhật ký Cảnh báo An ninh mạng (SIEM Log):'
-                          : 'Tóm tắt Bối cảnh & Yêu cầu Ra quyết định:'}
-                    </div>
-                    <div>
-                      • <strong>Đối tượng tương tác:</strong>{' '}
-                      {(effectiveConfig.interactiveObjects || [])[
-                        activeStageIndex % Math.max(1, (effectiveConfig.interactiveObjects || []).length)
-                      ] || currentStageMeta?.checkpointTitle}
-                    </div>
-                    <div>
-                      • <strong>Trạng thái hiện tại:</strong>{' '}
-                      {gameplayProfile.archetypeId === 'DIAGNOSTIC_WORKBENCH_SIM'
-                        ? 'Phát hiện tín hiệu cần kiểm tra thông số kỹ thuật và xác nhận quy trình bảo dưỡng/QA.'
-                        : gameplayProfile.archetypeId === 'CYBER_DEFENSE_CONSOLE_SIM'
-                          ? 'Phát hiện lưu lượng bất thường tại Node mạng — yêu cầu cô lập và xác thực phương án bảo mật.'
-                          : 'Hồ sơ tình huống đang chờ chuyên viên phân tích dữ kiện và lựa chọn phương án xử lý.'}
-                    </div>
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                  <button
-                    type="button"
-                    onClick={handleOpenCheckpointModal}
-                    style={{
-                      width: '100%',
-                      minHeight: '52px',
-                      padding: '12px 20px',
-                      borderRadius: '8px',
-                      backgroundColor: accentHex,
-                      border: 'none',
-                      color: '#090d16',
-                      fontSize: '15px',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '10px',
-                    }}
-                  >
-                    <span>{gameplayProfile.actionVerb} #{activeStageIndex + 1}</span>
-                    <span
-                      style={{
-                        fontSize: '11px',
-                        fontWeight: 700,
-                        padding: '2px 7px',
-                        borderRadius: '4px',
-                        backgroundColor: 'rgba(9, 13, 22, 0.2)',
-                        color: '#090d16',
-                      }}
-                    >
-                      Space
-                    </span>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Compact Integrated How-To-Play Banner (Auto-collapses after jumping) */}
+        {/* Scene-Specific Dynamic How-To-Play Banner & Guide */}
         {showHowToPlay && isJourneyStarted && !isJourneyFinished && !activeModalOpen && (
           <div
+            data-testid="scene-tutorial-banner"
             style={{
               position: 'absolute',
-              top: '16px',
+              top: '14px',
               left: '50%',
               transform: 'translateX(-50%)',
-              zIndex: 15,
-              backgroundColor: '#0b0f19',
-              border: '1px solid #26334d',
-              borderRadius: '8px',
-              padding: '8px 14px',
+              zIndex: 18,
+              backgroundColor: 'rgba(11, 15, 25, 0.96)',
+              border: `1px solid ${accentHex}66`,
+              borderRadius: '10px',
+              padding: '10px 16px',
               display: 'flex',
               alignItems: 'center',
-              gap: '12px',
-              maxWidth: 'calc(100vw - 32px)',
+              justifyContent: 'space-between',
+              gap: '14px',
+              width: 'min(920px, calc(100vw - 32px))',
+              boxShadow: '0 10px 26px rgba(0, 0, 0, 0.45)',
             }}
           >
-            <span style={{ fontSize: '13px', color: '#f8fafc', fontWeight: 500 }}>
-              <strong>Cách chơi:</strong> Xe tự chạy về phía trước. Nhấn phím{' '}
-              <kbd
+            <div style={{ fontSize: '12.5px', color: '#f8fafc', lineHeight: 1.45 }}>
+              <span
                 style={{
-                  padding: '2px 6px',
+                  display: 'inline-block',
+                  padding: '2px 7px',
                   borderRadius: '4px',
-                  backgroundColor: '#1e293b',
-                  border: '1px solid #334155',
-                  fontSize: '12px',
-                  fontWeight: 700,
+                  backgroundColor: `${accentHex}22`,
+                  color: accentHex,
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  marginRight: '8px',
                 }}
               >
-                Space
-              </kbd>{' '}
-              hoặc chạm nút <strong>NHẢY</strong> để né vật cản.
-            </span>
+                {sceneDescriptor.sceneBadge}
+              </span>
+              <strong>{sceneDescriptor.tutorial.tutorialTitle}:</strong>{' '}
+              {sceneDescriptor.tutorial.compactBannerText}
+            </div>
             <button
               type="button"
               onClick={() => setShowHowToPlay(false)}
               style={{
-                background: 'transparent',
-                border: 'none',
-                color: '#94a3b8',
+                background: '#161f30',
+                border: '1px solid #26334d',
+                borderRadius: '6px',
+                color: '#cbd5e1',
                 fontSize: '12px',
-                fontWeight: 600,
+                fontWeight: 700,
                 cursor: 'pointer',
-                padding: '2px 4px',
+                padding: '4px 10px',
+                flexShrink: 0,
               }}
             >
-              Ẩn
+              Ẩn hướng dẫn
             </button>
           </div>
         )}
 
-        {/* Loading / Session Initialization Overlay (for LIVE_SESSION if still connecting) */}
+        {/* Loading / Session Initialization Overlay with Scene-Specific Tutorial */}
         {!isJourneyStarted && (
           <div
+            data-testid="scene-pregame-briefing"
             style={{
               position: 'absolute',
               inset: 0,
               zIndex: 25,
-              backgroundColor: 'rgba(9, 13, 22, 0.84)',
+              backgroundColor: 'rgba(9, 13, 22, 0.86)',
               backdropFilter: 'blur(4px)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               padding: '24px',
+              overflowY: 'auto',
             }}
           >
             <div
               style={{
                 width: '100%',
-                maxWidth: '540px',
+                maxWidth: '580px',
                 backgroundColor: '#111726',
                 border: '1px solid #222d42',
                 borderRadius: '12px',
-                padding: '28px 24px',
+                padding: '26px 24px',
                 textAlign: 'center',
               }}
             >
@@ -2210,9 +1953,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   marginBottom: '6px',
                 }}
               >
-                {effectiveConfig.industryLabel} · {effectiveConfig.subEnvironment} · {totalStages} câu hỏi thực tế
-                <div style={{ fontSize: '12px', color: accentHex, marginTop: '4px', fontWeight: 700 }}>
-                  Cơ chế: {gameplayProfile.mechanicTitle}
+                {effectiveConfig.industryLabel} · {effectiveConfig.subEnvironment} · {totalStages} chặng thực hành
+                <div style={{ fontSize: '12px', color: accentHex, marginTop: '4px', fontWeight: 800 }}>
+                  Chế độ chơi: {sceneDescriptor.sceneBadge} — {sceneDescriptor.sceneTitle}
                 </div>
               </div>
               <h2
@@ -2227,13 +1970,13 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               </h2>
               <p
                 style={{
-                  margin: '0 0 20px 0',
-                  fontSize: '14px',
-                  color: '#b4b4b4',
+                  margin: '0 0 18px 0',
+                  fontSize: '13.5px',
+                  color: '#cbd5e1',
                   lineHeight: 1.5,
                 }}
               >
-                {game.description || effectiveConfig.learningObjective || `Chinh phục ${totalStages} chặng câu hỏi thực tế trong bối cảnh ${effectiveConfig.subEnvironment}.`}
+                {sceneDescriptor.sceneSubtitle}
               </p>
               <div
                 style={{
@@ -2251,22 +1994,22 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   lineHeight: 1.5,
                 }}
               >
-                <div style={{ fontWeight: 700, color: '#f8fafc', fontSize: '13.5px', marginBottom: '2px' }}>
-                  Hướng dẫn cách chơi ({effectiveConfig.avatarLabel}):
+                <div style={{ fontWeight: 800, color: '#f8fafc', fontSize: '13.5px', marginBottom: '2px' }}>
+                  {sceneDescriptor.tutorial.tutorialTitle} (Vai trò: {sceneDescriptor.tutorial.roleTitle}):
                 </div>
                 <div>
-                  • <strong>Chế độ Gameplay ({gameplayProfile.archetypeBadge}):</strong>{' '}
-                  {effectiveConfig.winConditionSummary || gameplayProfile.mechanicTitle}
+                  • <strong>Mục tiêu màn chơi:</strong> {sceneDescriptor.tutorial.objectiveSummary}
                 </div>
+                {sceneDescriptor.tutorial.controlInstructions.map((stepText, sIdx) => (
+                  <div key={sIdx}>
+                    • <strong>Thao tác {sIdx + 1}:</strong> {stepText}
+                  </div>
+                ))}
                 <div>
-                  • <strong>Thao tác chính:</strong> Nhấn phím <strong>Space</strong> hoặc chọn trực tiếp nút{' '}
-                  <strong>{gameplayProfile.actionVerb}</strong> trên màn hình tương tác.
+                  • <strong>Ảnh hưởng trạng thái &amp; Chiến thắng:</strong>{' '}
+                  {sceneDescriptor.tutorial.rightWrongImpactSummary}
                 </div>
-                <div>• <strong>Trên điện thoại / cảm ứng:</strong> Chạm nút <strong>NHẢY</strong> ở góc dưới phải hoặc chạm vào vùng chơi để nhảy.</div>
-                <div>• <strong>Trạm câu hỏi &amp; Về đích:</strong> Dừng tại các trạm kiểm tra (Checkpoint) để trả lời câu hỏi và hoàn thành đủ <strong>{totalStages} chặng</strong> để kết thúc hành trình.</div>
               </div>
-              <p style={{ display: 'none' }}>
-              </p>
               <button
                 type="button"
                 onClick={() => {
@@ -2285,12 +2028,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   backgroundColor: accentHex,
                   color: '#090d16',
                   fontSize: '15px',
-                  fontWeight: 700,
+                  fontWeight: 800,
                   cursor: startingSession ? 'not-allowed' : 'pointer',
                   opacity: startingSession ? 0.6 : 1,
                 }}
               >
-                {startingSession ? 'Đang chuẩn bị đường chạy...' : 'Bắt đầu'}
+                {startingSession ? 'Đang khởi tạo màn chơi...' : 'Bắt đầu trải nghiệm'}
               </button>
             </div>
           </div>
