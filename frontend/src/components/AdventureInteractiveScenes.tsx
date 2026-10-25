@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import type {
   AdventureConfig,
   GameQuestion,
@@ -29,20 +29,331 @@ export interface InteractiveSceneCommonProps {
   answeredCount: number;
   correctCount: number;
   wrongCount: number;
+  isPaused?: boolean;
+  onCollectBonus?: (bonusPoints: number) => void;
+  onHazardHit?: () => void;
+}
+
+interface ArenaCollectible {
+  id: string;
+  x: number;
+  y: number;
+  label: string;
+  collected: boolean;
+}
+
+interface ArenaHazard {
+  id: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  radius: number;
+  label: string;
+}
+
+interface ArenaFloatingPopup {
+  id: number;
+  x: number;
+  y: number;
+  text: string;
+  color: string;
 }
 
 /**
- * Shared Inline Question & Action Resolution Panel embedded directly inside each scene's
- * domain-authentic workspace (Repair Console, HACCP Board, Customer Dialogue Counter,
- * IDE Patch Runner, or SOC Firewall Terminal) so players never feel like they are filling
- * out a generic modal form.
+ * Shared 2D Interactive Game Hook for Non-Runner Scenes
+ * Enables real-time WASD / Arrow movement, click/tap-to-move on the 2D SVG arena (560x280),
+ * collectible items (+10 pts), moving hazards to dodge, and proximity auto-triggering of targets.
  */
-const InlineDomainChallengeBox: React.FC<{
+function useArena2DGame(params: {
+  activeStageIndex: number;
+  stageInspected: boolean;
+  isPaused?: boolean;
+  targetX: number;
+  targetY: number;
+  initialX: number;
+  initialY: number;
+  selectedToolId: string;
+  onInspectStage: (toolId?: string) => void;
+  onCollectBonus?: (pts: number) => void;
+  onHazardHit?: () => void;
+  collectibleLabels: [string, string, string];
+  hazardLabel: string;
+}) {
+  const {
+    activeStageIndex,
+    stageInspected,
+    isPaused = false,
+    targetX,
+    targetY,
+    initialX,
+    initialY,
+    selectedToolId,
+    onInspectStage,
+    onCollectBonus,
+    onHazardHit,
+    collectibleLabels,
+    hazardLabel,
+  } = params;
+
+  const [avatarPos, setAvatarPos] = useState<{ x: number; y: number }>({
+    x: initialX,
+    y: initialY,
+  });
+  const [scanProgress, setScanProgress] = useState<number>(0);
+  const [collectibles, setCollectibles] = useState<ArenaCollectible[]>([]);
+  const [hazards, setHazards] = useState<ArenaHazard[]>([]);
+  const [popups, setPopups] = useState<ArenaFloatingPopup[]>([]);
+
+  const stateRef = useRef({
+    x: initialX,
+    y: initialY,
+    destX: null as number | null,
+    destY: null as number | null,
+    keys: { up: false, down: false, left: false, right: false },
+    lastHazardHitAt: 0,
+    autoLockedStage: -1,
+  });
+
+  // Reset collectibles & hazard positions when stage changes
+  useEffect(() => {
+    stateRef.current.destX = null;
+    stateRef.current.destY = null;
+    setScanProgress(stageInspected ? 100 : 0);
+
+    const seed = (activeStageIndex + 1) * 47;
+    setCollectibles([
+      {
+        id: `col_${activeStageIndex}_0`,
+        x: 95 + ((seed * 3) % 140),
+        y: 62 + ((seed * 5) % 145),
+        label: collectibleLabels[0],
+        collected: false,
+      },
+      {
+        id: `col_${activeStageIndex}_1`,
+        x: 260 + ((seed * 7) % 160),
+        y: 58 + ((seed * 11) % 150),
+        label: collectibleLabels[1],
+        collected: false,
+      },
+    ]);
+
+    setHazards([
+      {
+        id: `haz_${activeStageIndex}_0`,
+        x: Math.max(70, Math.min(480, targetX - 55)),
+        y: Math.max(55, Math.min(220, targetY + 35)),
+        vx: 64,
+        vy: -42,
+        radius: 13,
+        label: hazardLabel,
+      },
+    ]);
+  }, [activeStageIndex, targetX, targetY, collectibleLabels[0], collectibleLabels[1], hazardLabel]);
+
+  useEffect(() => {
+    if (stageInspected) {
+      setScanProgress(100);
+    }
+  }, [stageInspected]);
+
+  const addPopup = useCallback((x: number, y: number, text: string, color: string) => {
+    setPopups(prev => [
+      ...prev.slice(-4),
+      { id: Date.now() + Math.random(), x, y, text, color },
+    ]);
+  }, []);
+
+  // Keyboard movement listeners (WASD / Arrows)
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') {
+        stateRef.current.keys.up = true;
+        stateRef.current.destX = null;
+      } else if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') {
+        stateRef.current.keys.down = true;
+        stateRef.current.destX = null;
+      } else if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') {
+        stateRef.current.keys.left = true;
+        stateRef.current.destX = null;
+      } else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
+        stateRef.current.keys.right = true;
+        stateRef.current.destX = null;
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') stateRef.current.keys.up = false;
+      if (e.key === 's' || e.key === 'S' || e.key === 'ArrowDown') stateRef.current.keys.down = false;
+      if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') stateRef.current.keys.left = false;
+      if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') stateRef.current.keys.right = false;
+    };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+    };
+  }, []);
+
+  // 30fps lightweight arena game tick
+  useEffect(() => {
+    if (isPaused || stageInspected) return;
+
+    const timer = window.setInterval(() => {
+      const s = stateRef.current;
+      const dt = 0.033;
+      const speed = 175;
+
+      let vx = 0;
+      let vy = 0;
+      if (s.keys.left) vx -= speed;
+      if (s.keys.right) vx += speed;
+      if (s.keys.up) vy -= speed;
+      if (s.keys.down) vy += speed;
+
+      if (vx === 0 && vy === 0 && s.destX !== null && s.destY !== null) {
+        const dx = s.destX - s.x;
+        const dy = s.destY - s.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 5) {
+          vx = (dx / dist) * (speed * 1.25);
+          vy = (dy / dist) * (speed * 1.25);
+        } else {
+          s.destX = null;
+          s.destY = null;
+        }
+      }
+
+      s.x = Math.max(32, Math.min(528, s.x + vx * dt));
+      s.y = Math.max(34, Math.min(246, s.y + vy * dt));
+      setAvatarPos({ x: Math.round(s.x), y: Math.round(s.y) });
+
+      // Update moving hazards & check collision
+      setHazards(prevHazards =>
+        prevHazards.map(h => {
+          let nx = h.x + h.vx * dt;
+          let ny = h.y + h.vy * dt;
+          let nvx = h.vx;
+          let nvy = h.vy;
+          if (nx < 48 || nx > 512) {
+            nvx = -nvx;
+            nx = Math.max(48, Math.min(512, nx));
+          }
+          if (ny < 44 || ny > 236) {
+            nvy = -nvy;
+            ny = Math.max(44, Math.min(236, ny));
+          }
+
+          const dHaz = Math.hypot(s.x - nx, s.y - ny);
+          const now = Date.now();
+          if (dHaz < h.radius + 14 && now - s.lastHazardHitAt > 1400) {
+            s.lastHazardHitAt = now;
+            onHazardHit?.();
+            addPopup(nx, ny - 12, `-8% ${h.label}`, '#e5566f');
+          }
+          return { ...h, x: nx, y: ny, vx: nvx, vy: nvy };
+        })
+      );
+
+      // Check collectible pickup
+      setCollectibles(prevCols =>
+        prevCols.map(c => {
+          if (c.collected) return c;
+          const dCol = Math.hypot(s.x - c.x, s.y - c.y);
+          if (dCol < 26) {
+            onCollectBonus?.(10);
+            addPopup(c.x, c.y - 10, `+10Đ ${c.label}`, '#3fc07a');
+            return { ...c, collected: true };
+          }
+          return c;
+        })
+      );
+
+      // Check proximity to active target checkpoint/station
+      const distTarget = Math.hypot(s.x - targetX, s.y - targetY);
+      if (distTarget <= 34) {
+        setScanProgress(prev => {
+          const next = Math.min(100, prev + 25);
+          if (next >= 100 && s.autoLockedStage !== activeStageIndex) {
+            s.autoLockedStage = activeStageIndex;
+            addPopup(targetX, targetY - 18, '+15Đ MỞ THỬ THÁCH', '#38bdf8');
+            setTimeout(() => onInspectStage(selectedToolId), 40);
+          }
+          return next;
+        });
+      } else {
+        setScanProgress(prev => Math.max(0, prev - 10));
+      }
+    }, 33);
+
+    return () => clearInterval(timer);
+  }, [
+    isPaused,
+    stageInspected,
+    targetX,
+    targetY,
+    activeStageIndex,
+    selectedToolId,
+    onInspectStage,
+    onCollectBonus,
+    onHazardHit,
+    addPopup,
+  ]);
+
+  const moveAvatarTo = useCallback((x: number, y: number) => {
+    stateRef.current.destX = Math.max(32, Math.min(528, x));
+    stateRef.current.destY = Math.max(34, Math.min(246, y));
+  }, []);
+
+  const engageTargetNow = useCallback(
+    (toolOverride?: string) => {
+      stateRef.current.x = targetX;
+      stateRef.current.y = targetY;
+      stateRef.current.destX = null;
+      stateRef.current.destY = null;
+      setAvatarPos({ x: targetX, y: targetY });
+      setScanProgress(100);
+      addPopup(targetX, targetY - 18, '+15Đ MỞ THỬ THÁCH', '#38bdf8');
+      onInspectStage(toolOverride || selectedToolId);
+    },
+    [targetX, targetY, selectedToolId, onInspectStage, addPopup]
+  );
+
+  const nudgeAvatar = useCallback((dx: number, dy: number) => {
+    stateRef.current.destX = null;
+    stateRef.current.destY = null;
+    stateRef.current.x = Math.max(32, Math.min(528, stateRef.current.x + dx));
+    stateRef.current.y = Math.max(34, Math.min(246, stateRef.current.y + dy));
+    setAvatarPos({ x: Math.round(stateRef.current.x), y: Math.round(stateRef.current.y) });
+  }, []);
+
+  return {
+    avatarPos,
+    scanProgress,
+    collectibles,
+    hazards,
+    popups,
+    moveAvatarTo,
+    engageTargetNow,
+    nudgeAvatar,
+  };
+}
+
+/**
+ * Compact In-Game Challenge Popup Overlay
+ * ONLY appears when the player reaches/scans/interacts with the active target in the 2D world.
+ * Keeps the 2D game world visible behind it and closes immediately when continuing.
+ */
+const InGameChallengePopup: React.FC<{
   sceneDescriptor: SceneRendererDescriptor;
   activeStageIndex: number;
   totalStages: number;
-  zoneLabel: string;
-  checkpointTitle: string;
+  targetCode: string;
+  targetName: string;
+  telemetryLine: string;
   activeQuestion: SanitizedQuestion | GameQuestion | null;
   activeFeedback: PracticeQuestionResult | null;
   activeTimeRemaining: number;
@@ -54,16 +365,14 @@ const InlineDomainChallengeBox: React.FC<{
   onSubmitAnswer: (explicitAnswer?: string) => void;
   onContinueStage: () => void;
   stageInspected: boolean;
-  onInspectStage: () => void;
   accentHex: string;
-  domainPromptHeader: string;
-  domainUnlockedHint: string;
 }> = ({
   sceneDescriptor,
   activeStageIndex,
   totalStages,
-  zoneLabel,
-  checkpointTitle,
+  targetCode,
+  targetName,
+  telemetryLine,
   activeQuestion,
   activeFeedback,
   activeTimeRemaining,
@@ -75,332 +384,530 @@ const InlineDomainChallengeBox: React.FC<{
   onSubmitAnswer,
   onContinueStage,
   stageInspected,
-  onInspectStage,
   accentHex,
-  domainPromptHeader,
-  domainUnlockedHint,
 }) => {
-  if (!activeQuestion) return null;
+  if (!activeQuestion || (!stageInspected && !activeFeedback)) return null;
 
   return (
     <div
+      data-testid="ingame-challenge-popup"
       style={{
-        backgroundColor: '#111726',
-        border: `1.5px solid ${stageInspected ? accentHex : '#26334d'}`,
-        borderRadius: '12px',
-        padding: '18px 20px',
+        position: 'absolute',
+        inset: 0,
+        zIndex: 35,
+        backgroundColor: 'rgba(9, 13, 22, 0.82)',
         display: 'flex',
-        flexDirection: 'column',
-        gap: '14px',
-        color: '#f8fafc',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '14px',
+        overflowY: 'auto',
       }}
     >
-      {/* Top Bar: Domain Title + Countdown Timer */}
       <div
         style={{
+          width: '100%',
+          maxWidth: '620px',
+          backgroundColor: '#111726',
+          border: `1.5px solid ${accentHex}`,
+          borderRadius: '12px',
+          padding: '18px 20px',
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '10px',
-          paddingBottom: '10px',
-          borderBottom: '1px solid #1e293b',
-          flexWrap: 'wrap',
+          flexDirection: 'column',
+          gap: '12px',
+          color: '#f8fafc',
+          boxShadow: '0 16px 36px rgba(0, 0, 0, 0.65)',
         }}
       >
-        <div>
-          <div style={{ fontSize: '11.5px', color: accentHex, fontWeight: 700, letterSpacing: '0.03em' }}>
-            {sceneDescriptor.questionPanelTitle.toUpperCase()} · CHẶNG {activeStageIndex + 1}/{totalStages}
+        {/* Compact Header */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '8px',
+            paddingBottom: '10px',
+            borderBottom: '1px solid #1e293b',
+            flexWrap: 'wrap',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <span
+              style={{
+                padding: '3px 8px',
+                borderRadius: '5px',
+                backgroundColor: '#0b0f19',
+                border: `1px solid ${accentHex}`,
+                color: accentHex,
+                fontSize: '11px',
+                fontWeight: 800,
+              }}
+            >
+              {targetCode} · CHẶNG {activeStageIndex + 1}/{totalStages}
+            </span>
+            <strong style={{ fontSize: '14.5px', color: '#f8fafc' }}>{targetName}</strong>
           </div>
-          <div style={{ fontSize: '15px', fontWeight: 700, color: '#f8fafc', marginTop: '2px' }}>
-            {checkpointTitle} <span style={{ color: '#94a3b8', fontWeight: 500 }}>({zoneLabel})</span>
-          </div>
-        </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span
+          <div
             style={{
-              padding: '4px 9px',
-              borderRadius: '6px',
-              backgroundColor: stageInspected ? '#172a1d' : '#1e293b',
-              border: `1px solid ${stageInspected ? '#3fc07a' : '#334155'}`,
-              color: stageInspected ? '#3fc07a' : '#cbd5e1',
-              fontSize: '11px',
-              fontWeight: 700,
-            }}
-          >
-            {stageInspected ? sceneDescriptor.step1CompletedBadge : 'BƯỚC 1: CẦN THAO TÁC KIỂM TRA'}
-          </span>
-          <span
-            style={{
-              padding: '4px 10px',
-              borderRadius: '6px',
-              backgroundColor: activeTimeRemaining <= 5 ? '#2c1a20' : '#0b0f19',
-              border: `1px solid ${activeTimeRemaining <= 5 ? '#5c2632' : '#26334d'}`,
-              color: activeTimeRemaining <= 5 ? '#e5566f' : '#f8fafc',
-              fontSize: '13px',
-              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
               fontVariantNumeric: 'tabular-nums',
             }}
           >
-            ⏱ {activeTimeRemaining}s
+            <span
+              style={{
+                padding: '3px 8px',
+                borderRadius: '5px',
+                backgroundColor: '#172a1d',
+                border: '1px solid #3fc07a',
+                color: '#3fc07a',
+                fontSize: '11px',
+                fontWeight: 700,
+              }}
+            >
+              +15Đ THAO TÁC
+            </span>
+            <span
+              style={{
+                padding: '4px 10px',
+                borderRadius: '6px',
+                backgroundColor: activeTimeRemaining <= 5 ? '#2c1a20' : '#0b0f19',
+                border: `1px solid ${activeTimeRemaining <= 5 ? '#5c2632' : '#26334d'}`,
+                color: activeTimeRemaining <= 5 ? '#e5566f' : '#f8fafc',
+                fontSize: '13px',
+                fontWeight: 800,
+              }}
+            >
+              {activeTimeRemaining}s
+            </span>
+          </div>
+        </div>
+
+        {/* Single-line telemetry context badge */}
+        <div
+          style={{
+            padding: '7px 11px',
+            borderRadius: '6px',
+            backgroundColor: '#0b0f19',
+            borderLeft: `3px solid ${accentHex}`,
+            fontSize: '12px',
+            color: '#cbd5e1',
+          }}
+        >
+          {telemetryLine}
+        </div>
+
+        {/* Question Text */}
+        <div
+          style={{
+            fontSize: '16px',
+            fontWeight: 700,
+            color: '#f8fafc',
+            lineHeight: 1.45,
+          }}
+        >
+          {activeQuestion.question}
+        </div>
+
+        {/* Answer Options */}
+        {Array.isArray(activeQuestion.choices) && activeQuestion.choices.length > 0 ? (
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+              gap: '8px',
+            }}
+          >
+            {activeQuestion.choices.map((choice, cIdx) => {
+              const isSelected = selectedChoice === choice;
+              const isCorrectChoice = activeFeedback && choice === activeFeedback.correctAnswer;
+              const isWrongSelected = activeFeedback && isSelected && !activeFeedback.isCorrect;
+
+              let bg = '#161f30';
+              let border = '#26334d';
+              let textColor = '#f8fafc';
+
+              if (isCorrectChoice) {
+                bg = '#172a1d';
+                border = '#3fc07a';
+                textColor = '#3fc07a';
+              } else if (isWrongSelected) {
+                bg = '#2c1a20';
+                border = '#e5566f';
+                textColor = '#e5566f';
+              } else if (isSelected) {
+                bg = '#1e293b';
+                border = accentHex;
+              }
+
+              return (
+                <button
+                  key={`${cIdx}_${choice}`}
+                  type="button"
+                  disabled={Boolean(activeFeedback) || submittingAnswer}
+                  onClick={() => {
+                    onSelectChoice(choice);
+                    onSubmitAnswer(choice);
+                  }}
+                  style={{
+                    textAlign: 'left',
+                    padding: '11px 13px',
+                    borderRadius: '8px',
+                    backgroundColor: bg,
+                    border: `1.5px solid ${border}`,
+                    color: textColor,
+                    fontSize: '13.5px',
+                    fontWeight: 600,
+                    cursor: Boolean(activeFeedback) || submittingAnswer ? 'default' : 'pointer',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: '9px',
+                    minHeight: '46px',
+                  }}
+                >
+                  <span
+                    style={{
+                      padding: '2px 7px',
+                      borderRadius: '4px',
+                      backgroundColor: '#0b0f19',
+                      color: accentHex,
+                      fontSize: '11.5px',
+                      fontWeight: 800,
+                      fontVariantNumeric: 'tabular-nums',
+                      flexShrink: 0,
+                    }}
+                  >
+                    #{cIdx + 1}
+                  </span>
+                  <span style={{ flex: 1, lineHeight: 1.38 }}>{choice}</span>
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <input
+              type="text"
+              value={textAnswer}
+              disabled={Boolean(activeFeedback) || submittingAnswer}
+              onChange={e => onChangeTextAnswer(e.target.value)}
+              placeholder="Nhập câu trả lời..."
+              style={{
+                flex: '1 1 200px',
+                height: '42px',
+                padding: '0 12px',
+                borderRadius: '8px',
+                backgroundColor: '#0b0f19',
+                border: '1px solid #26334d',
+                color: '#f8fafc',
+                fontSize: '14px',
+              }}
+            />
+            {!activeFeedback && (
+              <button
+                type="button"
+                disabled={!textAnswer.trim() || submittingAnswer}
+                onClick={() => onSubmitAnswer(textAnswer.trim())}
+                style={{
+                  height: '42px',
+                  padding: '0 18px',
+                  borderRadius: '8px',
+                  backgroundColor: accentHex,
+                  border: 'none',
+                  color: '#090d16',
+                  fontSize: '14px',
+                  fontWeight: 800,
+                  cursor: !textAnswer.trim() || submittingAnswer ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Xác nhận
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Instant Feedback & Resume Action */}
+        {activeFeedback && (
+          <div
+            style={{
+              padding: '12px 14px',
+              borderRadius: '8px',
+              backgroundColor: activeFeedback.isCorrect ? '#172a1d' : '#2c1a20',
+              border: `1px solid ${activeFeedback.isCorrect ? '#3fc07a' : '#e5566f'}`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '12px',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: '1 1 260px' }}>
+              <div
+                style={{
+                  fontSize: '13.5px',
+                  fontWeight: 800,
+                  color: activeFeedback.isCorrect ? '#3fc07a' : '#e5566f',
+                }}
+              >
+                {activeFeedback.isCorrect
+                  ? `[CHÍNH XÁC +${activeFeedback.pointsEarned}Đ] Đã xử lý thành công mục tiêu!`
+                  : `[CHƯA ĐÚNG] Đáp án chuẩn: ${activeFeedback.correctAnswer}`}
+              </div>
+              {activeFeedback.explanation && (
+                <div style={{ fontSize: '12px', color: '#e2e8f0', marginTop: '4px', lineHeight: 1.4 }}>
+                  {activeFeedback.explanation}
+                </div>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={onContinueStage}
+              style={{
+                height: '40px',
+                padding: '0 16px',
+                borderRadius: '6px',
+                backgroundColor: '#f8fafc',
+                border: 'none',
+                color: '#090d16',
+                fontSize: '13px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+            >
+              {activeStageIndex + 1 < totalStages
+                ? sceneDescriptor.continueActionLabel
+                : 'Hoàn tất màn chơi (Space)'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * Shared Bottom Interactive Control Bar for all 2D Non-Runner Scenes
+ */
+const BottomSceneControlDock: React.FC<{
+  sceneDescriptor: SceneRendererDescriptor;
+  selectedToolId: string;
+  onSelectTool: (id: string) => void;
+  onNudge: (dx: number, dy: number) => void;
+  onEngageTarget: () => void;
+  targetBadge: string;
+  accentHex: string;
+  energyPercent: number;
+  skillBonusScore: number;
+}> = ({
+  sceneDescriptor,
+  selectedToolId,
+  onSelectTool,
+  onNudge,
+  onEngageTarget,
+  targetBadge,
+  accentHex,
+  energyPercent,
+  skillBonusScore,
+}) => {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '10px',
+        padding: '10px 14px',
+        backgroundColor: '#0b0f19',
+        border: '1px solid #1e293b',
+        borderRadius: '10px',
+        flexWrap: 'wrap',
+        flexShrink: 0,
+      }}
+    >
+      {/* Left: D-Pad / Movement Controls + Live Health/Bonus */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            backgroundColor: '#111726',
+            border: '1px solid #26334d',
+            borderRadius: '7px',
+            padding: '3px',
+          }}
+        >
+          <button
+            type="button"
+            aria-label="Di chuyển sang trái"
+            onClick={() => onNudge(-38, 0)}
+            style={{
+              width: '30px',
+              height: '30px',
+              borderRadius: '5px',
+              backgroundColor: '#161f30',
+              border: '1px solid #2e3c56',
+              color: '#f8fafc',
+              fontSize: '11px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            A
+          </button>
+          <button
+            type="button"
+            aria-label="Di chuyển lên"
+            onClick={() => onNudge(0, -34)}
+            style={{
+              width: '30px',
+              height: '30px',
+              borderRadius: '5px',
+              backgroundColor: '#161f30',
+              border: '1px solid #2e3c56',
+              color: '#f8fafc',
+              fontSize: '11px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            W
+          </button>
+          <button
+            type="button"
+            aria-label="Di chuyển xuống"
+            onClick={() => onNudge(0, 34)}
+            style={{
+              width: '30px',
+              height: '30px',
+              borderRadius: '5px',
+              backgroundColor: '#161f30',
+              border: '1px solid #2e3c56',
+              color: '#f8fafc',
+              fontSize: '11px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            S
+          </button>
+          <button
+            type="button"
+            aria-label="Di chuyển sang phải"
+            onClick={() => onNudge(38, 0)}
+            style={{
+              width: '30px',
+              height: '30px',
+              borderRadius: '5px',
+              backgroundColor: '#161f30',
+              border: '1px solid #2e3c56',
+              color: '#f8fafc',
+              fontSize: '11px',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            D
+          </button>
+        </div>
+
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            padding: '5px 10px',
+            borderRadius: '7px',
+            backgroundColor: '#111726',
+            border: '1px solid #222d42',
+            fontSize: '12px',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          <span style={{ color: '#94a3b8' }}>
+            {sceneDescriptor.primaryMetricLabel}:{' '}
+            <strong style={{ color: '#3fc07a' }}>{energyPercent}%</strong>
+          </span>
+          <span style={{ color: '#334155' }}>|</span>
+          <span style={{ color: '#94a3b8' }}>
+            Thưởng kỹ năng: <strong style={{ color: accentHex }}>+{skillBonusScore}</strong>
           </span>
         </div>
       </div>
 
-      {/* Step 1 Interactive Gate or Step 2 Domain Action Prompt */}
-      {!stageInspected && !activeFeedback ? (
-        <div
+      {/* Center: 3 Domain Equipment / Action Tools */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+        {sceneDescriptor.tools.map(tool => {
+          const isSelected = tool.id === selectedToolId;
+          return (
+            <button
+              key={tool.id}
+              type="button"
+              onClick={() => onSelectTool(tool.id)}
+              style={{
+                height: '36px',
+                padding: '0 11px',
+                borderRadius: '7px',
+                backgroundColor: isSelected ? '#162038' : '#111726',
+                border: `1.5px solid ${isSelected ? accentHex : '#26334d'}`,
+                color: '#f8fafc',
+                fontSize: '12px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <span style={{ color: isSelected ? accentHex : '#94a3b8', fontWeight: 800 }}>
+                [{tool.badgeCode}]
+              </span>
+              <span>{tool.label.split('&')[0].trim()}</span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Right: Primary Target Action Trigger */}
+      <button
+        type="button"
+        onClick={onEngageTarget}
+        style={{
+          height: '40px',
+          padding: '0 16px',
+          borderRadius: '8px',
+          backgroundColor: accentHex,
+          border: 'none',
+          color: '#090d16',
+          fontSize: '13px',
+          fontWeight: 800,
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '8px',
+        }}
+      >
+        <span>{targetBadge}</span>
+        <span
           style={{
-            backgroundColor: '#0b0f19',
-            border: '1px dashed #334155',
-            borderRadius: '10px',
-            padding: '16px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
+            padding: '2px 6px',
+            borderRadius: '4px',
+            backgroundColor: 'rgba(9, 13, 22, 0.2)',
+            fontSize: '11px',
+            fontWeight: 800,
           }}
         >
-          <div style={{ fontSize: '13.5px', color: '#e2e8f0', lineHeight: 1.5 }}>
-            <strong style={{ color: accentHex }}>Yêu cầu thao tác trước khi xử lý:</strong>{' '}
-            {sceneDescriptor.step1PromptLabel}. Bạn sẽ nhận ngay <strong>+15 điểm thao tác</strong> và mở khóa bảng xử lý tình huống.
-          </div>
-          <button
-            type="button"
-            onClick={() => onInspectStage()}
-            style={{
-              width: '100%',
-              minHeight: '48px',
-              padding: '12px 18px',
-              borderRadius: '8px',
-              backgroundColor: accentHex,
-              border: 'none',
-              color: '#090d16',
-              fontSize: '14.5px',
-              fontWeight: 800,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '10px',
-            }}
-          >
-            <span>{sceneDescriptor.step1ActionButtonLabel}</span>
-          </button>
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <div
-            style={{
-              padding: '10px 12px',
-              borderRadius: '8px',
-              backgroundColor: '#0b0f19',
-              borderLeft: `3px solid ${accentHex}`,
-              fontSize: '12.5px',
-              color: '#cbd5e1',
-            }}
-          >
-            <strong style={{ color: '#f8fafc' }}>{domainPromptHeader}:</strong> {domainUnlockedHint}
-          </div>
-
-          <div
-            style={{
-              fontSize: '16px',
-              fontWeight: 700,
-              color: '#f8fafc',
-              lineHeight: 1.5,
-              padding: '4px 0',
-            }}
-          >
-            {activeQuestion.question}
-          </div>
-
-          {/* Choices or Input */}
-          {Array.isArray(activeQuestion.choices) && activeQuestion.choices.length > 0 ? (
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
-                gap: '10px',
-              }}
-            >
-              {activeQuestion.choices.map((choice, cIdx) => {
-                const isSelected = selectedChoice === choice;
-                const isCorrectChoice =
-                  activeFeedback && choice === activeFeedback.correctAnswer;
-                const isWrongSelected =
-                  activeFeedback && isSelected && !activeFeedback.isCorrect;
-
-                let bg = '#161f30';
-                let border = '#26334d';
-                let textColor = '#f8fafc';
-
-                if (isCorrectChoice) {
-                  bg = '#172a1d';
-                  border = '#3fc07a';
-                  textColor = '#3fc07a';
-                } else if (isWrongSelected) {
-                  bg = '#2c1a20';
-                  border = '#e5566f';
-                  textColor = '#e5566f';
-                } else if (isSelected) {
-                  bg = '#1e293b';
-                  border = accentHex;
-                }
-
-                return (
-                  <button
-                    key={`${cIdx}_${choice}`}
-                    type="button"
-                    disabled={Boolean(activeFeedback) || submittingAnswer}
-                    onClick={() => {
-                      onSelectChoice(choice);
-                      onSubmitAnswer(choice);
-                    }}
-                    style={{
-                      textAlign: 'left',
-                      padding: '12px 14px',
-                      borderRadius: '8px',
-                      backgroundColor: bg,
-                      border: `1.5px solid ${border}`,
-                      color: textColor,
-                      fontSize: '13.5px',
-                      fontWeight: 600,
-                      cursor:
-                        Boolean(activeFeedback) || submittingAnswer ? 'default' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'flex-start',
-                      gap: '10px',
-                      minHeight: '48px',
-                    }}
-                  >
-                    <span
-                      style={{
-                        padding: '2px 7px',
-                        borderRadius: '4px',
-                        backgroundColor: '#0b0f19',
-                        color: accentHex,
-                        fontSize: '11.5px',
-                        fontWeight: 800,
-                        fontVariantNumeric: 'tabular-nums',
-                        flexShrink: 0,
-                      }}
-                    >
-                      {sceneDescriptor.questionChoicePrefix} #{cIdx + 1}
-                    </span>
-                    <span style={{ flex: 1, lineHeight: 1.4 }}>{choice}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
-              <input
-                type="text"
-                value={textAnswer}
-                disabled={Boolean(activeFeedback) || submittingAnswer}
-                onChange={e => onChangeTextAnswer(e.target.value)}
-                placeholder="Nhập thông số / câu trả lời..."
-                style={{
-                  flex: '1 1 220px',
-                  height: '44px',
-                  padding: '0 14px',
-                  borderRadius: '8px',
-                  backgroundColor: '#0b0f19',
-                  border: '1px solid #26334d',
-                  color: '#f8fafc',
-                  fontSize: '14px',
-                }}
-              />
-              {!activeFeedback && (
-                <button
-                  type="button"
-                  disabled={!textAnswer.trim() || submittingAnswer}
-                  onClick={() => onSubmitAnswer(textAnswer.trim())}
-                  style={{
-                    height: '44px',
-                    padding: '0 20px',
-                    borderRadius: '8px',
-                    backgroundColor: accentHex,
-                    border: 'none',
-                    color: '#090d16',
-                    fontSize: '14px',
-                    fontWeight: 800,
-                    cursor: !textAnswer.trim() || submittingAnswer ? 'not-allowed' : 'pointer',
-                    opacity: !textAnswer.trim() || submittingAnswer ? 0.5 : 1,
-                  }}
-                >
-                  Xác nhận
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Feedback & Continue */}
-          {activeFeedback && (
-            <div
-              style={{
-                marginTop: '4px',
-                padding: '14px 16px',
-                borderRadius: '8px',
-                backgroundColor: activeFeedback.isCorrect ? '#172a1d' : '#2c1a20',
-                border: `1px solid ${activeFeedback.isCorrect ? '#3fc07a' : '#e5566f'}`,
-              }}
-            >
-              <div
-                style={{
-                  fontSize: '14px',
-                  fontWeight: 700,
-                  color: activeFeedback.isCorrect ? '#3fc07a' : '#e5566f',
-                  marginBottom: activeFeedback.explanation ? '6px' : '10px',
-                }}
-              >
-                {activeFeedback.isCorrect
-                  ? `✓ Chính xác (+${activeFeedback.pointsEarned} điểm) — Trạng thái hệ thống đã cập nhật thành công!`
-                  : `✗ Chưa chính xác — Phương án chuẩn: ${activeFeedback.correctAnswer}`}
-              </div>
-              {activeFeedback.explanation && (
-                <p
-                  style={{
-                    margin: '0 0 12px 0',
-                    fontSize: '13px',
-                    color: '#e2e8f0',
-                    lineHeight: 1.5,
-                  }}
-                >
-                  {activeFeedback.explanation}
-                </p>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                <button
-                  type="button"
-                  onClick={onContinueStage}
-                  style={{
-                    height: '40px',
-                    padding: '0 18px',
-                    borderRadius: '6px',
-                    backgroundColor: '#f8fafc',
-                    border: 'none',
-                    color: '#090d16',
-                    fontSize: '13px',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {activeStageIndex + 1 < totalStages
-                    ? sceneDescriptor.continueActionLabel
-                    : 'Hoàn tất & Tổng kết kết quả (Space)'}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
+          Space
+        </span>
+      </button>
     </div>
   );
 };
 
 /* ============================================================================
- * SCENE 2: MECHANICAL DIAGNOSTIC GARAGE & FACTORY QA WORKBENCH SCENE
+ * SCENE 2: MECHANICAL DIAGNOSTIC GARAGE & FACTORY QA WORKBENCH (2D ACTION GAME)
  * ============================================================================ */
 export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonProps> = props => {
   const {
@@ -422,357 +929,282 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
     onInspectStage,
     energyPercent,
     skillBonusScore,
+    isPaused,
+    onCollectBonus,
+    onHazardHit,
   } = props;
 
   const [selectedToolId, setSelectedToolId] = useState<string>(
     sceneDescriptor.tools[0]?.id || 'tool_obd_compression'
   );
   const accentHex = config.palette.accentColor || '#F97316';
-  const currentStage = config.stages[activeStageIndex] || config.stages[0];
-  const activeTool =
-    sceneDescriptor.tools.find(t => t.id === selectedToolId) || sceneDescriptor.tools[0];
 
-  // 5 schematic hotspot coordinates on the Motorcycle / Machine SVG blueprint
   const blueprintNodes = [
-    { x: 255, y: 138, code: 'ENG-01', short: 'Động cơ & Piston', readingFault: 'Áp suất nén: 6.1 kg/cm² (Thấp) · Nhiệt: 114°C', readingOk: 'Áp suất nén: 11.5 kg/cm² · Nhiệt: 82°C (Chuẩn)' },
-    { x: 410, y: 162, code: 'BRK-02', short: 'Phanh đĩa & Lốp trước', readingFault: 'Độ dày má phanh: 1.2mm (Mòn) · Lốp: 1.6 bar', readingOk: 'Má phanh: 4.5mm · Áp suất lốp: 2.25 bar (Chuẩn)' },
-    { x: 235, y: 88, code: 'IGN-03', short: 'Bugi & Kim phun FI', readingFault: 'Khe hở bugi: 1.3mm (Đánh lửa yếu) · Mã lỗi P0300', readingOk: 'Khe hở bugi: 0.8mm · Tia lửa xanh chuẩn' },
-    { x: 168, y: 112, code: 'BAT-04', short: 'Ắc quy 12V & Cuộn sạc', readingFault: 'Điện áp tĩnh: 11.1V (Sụt áp) · Dòng rò: 45mA', readingOk: 'Điện áp: 12.8V · Dòng sạc máy phát: 14.2V' },
-    { x: 118, y: 165, code: 'DRV-05', short: 'Nhông xích / Truyền động', readingFault: 'Độ chùng xích: 48mm (Quá chùng, kêu lớn)', readingOk: 'Độ chùng xích: 25mm · Bôi trơn đạt chuẩn' },
+    { x: 265, y: 142, code: 'ENG-01', short: 'Cụm Động Cơ & Buồng Đốt', readingFault: 'Áp suất nén: 6.1 kg/cm2 (Thấp) · Nhiệt: 114°C' },
+    { x: 425, y: 168, code: 'BRK-02', short: 'Phanh Đĩa & Áp Suất Lốp', readingFault: 'Má phanh: 1.2mm (Mòn) · Lốp: 1.6 bar' },
+    { x: 242, y: 88, code: 'IGN-03', short: 'Đánh Lửa Bugi & Kim Phun FI', readingFault: 'Khe hở bugi: 1.3mm · Mã lỗi P0300' },
+    { x: 172, y: 115, code: 'BAT-04', short: 'Ắc Quy 12V & Cuộn Sạc', readingFault: 'Điện áp tĩnh: 11.1V (Sụt áp)' },
+    { x: 120, y: 168, code: 'DRV-05', short: 'Bộ Truyền Động Nhông Xích', readingFault: 'Độ chùng xích: 48mm (Quá chùng)' },
   ];
   const activeNodeIdx = activeStageIndex % blueprintNodes.length;
   const activeNodeSpec = blueprintNodes[activeNodeIdx];
   const isStageRepaired = Boolean(activeFeedback?.isCorrect);
 
+  const arena = useArena2DGame({
+    activeStageIndex,
+    stageInspected,
+    isPaused,
+    targetX: activeNodeSpec.x,
+    targetY: activeNodeSpec.y,
+    initialX: 70,
+    initialY: 140,
+    selectedToolId,
+    onInspectStage,
+    onCollectBonus,
+    onHazardHit,
+    collectibleLabels: ['Bu-lông Titan', 'Dầu Nhớt Chuẩn', 'Cảm Biến OBD'],
+    hazardLabel: 'Rò nhiệt/dầu',
+  });
+
   return (
     <div
       data-testid="scene-mechanical-diagnostic-garage"
       style={{
+        position: 'relative',
         width: '100%',
         height: '100%',
-        overflowY: 'auto',
-        padding: '18px 22px 96px 22px',
-        background: 'radial-gradient(circle at 20% 15%, rgba(249, 115, 22, 0.14) 0%, #090d16 70%)',
+        backgroundColor: '#090d16',
+        padding: '12px 16px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '16px',
+        justifyContent: 'space-between',
+        gap: '10px',
+        overflow: 'hidden',
       }}
     >
+      {/* Full-Stage 2D Interactive Garage & Machine Arena */}
       <div
         style={{
-          maxWidth: '1240px',
-          width: '100%',
-          margin: '0 auto',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
-          gap: '18px',
+          position: 'relative',
+          flex: 1,
+          minHeight: 0,
+          backgroundColor: '#0b0f19',
+          border: '1.5px solid #1e293b',
+          borderRadius: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
         }}
       >
-        {/* LEFT PANE: Interactive Hydraulic Lift Vehicle Blueprint + Toolbay Rack */}
-        <div
-          style={{
-            backgroundColor: '#111726',
-            border: '1px solid #26334d',
-            borderRadius: '12px',
-            padding: '16px 18px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '14px',
+        <svg
+          viewBox="0 0 560 280"
+          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block', cursor: 'crosshair' }}
+          onClick={e => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const svgX = ((e.clientX - rect.left) / rect.width) * 560;
+            const svgY = ((e.clientY - rect.top) / rect.height) * 280;
+            arena.moveAvatarTo(svgX, svgY);
           }}
         >
-          {/* Header with Telemetry Badges */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-            <div>
-              <span
-                style={{
-                  padding: '3px 8px',
-                  borderRadius: '4px',
-                  backgroundColor: `${accentHex}22`,
-                  border: `1px solid ${accentHex}66`,
-                  color: accentHex,
-                  fontSize: '11px',
-                  fontWeight: 800,
+          <defs>
+            <pattern id="garageGrid2D" width="28" height="28" patternUnits="userSpaceOnUse">
+              <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#131c2e" strokeWidth="1" />
+            </pattern>
+          </defs>
+          <rect width="560" height="280" fill="url(#garageGrid2D)" />
+
+          {/* Garage Bay Pillars & Overhead Crane Rail */}
+          <rect x="0" y="0" width="560" height="22" fill="#111726" />
+          <line x1="0" y1="22" x2="560" y2="22" stroke="#26334d" strokeWidth="2" />
+          <text x="16" y="15" fill={accentHex} fontSize="10" fontWeight="800">
+            {sceneDescriptor.sceneBadge} · DI CHUYỂN MÁY QUÉT TỚI [{activeNodeSpec.code}] ({activeNodeSpec.short.toUpperCase()})
+          </text>
+
+          {/* Hydraulic Lift Platform */}
+          <rect x="52" y="218" width="456" height="12" rx="4" fill="#334155" stroke="#475569" />
+          <rect x="155" y="230" width="26" height="42" fill="#1e293b" stroke="#475569" />
+          <rect x="375" y="230" width="26" height="42" fill="#1e293b" stroke="#475569" />
+
+          {/* Rear & Front Wheels */}
+          <circle cx="120" cy="168" r="38" fill="#0f172a" stroke="#64748b" strokeWidth="7" />
+          <circle cx="120" cy="168" r="16" fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="5 3" />
+          <line x1="120" y1="168" x2="225" y2="152" stroke="#94a3b8" strokeWidth="6" strokeLinecap="round" />
+
+          <circle cx="425" cy="168" r="38" fill="#0f172a" stroke="#64748b" strokeWidth="7" />
+          <circle cx="425" cy="168" r="20" fill="none" stroke="#f59e0b" strokeWidth="2.5" />
+          <line x1="360" y1="74" x2="425" y2="168" stroke="#cbd5e1" strokeWidth="6" strokeLinecap="round" />
+
+          {/* Chassis & Engine Block */}
+          <path
+            d="M 140 115 L 220 110 L 288 82 L 365 78 L 338 152 L 220 158 Z"
+            fill="#1e293b"
+            stroke={accentHex}
+            strokeWidth="2.5"
+          />
+          <rect x="228" y="116" width="74" height="52" rx="8" fill="#0f172a" stroke="#94a3b8" strokeWidth="2" />
+          <line x1="236" y1="130" x2="292" y2="130" stroke="#475569" strokeWidth="3" />
+          <line x1="236" y1="142" x2="292" y2="142" stroke="#475569" strokeWidth="3" />
+          <line x1="236" y1="154" x2="292" y2="154" stroke="#475569" strokeWidth="3" />
+          <path d="M 278 162 L 172 180 L 86 162" fill="none" stroke="#94a3b8" strokeWidth="5" strokeLinecap="round" />
+
+          {/* Collectible Spare Parts / Bolts */}
+          {arena.collectibles.map(col =>
+            !col.collected ? (
+              <g
+                key={col.id}
+                style={{ cursor: 'pointer' }}
+                onClick={e => {
+                  e.stopPropagation();
+                  arena.moveAvatarTo(col.x, col.y);
                 }}
               >
-                {sceneDescriptor.sceneBadge}
-              </span>
-              <h3 style={{ margin: '6px 0 0 0', fontSize: '16px', fontWeight: 700, color: '#f8fafc' }}>
-                {sceneDescriptor.sceneTitle}
-              </h3>
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                gap: '12px',
-                backgroundColor: '#0b0f19',
-                border: '1px solid #1e293b',
-                borderRadius: '8px',
-                padding: '8px 12px',
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>{sceneDescriptor.primaryMetricLabel}</div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: '#3fc07a' }}>{energyPercent}%</div>
-              </div>
-              <div style={{ width: '1px', backgroundColor: '#1e293b' }} />
-              <div>
-                <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Tay nghề đo kiểm</div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: accentHex }}>+{skillBonusScore}</div>
-              </div>
-            </div>
-          </div>
+                <circle cx={col.x} cy={col.y} r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
+                <text x={col.x} y={col.y + 3.5} textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
+                  +10
+                </text>
+                <text x={col.x} y={col.y + 22} textAnchor="middle" fill="#86efac" fontSize="8" fontWeight="700">
+                  {col.label}
+                </text>
+              </g>
+            ) : null
+          )}
 
-          {/* Interactive SVG Vehicle / Machine Blueprint on Hydraulic Lift */}
-          <div
-            style={{
-              backgroundColor: '#0b0f19',
-              border: '1px solid #1e293b',
-              borderRadius: '10px',
-              padding: '12px',
-              position: 'relative',
-            }}
-          >
-            <svg
-              viewBox="0 0 520 235"
-              style={{ width: '100%', height: 'auto', maxHeight: '235px', display: 'block' }}
-            >
-              {/* Blueprint Grid Lines */}
-              <defs>
-                <pattern id="garageGrid" width="26" height="26" patternUnits="userSpaceOnUse">
-                  <path d="M 26 0 L 0 0 0 26" fill="none" stroke="#162238" strokeWidth="1" />
-                </pattern>
-              </defs>
-              <rect width="520" height="235" fill="url(#garageGrid)" rx="8" />
-
-              {/* Hydraulic Lift Platform */}
-              <rect x="45" y="198" width="430" height="10" rx="4" fill="#334155" stroke="#475569" />
-              <rect x="145" y="208" width="22" height="22" fill="#475569" />
-              <rect x="355" y="208" width="22" height="22" fill="#475569" />
-
-              {/* Rear Wheel & Swingarm */}
-              <circle cx="118" cy="162" r="34" fill="#0f172a" stroke="#64748b" strokeWidth="6" />
-              <circle cx="118" cy="162" r="14" fill="none" stroke="#94a3b8" strokeWidth="2" strokeDasharray="4 3" />
-              <line x1="118" y1="162" x2="215" y2="148" stroke="#94a3b8" strokeWidth="6" strokeLinecap="round" />
-
-              {/* Front Wheel & Fork */}
-              <circle cx="408" cy="162" r="34" fill="#0f172a" stroke="#64748b" strokeWidth="6" />
-              <circle cx="408" cy="162" r="18" fill="none" stroke="#f59e0b" strokeWidth="2.5" />
-              <line x1="348" y1="72" x2="408" y2="162" stroke="#cbd5e1" strokeWidth="6" strokeLinecap="round" />
-
-              {/* Motorcycle Frame, Fuel Tank, Seat & Engine Block */}
-              <path
-                d="M 135 112 L 210 108 L 275 82 L 352 78 L 325 148 L 210 154 Z"
-                fill="#1e293b"
-                stroke={accentHex}
-                strokeWidth="2.5"
-              />
-              {/* Engine Cylinder & Crankcase Cutaway */}
-              <rect x="218" y="114" width="68" height="48" rx="8" fill="#0f172a" stroke="#94a3b8" strokeWidth="2" />
-              <line x1="226" y1="126" x2="278" y2="126" stroke="#475569" strokeWidth="3" />
-              <line x1="226" y1="138" x2="278" y2="138" stroke="#475569" strokeWidth="3" />
-              <line x1="226" y1="150" x2="278" y2="150" stroke="#475569" strokeWidth="3" />
-
-              {/* Exhaust Pipe */}
-              <path d="M 265 155 L 165 174 L 88 156" fill="none" stroke="#94a3b8" strokeWidth="5" strokeLinecap="round" />
-
-              {/* Interactive Mechanical Nodes */}
-              {blueprintNodes.map((node, idx) => {
-                const isTarget = idx === activeNodeIdx;
-                const isRepairedNode = idx < activeStageIndex || (isTarget && isStageRepaired);
-                const nodeColor = isRepairedNode
-                  ? '#3fc07a'
-                  : isTarget
-                    ? stageInspected
-                      ? '#38bdf8'
-                      : '#ef4444'
-                    : '#64748b';
-
-                return (
-                  <g
-                    key={node.code}
-                    style={{ cursor: isTarget ? 'pointer' : 'default' }}
-                    onClick={() => {
-                      if (isTarget) onInspectStage(selectedToolId);
-                    }}
-                  >
-                    {isTarget && !isRepairedNode && (
-                      <circle
-                        cx={node.x}
-                        cy={node.y}
-                        r="22"
-                        fill={`${nodeColor}26`}
-                        stroke={nodeColor}
-                        strokeWidth="1.5"
-                        strokeDasharray="4 2"
-                      />
-                    )}
-                    <circle
-                      cx={node.x}
-                      cy={node.y}
-                      r={isTarget ? 13 : 9}
-                      fill="#090d16"
-                      stroke={nodeColor}
-                      strokeWidth={isTarget ? 3 : 2}
-                    />
-                    <text
-                      x={node.x}
-                      y={node.y + 4}
-                      textAnchor="middle"
-                      fill={nodeColor}
-                      fontSize="9.5"
-                      fontWeight="800"
-                    >
-                      {idx + 1}
-                    </text>
-                    <rect
-                      x={node.x - 42}
-                      y={node.y - 32}
-                      width="84"
-                      height="15"
-                      rx="4"
-                      fill="#090d16"
-                      stroke={nodeColor}
-                      strokeWidth="1"
-                    />
-                    <text
-                      x={node.x}
-                      y={node.y - 21}
-                      textAnchor="middle"
-                      fill="#f8fafc"
-                      fontSize="8.5"
-                      fontWeight="700"
-                    >
-                      {node.code}
-                    </text>
-                  </g>
-                );
-              })}
-
-              {/* Status Banner inside Schematic */}
-              <rect x="12" y="10" width="320" height="24" rx="5" fill="#111726" stroke="#26334d" />
-              <text x="20" y="26" fill="#cbd5e1" fontSize="11" fontWeight="700">
-                ĐANG CHẨN ĐOÁN: [{activeNodeSpec.code}] {activeNodeSpec.short}
+          {/* Moving Heat / Oil Leak Hazard */}
+          {arena.hazards.map(haz => (
+            <g key={haz.id}>
+              <circle cx={haz.x} cy={haz.y} r={haz.radius} fill="rgba(229, 86, 111, 0.22)" stroke="#e5566f" strokeWidth="2" strokeDasharray="3 2" />
+              <text x={haz.x} y={haz.y + 3} textAnchor="middle" fill="#e5566f" fontSize="8" fontWeight="800">
+                NHIỆT
               </text>
-            </svg>
+            </g>
+          ))}
 
-            {/* Live Oscilloscope & Telemetry Readout Bar */}
-            <div
-              style={{
-                marginTop: '10px',
-                padding: '10px 12px',
-                borderRadius: '8px',
-                backgroundColor: '#111726',
-                border: `1px solid ${isStageRepaired ? '#3fc07a' : stageInspected ? '#38bdf8' : '#ef4444'}`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '12px',
-                flexWrap: 'wrap',
-              }}
-            >
-              <div style={{ fontSize: '12.5px', color: '#f8fafc' }}>
-                <span style={{ color: '#94a3b8', fontWeight: 600 }}>Thiết bị đang cầm: </span>
-                <strong style={{ color: accentHex }}>{activeTool?.label}</strong>
-                <div style={{ marginTop: '3px', fontSize: '12px', color: isStageRepaired ? '#3fc07a' : stageInspected ? '#38bdf8' : '#fca5a5' }}>
-                  {isStageRepaired
-                    ? `✓ THÔNG SỐ SAU SỬA CHỮA: ${activeNodeSpec.readingOk}`
-                    : stageInspected
-                      ? `⚡ KẾT QUẢ ĐO TRỰC TIẾP: ${activeNodeSpec.readingFault}`
-                      : `⚠ CẢNH BÁO: Nhấn vào điểm nóng [${activeNodeSpec.code}] trên sơ đồ xe để đo thông số lỗi`}
-                </div>
-              </div>
-              {!stageInspected && (
-                <button
-                  type="button"
-                  onClick={() => onInspectStage(selectedToolId)}
-                  style={{
-                    padding: '7px 12px',
-                    borderRadius: '6px',
-                    backgroundColor: accentHex,
-                    border: 'none',
-                    color: '#090d16',
-                    fontSize: '12px',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Đo kiểm [{activeNodeSpec.code}]
-                </button>
-              )}
-            </div>
-          </div>
+          {/* Interactive Component Nodes */}
+          {blueprintNodes.map((node, idx) => {
+            const isTarget = idx === activeNodeIdx;
+            const isRepairedNode = idx < activeStageIndex || (isTarget && isStageRepaired);
+            const nodeColor = isRepairedNode
+              ? '#3fc07a'
+              : isTarget
+                ? stageInspected
+                  ? '#38bdf8'
+                  : '#ef4444'
+                : '#64748b';
 
-          {/* Interactive Toolbay Rack (3 Diagnostic Instruments) */}
-          <div>
-            <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#94a3b8', marginBottom: '8px', textTransform: 'uppercase' }}>
-              Giá Dụng Cụ Chẩn Đoán & Sửa Chữa Kỹ Thuật (Chọn dụng cụ để đo):
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-              {sceneDescriptor.tools.map(tool => {
-                const isSelected = tool.id === selectedToolId;
-                return (
-                  <button
-                    key={tool.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedToolId(tool.id);
-                      onInspectStage(tool.id);
-                    }}
-                    style={{
-                      textAlign: 'left',
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      backgroundColor: isSelected ? '#162038' : '#0b0f19',
-                      border: `1.5px solid ${isSelected ? accentHex : '#1e293b'}`,
-                      color: '#f8fafc',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '4px',
-                    }}
-                  >
-                    <span style={{ fontSize: '10.5px', fontWeight: 800, color: isSelected ? accentHex : '#64748b' }}>
-                      [{tool.badgeCode}]
-                    </span>
-                    <span style={{ fontSize: '12.5px', fontWeight: 700, lineHeight: 1.3 }}>{tool.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
+            return (
+              <g
+                key={node.code}
+                style={{ cursor: isTarget ? 'pointer' : 'default' }}
+                onClick={e => {
+                  e.stopPropagation();
+                  if (isTarget) {
+                    arena.engageTargetNow(selectedToolId);
+                  } else {
+                    arena.moveAvatarTo(node.x, node.y);
+                  }
+                }}
+              >
+                {isTarget && !isRepairedNode && (
+                  <circle
+                    cx={node.x}
+                    cy={node.y}
+                    r="26"
+                    fill="rgba(239, 68, 68, 0.18)"
+                    stroke={nodeColor}
+                    strokeWidth="2"
+                    strokeDasharray="4 2"
+                  />
+                )}
+                <circle
+                  cx={node.x}
+                  cy={node.y}
+                  r={isTarget ? 15 : 10}
+                  fill="#090d16"
+                  stroke={nodeColor}
+                  strokeWidth={isTarget ? 3 : 2}
+                />
+                <text x={node.x} y={node.y + 3.5} textAnchor="middle" fill={nodeColor} fontSize="9.5" fontWeight="800">
+                  {isRepairedNode ? 'OK' : idx + 1}
+                </text>
+                <rect
+                  x={node.x - 36}
+                  y={node.y - 34}
+                  width="72"
+                  height="15"
+                  rx="4"
+                  fill="#090d16"
+                  stroke={nodeColor}
+                  strokeWidth="1"
+                />
+                <text x={node.x} y={node.y - 23} textAnchor="middle" fill="#f8fafc" fontSize="8.5" fontWeight="800">
+                  {node.code}
+                </text>
+              </g>
+            );
+          })}
 
-        {/* RIGHT PANE: Inline Repair & Technical Calibration Console */}
-        <InlineDomainChallengeBox
-          sceneDescriptor={sceneDescriptor}
-          activeStageIndex={activeStageIndex}
-          totalStages={totalStages}
-          zoneLabel={currentStage?.zoneLabel || config.subEnvironment}
-          checkpointTitle={currentStage?.checkpointTitle || `Cụm kỹ thuật #${activeStageIndex + 1}`}
-          activeQuestion={activeQuestion}
-          activeFeedback={activeFeedback}
-          activeTimeRemaining={activeTimeRemaining}
-          submittingAnswer={submittingAnswer}
-          selectedChoice={selectedChoice}
-          onSelectChoice={onSelectChoice}
-          textAnswer={textAnswer}
-          onChangeTextAnswer={onChangeTextAnswer}
-          onSubmitAnswer={onSubmitAnswer}
-          onContinueStage={onContinueStage}
-          stageInspected={stageInspected}
-          onInspectStage={() => onInspectStage(selectedToolId)}
-          accentHex={accentHex}
-          domainPromptHeader={`Chẩn đoán [${activeNodeSpec.code}] bằng ${activeTool?.badgeCode}`}
-          domainUnlockedHint={`${activeNodeSpec.readingFault} — Hãy chọn quy trình xử lý kỹ thuật chuẩn bên dưới.`}
-        />
+          {/* Player Controlled Mechanic OBD Scanner Probe */}
+          <g transform={`translate(${arena.avatarPos.x}, ${arena.avatarPos.y})`}>
+            <circle cx="0" cy="0" r="18" fill="rgba(56, 189, 248, 0.15)" stroke="#38bdf8" strokeWidth="1.5" />
+            <circle cx="0" cy="0" r="11" fill="#090d16" stroke={accentHex} strokeWidth="2.5" />
+            <line x1="-14" y1="0" x2="14" y2="0" stroke="#38bdf8" strokeWidth="1.5" />
+            <line x1="0" y1="-14" x2="0" y2="14" stroke="#38bdf8" strokeWidth="1.5" />
+            <rect x="-28" y="14" width="56" height="13" rx="3" fill="#090d16" stroke="#38bdf8" strokeWidth="1" />
+            <text x="0" y="23" textAnchor="middle" fill="#38bdf8" fontSize="7.5" fontWeight="800">
+              MÁY QUÉT {arena.scanProgress > 0 && arena.scanProgress < 100 ? `${arena.scanProgress}%` : ''}
+            </text>
+          </g>
+
+          {/* Floating Score Popups */}
+          {arena.popups.map(p => (
+            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+              {p.text}
+            </text>
+          ))}
+        </svg>
       </div>
+
+      {/* Bottom Interactive Dock */}
+      <BottomSceneControlDock
+        sceneDescriptor={sceneDescriptor}
+        selectedToolId={selectedToolId}
+        onSelectTool={id => setSelectedToolId(id)}
+        onNudge={arena.nudgeAvatar}
+        onEngageTarget={() => arena.engageTargetNow(selectedToolId)}
+        targetBadge={`QUÉT & SỬA [${activeNodeSpec.code}]`}
+        accentHex={accentHex}
+        energyPercent={energyPercent}
+        skillBonusScore={skillBonusScore}
+      />
+
+      {/* Compact In-Game Challenge Popup (Only shown when target is scanned) */}
+      <InGameChallengePopup
+        sceneDescriptor={sceneDescriptor}
+        activeStageIndex={activeStageIndex}
+        totalStages={totalStages}
+        targetCode={activeNodeSpec.code}
+        targetName={activeNodeSpec.short}
+        telemetryLine={`Thông số đo trực tiếp: ${activeNodeSpec.readingFault}`}
+        activeQuestion={activeQuestion}
+        activeFeedback={activeFeedback}
+        activeTimeRemaining={activeTimeRemaining}
+        submittingAnswer={submittingAnswer}
+        selectedChoice={selectedChoice}
+        onSelectChoice={onSelectChoice}
+        textAnswer={textAnswer}
+        onChangeTextAnswer={onChangeTextAnswer}
+        onSubmitAnswer={onSubmitAnswer}
+        onContinueStage={onContinueStage}
+        stageInspected={stageInspected}
+        accentHex={accentHex}
+      />
     </div>
   );
 };
 
 /* ============================================================================
- * SCENE 3: KITCHEN & FOOD SAFETY LAB SCENE (1-WAY KITCHEN & HACCP)
+ * SCENE 3: KITCHEN & FOOD SAFETY LAB SCENE (2D TOP-DOWN CHEF PATROL GAME)
  * ============================================================================ */
 export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = props => {
   const {
@@ -794,296 +1226,229 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
     onInspectStage,
     energyPercent,
     skillBonusScore,
+    isPaused,
+    onCollectBonus,
+    onHazardHit,
   } = props;
 
   const [selectedToolId, setSelectedToolId] = useState<string>(
     sceneDescriptor.tools[0]?.id || 'tool_temp_probe'
   );
   const accentHex = config.palette.accentColor || '#10B981';
-  const currentStage = config.stages[activeStageIndex] || config.stages[0];
 
   const kitchenStations = [
-    {
-      code: 'KHU-01',
-      name: 'Bàn Tiếp Nhận Nguyên Liệu',
-      temp: '+4.0°C',
-      hazardAlert: 'Kiểm tra độ tươi sống, chứng từ nguồn gốc & hạn sử dụng lô hàng nhập bếp',
-      cleanStatus: 'Nguyên liệu đạt chuẩn tươi sạch · Có tem truy xuất',
-    },
-    {
-      code: 'KHU-02',
-      name: 'Kho Lạnh & Tủ Đông Bảo Quản',
-      temp: '-18.0°C / +3.2°C',
-      hazardAlert: 'Cảnh báo biến thiên nhiệt độ tủ mát & nguyên tắc xếp hàng FIFO (Nhập trước - Xuất trước)',
-      cleanStatus: 'Nhiệt độ tủ đông -18°C / tủ mát +3°C ổn định chuẩn HACCP',
-    },
-    {
-      code: 'KHU-03',
-      name: 'Bàn Sơ Chế Sống - Chín',
-      temp: '+20.5°C',
-      hazardAlert: 'Nguy cơ nhiễm khuẩn chéo nếu dùng chung dao thớt thực phẩm sống và thức ăn chín!',
-      cleanStatus: 'Đã phân tách 100% dao thớt màu Đỏ (Sống) & Trắng (Chín)',
-    },
-    {
-      code: 'KHU-04',
-      name: 'Bếp Nấu Trung Tâm & Chế Biến Nhiệt',
-      temp: '+78.5°C (Tâm)',
-      hazardAlert: 'Kiểm tra nhiệt độ tâm thực phẩm nấu chín (>75°C) để tiêu diệt vi sinh vật gây hại',
-      cleanStatus: 'Nhiệt độ tâm món ăn đạt >78°C · Bề mặt bếp khử khuẩn',
-    },
-    {
-      code: 'KHU-05',
-      name: 'Tủ Lưu Mẫu 24h & Bàn Ra Món',
-      temp: '+2.8°C (Lưu mẫu)',
-      hazardAlert: 'Kiểm tra quy trình niêm phong hộp lưu mẫu 24h & vệ sinh dụng cụ phục vụ',
-      cleanStatus: 'Đã niêm phong lưu mẫu 24h có nhãn giờ & người lấy mẫu',
-    },
+    { x: 90, y: 95, code: 'KHU-01', name: 'Bàn Tiếp Nhận Nguyên Liệu', temp: '+4.0°C', hazardAlert: 'Kiểm tra độ tươi sống & tem xuất xứ nguyên liệu' },
+    { x: 265, y: 85, code: 'KHU-02', name: 'Kho Lạnh & Tủ Đông (-18°C)', temp: '-18.0°C', hazardAlert: 'Kiểm soát nhiệt độ bảo quản đông & nguyên tắc FIFO' },
+    { x: 445, y: 95, code: 'KHU-03', name: 'Bàn Sơ Chế Sống - Chín', temp: '+20.5°C', hazardAlert: 'Phân tách dao thớt Đỏ (Sống) & Trắng (Chín) chống nhiễm chéo' },
+    { x: 185, y: 195, code: 'KHU-04', name: 'Bếp Nấu Trung Tâm (>75°C)', temp: '+78.5°C', hazardAlert: 'Kiểm tra nhiệt độ tâm thực phẩm nấu chín (>75°C)' },
+    { x: 385, y: 195, code: 'KHU-05', name: 'Tủ Lưu Mẫu Thức Ăn 24h', temp: '+2.8°C', hazardAlert: 'Niêm phong hộp lưu mẫu 24h & khử trùng quầy ra món' },
   ];
   const activeStationIdx = activeStageIndex % kitchenStations.length;
   const activeStation = kitchenStations[activeStationIdx];
   const isSanitized = Boolean(activeFeedback?.isCorrect);
 
+  const arena = useArena2DGame({
+    activeStageIndex,
+    stageInspected,
+    isPaused,
+    targetX: activeStation.x,
+    targetY: activeStation.y,
+    initialX: 48,
+    initialY: 145,
+    selectedToolId,
+    onInspectStage,
+    onCollectBonus,
+    onHazardHit,
+    collectibleLabels: ['Tem HACCP', 'Găng Vô Trùng', 'Nhãn Lưu Mẫu'],
+    hazardLabel: 'Vi khuẩn chéo',
+  });
+
   return (
     <div
       data-testid="scene-kitchen-food-safety"
       style={{
+        position: 'relative',
         width: '100%',
         height: '100%',
-        overflowY: 'auto',
-        padding: '18px 22px 96px 22px',
-        background: 'radial-gradient(circle at 80% 15%, rgba(16, 185, 129, 0.14) 0%, #090d16 70%)',
+        backgroundColor: '#090d16',
+        padding: '12px 16px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '16px',
+        justifyContent: 'space-between',
+        gap: '10px',
+        overflow: 'hidden',
       }}
     >
+      {/* Full-Stage 2D One-Way Kitchen Floor Arena */}
       <div
         style={{
-          maxWidth: '1240px',
-          width: '100%',
-          margin: '0 auto',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
-          gap: '18px',
+          position: 'relative',
+          flex: 1,
+          minHeight: 0,
+          backgroundColor: '#0b0f19',
+          border: '1.5px solid #1e293b',
+          borderRadius: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
         }}
       >
-        {/* LEFT PANE: 1-Way Commercial Kitchen Floorplan & Thermometers */}
-        <div
-          style={{
-            backgroundColor: '#111726',
-            border: '1px solid #26334d',
-            borderRadius: '12px',
-            padding: '16px 18px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '14px',
+        <svg
+          viewBox="0 0 560 280"
+          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block', cursor: 'pointer' }}
+          onClick={e => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const svgX = ((e.clientX - rect.left) / rect.width) * 560;
+            const svgY = ((e.clientY - rect.top) / rect.height) * 280;
+            arena.moveAvatarTo(svgX, svgY);
           }}
         >
-          {/* Header & HACCP Gauges */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-            <div>
-              <span
-                style={{
-                  padding: '3px 8px',
-                  borderRadius: '4px',
-                  backgroundColor: `${accentHex}22`,
-                  border: `1px solid ${accentHex}66`,
-                  color: accentHex,
-                  fontSize: '11px',
-                  fontWeight: 800,
+          <defs>
+            <pattern id="kitchenTileGrid" width="32" height="32" patternUnits="userSpaceOnUse">
+              <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#122128" strokeWidth="1" />
+            </pattern>
+          </defs>
+          <rect width="560" height="280" fill="url(#kitchenTileGrid)" />
+
+          {/* Top Banner */}
+          <rect x="0" y="0" width="560" height="22" fill="#111726" />
+          <text x="16" y="15" fill={accentHex} fontSize="10" fontWeight="800">
+            {sceneDescriptor.sceneBadge} · DI CHUYỂN ĐẦU BẾP TỚI [{activeStation.code}] ({activeStation.name.toUpperCase()})
+          </text>
+
+          {/* 1-Way Kitchen Flow Arrows */}
+          <path
+            d="M 90 95 L 265 85 L 445 95 L 185 195 L 385 195"
+            fill="none"
+            stroke="#1e293b"
+            strokeWidth="4"
+            strokeDasharray="6 4"
+          />
+
+          {/* Kitchen Stations */}
+          {kitchenStations.map((st, idx) => {
+            const isTarget = idx === activeStationIdx;
+            const isPassed = idx < activeStageIndex || (isTarget && isSanitized);
+            const stColor = isPassed ? '#3fc07a' : isTarget ? '#f59e0b' : '#475569';
+
+            return (
+              <g
+                key={st.code}
+                style={{ cursor: 'pointer' }}
+                onClick={e => {
+                  e.stopPropagation();
+                  if (isTarget) {
+                    arena.engageTargetNow(selectedToolId);
+                  } else {
+                    arena.moveAvatarTo(st.x, st.y);
+                  }
                 }}
               >
-                {sceneDescriptor.sceneBadge}
-              </span>
-              <h3 style={{ margin: '6px 0 0 0', fontSize: '16px', fontWeight: 700, color: '#f8fafc' }}>
-                {sceneDescriptor.sceneTitle}
-              </h3>
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                gap: '12px',
-                backgroundColor: '#0b0f19',
-                border: '1px solid #1e293b',
-                borderRadius: '8px',
-                padding: '8px 12px',
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Chỉ số Vệ sinh HACCP</div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: '#3fc07a' }}>{energyPercent}%</div>
-              </div>
-              <div style={{ width: '1px', backgroundColor: '#1e293b' }} />
-              <div>
-                <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Nhiệt độ Trạm</div>
-                <div style={{ fontSize: '15px', fontWeight: 800, color: '#38bdf8' }}>{activeStation.temp}</div>
-              </div>
-            </div>
-          </div>
+                <rect
+                  x={st.x - 58}
+                  y={st.y - 28}
+                  width="116"
+                  height="56"
+                  rx="8"
+                  fill={isTarget ? '#122924' : '#111726'}
+                  stroke={stColor}
+                  strokeWidth={isTarget ? 2.5 : 1.5}
+                />
+                <text x={st.x - 48} y={st.y - 12} fill={stColor} fontSize="9" fontWeight="800">
+                  {st.code} · {st.temp}
+                </text>
+                <text x={st.x} y={st.y + 4} textAnchor="middle" fill="#f8fafc" fontSize="9.5" fontWeight="700">
+                  {st.name.slice(0, 18)}
+                </text>
+                <text x={st.x} y={st.y + 19} textAnchor="middle" fill={isPassed ? '#3fc07a' : '#fbbf24'} fontSize="8" fontWeight="800">
+                  {isPassed ? '[ĐẠT HACCP]' : isTarget ? '[CẦN ĐO KIỂM]' : '[CHỜ KIỂM TRA]'}
+                </text>
+              </g>
+            );
+          })}
 
-          {/* Visual 1-Way Kitchen Flow Map */}
-          <div
-            style={{
-              backgroundColor: '#0b0f19',
-              border: '1px solid #1e293b',
-              borderRadius: '10px',
-              padding: '14px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <span style={{ fontSize: '11.5px', fontWeight: 800, color: '#34d399', letterSpacing: '0.04em' }}>
-                SƠ ĐỒ DÂY CHUYỀN BẾP MỘT CHIỀU (NGUYÊN LIỆU SỐNG ➔ SƠ CHẾ ➔ NẤU CHÍN ➔ LƯU MẪU)
-              </span>
-              <span style={{ fontSize: '11px', color: '#94a3b8' }}>Chạm vào Trạm bếp để đo kiểm</span>
-            </div>
+          {/* Collectibles */}
+          {arena.collectibles.map(col =>
+            !col.collected ? (
+              <g
+                key={col.id}
+                style={{ cursor: 'pointer' }}
+                onClick={e => {
+                  e.stopPropagation();
+                  arena.moveAvatarTo(col.x, col.y);
+                }}
+              >
+                <circle cx={col.x} cy={col.y} r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
+                <text x={col.x} y={col.y + 3.5} textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
+                  +10
+                </text>
+                <text x={col.x} y={col.y + 22} textAnchor="middle" fill="#86efac" fontSize="8" fontWeight="700">
+                  {col.label}
+                </text>
+              </g>
+            ) : null
+          )}
 
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
-                gap: '8px',
-              }}
-            >
-              {kitchenStations.map((st, idx) => {
-                const isCurrent = idx === activeStationIdx;
-                const isPassed = idx < activeStageIndex || (isCurrent && isSanitized);
-                return (
-                  <button
-                    key={st.code}
-                    type="button"
-                    onClick={() => {
-                      if (isCurrent) onInspectStage(selectedToolId);
-                    }}
-                    style={{
-                      textAlign: 'left',
-                      padding: '10px',
-                      borderRadius: '8px',
-                      backgroundColor: isCurrent ? '#122924' : isPassed ? '#0f1f1c' : '#111726',
-                      border: `1.5px solid ${isPassed ? '#3fc07a' : isCurrent ? '#f59e0b' : '#1e293b'}`,
-                      color: '#f8fafc',
-                      cursor: isCurrent ? 'pointer' : 'default',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '4px',
-                    }}
-                  >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontSize: '10.5px', fontWeight: 800, color: isPassed ? '#3fc07a' : isCurrent ? '#fbbf24' : '#64748b' }}>
-                        {st.code}
-                      </span>
-                      <span style={{ fontSize: '10px', fontWeight: 700, color: '#38bdf8' }}>{st.temp}</span>
-                    </div>
-                    <div style={{ fontSize: '12.5px', fontWeight: 700, lineHeight: 1.3 }}>{st.name}</div>
-                    <div style={{ fontSize: '10.5px', fontWeight: 700, color: isPassed ? '#3fc07a' : isCurrent ? '#fbbf24' : '#94a3b8' }}>
-                      {isPassed ? '✓ ĐẠT CHUẨN HACCP' : isCurrent ? (stageInspected ? '🔍 ĐÃ LẤY MẪU ĐO' : '⚠ CẦN KIỂM TRA') : 'Tiếp theo'}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+          {/* Moving Cross-Contamination Hazard */}
+          {arena.hazards.map(haz => (
+            <g key={haz.id}>
+              <circle cx={haz.x} cy={haz.y} r={haz.radius} fill="rgba(229, 86, 111, 0.22)" stroke="#e5566f" strokeWidth="2" />
+              <text x={haz.x} y={haz.y + 3} textAnchor="middle" fill="#e5566f" fontSize="7.5" fontWeight="800">
+                KHUẨN
+              </text>
+            </g>
+          ))}
 
-            {/* Color-Coded Cutting Board & Thermometer Status Strip */}
-            <div
-              style={{
-                padding: '10px 12px',
-                borderRadius: '8px',
-                backgroundColor: '#111726',
-                border: `1px solid ${isSanitized ? '#3fc07a' : '#26334d'}`,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '6px',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                <span style={{ fontSize: '12px', fontWeight: 700, color: '#f8fafc' }}>
-                  Trạm đang kiểm tra: <span style={{ color: accentHex }}>{activeStation.name}</span>
-                </span>
-                <div style={{ display: 'flex', gap: '6px' }}>
-                  <span style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: '#ef444422', border: '1px solid #ef4444', color: '#fca5a5', fontSize: '10.5px', fontWeight: 700 }}>
-                    Thớt Đỏ: Thịt sống
-                  </span>
-                  <span style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: '#38bdf822', border: '1px solid #38bdf8', color: '#bae6fd', fontSize: '10.5px', fontWeight: 700 }}>
-                    Thớt Xanh: Thủy sản
-                  </span>
-                  <span style={{ padding: '2px 6px', borderRadius: '4px', backgroundColor: '#f8fafc22', border: '1px solid #e2e8f0', color: '#f8fafc', fontSize: '10.5px', fontWeight: 700 }}>
-                    Thớt Trắng: Đồ chín
-                  </span>
-                </div>
-              </div>
-              <div style={{ fontSize: '12px', color: isSanitized ? '#3fc07a' : '#fde68a' }}>
-                {isSanitized ? `✓ ${activeStation.cleanStatus}` : `🔎 Phát hiện tại trạm: ${activeStation.hazardAlert}`}
-              </div>
-            </div>
-          </div>
+          {/* Player Chef / QA Inspector Avatar */}
+          <g transform={`translate(${arena.avatarPos.x}, ${arena.avatarPos.y})`}>
+            <circle cx="0" cy="0" r="15" fill="#0f172a" stroke="#3fc07a" strokeWidth="2.5" />
+            <rect x="-8" y="-12" width="16" height="8" rx="3" fill="#f8fafc" />
+            <text x="0" y="6" textAnchor="middle" fill="#3fc07a" fontSize="8" fontWeight="800">
+              QA
+            </text>
+          </g>
 
-          {/* Kitchen Inspection Tools */}
-          <div>
-            <div style={{ fontSize: '11.5px', fontWeight: 700, color: '#94a3b8', marginBottom: '8px', textTransform: 'uppercase' }}>
-              Bộ Công Cụ Giám Sát Vệ Sinh An Toàn Thực Phẩm:
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-              {sceneDescriptor.tools.map(tool => {
-                const isSelected = tool.id === selectedToolId;
-                return (
-                  <button
-                    key={tool.id}
-                    type="button"
-                    onClick={() => {
-                      setSelectedToolId(tool.id);
-                      onInspectStage(tool.id);
-                    }}
-                    style={{
-                      textAlign: 'left',
-                      padding: '10px 12px',
-                      borderRadius: '8px',
-                      backgroundColor: isSelected ? '#122924' : '#0b0f19',
-                      border: `1.5px solid ${isSelected ? accentHex : '#1e293b'}`,
-                      color: '#f8fafc',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: '4px',
-                    }}
-                  >
-                    <span style={{ fontSize: '10.5px', fontWeight: 800, color: isSelected ? accentHex : '#64748b' }}>
-                      [{tool.badgeCode}]
-                    </span>
-                    <span style={{ fontSize: '12.5px', fontWeight: 700, lineHeight: 1.3 }}>{tool.label}</span>
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-
-        {/* RIGHT PANE: Inline HACCP & Culinary Action Resolution Box */}
-        <InlineDomainChallengeBox
-          sceneDescriptor={sceneDescriptor}
-          activeStageIndex={activeStageIndex}
-          totalStages={totalStages}
-          zoneLabel={currentStage?.zoneLabel || config.subEnvironment}
-          checkpointTitle={currentStage?.checkpointTitle || activeStation.name}
-          activeQuestion={activeQuestion}
-          activeFeedback={activeFeedback}
-          activeTimeRemaining={activeTimeRemaining}
-          submittingAnswer={submittingAnswer}
-          selectedChoice={selectedChoice}
-          onSelectChoice={onSelectChoice}
-          textAnswer={textAnswer}
-          onChangeTextAnswer={onChangeTextAnswer}
-          onSubmitAnswer={onSubmitAnswer}
-          onContinueStage={onContinueStage}
-          stageInspected={stageInspected}
-          onInspectStage={() => onInspectStage(selectedToolId)}
-          accentHex={accentHex}
-          domainPromptHeader={`Kết quả kiểm tra [${activeStation.code}] (${activeStation.temp})`}
-          domainUnlockedHint={activeStation.hazardAlert}
-        />
+          {arena.popups.map(p => (
+            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+              {p.text}
+            </text>
+          ))}
+        </svg>
       </div>
+
+      <BottomSceneControlDock
+        sceneDescriptor={sceneDescriptor}
+        selectedToolId={selectedToolId}
+        onSelectTool={id => setSelectedToolId(id)}
+        onNudge={arena.nudgeAvatar}
+        onEngageTarget={() => arena.engageTargetNow(selectedToolId)}
+        targetBadge={`ĐO KIỂM [${activeStation.code}]`}
+        accentHex={accentHex}
+        energyPercent={energyPercent}
+        skillBonusScore={skillBonusScore}
+      />
+
+      <InGameChallengePopup
+        sceneDescriptor={sceneDescriptor}
+        activeStageIndex={activeStageIndex}
+        totalStages={totalStages}
+        targetCode={activeStation.code}
+        targetName={`${activeStation.name} (${activeStation.temp})`}
+        telemetryLine={activeStation.hazardAlert}
+        activeQuestion={activeQuestion}
+        activeFeedback={activeFeedback}
+        activeTimeRemaining={activeTimeRemaining}
+        submittingAnswer={submittingAnswer}
+        selectedChoice={selectedChoice}
+        onSelectChoice={onSelectChoice}
+        textAnswer={textAnswer}
+        onChangeTextAnswer={onChangeTextAnswer}
+        onSubmitAnswer={onSubmitAnswer}
+        onContinueStage={onContinueStage}
+        stageInspected={stageInspected}
+        accentHex={accentHex}
+      />
     </div>
   );
 };
@@ -1111,294 +1476,243 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
     onInspectStage,
     energyPercent,
     skillBonusScore,
+    isPaused,
+    onCollectBonus,
+    onHazardHit,
   } = props;
 
-  const [revealedClues, setRevealedClues] = useState<number[]>([0]);
-  useEffect(() => {
-    setRevealedClues([0]);
-  }, [activeStageIndex]);
-
+  const [selectedToolId, setSelectedToolId] = useState<string>(
+    sceneDescriptor.tools[0]?.id || 'tool_needs_discovery'
+  );
   const variant = sceneDescriptor.consultationVariant || 'BUSINESS_NEGOTIATION';
-  const accentHex = config.palette.accentColor || '#6366F1';
-  const currentStage = config.stages[activeStageIndex] || config.stages[0];
+  const accentHex = config.palette.accentColor || '#0EA5E9';
 
-  const personaProfiles =
+  const stationPoints =
     variant === 'SHOWROOM_MOTO'
       ? [
-          { name: 'Anh Minh Hoàng', role: 'Khách mua xe đi làm đô thị', budget: 'Ngân sách: 40 - 52 triệu VNĐ', priority: 'Tiết kiệm xăng, cốp rộng đựng vừa 2 mũ bảo hiểm', objection: 'Đang phân vân giữa phanh ABS và CBS, lo chi phí bảo dưỡng' },
-          { name: 'Chị Thanh Thảo', role: 'Khách hàng nâng cấp xe tay ga', budget: 'Ngân sách: Trả góp linh hoạt', priority: 'Thiết kế thanh lịch, khóa thông minh SmartKey, sàn để chân phẳng', objection: 'Cần tư vấn rõ lãi suất trả góp và chế độ bảo hành động cơ 3 năm' },
-          { name: 'Anh Quốc Tuấn', role: 'Khách mua xe chạy đường dài / đèo dốc', budget: 'Ngân sách: 45 - 60 triệu VNĐ', priority: 'Động cơ bền bỉ, đèn LED chiếu sáng tốt, phanh an toàn', objection: 'Muốn so sánh mức tiêu hao nhiên liệu thực tế (L/100km)' },
+          { x: 105, y: 95, code: 'QUẦY-01', name: 'Anh Minh Hoàng', note: 'Tìm xe đi phố tiết kiệm xăng, cốp rộng' },
+          { x: 280, y: 85, code: 'KHU-GA', name: 'Chị Thanh Thảo', note: 'Tư vấn xe tay ga SmartKey & trả góp' },
+          { x: 450, y: 95, code: 'KHU-ABS', name: 'Anh Quốc Tuấn', note: 'So sánh phanh ABS/CBS & đi đường đèo' },
+          { x: 185, y: 195, code: 'BÀN-VIP', name: 'Gia đình Anh Kiên', note: 'Tư vấn giá lăn bánh & ưu đãi đăng ký' },
+          { x: 390, y: 195, code: 'BÀN-GIAO', name: 'Bàn Giao Xe Mới', note: 'Hướng dẫn sổ bảo hành & bảo dưỡng định kỳ' },
         ]
       : variant === 'RESTAURANT_DINING'
         ? [
-            { name: 'Bàn VIP #04 — Gia đình Chị Lan', role: 'Thực khách dùng bữa tối kỷ niệm', budget: 'Thực đơn Set Âu - Á (4 người)', priority: 'Có trẻ nhỏ và người lớn tuổi, ưu tiên món mềm ít cay', objection: 'Lưu ý đặc biệt: Có 1 khách bị dị ứng đậu phộng & hải sản có vỏ!' },
-            { name: 'Bàn #08 — Anh Đức & Đối tác', role: 'Thực khách tiếp khách thương mại', budget: 'Phục vụ tiêu chuẩn Fine Dining', priority: 'Cần không gian yên tĩnh, lên món đúng thứ tự Khai vị -> Món chính', objection: 'Món chính đang ra trễ 10 phút so với dự kiến, khách bắt đầu sốt ruột' },
-            { name: 'Bàn #12 — Nhóm Thực khách Trẻ', role: 'Khách đặt bàn trước qua hệ thống', budget: 'Gọi món A-la-carte & Đồ uống', priority: 'Cần tư vấn món đặc sản Signature của bếp trưởng hôm nay', objection: 'Thắc mắc về chương trình ưu đãi thành viên và tách hóa đơn VAT' },
+            { x: 105, y: 95, code: 'BÀN-01', name: 'Gia đình Chị Lan', note: 'Lưu ý dị ứng đậu phộng & hải sản có vỏ' },
+            { x: 280, y: 85, code: 'BÀN-VIP', name: 'Anh Đức & Đối tác', note: 'Phục vụ Fine Dining, xử lý món chính ra trễ' },
+            { x: 450, y: 95, code: 'BÀN-08', name: 'Nhóm Thực khách Trẻ', note: 'Tư vấn món đặc sản Signature & tách VAT' },
+            { x: 185, y: 195, code: 'QUẦY-RA', name: 'Quầy Kiểm Món', note: 'Kiểm tra nhiệt độ & thứ tự khai vị - món chính' },
+            { x: 390, y: 195, code: 'LỄ-TÂN', name: 'Quầy Chăm Sóc Khách', note: 'Lắng nghe phản hồi & tiễn thực khách' },
           ]
         : [
-            { name: 'Ông Trần Bảo Nam', role: 'Giám đốc Mua hàng / Đối tác B2B', budget: 'Quy mô gói giải pháp: Doanh nghiệp SME', priority: 'Tối ưu hiệu suất vận hành, cam kết SLA 99.9% và hoàn vốn nhanh (ROI)', objection: 'So sánh chi phí triển khai ban đầu với đối thủ cạnh tranh trên thị trường' },
-            { name: 'Bà Nguyễn Mai Anh', role: 'Trưởng bộ phận Vận hành Khách hàng', budget: 'Hợp đồng dịch vụ 12 tháng', priority: 'Đào tạo chuyển giao nhanh, hỗ trợ kỹ thuật 24/7 và bảo mật dữ liệu', objection: 'Yêu cầu làm rõ điều khoản bảo hành, nghiệm thu và lộ trình thanh toán' },
+            { x: 105, y: 95, code: 'TRẠM-01', name: 'Ông Trần Bảo Nam', note: 'Phân tích Pain Points & cam kết SLA 99.9%' },
+            { x: 280, y: 85, code: 'TRẠM-02', name: 'Bà Nguyễn Mai Anh', note: 'Thương lượng chi phí ROI & lộ trình triển khai' },
+            { x: 450, y: 95, code: 'TRẠM-03', name: 'Hội Đồng Thẩm Định', note: 'Giải trình bảo mật & điều khoản nghiệm thu' },
+            { x: 185, y: 195, code: 'TRẠM-04', name: 'Ban Pháp Chế', note: 'Chốt điều khoản hợp đồng thương mại Win-Win' },
+            { x: 390, y: 195, code: 'TRẠM-05', name: 'Lễ Ký Kết Hợp Đồng', note: 'Xác nhận bàn giao & chăm sóc sau bán hàng' },
           ];
 
-  const activePersona = personaProfiles[activeStageIndex % personaProfiles.length];
-  const customerMood = activeFeedback
-    ? activeFeedback.isCorrect
-      ? { emoji: '🤩', label: 'Hài lòng & Tin tưởng cao (+20% Tín nhiệm)', color: '#3fc07a' }
-      : { emoji: '😟', label: 'Còn băn khoăn, chưa thuyết phục (-15%)', color: '#e5566f' }
-    : stageInspected
-      ? { emoji: '😊', label: 'Đang lắng nghe đề xuất của bạn', color: '#38bdf8' }
-      : { emoji: '🤔', label: 'Đang chờ bạn khai thác nhu cầu', color: '#fbbf24' };
+  const activeIdx = activeStageIndex % stationPoints.length;
+  const activeCustomer = stationPoints[activeIdx];
+  const isResolved = Boolean(activeFeedback?.isCorrect);
 
-  const clueItems = [
-    { title: variant === 'RESTAURANT_DINING' ? 'Thông tin Bàn & Thực đơn' : 'Hồ sơ & Ngân sách', content: activePersona.budget },
-    { title: variant === 'RESTAURANT_DINING' ? 'Khẩu vị & Ưu tiên Phục vụ' : 'Mối quan tâm Trọng tâm', content: activePersona.priority },
-    { title: variant === 'RESTAURANT_DINING' ? 'Lưu ý Dị ứng / Tình huống phát sinh' : 'Rào cản / Điểm cần tháo gỡ', content: activePersona.objection },
-  ];
+  const arena = useArena2DGame({
+    activeStageIndex,
+    stageInspected,
+    isPaused,
+    targetX: activeCustomer.x,
+    targetY: activeCustomer.y,
+    initialX: 48,
+    initialY: 145,
+    selectedToolId,
+    onInspectStage,
+    onCollectBonus,
+    onHazardHit,
+    collectibleLabels: ['Hồ Sơ VIP', 'Catalog Chuẩn', 'Voucher Ưu Đãi'],
+    hazardLabel: 'Ồn/Quá tải',
+  });
 
   return (
     <div
       data-testid={`scene-customer-consultation-${variant.toLowerCase()}`}
       style={{
+        position: 'relative',
         width: '100%',
         height: '100%',
-        overflowY: 'auto',
-        padding: '18px 22px 96px 22px',
-        background: `radial-gradient(circle at 80% 15%, ${accentHex}22 0%, #090d16 70%)`,
+        backgroundColor: '#090d16',
+        padding: '12px 16px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '16px',
+        justifyContent: 'space-between',
+        gap: '10px',
+        overflow: 'hidden',
       }}
     >
+      {/* Full-Stage 2D Showroom / Dining Floor Arena */}
       <div
         style={{
-          maxWidth: '1240px',
-          width: '100%',
-          margin: '0 auto',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
-          gap: '18px',
+          position: 'relative',
+          flex: 1,
+          minHeight: 0,
+          backgroundColor: '#0b0f19',
+          border: '1.5px solid #1e293b',
+          borderRadius: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
         }}
       >
-        {/* LEFT PANE: Visual Showroom / Restaurant Table / Consultation Floor & Customer Persona */}
-        <div
-          style={{
-            backgroundColor: '#111726',
-            border: '1px solid #26334d',
-            borderRadius: '12px',
-            padding: '16px 18px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '14px',
+        <svg
+          viewBox="0 0 560 280"
+          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block', cursor: 'pointer' }}
+          onClick={e => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const svgX = ((e.clientX - rect.left) / rect.width) * 560;
+            const svgY = ((e.clientY - rect.top) / rect.height) * 280;
+            arena.moveAvatarTo(svgX, svgY);
           }}
         >
-          {/* Scene Badge & Trust Gauge */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-            <div>
-              <span
-                style={{
-                  padding: '3px 8px',
-                  borderRadius: '4px',
-                  backgroundColor: `${accentHex}22`,
-                  border: `1px solid ${accentHex}66`,
-                  color: accentHex,
-                  fontSize: '11px',
-                  fontWeight: 800,
+          <defs>
+            <pattern id="showroomFloorGrid" width="36" height="36" patternUnits="userSpaceOnUse">
+              <path d="M 36 0 L 0 0 0 36" fill="none" stroke="#151e30" strokeWidth="1" />
+            </pattern>
+          </defs>
+          <rect width="560" height="280" fill="url(#showroomFloorGrid)" />
+
+          <rect x="0" y="0" width="560" height="22" fill="#111726" />
+          <text x="16" y="15" fill={accentHex} fontSize="10" fontWeight="800">
+            {sceneDescriptor.sceneBadge} · DI CHUYỂN TỚI [{activeCustomer.code}] {activeCustomer.name.toUpperCase()}
+          </text>
+
+          {/* Customer / Table Stations */}
+          {stationPoints.map((pt, idx) => {
+            const isTarget = idx === activeIdx;
+            const isDone = idx < activeStageIndex || (isTarget && isResolved);
+            const stColor = isDone ? '#3fc07a' : isTarget ? accentHex : '#475569';
+
+            return (
+              <g
+                key={pt.code}
+                style={{ cursor: 'pointer' }}
+                onClick={e => {
+                  e.stopPropagation();
+                  if (isTarget) {
+                    arena.engageTargetNow(selectedToolId);
+                  } else {
+                    arena.moveAvatarTo(pt.x, pt.y);
+                  }
                 }}
               >
-                {sceneDescriptor.sceneBadge}
-              </span>
-              <h3 style={{ margin: '6px 0 0 0', fontSize: '16px', fontWeight: 700, color: '#f8fafc' }}>
-                {sceneDescriptor.sceneTitle}
-              </h3>
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                gap: '12px',
-                backgroundColor: '#0b0f19',
-                border: '1px solid #1e293b',
-                borderRadius: '8px',
-                padding: '8px 12px',
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>{sceneDescriptor.primaryMetricLabel}</div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: '#3fc07a' }}>{energyPercent}%</div>
-              </div>
-              <div style={{ width: '1px', backgroundColor: '#1e293b' }} />
-              <div>
-                <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Điểm Kỹ năng Tư vấn</div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: accentHex }}>+{skillBonusScore}</div>
-              </div>
-            </div>
-          </div>
+                <rect
+                  x={pt.x - 58}
+                  y={pt.y - 28}
+                  width="116"
+                  height="56"
+                  rx="10"
+                  fill={isTarget ? '#162038' : '#111726'}
+                  stroke={stColor}
+                  strokeWidth={isTarget ? 2.5 : 1.5}
+                />
+                <text x={pt.x} y={pt.y - 11} textAnchor="middle" fill={stColor} fontSize="9" fontWeight="800">
+                  {pt.code} · {isDone ? 'HÀI LÒNG' : isTarget ? 'ĐANG CHỜ TƯ VẤN' : 'TIẾP THEO'}
+                </text>
+                <text x={pt.x} y={pt.y + 5} textAnchor="middle" fill="#f8fafc" fontSize="10" fontWeight="700">
+                  {pt.name}
+                </text>
+                <text x={pt.x} y={pt.y + 19} textAnchor="middle" fill="#94a3b8" fontSize="7.5" fontWeight="600">
+                  {pt.note.slice(0, 26)}...
+                </text>
+              </g>
+            );
+          })}
 
-          {/* Interactive Customer Persona & Visual Stage Card */}
-          <div
-            style={{
-              backgroundColor: '#0b0f19',
-              border: '1px solid #1e293b',
-              borderRadius: '10px',
-              padding: '14px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div
-                  style={{
-                    width: '54px',
-                    height: '54px',
-                    borderRadius: '14px',
-                    backgroundColor: '#162038',
-                    border: `2px solid ${customerMood.color}`,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    fontSize: '28px',
-                  }}
-                >
-                  {customerMood.emoji}
-                </div>
-                <div>
-                  <div style={{ fontSize: '15px', fontWeight: 800, color: '#f8fafc' }}>
-                    {activePersona.name}
-                  </div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
-                    {activePersona.role} · {currentStage?.zoneLabel}
-                  </div>
-                  <div style={{ fontSize: '12px', fontWeight: 700, color: customerMood.color, marginTop: '2px' }}>
-                    Trạng thái tâm lý: {customerMood.label}
-                  </div>
-                </div>
-              </div>
-
-              {/* Trust Progress Bar */}
-              <div style={{ minWidth: '150px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '11px', color: '#94a3b8', marginBottom: '4px' }}>
-                  <span>Thiện cảm & Tín nhiệm</span>
-                  <strong style={{ color: customerMood.color }}>{energyPercent}%</strong>
-                </div>
-                <div style={{ height: '8px', borderRadius: '99px', backgroundColor: '#1e293b', overflow: 'hidden' }}>
-                  <div
-                    style={{
-                      width: `${energyPercent}%`,
-                      height: '100%',
-                      backgroundColor: customerMood.color,
-                      transition: 'width 240ms ease',
-                    }}
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Interactive Needs Discovery Clue Cards */}
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                <span style={{ fontSize: '11.5px', fontWeight: 800, color: '#cbd5e1', textTransform: 'uppercase' }}>
-                  Hồ Sơ Khai Thác Nhu Cầu & Tâm Lý (Nhấn vào từng thẻ để mở dữ kiện):
-                </span>
-                <span style={{ fontSize: '11px', color: accentHex, fontWeight: 700 }}>
-                  Đã mở {stageInspected ? 3 : revealedClues.length}/3 dữ kiện
-                </span>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(165px, 1fr))', gap: '8px' }}>
-                {clueItems.map((clue, idx) => {
-                  const isOpen = stageInspected || revealedClues.includes(idx);
-                  return (
-                    <button
-                      key={clue.title}
-                      type="button"
-                      onClick={() => {
-                        if (!revealedClues.includes(idx)) {
-                          setRevealedClues(prev => [...prev, idx]);
-                        }
-                        onInspectStage();
-                      }}
-                      style={{
-                        textAlign: 'left',
-                        padding: '10px 12px',
-                        borderRadius: '8px',
-                        backgroundColor: isOpen ? '#162038' : '#111726',
-                        border: `1.5px solid ${isOpen ? accentHex : '#26334d'}`,
-                        color: '#f8fafc',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '4px',
-                      }}
-                    >
-                      <div style={{ fontSize: '11px', fontWeight: 800, color: isOpen ? accentHex : '#94a3b8' }}>
-                        {isOpen ? `✓ ${clue.title}` : `🔒 Mở dữ kiện #${idx + 1}: ${clue.title}`}
-                      </div>
-                      <div style={{ fontSize: '12px', color: isOpen ? '#e2e8f0' : '#64748b', lineHeight: 1.35 }}>
-                        {isOpen ? clue.content : 'Nhấn để lắng nghe & khai thác thông tin này từ khách hàng (+15 điểm)'}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-
-          {/* Consultation Toolkit Strip */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-            {sceneDescriptor.tools.map(tool => (
-              <button
-                key={tool.id}
-                type="button"
-                onClick={() => onInspectStage(tool.id)}
-                style={{
-                  textAlign: 'left',
-                  padding: '10px 12px',
-                  borderRadius: '8px',
-                  backgroundColor: '#0b0f19',
-                  border: '1px solid #26334d',
-                  color: '#f8fafc',
-                  cursor: 'pointer',
+          {/* Collectible Catalogs / Vouchers */}
+          {arena.collectibles.map(col =>
+            !col.collected ? (
+              <g
+                key={col.id}
+                style={{ cursor: 'pointer' }}
+                onClick={e => {
+                  e.stopPropagation();
+                  arena.moveAvatarTo(col.x, col.y);
                 }}
               >
-                <div style={{ fontSize: '10.5px', fontWeight: 800, color: accentHex }}>[{tool.badgeCode}]</div>
-                <div style={{ fontSize: '12px', fontWeight: 700, marginTop: '2px', lineHeight: 1.3 }}>{tool.label}</div>
-              </button>
-            ))}
-          </div>
-        </div>
+                <circle cx={col.x} cy={col.y} r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
+                <text x={col.x} y={col.y + 3.5} textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
+                  +10
+                </text>
+                <text x={col.x} y={col.y + 22} textAnchor="middle" fill="#86efac" fontSize="8" fontWeight="700">
+                  {col.label}
+                </text>
+              </g>
+            ) : null
+          )}
 
-        {/* RIGHT PANE: Live Customer Dialogue & Consultation Pitch Console */}
-        <InlineDomainChallengeBox
-          sceneDescriptor={sceneDescriptor}
-          activeStageIndex={activeStageIndex}
-          totalStages={totalStages}
-          zoneLabel={currentStage?.zoneLabel || config.subEnvironment}
-          checkpointTitle={currentStage?.checkpointTitle || `Tình huống tư vấn #${activeStageIndex + 1}`}
-          activeQuestion={activeQuestion}
-          activeFeedback={activeFeedback}
-          activeTimeRemaining={activeTimeRemaining}
-          submittingAnswer={submittingAnswer}
-          selectedChoice={selectedChoice}
-          onSelectChoice={onSelectChoice}
-          textAnswer={textAnswer}
-          onChangeTextAnswer={onChangeTextAnswer}
-          onSubmitAnswer={onSubmitAnswer}
-          onContinueStage={onContinueStage}
-          stageInspected={stageInspected}
-          onInspectStage={() => onInspectStage()}
-          accentHex={accentHex}
-          domainPromptHeader={`Dữ kiện từ ${activePersona.name}`}
-          domainUnlockedHint={`${activePersona.priority} · ${activePersona.objection}`}
-        />
+          {/* Moving Distraction / Rush Hazard */}
+          {arena.hazards.map(haz => (
+            <g key={haz.id}>
+              <circle cx={haz.x} cy={haz.y} r={haz.radius} fill="rgba(229, 86, 111, 0.22)" stroke="#e5566f" strokeWidth="2" />
+              <text x={haz.x} y={haz.y + 3} textAnchor="middle" fill="#e5566f" fontSize="7.5" fontWeight="800">
+                TRỄ
+              </text>
+            </g>
+          ))}
+
+          {/* Player Advisor / Server Avatar */}
+          <g transform={`translate(${arena.avatarPos.x}, ${arena.avatarPos.y})`}>
+            <circle cx="0" cy="0" r="15" fill="#0f172a" stroke={accentHex} strokeWidth="2.5" />
+            <text x="0" y="3.5" textAnchor="middle" fill="#f8fafc" fontSize="8" fontWeight="800">
+              PRO
+            </text>
+          </g>
+
+          {arena.popups.map(p => (
+            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+              {p.text}
+            </text>
+          ))}
+        </svg>
       </div>
+
+      <BottomSceneControlDock
+        sceneDescriptor={sceneDescriptor}
+        selectedToolId={selectedToolId}
+        onSelectTool={id => setSelectedToolId(id)}
+        onNudge={arena.nudgeAvatar}
+        onEngageTarget={() => arena.engageTargetNow(selectedToolId)}
+        targetBadge={`TƯ VẤN [${activeCustomer.code}]`}
+        accentHex={accentHex}
+        energyPercent={energyPercent}
+        skillBonusScore={skillBonusScore}
+      />
+
+      <InGameChallengePopup
+        sceneDescriptor={sceneDescriptor}
+        activeStageIndex={activeStageIndex}
+        totalStages={totalStages}
+        targetCode={activeCustomer.code}
+        targetName={activeCustomer.name}
+        telemetryLine={`Nhu cầu & Băn khoăn: ${activeCustomer.note}`}
+        activeQuestion={activeQuestion}
+        activeFeedback={activeFeedback}
+        activeTimeRemaining={activeTimeRemaining}
+        submittingAnswer={submittingAnswer}
+        selectedChoice={selectedChoice}
+        onSelectChoice={onSelectChoice}
+        textAnswer={textAnswer}
+        onChangeTextAnswer={onChangeTextAnswer}
+        onSubmitAnswer={onSubmitAnswer}
+        onContinueStage={onContinueStage}
+        stageInspected={stageInspected}
+        accentHex={accentHex}
+      />
     </div>
   );
 };
 
 /* ============================================================================
- * SCENE 5: CODING IDE & SOFTWARE DEBUGGER SCENE (IT CODE DEBUGGING)
+ * SCENE 5: CODING IDE & SOFTWARE DEBUGGER (2D DIGITAL CIRCUIT BUG HUNTER GAME)
  * ============================================================================ */
 export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = props => {
   const {
@@ -1420,230 +1734,239 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
     onInspectStage,
     energyPercent,
     skillBonusScore,
+    isPaused,
+    onCollectBonus,
+    onHazardHit,
   } = props;
 
+  const [selectedToolId, setSelectedToolId] = useState<string>(
+    sceneDescriptor.tools[0]?.id || 'tool_step_debugger'
+  );
   const accentHex = config.palette.accentColor || '#3B82F6';
-  const currentStage = config.stages[activeStageIndex] || config.stages[0];
-  const isPatched = Boolean(activeFeedback?.isCorrect);
-  const isTestFailed = Boolean(activeFeedback && !activeFeedback.isCorrect);
 
-  const fileName = `src/module_0${activeStageIndex + 1}_handler.ts`;
-  const codeLines = [
-    `01 | import { validateInput, ExecutionContext } from './core';`,
-    `02 | `,
-    `03 | // Chặng ${activeStageIndex + 1}: ${currentStage?.checkpointTitle || 'Kiểm tra logic thực thi'}`,
-    `04 | export function executeStageTask(ctx: ExecutionContext, payload: unknown) {`,
-    `05 |   const auditTrace = ctx.createSpan('stage_${activeStageIndex + 1}');`,
-    isPatched
-      ? `06 |   const verified = validateInput(payload, { strictMode: true }); // ✓ PATCH APPLIED`
-      : `06 |   const verified = validateInput(payload); // ● BREAKPOINT: Missing guard / logic fault!`,
-    `07 |   if (!verified.ok) {`,
-    `08 |     return auditTrace.completeWithGuard(verified.reason);`,
-    `09 |   }`,
-    `10 |   return auditTrace.commitResult(verified.data);`,
-    `11 | }`,
+  const circuitModules = [
+    { x: 100, y: 90, code: 'MOD-01', name: 'types_guard.ts', bug: 'TypeError: Undefined payload input' },
+    { x: 275, y: 80, code: 'MOD-02', name: 'loop_engine.ts', bug: 'Infinite Loop: Missing exit condition' },
+    { x: 450, y: 90, code: 'MOD-03', name: 'null_handler.ts', bug: 'NullReferenceException on Line 06' },
+    { x: 185, y: 195, code: 'MOD-04', name: 'async_worker.ts', bug: 'Unhandled Promise Rejection / Race Bug' },
+    { x: 390, y: 195, code: 'MOD-05', name: 'unit_suite.spec.ts', bug: 'Assertion Failed: Edge case boundary' },
   ];
+  const activeModIdx = activeStageIndex % circuitModules.length;
+  const activeMod = circuitModules[activeModIdx];
+  const isPatched = Boolean(activeFeedback?.isCorrect);
+
+  const arena = useArena2DGame({
+    activeStageIndex,
+    stageInspected,
+    isPaused,
+    targetX: activeMod.x,
+    targetY: activeMod.y,
+    initialX: 46,
+    initialY: 145,
+    selectedToolId,
+    onInspectStage,
+    onCollectBonus,
+    onHazardHit,
+    collectibleLabels: ['Clean Token', 'Cache Hit', 'Type Guard'],
+    hazardLabel: 'Memory Leak',
+  });
 
   return (
     <div
       data-testid="scene-coding-ide-debugger"
       style={{
+        position: 'relative',
         width: '100%',
         height: '100%',
-        overflowY: 'auto',
-        padding: '18px 22px 96px 22px',
-        background: 'radial-gradient(circle at 20% 20%, rgba(59, 130, 246, 0.14) 0%, #060911 70%)',
+        backgroundColor: '#070a12',
+        padding: '12px 16px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '16px',
+        justifyContent: 'space-between',
+        gap: '10px',
+        overflow: 'hidden',
       }}
     >
+      {/* Full-Stage 2D Digital Code Grid & Bug Hunter Arena */}
       <div
         style={{
-          maxWidth: '1240px',
-          width: '100%',
-          margin: '0 auto',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
-          gap: '18px',
+          position: 'relative',
+          flex: 1,
+          minHeight: 0,
+          backgroundColor: '#090d16',
+          border: '1.5px solid #1e293b',
+          borderRadius: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
         }}
       >
-        {/* LEFT PANE: Dark Code Editor, Breakpoint Gutter & Runtime Watch / Unit Test Console */}
-        <div
-          style={{
-            backgroundColor: '#0d1322',
-            border: '1px solid #26334d',
-            borderRadius: '12px',
-            padding: '16px 18px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
+        <svg
+          viewBox="0 0 560 280"
+          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block', cursor: 'crosshair' }}
+          onClick={e => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const svgX = ((e.clientX - rect.left) / rect.width) * 560;
+            const svgY = ((e.clientY - rect.top) / rect.height) * 280;
+            arena.moveAvatarTo(svgX, svgY);
           }}
         >
-          {/* IDE Top Tab Bar */}
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <span
-                style={{
-                  padding: '3px 8px',
-                  borderRadius: '4px',
-                  backgroundColor: `${accentHex}22`,
-                  border: `1px solid ${accentHex}66`,
-                  color: accentHex,
-                  fontSize: '11px',
-                  fontWeight: 800,
+          <defs>
+            <pattern id="codeCircuitGrid" width="28" height="28" patternUnits="userSpaceOnUse">
+              <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#111a2e" strokeWidth="1" />
+            </pattern>
+          </defs>
+          <rect width="560" height="280" fill="url(#codeCircuitGrid)" />
+
+          <rect x="0" y="0" width="560" height="22" fill="#0d1322" />
+          <text x="16" y="15" fill={accentHex} fontSize="10" fontWeight="800">
+            {sceneDescriptor.sceneBadge} · ĐIỀU KHIỂN DEBUG BOT BẮT BUG TẠI [{activeMod.code}] ({activeMod.name})
+          </text>
+
+          {/* Digital Execution Bus Tracks */}
+          <path
+            d="M 100 90 L 275 80 L 450 90 L 185 195 L 390 195"
+            fill="none"
+            stroke="#1e293b"
+            strokeWidth="5"
+          />
+          <path
+            d="M 100 90 L 275 80 L 450 90 L 185 195 L 390 195"
+            fill="none"
+            stroke="#38bdf8"
+            strokeWidth="1.5"
+            strokeDasharray="6 6"
+          />
+
+          {/* Code Execution Modules / Bug Targets */}
+          {circuitModules.map((mod, idx) => {
+            const isTarget = idx === activeModIdx;
+            const isFixed = idx < activeStageIndex || (isTarget && isPatched);
+            const nodeColor = isFixed ? '#3fc07a' : isTarget ? '#ef4444' : '#475569';
+
+            return (
+              <g
+                key={mod.code}
+                style={{ cursor: 'pointer' }}
+                onClick={e => {
+                  e.stopPropagation();
+                  if (isTarget) {
+                    arena.engageTargetNow(selectedToolId);
+                  } else {
+                    arena.moveAvatarTo(mod.x, mod.y);
+                  }
                 }}
               >
-                {sceneDescriptor.sceneBadge}
-              </span>
-              <span style={{ fontFamily: 'monospace', fontSize: '12.5px', color: '#e2e8f0', fontWeight: 700 }}>
-                📄 {fileName}
-              </span>
-            </div>
+                <rect
+                  x={mod.x - 56}
+                  y={mod.y - 28}
+                  width="112"
+                  height="56"
+                  rx="8"
+                  fill={isTarget ? '#191224' : '#0d1322'}
+                  stroke={nodeColor}
+                  strokeWidth={isTarget ? 2.5 : 1.5}
+                />
+                <text x={mod.x} y={mod.y - 11} textAnchor="middle" fill={nodeColor} fontSize="9" fontWeight="800">
+                  {mod.code} · {isFixed ? 'TEST PASS' : isTarget ? 'BUG ACTIVE!' : 'QUEUED'}
+                </text>
+                <text x={mod.x} y={mod.y + 4} textAnchor="middle" fill="#f8fafc" fontSize="9.5" fontWeight="700">
+                  {mod.name}
+                </text>
+                <text x={mod.x} y={mod.y + 18} textAnchor="middle" fill={isFixed ? '#3fc07a' : '#fca5a5'} fontSize="7.5" fontWeight="700">
+                  {isFixed ? '[BUILD GREEN]' : mod.bug.slice(0, 24)}
+                </text>
+              </g>
+            );
+          })}
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', fontVariantNumeric: 'tabular-nums' }}>
-              <span
-                style={{
-                  padding: '4px 8px',
-                  borderRadius: '6px',
-                  backgroundColor: isPatched ? '#172a1d' : '#2c1a20',
-                  border: `1px solid ${isPatched ? '#3fc07a' : '#e5566f'}`,
-                  color: isPatched ? '#3fc07a' : '#e5566f',
-                  fontSize: '11px',
-                  fontWeight: 800,
+          {/* Collectible Clean Data Tokens */}
+          {arena.collectibles.map(col =>
+            !col.collected ? (
+              <g
+                key={col.id}
+                style={{ cursor: 'pointer' }}
+                onClick={e => {
+                  e.stopPropagation();
+                  arena.moveAvatarTo(col.x, col.y);
                 }}
               >
-                {isPatched ? '✓ UNIT TESTS: 3/3 PASS' : '● 1 FAILING TEST CASE'}
-              </span>
-              <span style={{ fontSize: '12px', fontWeight: 700, color: '#3fc07a' }}>
-                Build: {energyPercent}%
-              </span>
-            </div>
-          </div>
+                <circle cx={col.x} cy={col.y} r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
+                <text x={col.x} y={col.y + 3.5} textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
+                  +10
+                </text>
+                <text x={col.x} y={col.y + 22} textAnchor="middle" fill="#86efac" fontSize="8" fontWeight="700">
+                  {col.label}
+                </text>
+              </g>
+            ) : null
+          )}
 
-          {/* Code Editor Lines with Clickable Breakpoint */}
-          <div
-            onClick={() => onInspectStage('tool_step_debugger')}
-            style={{
-              backgroundColor: '#070a12',
-              border: '1px solid #1e293b',
-              borderRadius: '8px',
-              padding: '12px 14px',
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-              fontSize: '12.5px',
-              lineHeight: 1.65,
-              cursor: 'pointer',
-              overflowX: 'auto',
-            }}
-          >
-            {codeLines.map((line, idx) => {
-              const isBugLine = idx === 5;
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    padding: '1px 6px',
-                    borderRadius: '4px',
-                    backgroundColor: isBugLine
-                      ? isPatched
-                        ? 'rgba(63, 192, 122, 0.16)'
-                        : 'rgba(239, 68, 68, 0.20)'
-                      : 'transparent',
-                    borderLeft: isBugLine
-                      ? `3px solid ${isPatched ? '#3fc07a' : '#ef4444'}`
-                      : '3px solid transparent',
-                    color: isBugLine ? (isPatched ? '#86efac' : '#fca5a5') : '#cbd5e1',
-                    fontWeight: isBugLine ? 700 : 400,
-                  }}
-                >
-                  {line}
-                </div>
-              );
-            })}
-          </div>
+          {/* Moving Memory Leak Glitch Hazard */}
+          {arena.hazards.map(haz => (
+            <g key={haz.id}>
+              <circle cx={haz.x} cy={haz.y} r={haz.radius} fill="rgba(229, 86, 111, 0.24)" stroke="#e5566f" strokeWidth="2" />
+              <text x={haz.x} y={haz.y + 3} textAnchor="middle" fill="#e5566f" fontSize="7.5" fontWeight="800">
+                GLITCH
+              </text>
+            </g>
+          ))}
 
-          {/* Variable Watch & Unit Test Runner Pipeline */}
-          <div
-            style={{
-              backgroundColor: '#070a12',
-              border: '1px solid #1e293b',
-              borderRadius: '8px',
-              padding: '12px 14px',
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-              fontSize: '12px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '6px',
-            }}
-          >
-            <div style={{ color: '#94a3b8', fontWeight: 700 }}>
-              [DEBUG CONSOLE &amp; STACK TRACE INSPECTOR]
-            </div>
-            <div style={{ color: isPatched ? '#3fc07a' : stageInspected ? '#38bdf8' : '#f87171' }}>
-              {isPatched
-                ? `✓ [PASS] Assertion verified on ${fileName}:6 — All 3 unit tests green (+${skillBonusScore} Debug XP).`
-                : isTestFailed
-                  ? `✗ [FAIL] Test Suite Error: Patch did not resolve root cause. Check compiler explanation.`
-                  : stageInspected
-                    ? `🔍 [BREAKPOINT HIT at Line 06] Inspecting Question Context: "${activeQuestion?.question?.slice(0, 88)}..."`
-                    : `⚠ Click Line 06 (Breakpoint) or press Space to attach Runtime Debugger (+15 Debug XP).`}
-            </div>
-          </div>
+          {/* Player Debugger Bot */}
+          <g transform={`translate(${arena.avatarPos.x}, ${arena.avatarPos.y})`}>
+            <rect x="-15" y="-15" width="30" height="30" rx="7" fill="#090d16" stroke="#38bdf8" strokeWidth="2.5" />
+            <text x="0" y="3.5" textAnchor="middle" fill="#38bdf8" fontSize="8" fontWeight="800">
+              DBG
+            </text>
+          </g>
 
-          {/* IDE Debugger Action Buttons */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-            {sceneDescriptor.tools.map(tool => (
-              <button
-                key={tool.id}
-                type="button"
-                onClick={() => onInspectStage(tool.id)}
-                style={{
-                  textAlign: 'left',
-                  padding: '9px 11px',
-                  borderRadius: '8px',
-                  backgroundColor: '#070a12',
-                  border: '1px solid #26334d',
-                  color: '#f8fafc',
-                  cursor: 'pointer',
-                }}
-              >
-                <div style={{ fontSize: '10.5px', fontWeight: 800, color: accentHex }}>[{tool.badgeCode}]</div>
-                <div style={{ fontSize: '12px', fontWeight: 700, marginTop: '2px' }}>{tool.label}</div>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {/* RIGHT PANE: Inline Code Patch & Unit Test Verification Console */}
-        <InlineDomainChallengeBox
-          sceneDescriptor={sceneDescriptor}
-          activeStageIndex={activeStageIndex}
-          totalStages={totalStages}
-          zoneLabel={currentStage?.zoneLabel || 'Runtime Debugger'}
-          checkpointTitle={currentStage?.checkpointTitle || `Module #${activeStageIndex + 1}`}
-          activeQuestion={activeQuestion}
-          activeFeedback={activeFeedback}
-          activeTimeRemaining={activeTimeRemaining}
-          submittingAnswer={submittingAnswer}
-          selectedChoice={selectedChoice}
-          onSelectChoice={onSelectChoice}
-          textAnswer={textAnswer}
-          onChangeTextAnswer={onChangeTextAnswer}
-          onSubmitAnswer={onSubmitAnswer}
-          onContinueStage={onContinueStage}
-          stageInspected={stageInspected}
-          onInspectStage={() => onInspectStage('tool_step_debugger')}
-          accentHex={accentHex}
-          domainPromptHeader={`Stack Trace tại ${fileName}:06`}
-          domainUnlockedHint="Phân tích nguyên nhân lỗi và chọn bản vá (Code Patch) chính xác để vượt qua Unit Test."
-        />
+          {arena.popups.map(p => (
+            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+              {p.text}
+            </text>
+          ))}
+        </svg>
       </div>
+
+      <BottomSceneControlDock
+        sceneDescriptor={sceneDescriptor}
+        selectedToolId={selectedToolId}
+        onSelectTool={id => setSelectedToolId(id)}
+        onNudge={arena.nudgeAvatar}
+        onEngageTarget={() => arena.engageTargetNow(selectedToolId)}
+        targetBadge={`KHÓA BUG [${activeMod.code}]`}
+        accentHex={accentHex}
+        energyPercent={energyPercent}
+        skillBonusScore={skillBonusScore}
+      />
+
+      <InGameChallengePopup
+        sceneDescriptor={sceneDescriptor}
+        activeStageIndex={activeStageIndex}
+        totalStages={totalStages}
+        targetCode={activeMod.code}
+        targetName={activeMod.name}
+        telemetryLine={`Stack Trace: ${activeMod.bug}`}
+        activeQuestion={activeQuestion}
+        activeFeedback={activeFeedback}
+        activeTimeRemaining={activeTimeRemaining}
+        submittingAnswer={submittingAnswer}
+        selectedChoice={selectedChoice}
+        onSelectChoice={onSelectChoice}
+        textAnswer={textAnswer}
+        onChangeTextAnswer={onChangeTextAnswer}
+        onSubmitAnswer={onSubmitAnswer}
+        onContinueStage={onContinueStage}
+        stageInspected={stageInspected}
+        accentHex={accentHex}
+      />
     </div>
   );
 };
 
 /* ============================================================================
- * SCENE 6: CYBER DEFENSE SOC RADAR & NETWORK TOPOLOGY SCENE
+ * SCENE 6: CYBER DEFENSE SOC RADAR & THREAT INTERCEPTOR (2D ACTIVE DEFENSE GAME)
  * ============================================================================ */
 export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = props => {
   const {
@@ -1665,239 +1988,244 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
     onInspectStage,
     energyPercent,
     skillBonusScore,
+    isPaused,
+    onCollectBonus,
+    onHazardHit,
   } = props;
 
+  const [selectedToolId, setSelectedToolId] = useState<string>(
+    sceneDescriptor.tools[0]?.id || 'tool_node_quarantine'
+  );
   const accentHex = config.palette.accentColor || '#10B981';
-  const currentStage = config.stages[activeStageIndex] || config.stages[0];
-  const isNodeSecured = Boolean(activeFeedback?.isCorrect);
 
   const socNodes = [
-    { x: 90, y: 110, id: 'NODE-01', name: 'Mail Gateway', threat: 'Phishing & Spoofing Vector' },
-    { x: 205, y: 62, id: 'NODE-02', name: 'IAM / MFA Auth', threat: 'Brute-force Credential Attack' },
-    { x: 205, y: 162, id: 'NODE-03', name: 'App Cluster WAF', threat: 'SQLi / XSS Payload Injection' },
-    { x: 335, y: 110, id: 'NODE-04', name: 'Encrypted Vault', threat: 'Unauthorized Data Exfiltration' },
-    { x: 445, y: 110, id: 'NODE-05', name: 'Core SIEM/SOAR', threat: 'Zero-Day Privilege Escalation' },
+    { x: 95, y: 138, id: 'NODE-01', name: 'Mail Gateway', threat: 'Phishing & Spoofing Payload' },
+    { x: 220, y: 78, id: 'NODE-02', name: 'IAM / MFA Auth', threat: 'Brute-force Credential Attack' },
+    { x: 220, y: 198, id: 'NODE-03', name: 'App Cluster WAF', threat: 'SQLi / XSS Injection Vector' },
+    { x: 355, y: 138, id: 'NODE-04', name: 'Encrypted Vault', threat: 'Ransomware Data Exfiltration' },
+    { x: 475, y: 138, id: 'NODE-05', name: 'Core SIEM/SOAR', threat: 'Zero-Day Privilege Escalation' },
   ];
   const targetNodeIdx = activeStageIndex % socNodes.length;
   const targetNode = socNodes[targetNodeIdx];
+  const isNodeSecured = Boolean(activeFeedback?.isCorrect);
+
+  const arena = useArena2DGame({
+    activeStageIndex,
+    stageInspected,
+    isPaused,
+    targetX: targetNode.x,
+    targetY: targetNode.y,
+    initialX: 46,
+    initialY: 138,
+    selectedToolId,
+    onInspectStage,
+    onCollectBonus,
+    onHazardHit,
+    collectibleLabels: ['Cyber Key', 'Zero-Trust Token', 'Patch Hash'],
+    hazardLabel: 'Mã độc DDoS',
+  });
 
   return (
     <div
       data-testid="scene-cyber-defense-soc-radar"
       style={{
+        position: 'relative',
         width: '100%',
         height: '100%',
-        overflowY: 'auto',
-        padding: '18px 22px 96px 22px',
-        background: 'radial-gradient(circle at 20% 20%, rgba(16, 185, 129, 0.14) 0%, #050a10 70%)',
+        backgroundColor: '#050a10',
+        padding: '12px 16px',
         display: 'flex',
         flexDirection: 'column',
-        gap: '16px',
+        justifyContent: 'space-between',
+        gap: '10px',
+        overflow: 'hidden',
       }}
     >
+      {/* Full-Stage 2D Active Network Defense Radar Arena */}
       <div
         style={{
-          maxWidth: '1240px',
-          width: '100%',
-          margin: '0 auto',
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))',
-          gap: '18px',
+          position: 'relative',
+          flex: 1,
+          minHeight: 0,
+          backgroundColor: '#060b12',
+          border: '1.5px solid #1f3a3d',
+          borderRadius: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'hidden',
         }}
       >
-        {/* LEFT PANE: Interactive SVG Network Topology Map & SIEM Log Terminal */}
-        <div
-          style={{
-            backgroundColor: '#0c1420',
-            border: '1px solid #1f3a3d',
-            borderRadius: '12px',
-            padding: '16px 18px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '12px',
+        <svg
+          viewBox="0 0 560 280"
+          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block', cursor: 'crosshair' }}
+          onClick={e => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const svgX = ((e.clientX - rect.left) / rect.width) * 560;
+            const svgY = ((e.clientY - rect.top) / rect.height) * 280;
+            arena.moveAvatarTo(svgX, svgY);
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-            <div>
-              <span
-                style={{
-                  padding: '3px 8px',
-                  borderRadius: '4px',
-                  backgroundColor: `${accentHex}22`,
-                  border: `1px solid ${accentHex}66`,
-                  color: accentHex,
-                  fontSize: '11px',
-                  fontWeight: 800,
+          <defs>
+            <pattern id="socRadarGrid" width="28" height="28" patternUnits="userSpaceOnUse">
+              <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#0d1f26" strokeWidth="1" />
+            </pattern>
+          </defs>
+          <rect width="560" height="280" fill="url(#socRadarGrid)" />
+
+          {/* Radar Concentric Rings */}
+          <circle cx="280" cy="145" r="110" fill="none" stroke="#0f2930" strokeWidth="1" strokeDasharray="4 4" />
+          <circle cx="280" cy="145" r="65" fill="none" stroke="#0f2930" strokeWidth="1" strokeDasharray="4 4" />
+
+          <rect x="0" y="0" width="560" height="22" fill="#0c1420" />
+          <text x="16" y="15" fill={accentHex} fontSize="10" fontWeight="800">
+            {sceneDescriptor.sceneBadge} · ĐIỀU KHIỂN KHIÊN SOC CÔ LẬP [{targetNode.id}] ({targetNode.name.toUpperCase()})
+          </text>
+
+          {/* Network Topology Fiber Links */}
+          <line x1="95" y1="138" x2="220" y2="78" stroke="#1e293b" strokeWidth="3.5" />
+          <line x1="95" y1="138" x2="220" y2="198" stroke="#1e293b" strokeWidth="3.5" />
+          <line x1="220" y1="78" x2="355" y2="138" stroke="#1e293b" strokeWidth="3.5" />
+          <line x1="220" y1="198" x2="355" y2="138" stroke="#1e293b" strokeWidth="3.5" />
+          <line x1="355" y1="138" x2="475" y2="138" stroke="#1e293b" strokeWidth="3.5" />
+
+          {/* Network Nodes */}
+          {socNodes.map((node, idx) => {
+            const isTarget = idx === targetNodeIdx;
+            const isProtected = idx < activeStageIndex || (isTarget && isNodeSecured);
+            const color = isProtected
+              ? '#3fc07a'
+              : isTarget
+                ? stageInspected
+                  ? '#f59e0b'
+                  : '#ef4444'
+                : '#38bdf8';
+
+            return (
+              <g
+                key={node.id}
+                style={{ cursor: 'pointer' }}
+                onClick={e => {
+                  e.stopPropagation();
+                  if (isTarget) {
+                    arena.engageTargetNow(selectedToolId);
+                  } else {
+                    arena.moveAvatarTo(node.x, node.y);
+                  }
                 }}
               >
-                {sceneDescriptor.sceneBadge}
-              </span>
-              <h3 style={{ margin: '6px 0 0 0', fontSize: '16px', fontWeight: 700, color: '#f8fafc' }}>
-                {sceneDescriptor.sceneTitle}
-              </h3>
-            </div>
-            <div
-              style={{
-                display: 'flex',
-                gap: '12px',
-                backgroundColor: '#060b12',
-                border: '1px solid #1e293b',
-                borderRadius: '8px',
-                padding: '8px 12px',
-                fontVariantNumeric: 'tabular-nums',
-              }}
-            >
-              <div>
-                <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Chỉ số Phòng thủ SOC</div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: '#3fc07a' }}>{energyPercent}%</div>
-              </div>
-              <div style={{ width: '1px', backgroundColor: '#1e293b' }} />
-              <div>
-                <div style={{ fontSize: '10.5px', color: '#94a3b8' }}>Điểm Phản ứng</div>
-                <div style={{ fontSize: '16px', fontWeight: 800, color: accentHex }}>+{skillBonusScore}</div>
-              </div>
-            </div>
-          </div>
+                {isTarget && !isProtected && (
+                  <circle
+                    cx={node.x}
+                    cy={node.y}
+                    r="34"
+                    fill="rgba(239, 68, 68, 0.16)"
+                    stroke={color}
+                    strokeWidth="2"
+                    strokeDasharray="5 3"
+                  />
+                )}
+                <circle
+                  cx={node.x}
+                  cy={node.y}
+                  r="24"
+                  fill="#0b1320"
+                  stroke={color}
+                  strokeWidth="3"
+                />
+                <text x={node.x} y={node.y - 2} textAnchor="middle" fill={color} fontSize="9.5" fontWeight="800">
+                  {node.id}
+                </text>
+                <text x={node.x} y={node.y + 10} textAnchor="middle" fill="#cbd5e1" fontSize="7.5" fontWeight="700">
+                  {isProtected ? 'SHIELD ON' : isTarget ? 'ATTACK!' : 'ONLINE'}
+                </text>
+                <text x={node.x} y={node.y + 38} textAnchor="middle" fill="#e2e8f0" fontSize="9.5" fontWeight="700">
+                  {node.name}
+                </text>
+              </g>
+            );
+          })}
 
-          {/* Interactive SVG Network Topology Graph */}
-          <div
-            style={{
-              backgroundColor: '#060b12',
-              border: '1px solid #1e293b',
-              borderRadius: '10px',
-              padding: '10px',
-            }}
-          >
-            <svg viewBox="0 0 520 215" style={{ width: '100%', height: 'auto', maxHeight: '215px', display: 'block' }}>
-              {/* Network Links */}
-              <line x1="90" y1="110" x2="205" y2="62" stroke="#1e293b" strokeWidth="3" />
-              <line x1="90" y1="110" x2="205" y2="162" stroke="#1e293b" strokeWidth="3" />
-              <line x1="205" y1="62" x2="335" y2="110" stroke="#1e293b" strokeWidth="3" />
-              <line x1="205" y1="162" x2="335" y2="110" stroke="#1e293b" strokeWidth="3" />
-              <line x1="335" y1="110" x2="445" y2="110" stroke="#1e293b" strokeWidth="3" />
-
-              {/* Nodes */}
-              {socNodes.map((node, idx) => {
-                const isTarget = idx === targetNodeIdx;
-                const isProtected = idx < activeStageIndex || (isTarget && isNodeSecured);
-                const color = isProtected
-                  ? '#3fc07a'
-                  : isTarget
-                    ? stageInspected
-                      ? '#f59e0b'
-                      : '#ef4444'
-                    : '#38bdf8';
-
-                return (
-                  <g
-                    key={node.id}
-                    style={{ cursor: isTarget ? 'pointer' : 'default' }}
-                    onClick={() => {
-                      if (isTarget) onInspectStage('tool_node_quarantine');
-                    }}
-                  >
-                    {isTarget && !isProtected && (
-                      <circle
-                        cx={node.x}
-                        cy={node.y}
-                        r="31"
-                        fill={`${color}22`}
-                        stroke={color}
-                        strokeWidth="2"
-                        strokeDasharray="5 3"
-                      />
-                    )}
-                    <circle
-                      cx={node.x}
-                      cy={node.y}
-                      r="22"
-                      fill="#0b1320"
-                      stroke={color}
-                      strokeWidth="3"
-                    />
-                    <text x={node.x} y={node.y - 2} textAnchor="middle" fill={color} fontSize="9.5" fontWeight="800">
-                      {node.id}
-                    </text>
-                    <text x={node.x} y={node.y + 10} textAnchor="middle" fill="#cbd5e1" fontSize="7.5" fontWeight="700">
-                      {isProtected ? 'SHIELD ON' : isTarget ? (stageInspected ? 'ISOLATED' : 'ALERT!') : 'ONLINE'}
-                    </text>
-                    <text x={node.x} y={node.y + 36} textAnchor="middle" fill="#e2e8f0" fontSize="9.5" fontWeight="700">
-                      {node.name}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
-          </div>
-
-          {/* Live SIEM Intrusion Terminal */}
-          <div
-            style={{
-              backgroundColor: '#060b12',
-              border: '1px solid #1e293b',
-              borderRadius: '8px',
-              padding: '10px 12px',
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
-              fontSize: '12px',
-              color: isNodeSecured ? '#3fc07a' : stageInspected ? '#fbbf24' : '#f87171',
-            }}
-          >
-            {isNodeSecured
-              ? `[SIEM-OK] ${targetNode.id} (${targetNode.name}): Firewall rule deployed. Malicious traffic blocked (0% packet loss).`
-              : stageInspected
-                ? `[QUARANTINE ACTIVE] ${targetNode.id} isolated. Signature decoded: ${targetNode.threat}. Select countermeasure rule.`
-                : `[SIEM-ALERT] Intrusion detected on ${targetNode.id} (${targetNode.name}) — Vector: ${targetNode.threat}. Click node to isolate!`}
-          </div>
-
-          {/* SOC Countermeasure Tools */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px' }}>
-            {sceneDescriptor.tools.map(tool => (
-              <button
-                key={tool.id}
-                type="button"
-                onClick={() => onInspectStage(tool.id)}
-                style={{
-                  textAlign: 'left',
-                  padding: '9px 11px',
-                  borderRadius: '8px',
-                  backgroundColor: '#060b12',
-                  border: '1px solid #26334d',
-                  color: '#f8fafc',
-                  cursor: 'pointer',
+          {/* Collectible Cyber Security Tokens */}
+          {arena.collectibles.map(col =>
+            !col.collected ? (
+              <g
+                key={col.id}
+                style={{ cursor: 'pointer' }}
+                onClick={e => {
+                  e.stopPropagation();
+                  arena.moveAvatarTo(col.x, col.y);
                 }}
               >
-                <div style={{ fontSize: '10.5px', fontWeight: 800, color: accentHex }}>[{tool.badgeCode}]</div>
-                <div style={{ fontSize: '12px', fontWeight: 700, marginTop: '2px' }}>{tool.label}</div>
-              </button>
-            ))}
-          </div>
-        </div>
+                <circle cx={col.x} cy={col.y} r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
+                <text x={col.x} y={col.y + 3.5} textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
+                  +10
+                </text>
+                <text x={col.x} y={col.y + 22} textAnchor="middle" fill="#86efac" fontSize="8" fontWeight="700">
+                  {col.label}
+                </text>
+              </g>
+            ) : null
+          )}
 
-        {/* RIGHT PANE: SOC Firewall & Incident Response Console */}
-        <InlineDomainChallengeBox
-          sceneDescriptor={sceneDescriptor}
-          activeStageIndex={activeStageIndex}
-          totalStages={totalStages}
-          zoneLabel={currentStage?.zoneLabel || 'SOC Defense Grid'}
-          checkpointTitle={currentStage?.checkpointTitle || `${targetNode.id}: ${targetNode.name}`}
-          activeQuestion={activeQuestion}
-          activeFeedback={activeFeedback}
-          activeTimeRemaining={activeTimeRemaining}
-          submittingAnswer={submittingAnswer}
-          selectedChoice={selectedChoice}
-          onSelectChoice={onSelectChoice}
-          textAnswer={textAnswer}
-          onChangeTextAnswer={onChangeTextAnswer}
-          onSubmitAnswer={onSubmitAnswer}
-          onContinueStage={onContinueStage}
-          stageInspected={stageInspected}
-          onInspectStage={() => onInspectStage('tool_node_quarantine')}
-          accentHex={accentHex}
-          domainPromptHeader={`Cảnh báo SIEM tại ${targetNode.id} (${targetNode.name})`}
-          domainUnlockedHint={`Phát hiện: ${targetNode.threat} — Hãy chọn quy tắc phòng thủ / phản ứng sự cố chuẩn xác.`}
-        />
+          {/* Moving Malware / DDoS Packet */}
+          {arena.hazards.map(haz => (
+            <g key={haz.id}>
+              <circle cx={haz.x} cy={haz.y} r={haz.radius} fill="rgba(229, 86, 111, 0.25)" stroke="#e5566f" strokeWidth="2" />
+              <text x={haz.x} y={haz.y + 3} textAnchor="middle" fill="#e5566f" fontSize="7.5" fontWeight="800">
+                DDOS
+              </text>
+            </g>
+          ))}
+
+          {/* Player SOC Shield Drone */}
+          <g transform={`translate(${arena.avatarPos.x}, ${arena.avatarPos.y})`}>
+            <circle cx="0" cy="0" r="16" fill="#060b12" stroke="#3fc07a" strokeWidth="2.5" />
+            <text x="0" y="3.5" textAnchor="middle" fill="#3fc07a" fontSize="8" fontWeight="800">
+              SOC
+            </text>
+          </g>
+
+          {arena.popups.map(p => (
+            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+              {p.text}
+            </text>
+          ))}
+        </svg>
       </div>
+
+      <BottomSceneControlDock
+        sceneDescriptor={sceneDescriptor}
+        selectedToolId={selectedToolId}
+        onSelectTool={id => setSelectedToolId(id)}
+        onNudge={arena.nudgeAvatar}
+        onEngageTarget={() => arena.engageTargetNow(selectedToolId)}
+        targetBadge={`CÔ LẬP [${targetNode.id}]`}
+        accentHex={accentHex}
+        energyPercent={energyPercent}
+        skillBonusScore={skillBonusScore}
+      />
+
+      <InGameChallengePopup
+        sceneDescriptor={sceneDescriptor}
+        activeStageIndex={activeStageIndex}
+        totalStages={totalStages}
+        targetCode={targetNode.id}
+        targetName={targetNode.name}
+        telemetryLine={`Phát hiện tấn công: ${targetNode.threat}`}
+        activeQuestion={activeQuestion}
+        activeFeedback={activeFeedback}
+        activeTimeRemaining={activeTimeRemaining}
+        submittingAnswer={submittingAnswer}
+        selectedChoice={selectedChoice}
+        onSelectChoice={onSelectChoice}
+        textAnswer={textAnswer}
+        onChangeTextAnswer={onChangeTextAnswer}
+        onSubmitAnswer={onSubmitAnswer}
+        onContinueStage={onContinueStage}
+        stageInspected={stageInspected}
+        accentHex={accentHex}
+      />
     </div>
   );
 };
-

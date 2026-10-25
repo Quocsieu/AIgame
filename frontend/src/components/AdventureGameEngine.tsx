@@ -65,6 +65,14 @@ interface WorldObstacle {
   hit: boolean;
 }
 
+interface WorldCollectible {
+  id: string;
+  x: number;
+  yOffset: number;
+  label: string;
+  collected: boolean;
+}
+
 interface WorldDecor {
   id: string;
   x: number;
@@ -181,80 +189,6 @@ function getIndustryGameplayProfile(config: AdventureConfig) {
     continueLabel: 'Xác nhận quyết định & Mở hồ sơ kế tiếp (Space)',
   };
 }
-function _legacyIndustryProfilePlaceholder(config: AdventureConfig) {
-  if (config.industryId === 'MOTORCYCLE_TRAFFIC') {
-    if (config.themePresetId === 'theme_moto_circuit') {
-      return {
-        mechanicTitle: 'Sa Hình & Xử Lý Tình Huống Giao Thông',
-        autoMoveOn: 'Xe tự chạy: BẬT',
-        autoMoveOff: 'Xe tự chạy: TẠM DỪNG',
-        actionVerb: 'NÉ VẬT CẢN',
-        clearFloatingText: '+15 AN TOÀN GIAO THÔNG',
-        checkpointAction: 'Mở trạm sát hạch chặng',
-      };
-    }
-    return {
-      mechanicTitle: 'Quy Trình Kỹ Thuật & Bảo Dưỡng Xưởng Dịch Vụ',
-      autoMoveOn: 'Di chuyển khoang xưởng: BẬT',
-      autoMoveOff: 'Di chuyển khoang xưởng: TẠM DỪNG',
-      actionVerb: 'VƯỢT VẬT CẢN',
-      clearFloatingText: '+15 KỸ THUẬT XƯỞNG',
-      checkpointAction: 'Mở trạm chẩn đoán chặng',
-    };
-  }
-  if (config.industryId === 'IT_TECHNOLOGY') {
-    return {
-      mechanicTitle: 'Tuần Tra Hạ Tầng Số & Xử Lý Sự Cố An Ninh Mạng',
-      autoMoveOn: 'Tuần tra hệ thống: BẬT',
-      autoMoveOff: 'Tuần tra hệ thống: TẠM DỪNG',
-      actionVerb: 'VƯỢT FIREWALL',
-      clearFloatingText: '+15 CHẶN SỰ CỐ',
-      checkpointAction: 'Xử lý sự cố Node',
-    };
-  }
-  if (config.industryId === 'MANUFACTURING_INDUSTRIAL') {
-    return {
-      mechanicTitle: 'Vận Hành Dây Chuyền, Kho Vận & Kiểm Định 5S/QA',
-      autoMoveOn: 'Tiến trình dây chuyền: BẬT',
-      autoMoveOff: 'Tiến trình dây chuyền: TẠM DỪNG',
-      actionVerb: 'VƯỢT KIỆN HÀNG',
-      clearFloatingText: '+15 AN TOÀN 5S',
-      checkpointAction: 'Kiểm định chốt QA/QC',
-    };
-  }
-  if (config.industryId === 'HEALTHCARE_TRAINING') {
-    return {
-      mechanicTitle: 'Phân Luồng Lâm Sàng & Xử Trí Tình Huống Y Khoa',
-      autoMoveOn: 'Di chuyển ca trực: BẬT',
-      autoMoveOff: 'Di chuyển ca trực: TẠM DỪNG',
-      actionVerb: 'VƯỢT THIẾT BỊ',
-      clearFloatingText: '+15 AN TOÀN LÂM SÀNG',
-      checkpointAction: 'Mở ca lâm sàng chặng',
-    };
-  }
-  if (
-    config.industryId === 'BUSINESS_SALES' ||
-    config.industryId === 'FINANCE_BANKING' ||
-    config.industryId === 'FNB_HOSPITALITY'
-  ) {
-    return {
-      mechanicTitle: 'Hành Trình Tư Vấn Khách Hàng & Xử Lý Tình Huống',
-      autoMoveOn: 'Tiến trình tư vấn: BẬT',
-      autoMoveOff: 'Tiến trình tư vấn: TẠM DỪNG',
-      actionVerb: 'VƯỢT RÀO CẢN',
-      clearFloatingText: '+15 KỸ NĂNG TƯ VẤN',
-      checkpointAction: 'Mở điểm chạm tư vấn',
-    };
-  }
-  return {
-    mechanicTitle: 'Hành Trình Khám Phá & Chinh Phục Học Phần',
-    autoMoveOn: 'Hành trình học tập: BẬT',
-    autoMoveOff: 'Hành trình học tập: TẠM DỪNG',
-    actionVerb: 'NHẢY VƯỢT',
-    clearFloatingText: '+15 ĐIỂM KỸ NĂNG',
-    checkpointAction: 'Mở thử thách học phần',
-  };
-}
 
 export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   game,
@@ -266,7 +200,6 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   currentQuestion: liveCurrentQuestion,
   currentQuestionIndex: liveQuestionIndex = 0,
   totalQuestions: liveTotalQuestions,
-  timeRemaining: liveTimeRemaining = 20,
   liveScore = 0,
   liveCorrectCount = 0,
   liveWrongCount = 0,
@@ -282,7 +215,10 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     const raw = propAdventureConfig || game.settings?.adventureConfig;
     return syncAdventureStagesWithQuestions(raw, game.questions || []);
   }, [propAdventureConfig, game.settings?.adventureConfig, game.questions]);
-  const gameplayProfile = useMemo(() => getIndustryGameplayProfile(effectiveConfig), [effectiveConfig]);
+  const gameplayProfile = useMemo(
+    () => getIndustryGameplayProfile(effectiveConfig),
+    [effectiveConfig]
+  );
   const sceneDescriptor = useMemo(
     () => resolveSceneRendererDescriptor(effectiveConfig),
     [effectiveConfig]
@@ -297,7 +233,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     liveTotalQuestions || game.questions?.length || effectiveConfig.stages.length || 1
   );
 
-  // Preview mode internal state — starts immediately without multi-step briefing friction
+  // Preview mode internal state
   const [previewStarted, setPreviewStarted] = useState<boolean>(false);
   const [previewStageIdx, setPreviewStageIdx] = useState<number>(0);
   const [previewFeedback, setPreviewFeedback] = useState<PracticeQuestionResult | null>(null);
@@ -306,25 +242,26 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   const [previewCorrectCount, setPreviewCorrectCount] = useState<number>(0);
   const [previewWrongCount, setPreviewWrongCount] = useState<number>(0);
   const [previewStreak, setPreviewStreak] = useState<number>(0);
-  const [previewMaxStreak, setPreviewMaxStreak] = useState<number>(0);
+  const [, setPreviewMaxStreak] = useState<number>(0);
   const [previewTimeRemaining, setPreviewTimeRemaining] = useState<number>(
     game.settings?.timePerQuestion || 20
   );
 
-  // Shared gameplay state — autoCruise is enabled by default so vehicle runs automatically
+  // Shared gameplay state
   const [activeModalOpen, setActiveModalOpen] = useState<boolean>(false);
   const [selectedChoice, setSelectedChoice] = useState<string>('');
   const [textAnswer, setTextAnswer] = useState<string>('');
   const [autoCruise, setAutoCruise] = useState<boolean>(true);
   const [skillBonusScore, setSkillBonusScore] = useState<number>(0);
   const [obstaclesClearedCount, setObstaclesClearedCount] = useState<number>(0);
-  const [obstaclesHitCount, setObstaclesHitCount] = useState<number>(0);
+  const [, setObstaclesHitCount] = useState<number>(0);
   const [energyPercent, setEnergyPercent] = useState<number>(100);
   const [nearCheckpointIndex, setNearCheckpointIndex] = useState<number | null>(null);
   const [reachedFinishGate, setReachedFinishGate] = useState<boolean>(false);
   const [playerProgressPercent, setPlayerProgressPercent] = useState<number>(0);
   const [showHowToPlay, setShowHowToPlay] = useState<boolean>(true);
   const [isNativeFullscreen, setIsNativeFullscreen] = useState<boolean>(false);
+  const [isPaused, setIsPaused] = useState<boolean>(false);
 
   // Dynamic viewport dimensions for full-screen Canvas
   const viewportContainerRef = useRef<HTMLDivElement | null>(null);
@@ -413,8 +350,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     return game.questions?.[previewStageIdx] || null;
   }, [mode, liveCurrentQuestion, game.questions, activeStageIndex, previewStageIdx]);
 
-  const activeTimeRemaining =
-    previewTimeRemaining;
+  const activeTimeRemaining = previewTimeRemaining;
 
   // World geometry calculation
   const checkpointPositions = useMemo(() => {
@@ -430,7 +366,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     return lastCheckpoint + 460;
   }, [checkpointPositions]);
 
-  // Build world obstacles and non-collidable decor
+  // Build world obstacles and collectibles
   const initialWorldObstacles = useMemo<WorldObstacle[]>(() => {
     const list: WorldObstacle[] = [];
     const densityCount =
@@ -478,6 +414,31 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     effectiveConfig.obstacleTypes,
   ]);
 
+  const initialWorldCollectibles = useMemo<WorldCollectible[]>(() => {
+    const tokens: WorldCollectible[] = [];
+    for (let stageIdx = 0; stageIdx < totalStages; stageIdx++) {
+      const segmentStart =
+        stageIdx === 0 ? 180 : checkpointPositions[stageIdx - 1] + 110;
+      const segmentEnd = checkpointPositions[stageIdx] - 110;
+      const midX = Math.round((segmentStart + segmentEnd) / 2);
+      tokens.push({
+        id: `token_${stageIdx}_a`,
+        x: segmentStart + 60,
+        yOffset: -26,
+        label: 'HUY HIỆU AN TOÀN',
+        collected: false,
+      });
+      tokens.push({
+        id: `token_${stageIdx}_b`,
+        x: midX + 55,
+        yOffset: -74,
+        label: 'MŨ CHUẨN +10',
+        collected: false,
+      });
+    }
+    return tokens;
+  }, [totalStages, checkpointPositions]);
+
   const worldDecorList = useMemo<WorldDecor[]>(() => {
     const decors: WorldDecor[] = [];
     const kinds: WorldDecor['kind'][] = ['SIGN', 'LAMP', 'TREE', 'PILLAR', 'BANNER'];
@@ -500,7 +461,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   // Mutable physics state inside ref for 60fps Canvas loop
   const physicsRef = useRef({
     playerX: 90,
-    playerY: 0, // offset above ground (<= 0)
+    playerY: 0,
     vy: 0,
     vx: 0,
     facing: 1 as 1 | -1,
@@ -514,14 +475,15 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       jump: false,
     },
     obstacles: [] as WorldObstacle[],
+    collectibles: [] as WorldCollectible[],
     particles: [] as FloatingParticle[],
     unlockedStageCount: 0,
   });
 
-  // Sync obstacles when config changes
   useEffect(() => {
     physicsRef.current.obstacles = initialWorldObstacles.map(o => ({ ...o }));
-  }, [initialWorldObstacles]);
+    physicsRef.current.collectibles = initialWorldCollectibles.map(c => ({ ...c }));
+  }, [initialWorldObstacles, initialWorldCollectibles]);
 
   // Reset engine state completely when gameId or archetype/preset changes
   useEffect(() => {
@@ -536,6 +498,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     setPreviewMaxStreak(0);
     setActiveModalOpen(false);
     setStageInspected(false);
+    setIsPaused(false);
     inspectedStagesRef.current.clear();
     setSelectedChoice('');
     setTextAnswer('');
@@ -565,7 +528,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         physicsRef.current.playerX = minX;
       }
     }
-  }, [activeStageIndex, activeFeedback]);
+  }, [activeStageIndex, activeFeedback, checkpointPositions]);
 
   // Reset question input and stage inspection state when stage changes
   useEffect(() => {
@@ -573,12 +536,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     setTextAnswer('');
     setStageInspected(inspectedStagesRef.current.has(activeStageIndex));
     setPreviewTimeRemaining(game.settings?.timePerQuestion || 20);
-  }, [activeStageIndex, activeQuestion?.id]);
+  }, [activeStageIndex, activeQuestion?.id, game.settings?.timePerQuestion]);
 
   // Preview countdown timer when checkpoint question modal or inline non-runner question is active
   useEffect(() => {
     const isChallengeActive = isRunnerArchetype ? activeModalOpen : stageInspected;
-    if (!isChallengeActive || Boolean(activeFeedback) || isJourneyFinished) return;
+    if (!isChallengeActive || Boolean(activeFeedback) || isJourneyFinished || isPaused) return;
 
     const timer = window.setInterval(() => {
       setPreviewTimeRemaining(prev => {
@@ -590,7 +553,17 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       });
     }, 1000);
     return () => clearInterval(timer);
-  }, [mode, isRunnerArchetype, activeModalOpen, stageInspected, previewFeedback, previewFinished, activeFeedback, isJourneyFinished]);
+  }, [
+    mode,
+    isRunnerArchetype,
+    activeModalOpen,
+    stageInspected,
+    previewFeedback,
+    previewFinished,
+    activeFeedback,
+    isJourneyFinished,
+    isPaused,
+  ]);
 
   const spawnFloatingText = useCallback(
     (worldX: number, worldY: number, text: string, color: string) => {
@@ -631,17 +604,16 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
   const triggerJump = useCallback(() => {
     const p = physicsRef.current;
-    if (p.isGrounded && !activeModalOpen) {
+    if (p.isGrounded && !activeModalOpen && !isPaused) {
       p.vy = JUMP_VELOCITY;
       p.isGrounded = false;
       playClickSound();
-      // Auto-collapse how-to-play banner shortly after first jump so view stays clean
       setTimeout(() => setShowHowToPlay(false), 1200);
     }
-  }, [activeModalOpen]);
+  }, [activeModalOpen, isPaused]);
 
   const handleInspectCurrentStage = useCallback(() => {
-    if (!activeQuestion) return;
+    if (!activeQuestion || isPaused) return;
     if (!inspectedStagesRef.current.has(activeStageIndex)) {
       inspectedStagesRef.current.add(activeStageIndex);
       setSkillBonusScore(prev => prev + 15);
@@ -649,10 +621,20 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       playClickSound();
     }
     setStageInspected(true);
-  }, [activeQuestion, activeStageIndex]);
+  }, [activeQuestion, activeStageIndex, isPaused]);
+
+  const handleCollectArenaBonus = useCallback((bonusPoints: number) => {
+    setSkillBonusScore(prev => prev + bonusPoints);
+    playClickSound();
+  }, []);
+
+  const handleArenaHazardHit = useCallback(() => {
+    setEnergyPercent(prev => Math.max(10, prev - 8));
+    playWrongSound();
+  }, []);
 
   const handleOpenCheckpointModal = useCallback(() => {
-    if (!activeQuestion) return;
+    if (!activeQuestion || isPaused) return;
     if (!isRunnerArchetype) {
       handleInspectCurrentStage();
       return;
@@ -660,12 +642,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     setActiveModalOpen(true);
     physicsRef.current.keys.left = false;
     physicsRef.current.keys.right = false;
-  }, [activeQuestion, isRunnerArchetype, handleInspectCurrentStage]);
+  }, [activeQuestion, isPaused, isRunnerArchetype, handleInspectCurrentStage]);
 
   // Handle Answer Submission (both Live Session and Creator Preview)
   const handleAnswerSubmit = useCallback(
     (explicitAnswer?: string) => {
-      if (!activeQuestion || activeFeedback || submittingAnswer) return;
+      if (!activeQuestion || activeFeedback || submittingAnswer || isPaused) return;
       const rawAns =
         explicitAnswer !== undefined
           ? explicitAnswer
@@ -737,6 +719,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       activeQuestion,
       activeFeedback,
       submittingAnswer,
+      isPaused,
       selectedChoice,
       textAnswer,
       mode,
@@ -775,11 +758,18 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   // Proceed after answering a checkpoint question — vehicle automatically resumes running
   const handleContinueJourney = useCallback(() => {
     setActiveModalOpen(false);
+    setStageInspected(false);
     setAutoCruise(true);
     const isLastStage = activeStageIndex + 1 >= totalStages;
 
     if (!isRunnerArchetype && isLastStage) {
       setReachedFinishGate(true);
+      playVictorySound();
+      if (mode === 'LIVE_SESSION' && onNextQuestion && !liveFinalResult) {
+        onNextQuestion();
+      } else if (mode === 'CREATOR_PREVIEW') {
+        setPreviewFinished(true);
+      }
       return;
     }
 
@@ -794,7 +784,15 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         setPreviewTimeRemaining(game.settings?.timePerQuestion || 20);
       }
     }
-  }, [activeStageIndex, totalStages, isRunnerArchetype, mode, onNextQuestion, game.settings?.timePerQuestion]);
+  }, [
+    activeStageIndex,
+    totalStages,
+    isRunnerArchetype,
+    mode,
+    onNextQuestion,
+    liveFinalResult,
+    game.settings?.timePerQuestion,
+  ]);
 
   // When player reaches the Finish Gate after unlocking the last stage
   useEffect(() => {
@@ -819,7 +817,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     previewFinished,
   ]);
 
-  // Keyboard Listeners (Space / Up / W jump or inspect, 1-4 answer shortcuts, Enter continue, Left/Right optional)
+  // Keyboard Listeners
   useEffect(() => {
     if (isJourneyFinished) return;
 
@@ -834,7 +832,15 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         return;
       }
 
-      // Non-runner inline challenge shortcuts
+      if (e.key === 'p' || e.key === 'P') {
+        e.preventDefault();
+        setIsPaused(prev => !prev);
+        return;
+      }
+
+      if (isPaused) return;
+
+      // Non-runner challenge shortcuts
       if (!isRunnerArchetype) {
         if (activeFeedback && (e.key === 'Enter' || e.key === ' ')) {
           e.preventDefault();
@@ -920,6 +926,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   }, [
     isJourneyStarted,
     isJourneyFinished,
+    isPaused,
     isRunnerArchetype,
     stageInspected,
     activeModalOpen,
@@ -985,7 +992,6 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         drawWheel(-22);
         drawWheel(24);
 
-        // Bike chassis
         c.fillStyle = accentColor;
         c.beginPath();
         c.moveTo(-26, -20);
@@ -995,7 +1001,6 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         c.closePath();
         c.fill();
 
-        // Headlight beam inside canvas world
         const grad = c.createLinearGradient(30, -32, 130, -18);
         grad.addColorStop(0, 'rgba(253, 224, 71, 0.5)');
         grad.addColorStop(1, 'rgba(253, 224, 71, 0)');
@@ -1007,7 +1012,6 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         c.closePath();
         c.fill();
 
-        // Rider torso & helmet
         c.fillStyle = '#1E293B';
         c.fillRect(-10, -56, 16, 22);
         c.fillStyle = '#F8FAFC';
@@ -1054,7 +1058,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             : avatarId === 'FACTORY_ENGINEER'
               ? '#F59E0B'
               : avatarId === 'SALES_ADVISOR'
-                ? '#312E81'
+                ? '#0EA5E9'
                 : accentColor;
         c.beginPath();
         c.roundRect(-14, -56, 28, 32, 7);
@@ -1168,7 +1172,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     };
 
     const step = (now: number) => {
-      const dt = isJourneyStarted ? Math.min(0.05, (now - lastTime) / 1000) : 0;
+      const dt =
+        isJourneyStarted && !isPaused ? Math.min(0.05, (now - lastTime) / 1000) : 0;
       lastTime = now;
 
       const p = physicsRef.current;
@@ -1184,9 +1189,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           ? checkpointPositions[currentLockedIdx]
           : finishGateX;
 
-      // 1. Auto-run forward by default unless paused by checkpoint modal
-      const moveRightActive = isJourneyStarted && (p.keys.right || (autoCruise && !activeModalOpen));
-      const moveLeftActive = p.keys.left && !activeModalOpen;
+      const moveRightActive =
+        isJourneyStarted && !isPaused && (p.keys.right || (autoCruise && !activeModalOpen));
+      const moveLeftActive = p.keys.left && !activeModalOpen && !isPaused;
 
       const speed = BASE_MOVE_SPEED * (effectiveConfig.speedMultiplier || 1);
       if (moveRightActive && !activeModalOpen) {
@@ -1202,7 +1207,6 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       p.playerX += p.vx * dt;
       if (p.playerX < 40) p.playerX = 40;
 
-      // Stop smoothly at locked checkpoint
       if (p.playerX >= blockingCheckpointX - 18) {
         p.playerX = blockingCheckpointX - 18;
         p.vx = 0;
@@ -1212,7 +1216,6 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         p.wheelAngle += (p.vx * dt) / 16;
       }
 
-      // 2. Vertical jump physics
       if (!p.isGrounded || p.vy < 0) {
         p.playerY += p.vy * dt;
         p.vy += GRAVITY * dt;
@@ -1223,12 +1226,26 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         }
       }
 
-      // 3. AABB Collision Detection with Obstacles
       const playerLeft = p.playerX - 20;
       const playerRight = p.playerX + 20;
       const playerBottom = p.playerY;
       const playerTop = p.playerY - 58;
 
+      // Collectible Safety Tokens pickup
+      for (const token of p.collectibles) {
+        if (token.collected) continue;
+        const dx = Math.abs(p.playerX - token.x);
+        const dy = Math.abs(p.playerY - 26 - token.yOffset);
+        if (dx < 32 && dy < 38) {
+          token.collected = true;
+          setSkillBonusScore(prev => prev + 10);
+          spawnBurstParticles(token.x, token.yOffset, '#3fc07a');
+          spawnFloatingText(token.x, token.yOffset - 18, '+10 AN TOÀN', '#3fc07a');
+          playClickSound();
+        }
+      }
+
+      // AABB Collision Detection with Obstacles
       for (const obs of p.obstacles) {
         const obsLeft = obs.x;
         const obsRight = obs.x + obs.width;
@@ -1263,7 +1280,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         }
       }
 
-      // 4. Proximity to active Checkpoint -> pause vehicle & open question modal
+      // Proximity to active Checkpoint
       if (currentLockedIdx < checkpointPositions.length) {
         const targetCpX = checkpointPositions[currentLockedIdx];
         const dist = Math.abs(p.playerX - targetCpX);
@@ -1287,7 +1304,6 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       const pct = Math.min(100, Math.max(0, Math.round((p.playerX / finishGateX) * 100)));
       setPlayerProgressPercent(pct);
 
-      // 5. Camera Follow
       const targetCamX = Math.max(0, p.playerX - width * 0.26);
       p.cameraX += (targetCamX - p.cameraX) * (effectiveConfig.reducedMotion ? 1 : 0.14);
 
@@ -1304,7 +1320,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       ctx.fillStyle = glowGrad;
       ctx.fillRect(0, groundY - 120, width, 120);
 
-      // Parallax Layer 1 (Far Silhouette Buildings)
+      // Parallax Layer 1
       const farParallax = effectiveConfig.reducedMotion ? 0 : p.cameraX * 0.2;
       ctx.fillStyle = `${palette.buildingPrimary}AA`;
       const farCount = Math.ceil(width / 220) + 4;
@@ -1315,7 +1331,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         ctx.fillRect(bx, groundY - bh, 160, bh);
       }
 
-      // Parallax Layer 2 (Midground Industry Structures)
+      // Parallax Layer 2
       const midParallax = effectiveConfig.reducedMotion ? 0 : p.cameraX * 0.5;
       const midCount = Math.ceil(width / 290) + 4;
       for (let i = -1; i < midCount; i++) {
@@ -1440,6 +1456,27 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         ctx.restore();
       }
 
+      // Collectible Safety Tokens
+      for (const token of p.collectibles) {
+        if (token.collected) continue;
+        const sx = token.x - p.cameraX;
+        if (sx < -60 || sx > width + 60) continue;
+        ctx.save();
+        ctx.translate(sx, groundY + token.yOffset);
+        ctx.fillStyle = '#172a1d';
+        ctx.strokeStyle = '#3fc07a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, 13, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#3fc07a';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('+10', 0, 3);
+        ctx.restore();
+      }
+
       // Obstacles
       for (const obs of p.obstacles) {
         const sx = obs.x - p.cameraX;
@@ -1501,6 +1538,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   }, [
     isJourneyStarted,
     isJourneyFinished,
+    isPaused,
+    isRunnerArchetype,
     effectiveConfig,
     checkpointPositions,
     finishGateX,
@@ -1510,6 +1549,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     activeFeedback,
     canvasSize.width,
     canvasSize.height,
+    gameplayProfile.clearFloatingText,
     spawnBurstParticles,
     spawnFloatingText,
   ]);
@@ -1521,6 +1561,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     physicsRef.current.cameraX = 0;
     physicsRef.current.unlockedStageCount = 0;
     physicsRef.current.obstacles = initialWorldObstacles.map(o => ({ ...o }));
+    physicsRef.current.collectibles = initialWorldCollectibles.map(c => ({ ...c }));
     setPreviewStageIdx(0);
     setPreviewFeedback(null);
     setPreviewFinished(false);
@@ -1536,6 +1577,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     setPreviewWrongCount(0);
     setReachedFinishGate(false);
     setActiveModalOpen(false);
+    setIsPaused(false);
     setAutoCruise(true);
     if (mode === 'LIVE_SESSION' && onRestartSession) {
       onRestartSession();
@@ -1572,30 +1614,30 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       {/* ================= INTEGRATED TOP HUD BAR ================= */}
       <header
         style={{
-          minHeight: '56px',
-          padding: '8px 16px',
+          minHeight: '52px',
+          padding: '6px 14px',
           backgroundColor: '#0b0f19',
           borderBottom: '1px solid #1e293b',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
           flexWrap: 'wrap',
-          gap: '12px',
+          gap: '10px',
           flexShrink: 0,
           zIndex: 30,
         }}
       >
         {/* Left: Game Title & Industry Context */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
           <span
             style={{
-              padding: '4px 10px',
+              padding: '3px 9px',
               borderRadius: '6px',
               backgroundColor: '#161f30',
               border: '1px solid #26334d',
               color: '#f8fafc',
-              fontSize: '12px',
-              fontWeight: 600,
+              fontSize: '11.5px',
+              fontWeight: 700,
               whiteSpace: 'nowrap',
             }}
           >
@@ -1605,13 +1647,13 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             <h1
               style={{
                 margin: 0,
-                fontSize: '15px',
+                fontSize: '14.5px',
                 fontWeight: 700,
                 color: '#f8fafc',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
-                maxWidth: '280px',
+                maxWidth: '250px',
               }}
             >
               {game.title || effectiveConfig.environmentTitle}
@@ -1619,7 +1661,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           </div>
         </div>
 
-        {/* Center: Divided KPI Strip (Chặng | Điểm | Vượt qua) — Taste Skill §5 */}
+        {/* Center: Divided KPI Strip (Chặng | Điểm | Năng lượng | Mục tiêu) */}
         <div
           style={{
             display: 'flex',
@@ -1633,78 +1675,102 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         >
           <div
             style={{
-              padding: '6px 14px',
+              padding: '5px 12px',
               display: 'flex',
               alignItems: 'baseline',
-              gap: '6px',
+              gap: '5px',
               borderRight: '1px solid #222d42',
             }}
           >
-            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>Chặng</span>
-            <strong style={{ fontSize: '15px', color: '#f8fafc', fontWeight: 700 }}>
+            <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 500 }}>Chặng</span>
+            <strong style={{ fontSize: '14px', color: '#f8fafc', fontWeight: 700 }}>
               {Math.min(totalStages, activeStageIndex + 1)}/{totalStages}
             </strong>
           </div>
 
           <div
             style={{
-              padding: '6px 14px',
+              padding: '5px 12px',
               display: 'flex',
               alignItems: 'baseline',
-              gap: '6px',
+              gap: '5px',
               borderRight: '1px solid #222d42',
             }}
           >
-            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>Đã trả lời</span>
-            <strong style={{ fontSize: '14px', color: '#f8fafc', fontWeight: 700 }}>
-              {currentAnsweredCount}/{totalStages}
-            </strong>
-            <span style={{ fontSize: '11px', color: '#3fc07a', fontWeight: 600 }}>
-              ({currentCorrectCount}Đ·{currentWrongCount}S)
-            </span>
-          </div>
-          <div style={{ display: 'none' }}><strong>
-            </strong>
-          </div>
-
-          <div
-            style={{
-              padding: '6px 14px',
-              display: 'flex',
-              alignItems: 'baseline',
-              gap: '6px',
-              borderRight: '1px solid #222d42',
-            }}
-          >
-            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>Điểm</span>
-            <strong style={{ fontSize: '15px', color: accentHex, fontWeight: 700 }}>
+            <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 500 }}>Điểm</span>
+            <strong style={{ fontSize: '14px', color: accentHex, fontWeight: 700 }}>
               {totalDisplayScore}
             </strong>
           </div>
 
           <div
             style={{
-              padding: '6px 14px',
+              padding: '5px 12px',
               display: 'flex',
               alignItems: 'baseline',
-              gap: '6px',
+              gap: '5px',
+              borderRight: '1px solid #222d42',
             }}
           >
-            <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 500 }}>{sceneDescriptor.clearedMetricLabel}</span>
-            <strong style={{ fontSize: '15px', color: '#3fc07a', fontWeight: 700 }}>
+            <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 500 }}>An toàn</span>
+            <strong
+              style={{
+                fontSize: '14px',
+                color: energyPercent >= 50 ? '#3fc07a' : '#e5566f',
+                fontWeight: 700,
+              }}
+            >
+              {energyPercent}%
+            </strong>
+          </div>
+
+          <div
+            style={{
+              padding: '5px 12px',
+              display: 'flex',
+              alignItems: 'baseline',
+              gap: '5px',
+            }}
+          >
+            <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 500 }}>
+              {sceneDescriptor.clearedMetricLabel}
+            </span>
+            <strong style={{ fontSize: '14px', color: '#3fc07a', fontWeight: 700 }}>
               {obstaclesClearedCount}
             </strong>
           </div>
         </div>
 
-        {/* Right: How-To-Play Toggle, Fullscreen & Exit */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        {/* Right: Pause/Resume, How-To-Play Toggle, Fullscreen & Exit */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          {isJourneyStarted && !isJourneyFinished && (
+            <button
+              type="button"
+              data-testid="hud-pause-button"
+              onClick={() => setIsPaused(prev => !prev)}
+              style={{
+                height: '32px',
+                padding: '0 11px',
+                borderRadius: '6px',
+                backgroundColor: isPaused ? '#f59e0b' : '#111726',
+                border: `1px solid ${isPaused ? '#f59e0b' : '#2e3c56'}`,
+                color: isPaused ? '#090d16' : '#e2e8f0',
+                fontSize: '12px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {isPaused ? 'Tiếp tục' : 'Tạm dừng'}
+            </button>
+          )}
+
           <button
             type="button"
             onClick={() => setShowHowToPlay(prev => !prev)}
             style={{
-              height: '34px',
-              padding: '0 12px',
+              height: '32px',
+              padding: '0 11px',
               borderRadius: '6px',
               backgroundColor: showHowToPlay ? '#1e293b' : '#111726',
               border: '1px solid #2e3c56',
@@ -1722,8 +1788,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             type="button"
             onClick={toggleNativeFullscreen}
             style={{
-              height: '34px',
-              padding: '0 12px',
+              height: '32px',
+              padding: '0 11px',
               borderRadius: '6px',
               backgroundColor: '#111726',
               border: '1px solid #2e3c56',
@@ -1741,8 +1807,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             type="button"
             onClick={handleExitGame}
             style={{
-              height: '34px',
-              padding: '0 14px',
+              height: '32px',
+              padding: '0 12px',
               borderRadius: '6px',
               backgroundColor: '#2c1a20',
               border: '1px solid #5c2632',
@@ -1770,7 +1836,11 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         <div
           style={{
             height: '100%',
-            width: `${isRunnerArchetype ? playerProgressPercent : Math.min(100, Math.round((currentAnsweredCount / totalStages) * 100))}%`,
+            width: `${
+              isRunnerArchetype
+                ? playerProgressPercent
+                : Math.min(100, Math.round((currentAnsweredCount / totalStages) * 100))
+            }%`,
             backgroundColor: accentHex,
             transition: 'width 120ms linear',
           }}
@@ -1790,12 +1860,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           touchAction: 'none',
         }}
         onPointerDown={e => {
-          // Allow tapping directly on the canvas world to jump on mobile/tablet
           if (
             (e.target as HTMLElement)?.tagName === 'CANVAS' &&
             isJourneyStarted &&
             !isJourneyFinished &&
-            !activeModalOpen
+            !activeModalOpen &&
+            !isPaused
           ) {
             e.preventDefault();
             triggerJump();
@@ -1825,6 +1895,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             answeredCount: currentAnsweredCount,
             correctCount: currentCorrectCount,
             wrongCount: currentWrongCount,
+            isPaused,
+            onCollectBonus: handleCollectArenaBonus,
+            onHazardHit: handleArenaHazardHit,
           };
 
           switch (sceneDescriptor.sceneId) {
@@ -1857,45 +1930,30 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           }
         })()}
 
-        {/* Scene-Specific Dynamic How-To-Play Banner & Guide */}
-        {showHowToPlay && isJourneyStarted && !isJourneyFinished && !activeModalOpen && (
+        {/* Compact Scene-Specific How-To-Play Pill */}
+        {showHowToPlay && isJourneyStarted && !isJourneyFinished && !activeModalOpen && !stageInspected && (
           <div
             data-testid="scene-tutorial-banner"
             style={{
               position: 'absolute',
-              top: '14px',
+              top: '10px',
               left: '50%',
               transform: 'translateX(-50%)',
               zIndex: 18,
-              backgroundColor: 'rgba(11, 15, 25, 0.96)',
-              border: `1px solid ${accentHex}66`,
-              borderRadius: '10px',
-              padding: '10px 16px',
+              backgroundColor: 'rgba(11, 15, 25, 0.94)',
+              border: `1px solid ${accentHex}`,
+              borderRadius: '8px',
+              padding: '7px 14px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              gap: '14px',
-              width: 'min(920px, calc(100vw - 32px))',
-              boxShadow: '0 10px 26px rgba(0, 0, 0, 0.45)',
+              gap: '12px',
+              width: 'min(760px, calc(100vw - 28px))',
             }}
           >
-            <div style={{ fontSize: '12.5px', color: '#f8fafc', lineHeight: 1.45 }}>
-              <span
-                style={{
-                  display: 'inline-block',
-                  padding: '2px 7px',
-                  borderRadius: '4px',
-                  backgroundColor: `${accentHex}22`,
-                  color: accentHex,
-                  fontSize: '11px',
-                  fontWeight: 800,
-                  marginRight: '8px',
-                }}
-              >
-                {sceneDescriptor.sceneBadge}
-              </span>
-              <strong>{sceneDescriptor.tutorial.tutorialTitle}:</strong>{' '}
-              {sceneDescriptor.tutorial.compactBannerText}
+            <div style={{ fontSize: '12px', color: '#f8fafc', lineHeight: 1.35 }}>
+              <strong style={{ color: accentHex }}>[{sceneDescriptor.sceneBadge}]</strong>{' '}
+              {sceneDescriptor.step1PromptLabel}
             </div>
             <button
               type="button"
@@ -1903,21 +1961,93 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               style={{
                 background: '#161f30',
                 border: '1px solid #26334d',
-                borderRadius: '6px',
+                borderRadius: '5px',
                 color: '#cbd5e1',
-                fontSize: '12px',
+                fontSize: '11px',
                 fontWeight: 700,
                 cursor: 'pointer',
-                padding: '4px 10px',
+                padding: '3px 8px',
                 flexShrink: 0,
               }}
             >
-              Ẩn hướng dẫn
+              Ẩn
             </button>
           </div>
         )}
 
-        {/* Loading / Session Initialization Overlay with Scene-Specific Tutorial */}
+        {/* Pause Overlay */}
+        {isPaused && isJourneyStarted && !isJourneyFinished && (
+          <div
+            data-testid="scene-pause-overlay"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 38,
+              backgroundColor: 'rgba(9, 13, 22, 0.88)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '20px',
+            }}
+          >
+            <div
+              style={{
+                width: '100%',
+                maxWidth: '420px',
+                backgroundColor: '#111726',
+                border: '1px solid #26334d',
+                borderRadius: '12px',
+                padding: '22px',
+                textAlign: 'center',
+              }}
+            >
+              <div style={{ fontSize: '12px', color: accentHex, fontWeight: 800 }}>
+                TẠM DỪNG TRÒ CHƠI
+              </div>
+              <h3 style={{ margin: '6px 0 14px 0', fontSize: '19px', color: '#f8fafc' }}>
+                {game.title || effectiveConfig.environmentTitle}
+              </h3>
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => setIsPaused(false)}
+                  style={{
+                    height: '40px',
+                    padding: '0 20px',
+                    borderRadius: '8px',
+                    backgroundColor: accentHex,
+                    border: 'none',
+                    color: '#090d16',
+                    fontSize: '14px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Tiếp tục chơi (P)
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExitGame}
+                  style={{
+                    height: '40px',
+                    padding: '0 16px',
+                    borderRadius: '8px',
+                    backgroundColor: '#161f30',
+                    border: '1px solid #26334d',
+                    color: '#f8fafc',
+                    fontSize: '13px',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Thoát
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Concise Visual Pre-Game Briefing Overlay */}
         {!isJourneyStarted && (
           <div
             data-testid="scene-pregame-briefing"
@@ -1925,91 +2055,105 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               position: 'absolute',
               inset: 0,
               zIndex: 25,
-              backgroundColor: 'rgba(9, 13, 22, 0.86)',
-              backdropFilter: 'blur(4px)',
+              backgroundColor: 'rgba(9, 13, 22, 0.88)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '24px',
+              padding: '20px',
               overflowY: 'auto',
             }}
           >
             <div
               style={{
                 width: '100%',
-                maxWidth: '580px',
+                maxWidth: '520px',
                 backgroundColor: '#111726',
                 border: '1px solid #222d42',
                 borderRadius: '12px',
-                padding: '26px 24px',
+                padding: '22px 20px',
                 textAlign: 'center',
               }}
             >
               <div
                 style={{
-                  fontSize: '13px',
-                  color: '#94a3b8',
-                  fontWeight: 600,
+                  fontSize: '11.5px',
+                  color: accentHex,
+                  fontWeight: 800,
                   marginBottom: '6px',
                 }}
               >
-                {effectiveConfig.industryLabel} · {effectiveConfig.subEnvironment} · {totalStages} chặng thực hành
-                <div style={{ fontSize: '12px', color: accentHex, marginTop: '4px', fontWeight: 800 }}>
-                  Chế độ chơi: {sceneDescriptor.sceneBadge} — {sceneDescriptor.sceneTitle}
-                </div>
+                {effectiveConfig.industryLabel} · {sceneDescriptor.sceneBadge} · {totalStages} CHẶNG
               </div>
               <h2
                 style={{
-                  margin: '0 0 10px 0',
-                  fontSize: '22px',
+                  margin: '0 0 14px 0',
+                  fontSize: '20px',
                   fontWeight: 700,
                   color: '#f8fafc',
                 }}
               >
                 {game.title || effectiveConfig.environmentTitle}
               </h2>
-              <p
-                style={{
-                  margin: '0 0 18px 0',
-                  fontSize: '13.5px',
-                  color: '#cbd5e1',
-                  lineHeight: 1.5,
-                }}
-              >
-                {sceneDescriptor.sceneSubtitle}
-              </p>
+
+              {/* 3 Concise Visual Control Cards */}
               <div
                 style={{
-                  textAlign: 'left',
-                  backgroundColor: '#0b0f19',
-                  border: '1px solid #1e293b',
-                  borderRadius: '10px',
-                  padding: '14px 16px',
-                  marginBottom: '20px',
-                  display: 'flex',
-                  flexDirection: 'column',
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(3, 1fr)',
                   gap: '8px',
-                  fontSize: '13px',
-                  color: '#cbd5e1',
-                  lineHeight: 1.5,
+                  marginBottom: '18px',
+                  textAlign: 'left',
                 }}
               >
-                <div style={{ fontWeight: 800, color: '#f8fafc', fontSize: '13.5px', marginBottom: '2px' }}>
-                  {sceneDescriptor.tutorial.tutorialTitle} (Vai trò: {sceneDescriptor.tutorial.roleTitle}):
-                </div>
-                <div>
-                  • <strong>Mục tiêu màn chơi:</strong> {sceneDescriptor.tutorial.objectiveSummary}
-                </div>
-                {sceneDescriptor.tutorial.controlInstructions.map((stepText, sIdx) => (
-                  <div key={sIdx}>
-                    • <strong>Thao tác {sIdx + 1}:</strong> {stepText}
+                <div
+                  style={{
+                    backgroundColor: '#0b0f19',
+                    border: '1px solid #1e293b',
+                    borderRadius: '8px',
+                    padding: '10px',
+                  }}
+                >
+                  <div style={{ fontSize: '10.5px', fontWeight: 800, color: accentHex }}>
+                    1. DI CHUYỂN
                   </div>
-                ))}
-                <div>
-                  • <strong>Ảnh hưởng trạng thái &amp; Chiến thắng:</strong>{' '}
-                  {sceneDescriptor.tutorial.rightWrongImpactSummary}
+                  <div style={{ fontSize: '11.5px', color: '#cbd5e1', marginTop: '4px', lineHeight: 1.35 }}>
+                    Phím WASD / Mũi tên hoặc chạm trực tiếp lên màn chơi 2D
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    backgroundColor: '#0b0f19',
+                    border: '1px solid #1e293b',
+                    borderRadius: '8px',
+                    padding: '10px',
+                  }}
+                >
+                  <div style={{ fontSize: '10.5px', fontWeight: 800, color: '#38bdf8' }}>
+                    2. TƯƠNG TÁC
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#cbd5e1', marginTop: '4px', lineHeight: 1.35 }}>
+                    Né vật cản, thu thập vật phẩm (+10Đ) &amp; chạm mục tiêu (Space)
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    backgroundColor: '#0b0f19',
+                    border: '1px solid #1e293b',
+                    borderRadius: '8px',
+                    padding: '10px',
+                  }}
+                >
+                  <div style={{ fontSize: '10.5px', fontWeight: 800, color: '#3fc07a' }}>
+                    3. VƯỢT CHỐT
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#cbd5e1', marginTop: '4px', lineHeight: 1.35 }}>
+                    Trả lời nhanh câu hỏi tại chốt (phím 1-4) để mở khóa chặng
+                  </div>
                 </div>
               </div>
+
               <button
                 type="button"
                 onClick={() => {
@@ -2044,9 +2188,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           <div
             style={{
               position: 'absolute',
-              bottom: '24px',
-              right: '24px',
-              left: '24px',
+              bottom: '20px',
+              right: '20px',
+              left: '20px',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
@@ -2054,13 +2198,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               zIndex: 20,
             }}
           >
-            {/* Left subtle auto-run indicator / manual pause toggle */}
             <button
               type="button"
               onClick={() => setAutoCruise(prev => !prev)}
               style={{
                 pointerEvents: 'auto',
-                height: '40px',
+                height: '38px',
                 padding: '0 14px',
                 borderRadius: '8px',
                 backgroundColor: '#0b0f19',
@@ -2074,15 +2217,14 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               {autoCruise ? gameplayProfile.autoMoveOn : gameplayProfile.autoMoveOff}
             </button>
 
-            {/* Right Primary Jump Action */}
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', pointerEvents: 'auto' }}>
               {nearCheckpointIndex !== null && (
                 <button
                   type="button"
                   onClick={handleOpenCheckpointModal}
                   style={{
-                    height: '56px',
-                    padding: '0 20px',
+                    height: '52px',
+                    padding: '0 18px',
                     borderRadius: '10px',
                     backgroundColor: '#3fc07a',
                     border: 'none',
@@ -2104,14 +2246,14 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 }}
                 aria-label="Nhảy qua chướng ngại vật (Phím Space)"
                 style={{
-                  minWidth: '156px',
-                  height: '56px',
-                  padding: '0 24px',
+                  minWidth: '150px',
+                  height: '52px',
+                  padding: '0 22px',
                   borderRadius: '10px',
                   backgroundColor: accentHex,
                   border: 'none',
                   color: '#090d16',
-                  fontSize: '16px',
+                  fontSize: '15px',
                   fontWeight: 800,
                   cursor: 'pointer',
                   touchAction: 'none',
@@ -2140,29 +2282,30 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           </div>
         )}
 
-        {/* ================= CHECKPOINT QUESTION MODAL ================= */}
+        {/* ================= CHECKPOINT QUESTION MODAL (ROAD RUNNER) ================= */}
         {activeModalOpen && activeQuestion && !isJourneyFinished && (
           <div
+            data-testid="runner-checkpoint-modal"
             style={{
               position: 'absolute',
               inset: 0,
               zIndex: 40,
-              backgroundColor: 'rgba(9, 13, 22, 0.88)',
+              backgroundColor: 'rgba(9, 13, 22, 0.84)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '16px',
+              padding: '14px',
               overflowY: 'auto',
             }}
           >
             <div
               style={{
                 width: '100%',
-                maxWidth: '640px',
+                maxWidth: '610px',
                 backgroundColor: '#111726',
-                border: '1px solid #26334d',
+                border: `1.5px solid ${accentHex}`,
                 borderRadius: '12px',
-                padding: '24px',
+                padding: '18px 20px',
                 color: '#f8fafc',
                 margin: 'auto',
               }}
@@ -2173,25 +2316,20 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  gap: '12px',
-                  paddingBottom: '14px',
+                  gap: '10px',
+                  paddingBottom: '12px',
                   borderBottom: '1px solid #1e293b',
                 }}
               >
                 <div>
-                  <div style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
-                    Chặng {activeStageIndex + 1} / {totalStages} ·{' '}
-                    {currentStageMeta?.zoneLabel || effectiveConfig.subEnvironment} ·{' '}
-                    {activeQuestion.type === 'QUICK_BUTTON'
-                      ? 'Đúng / Sai'
-                      : activeQuestion.type === 'FILL_IN_THE_BLANK'
-                        ? 'Điền từ vào chỗ trống'
-                        : 'Trắc nghiệm 4 lựa chọn'}
+                  <div style={{ fontSize: '11.5px', color: accentHex, fontWeight: 800 }}>
+                    CHỐT SÁT HẠCH #{activeStageIndex + 1}/{totalStages} ·{' '}
+                    {currentStageMeta?.zoneLabel || effectiveConfig.subEnvironment}
                   </div>
                   <h2
                     style={{
                       margin: '2px 0 0 0',
-                      fontSize: '18px',
+                      fontSize: '16.5px',
                       fontWeight: 700,
                       color: '#f8fafc',
                     }}
@@ -2202,13 +2340,13 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
                 <div
                   style={{
-                    padding: '6px 12px',
+                    padding: '5px 10px',
                     borderRadius: '6px',
                     backgroundColor: activeTimeRemaining <= 5 ? '#2c1a20' : '#161f30',
                     border: `1px solid ${activeTimeRemaining <= 5 ? '#5c2632' : '#26334d'}`,
                     color: activeTimeRemaining <= 5 ? '#e5566f' : '#f8fafc',
-                    fontSize: '14px',
-                    fontWeight: 700,
+                    fontSize: '13.5px',
+                    fontWeight: 800,
                     fontVariantNumeric: 'tabular-nums',
                   }}
                 >
@@ -2217,27 +2355,26 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               </div>
 
               {/* Question Prompt */}
-              <div style={{ marginTop: '18px' }}>
+              <div style={{ marginTop: '14px' }}>
                 <p
                   style={{
                     margin: 0,
-                    fontSize: '17px',
-                    fontWeight: 600,
+                    fontSize: '16px',
+                    fontWeight: 700,
                     color: '#f8fafc',
-                    lineHeight: 1.5,
+                    lineHeight: 1.45,
                   }}
                 >
                   {activeQuestion.question}
                 </p>
 
-                {/* Choices */}
                 {Array.isArray(activeQuestion.choices) && activeQuestion.choices.length > 0 ? (
                   <div
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                      gap: '10px',
-                      marginTop: '16px',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+                      gap: '8px',
+                      marginTop: '14px',
                     }}
                   >
                     {activeQuestion.choices.map((choice, cIdx) => {
@@ -2275,12 +2412,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                           }}
                           style={{
                             textAlign: 'left',
-                            padding: '14px 16px',
+                            padding: '12px 14px',
                             borderRadius: '8px',
                             backgroundColor: bg,
-                            border: `1px solid ${border}`,
+                            border: `1.5px solid ${border}`,
                             color: textColor,
-                            fontSize: '14px',
+                            fontSize: '13.5px',
                             fontWeight: 600,
                             cursor:
                               Boolean(activeFeedback) || submittingAnswer
@@ -2288,8 +2425,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                                 : 'pointer',
                             display: 'flex',
                             alignItems: 'flex-start',
-                            gap: '10px',
-                            minHeight: '48px',
+                            gap: '9px',
+                            minHeight: '46px',
                           }}
                         >
                           <span
@@ -2298,15 +2435,15 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                               borderRadius: '4px',
                               backgroundColor: '#0b0f19',
                               color: '#94a3b8',
-                              fontSize: '12px',
-                              fontWeight: 700,
+                              fontSize: '11.5px',
+                              fontWeight: 800,
                               fontVariantNumeric: 'tabular-nums',
                               flexShrink: 0,
                             }}
                           >
                             {cIdx + 1}
                           </span>
-                          <span style={{ flex: 1, lineHeight: 1.4 }}>{choice}</span>
+                          <span style={{ flex: 1, lineHeight: 1.38 }}>{choice}</span>
                         </button>
                       );
                     })}
@@ -2314,7 +2451,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 ) : (
                   <div
                     style={{
-                      marginTop: '16px',
+                      marginTop: '14px',
                       display: 'flex',
                       gap: '10px',
                       flexWrap: 'wrap',
@@ -2328,7 +2465,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       placeholder="Nhập câu trả lời của bạn..."
                       style={{
                         flex: '1 1 220px',
-                        height: '44px',
+                        height: '42px',
                         padding: '0 14px',
                         borderRadius: '8px',
                         backgroundColor: '#0b0f19',
@@ -2343,7 +2480,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                         disabled={!textAnswer.trim() || submittingAnswer}
                         onClick={() => handleAnswerSubmit(textAnswer.trim())}
                         style={{
-                          height: '44px',
+                          height: '42px',
                           padding: '0 20px',
                           borderRadius: '8px',
                           backgroundColor: accentHex,
@@ -2367,58 +2504,62 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               {activeFeedback && (
                 <div
                   style={{
-                    marginTop: '18px',
-                    padding: '14px 16px',
+                    marginTop: '14px',
+                    padding: '12px 14px',
                     borderRadius: '8px',
                     backgroundColor: activeFeedback.isCorrect ? '#172a1d' : '#2c1a20',
                     border: `1px solid ${activeFeedback.isCorrect ? '#3fc07a' : '#e5566f'}`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '12px',
+                    flexWrap: 'wrap',
                   }}
                 >
-                  <div
+                  <div style={{ flex: '1 1 240px' }}>
+                    <div
+                      style={{
+                        fontSize: '13.5px',
+                        fontWeight: 700,
+                        color: activeFeedback.isCorrect ? '#3fc07a' : '#e5566f',
+                      }}
+                    >
+                      {activeFeedback.isCorrect
+                        ? `[CHÍNH XÁC +${activeFeedback.pointsEarned}Đ] Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
+                        : `[CHƯA ĐÚNG] Đáp án chuẩn: ${activeFeedback.correctAnswer}`}
+                    </div>
+                    {activeFeedback.explanation && (
+                      <div
+                        style={{
+                          marginTop: '4px',
+                          fontSize: '12px',
+                          color: '#e2e8f0',
+                          lineHeight: 1.4,
+                        }}
+                      >
+                        {activeFeedback.explanation}
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleContinueJourney}
                     style={{
-                      fontSize: '14px',
-                      fontWeight: 700,
-                      color: activeFeedback.isCorrect ? '#3fc07a' : '#e5566f',
-                      marginBottom: activeFeedback.explanation ? '6px' : '12px',
+                      height: '38px',
+                      padding: '0 16px',
+                      borderRadius: '6px',
+                      backgroundColor: '#f8fafc',
+                      border: 'none',
+                      color: '#090d16',
+                      fontSize: '13px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
                     }}
                   >
-                    {activeFeedback.isCorrect
-                      ? `Chính xác (+${activeFeedback.pointsEarned} điểm) — Rào chắn chặng ${activeStageIndex + 1} đã mở.`
-                      : `Chưa chính xác — Đáp án đúng: ${activeFeedback.correctAnswer}`}
-                  </div>
-                  {activeFeedback.explanation && (
-                    <p
-                      style={{
-                        margin: '0 0 12px 0',
-                        fontSize: '13px',
-                        color: '#e2e8f0',
-                        lineHeight: 1.5,
-                      }}
-                    >
-                      {activeFeedback.explanation}
-                    </p>
-                  )}
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <button
-                      type="button"
-                      onClick={handleContinueJourney}
-                      style={{
-                        height: '40px',
-                        padding: '0 18px',
-                        borderRadius: '6px',
-                        backgroundColor: '#f8fafc',
-                        border: 'none',
-                        color: '#090d16',
-                        fontSize: '13px',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {activeStageIndex + 1 < totalStages
-                        ? gameplayProfile.continueLabel
-                        : 'Tiến về đích (Space)'}
-                    </button>
-                  </div>
+                    {activeStageIndex + 1 < totalStages
+                      ? gameplayProfile.continueLabel
+                      : 'Tiến về đích (Space)'}
+                  </button>
                 </div>
               )}
             </div>
@@ -2428,6 +2569,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         {/* ================= VICTORY / FINISH OVERLAY ================= */}
         {isJourneyFinished && (
           <div
+            data-testid="scene-victory-overlay"
             style={{
               position: 'absolute',
               inset: 0,
@@ -2443,21 +2585,21 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             <div
               style={{
                 width: '100%',
-                maxWidth: '580px',
+                maxWidth: '560px',
                 backgroundColor: '#111726',
                 border: '1px solid #26334d',
                 borderRadius: '12px',
-                padding: '28px 24px',
+                padding: '26px 24px',
                 color: '#f8fafc',
               }}
             >
-              <div style={{ fontSize: '12px', color: '#3fc07a', fontWeight: 600 }}>
-                Hoàn thành hành trình · {effectiveConfig.industryLabel}
+              <div style={{ fontSize: '12px', color: '#3fc07a', fontWeight: 700 }}>
+                HOÀN THÀNH MÀN CHƠI · {effectiveConfig.industryLabel}
               </div>
               <h2
                 style={{
                   margin: '4px 0 18px 0',
-                  fontSize: '24px',
+                  fontSize: '23px',
                   fontWeight: 700,
                   color: '#f8fafc',
                 }}
@@ -2465,7 +2607,6 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 {game.title || effectiveConfig.environmentTitle}
               </h2>
 
-              {/* Divided KPI Summary Strip (Taste Skill §5) */}
               <div
                 style={{
                   display: 'grid',
@@ -2482,7 +2623,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   <div style={{ fontSize: '12px', color: '#94a3b8' }}>Tổng điểm</div>
                   <div
                     style={{
-                      fontSize: '26px',
+                      fontSize: '25px',
                       fontWeight: 700,
                       color: accentHex,
                       marginTop: '4px',
@@ -2497,7 +2638,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   <div style={{ fontSize: '12px', color: '#94a3b8' }}>Trạm trả lời đúng</div>
                   <div
                     style={{
-                      fontSize: '26px',
+                      fontSize: '25px',
                       fontWeight: 700,
                       color: '#f8fafc',
                       marginTop: '4px',
@@ -2511,10 +2652,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 </div>
 
                 <div style={{ padding: '14px 16px' }}>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>{gameplayProfile.clearedMetricLabel}</div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>
+                    {sceneDescriptor.clearedMetricLabel}
+                  </div>
                   <div
                     style={{
-                      fontSize: '26px',
+                      fontSize: '25px',
                       fontWeight: 700,
                       color: '#3fc07a',
                       marginTop: '4px',
