@@ -259,7 +259,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   const [nearCheckpointIndex, setNearCheckpointIndex] = useState<number | null>(null);
   const [reachedFinishGate, setReachedFinishGate] = useState<boolean>(false);
   const [playerProgressPercent, setPlayerProgressPercent] = useState<number>(0);
-  const [showHowToPlay, setShowHowToPlay] = useState<boolean>(true);
+  const [showHowToPlay, setShowHowToPlay] = useState<boolean>(false);
   const [isNativeFullscreen, setIsNativeFullscreen] = useState<boolean>(false);
   const [isPaused, setIsPaused] = useState<boolean>(false);
 
@@ -863,7 +863,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           }
           return;
         }
-        if (!stageInspected && (e.key === ' ' || e.key === 'Enter' || e.key === 'e' || e.key === 'E')) {
+        if (!stageInspected && e.key === 'Enter') {
           e.preventDefault();
           handleInspectCurrentStage();
           return;
@@ -1767,6 +1767,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
           <button
             type="button"
+            data-testid="hud-how-to-play-button"
             onClick={() => setShowHowToPlay(prev => !prev)}
             style={{
               height: '32px',
@@ -1930,48 +1931,167 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           }
         })()}
 
-        {/* Compact Scene-Specific How-To-Play Pill */}
+        {/* Scene-Specific Visual How-To-Play Modal Card (Opened via "Cách chơi" in Top Bar) */}
         {showHowToPlay && isJourneyStarted && !isJourneyFinished && !activeModalOpen && !stageInspected && (
           <div
             data-testid="scene-tutorial-banner"
             style={{
               position: 'absolute',
-              top: '10px',
+              top: '12px',
               left: '50%',
               transform: 'translateX(-50%)',
-              zIndex: 18,
-              backgroundColor: 'rgba(11, 15, 25, 0.94)',
-              border: `1px solid ${accentHex}`,
-              borderRadius: '8px',
-              padding: '7px 14px',
+              zIndex: 28,
+              backgroundColor: 'rgba(11, 15, 25, 0.96)',
+              border: `1.5px solid ${accentHex}`,
+              borderRadius: '12px',
+              padding: '14px 18px',
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '12px',
-              width: 'min(760px, calc(100vw - 28px))',
+              flexDirection: 'column',
+              gap: '10px',
+              width: 'min(640px, calc(100vw - 28px))',
+              boxShadow: '0 14px 32px rgba(0, 0, 0, 0.6)',
             }}
           >
-            <div style={{ fontSize: '12px', color: '#f8fafc', lineHeight: 1.35 }}>
-              <strong style={{ color: accentHex }}>[{sceneDescriptor.sceneBadge}]</strong>{' '}
-              {sceneDescriptor.step1PromptLabel}
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowHowToPlay(false)}
+            <div
               style={{
-                background: '#161f30',
-                border: '1px solid #26334d',
-                borderRadius: '5px',
-                color: '#cbd5e1',
-                fontSize: '11px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                padding: '3px 8px',
-                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '10px',
+                borderBottom: '1px solid #1e293b',
+                paddingBottom: '8px',
               }}
             >
-              Ẩn
-            </button>
+              <div style={{ fontSize: '13px', fontWeight: 800, color: accentHex }}>
+                CÁCH CHƠI · {sceneDescriptor.sceneBadge}
+              </div>
+              <button
+                type="button"
+                data-testid="close-how-to-play-btn"
+                onClick={() => setShowHowToPlay(false)}
+                style={{
+                  background: '#161f30',
+                  border: '1px solid #26334d',
+                  borderRadius: '6px',
+                  color: '#f8fafc',
+                  fontSize: '11.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  padding: '4px 10px',
+                  flexShrink: 0,
+                }}
+              >
+                Đóng
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
+                gap: '8px',
+                fontSize: '12px',
+                color: '#e2e8f0',
+                lineHeight: 1.4,
+              }}
+            >
+              {sceneDescriptor.sceneId === 'TRAFFIC_ROAD_RUNNER_SCENE' && (
+                <>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>DI CHUYỂN &amp; TỐC ĐỘ</strong>
+                    Phím <code>A / D</code> hoặc <code>← / →</code> để giảm/tăng tốc trên làn đường.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>NHẢY NÉ VẬT CẢN</strong>
+                    Nhấn <code>Space</code> / <code>W</code> / <code>↑</code> hoặc chạm trực tiếp màn hình để nhảy.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>VƯỢT CHỐT</strong>
+                    Dừng tại cổng Chốt Sát Hạch và chọn đáp án đúng (phím <code>1-4</code>).
+                  </div>
+                </>
+              )}
+              {sceneDescriptor.sceneId === 'KITCHEN_FOOD_SAFETY_LAB_SCENE' && (
+                <>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>ĐỔI LÀN BẾP</strong>
+                    Phím <code>← / →</code> hoặc <code>A / D</code> (hoặc chạm vào làn) để di chuyển Đầu Bếp.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>SƠ CHẾ &amp; NẤU MÓN</strong>
+                    Nhấn <code>Space</code> hoặc chạm nguyên liệu sạch để chế biến; chạm vi khuẩn để hủy.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>HOÀN THÀNH MÓN</strong>
+                    Đủ 3 nguyên liệu trên khay phục vụ sẽ mở câu hỏi kiểm định VSATTP.
+                  </div>
+                </>
+              )}
+              {sceneDescriptor.sceneId === 'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE' && (
+                <>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>CHỌN DỤNG CỤ</strong>
+                    Chạm vào hình Máy quét, Đồng hồ đo hoặc Cờ-lê trên khay dụng cụ.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>SIẾT BU-LÔNG &amp; CÂN LỰC</strong>
+                    Chạm vào 2 ốc bu-lông lỏng để siết và nhấn <code>Space</code>/đồng hồ khi kim ở vùng xanh.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>AN TOÀN XƯỞNG</strong>
+                    Tránh chạm vào vùng ống xả đang bốc khói nóng đỏ.
+                  </div>
+                </>
+              )}
+              {sceneDescriptor.sceneId === 'CODING_IDE_DEBUGGER_SCENE' && (
+                <>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>CHẠY &amp; NHẢY BẬC</strong>
+                    Phím <code>A / D</code> để chạy, <code>W</code> / <code>↑</code> / <code>Space</code> (hoặc chạm bậc thềm) để nhảy.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>BẮN TIA DIỆT BUG</strong>
+                    Nhấn phím <code>F</code> / <code>E</code> hoặc chạm trực tiếp vào con bọ Bug đỏ để bắn hạ.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>CỔNG ĐÍCH</strong>
+                    Thu thập pha lê dữ liệu và nhảy tới Cổng Xoáy Năng Lượng ở tầng trên cùng.
+                  </div>
+                </>
+              )}
+              {sceneDescriptor.sceneId === 'CYBER_DEFENSE_SOC_RADAR_SCENE' && (
+                <>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>XOAY KHIÊN 360°</strong>
+                    Phím <code>A / D</code>, <code>← / →</code> hoặc chạm quanh Lõi để xoay khiên chắn tường lửa.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>BẮN CHẶN MÃ ĐỘC</strong>
+                    Nhấn <code>Space</code> hoặc chạm vào tên lửa/nhện mã độc đang bay vào để bắn hạ.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>KHÓA MỐI ĐE DỌA</strong>
+                    Chặn đủ 3 mục tiêu tấn công để mở bảng câu hỏi phòng thủ SOC.
+                  </div>
+                </>
+              )}
+              {sceneDescriptor.sceneId === 'CUSTOMER_CONSULTATION_SHOWROOM_SCENE' && (
+                <>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>QUAN SÁT YÊU CẦU</strong>
+                    Nhìn hình ảnh sản phẩm/món ăn trong bóng suy nghĩ của khách ở bàn bên phải.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>LẤY ĐÚNG SẢN PHẨM</strong>
+                    Chạm vào kệ trưng bày tương ứng bên trái (hoặc phím <code>1-3</code>) để lấy hàng.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>GIAO TỚI KHÁCH HÀNG</strong>
+                    Nhấn <code>Space</code> hoặc chạm vào bàn khách hàng để giao sản phẩm và tư vấn.
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         )}
 
@@ -2183,104 +2303,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           </div>
         )}
 
-        {/* ================= ONE-BUTTON JUMP CONTROL (BOTTOM RIGHT) ================= */}
-        {isRunnerArchetype && isJourneyStarted && !isJourneyFinished && !activeModalOpen && (
-          <div
-            style={{
-              position: 'absolute',
-              bottom: '20px',
-              right: '20px',
-              left: '20px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              pointerEvents: 'none',
-              zIndex: 20,
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => setAutoCruise(prev => !prev)}
-              style={{
-                pointerEvents: 'auto',
-                height: '38px',
-                padding: '0 14px',
-                borderRadius: '8px',
-                backgroundColor: '#0b0f19',
-                border: '1px solid #26334d',
-                color: autoCruise ? '#3fc07a' : '#94a3b8',
-                fontSize: '12px',
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              {autoCruise ? gameplayProfile.autoMoveOn : gameplayProfile.autoMoveOff}
-            </button>
-
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', pointerEvents: 'auto' }}>
-              {nearCheckpointIndex !== null && (
-                <button
-                  type="button"
-                  onClick={handleOpenCheckpointModal}
-                  style={{
-                    height: '52px',
-                    padding: '0 18px',
-                    borderRadius: '10px',
-                    backgroundColor: '#3fc07a',
-                    border: 'none',
-                    color: '#04250e',
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  {gameplayProfile.checkpointAction} #{nearCheckpointIndex + 1}
-                </button>
-              )}
-
-              <button
-                type="button"
-                onPointerDown={e => {
-                  e.preventDefault();
-                  triggerJump();
-                }}
-                aria-label="Nhảy qua chướng ngại vật (Phím Space)"
-                style={{
-                  minWidth: '150px',
-                  height: '52px',
-                  padding: '0 22px',
-                  borderRadius: '10px',
-                  backgroundColor: accentHex,
-                  border: 'none',
-                  color: '#090d16',
-                  fontSize: '15px',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  touchAction: 'none',
-                  userSelect: 'none',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '8px',
-                }}
-              >
-                <span>{gameplayProfile.actionVerb}</span>
-                <span
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    padding: '2px 6px',
-                    borderRadius: '4px',
-                    backgroundColor: 'rgba(9, 13, 22, 0.18)',
-                    color: '#090d16',
-                  }}
-                >
-                  Space
-                </span>
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Bottom control bar removed per visual polish spec; touch & keyboard controls remain active on the game canvas */}
 
         {/* ================= CHECKPOINT QUESTION MODAL (ROAD RUNNER) ================= */}
         {activeModalOpen && activeQuestion && !isJourneyFinished && (

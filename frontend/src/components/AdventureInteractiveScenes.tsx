@@ -383,8 +383,9 @@ const InGameChallengePopup: React.FC<{
 
 /* ============================================================================
  * SCENE 2: MECHANICAL DIAGNOSTIC GARAGE & FACTORY QA WORKBENCH
- * Unique Mechanic: Interactive Machine Disassembly, Loose Bolt Tightening &
- * Oscillating Torque Calibration Meter on a Cutaway Engine/Machine Block.
+ * Visuals: Industrial Workshop Background (Tool Pegboard, Rolling Cabinet,
+ * Overhead Lights, Safety Stripe Floor), Mechanic Avatar, Cutaway Engine with
+ * Moving Piston & Spinning Discs, Visual Tool Icons, 3D Hex Bolts & Radial Torque Gauge.
  * ============================================================================ */
 export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonProps> = props => {
   const {
@@ -404,8 +405,6 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
     onContinueStage,
     stageInspected,
     onInspectStage,
-    energyPercent,
-    skillBonusScore,
     isPaused,
     onCollectBonus,
     onHazardHit,
@@ -414,62 +413,62 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
   const [selectedToolId, setSelectedToolId] = useState<string>(
     sceneDescriptor.tools[0]?.id || 'tool_obd_compression'
   );
-  const accentHex = config.palette.accentColor || '#F97316';
+  const accentHex = config.palette.accentColor || '#d97706';
 
   const machineAssemblies = [
     {
-      x: 262,
+      x: 224,
       y: 138,
       code: 'ENG-01',
       short: 'Buồng Đốt Piston & Xi-lanh',
       readingFault: 'Áp suất nén: 6.1 kg/cm2 (Hở xupap) · Nhiệt: 114°C',
       bolts: [
-        { id: 'b0', dx: -24, dy: -16, label: 'Ốc Quy-lát #1' },
-        { id: 'b1', dx: 24, dy: -16, label: 'Ốc Quy-lát #2' },
+        { id: 'b0', label: 'Ốc Quy-lát #1' },
+        { id: 'b1', label: 'Ốc Quy-lát #2' },
       ],
     },
     {
-      x: 425,
-      y: 168,
+      x: 325,
+      y: 178,
       code: 'BRK-02',
       short: 'Cụm Phanh Đĩa Thủy Lực & Lốp',
       readingFault: 'Má phanh: 1.2mm (Mòn giới hạn) · Áp suất lốp: 1.6 bar',
       bolts: [
-        { id: 'b0', dx: -18, dy: -20, label: 'Chốt Heo Dầu' },
-        { id: 'b1', dx: 20, dy: 14, label: 'Van Xả E Dầu' },
+        { id: 'b0', label: 'Chốt Heo Dầu' },
+        { id: 'b1', label: 'Van Xả Dầu' },
       ],
     },
     {
-      x: 245,
-      y: 86,
+      x: 224,
+      y: 92,
       code: 'IGN-03',
       short: 'Đánh Lửa Bugi & Kim Phun FI',
       readingFault: 'Khe hở bugi: 1.3mm (Đánh lửa yếu) · Lỗi P0300',
       bolts: [
-        { id: 'b0', dx: -20, dy: -12, label: 'Chụp Bugi Cao Áp' },
-        { id: 'b1', dx: 22, dy: -10, label: 'Giắc Kim Phun FI' },
+        { id: 'b0', label: 'Chụp Bugi' },
+        { id: 'b1', label: 'Giắc Kim Phun' },
       ],
     },
     {
-      x: 172,
-      y: 116,
+      x: 152,
+      y: 122,
       code: 'BAT-04',
       short: 'Ắc Quy 12V & Cuộn Sạc Máy Phát',
       readingFault: 'Điện áp tĩnh: 11.1V (Sụt áp cực âm) · Dòng rò 0.4A',
       bolts: [
-        { id: 'b0', dx: -18, dy: -14, label: 'Cọc Dương (+) 12V' },
-        { id: 'b1', dx: 18, dy: -14, label: 'Cọc Âm (-) Mass' },
+        { id: 'b0', label: 'Cọc Dương (+)' },
+        { id: 'b1', label: 'Cọc Âm (-)' },
       ],
     },
     {
-      x: 120,
-      y: 168,
+      x: 95,
+      y: 178,
       code: 'DRV-05',
       short: 'Bộ Truyền Động Nhông Xích / CVT',
       readingFault: 'Độ chùng xích: 48mm (Quá chùng) · Lệch tâm trục sau',
       bolts: [
-        { id: 'b0', dx: -22, dy: 12, label: 'Ốc Tăng Xích Trái' },
-        { id: 'b1', dx: 22, dy: 12, label: 'Ốc Khoá Trục Sau' },
+        { id: 'b0', label: 'Ốc Tăng Xích' },
+        { id: 'b1', label: 'Ốc Trục Sau' },
       ],
     },
   ];
@@ -498,7 +497,6 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
     setPopups(prev => [...prev.slice(-4), { id: Date.now() + Math.random(), x, y, text, color }]);
   }, []);
 
-  // Mechanical engine crank & oscillating torque calibration meter loop
   useEffect(() => {
     if (isPaused || stageInspected) return;
     const timer = window.setInterval(() => {
@@ -518,45 +516,63 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
     return () => clearInterval(timer);
   }, [isPaused, stageInspected]);
 
+  const handleTightenBolt = useCallback(
+    (boltId: string, bx: number, by: number) => {
+      if (tightenedSetRef.current.has(boltId)) return;
+      tightenedSetRef.current.add(boltId);
+      setTightenedBolts(prev => ({ ...prev, [boltId]: true }));
+      onCollectBonus?.(10);
+      addPopup(bx, by - 16, '+10Đ', '#3fc07a');
+      if (tightenedSetRef.current.size >= 2 && calibratedRef.current) {
+        setTimeout(() => onInspectStage(selectedToolId), 80);
+      }
+    },
+    [onCollectBonus, addPopup, onInspectStage, selectedToolId]
+  );
+
+  const handleCalibrateTorque = useCallback(() => {
+    calibratedRef.current = true;
+    setCalibrated(true);
+    onCollectBonus?.(10);
+    addPopup(462, 172, '+10Đ N·m', '#38bdf8');
+    if (tightenedSetRef.current.size >= 1) {
+      setTimeout(() => onInspectStage(selectedToolId), 80);
+    }
+  }, [onCollectBonus, addPopup, onInspectStage, selectedToolId]);
+
+  const handleTriggerFullRepair = useCallback(() => {
+    calibratedRef.current = true;
+    setCalibrated(true);
+    addPopup(activePart.x, activePart.y - 22, '+15Đ', '#38bdf8');
+    onInspectStage(selectedToolId);
+  }, [activePart.x, activePart.y, addPopup, onInspectStage, selectedToolId]);
+
+  // Space key tightens remaining bolts and locks torque calibration
+  useEffect(() => {
+    if (isPaused || stageInspected) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (!tightenedSetRef.current.has('b0')) {
+          handleTightenBolt('b0', 422, 118);
+        } else if (!tightenedSetRef.current.has('b1')) {
+          handleTightenBolt('b1', 502, 118);
+        } else {
+          handleCalibrateTorque();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isPaused, stageInspected, handleTightenBolt, handleCalibrateTorque]);
+
   const tightenedCount = Object.values(tightenedBolts).filter(Boolean).length;
   const repairReadiness = Math.min(
     100,
     tightenedCount * 35 + (calibrated || stageInspected ? 40 : 0)
   );
-
-  const handleTightenBolt = (boltId: string, bx: number, by: number, label: string) => {
-    if (tightenedSetRef.current.has(boltId)) return;
-    tightenedSetRef.current.add(boltId);
-    setTightenedBolts(prev => ({ ...prev, [boltId]: true }));
-    onCollectBonus?.(10);
-    addPopup(bx, by - 14, `+10Đ SIẾT ${label.toUpperCase()}`, '#3fc07a');
-    if (tightenedSetRef.current.size >= 2 && calibratedRef.current) {
-      setTimeout(() => onInspectStage(selectedToolId), 80);
-    }
-  };
-
-  const handleCalibrateTorque = () => {
-    const inGreenZone = torqueNeedle >= 48 && torqueNeedle <= 88;
-    calibratedRef.current = true;
-    setCalibrated(true);
-    onCollectBonus?.(10);
-    addPopup(
-      430,
-      78,
-      inGreenZone ? '+10Đ CÂN LỰC CHUẨN (45 N·m)' : '+10Đ ĐÃ ĐO THÔNG SỐ MÁY',
-      '#38bdf8'
-    );
-    if (tightenedSetRef.current.size >= 1) {
-      setTimeout(() => onInspectStage(selectedToolId), 80);
-    }
-  };
-
-  const handleTriggerFullRepair = () => {
-    setCalibrated(true);
-    addPopup(activePart.x, activePart.y - 22, '+15Đ MỞ PHIẾU CHẨN ĐOÁN', '#38bdf8');
-    onInspectStage(selectedToolId);
-  };
-
   const pistonOffset = Math.sin(crankPhase) * 7;
 
   return (
@@ -566,346 +582,363 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
         position: 'relative',
         width: '100%',
         height: '100%',
-        backgroundColor: '#090d16',
-        padding: '12px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        gap: '10px',
+        backgroundColor: '#0e1420',
         overflow: 'hidden',
       }}
     >
-      {/* Interactive Cutaway Machine & Torque Workbench Canvas */}
-      <div
-        style={{
-          position: 'relative',
-          flex: 1,
-          minHeight: 0,
-          backgroundColor: '#0b0f19',
-          border: '1.5px solid #1e293b',
-          borderRadius: '12px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
-        }}
+      <svg
+        viewBox="0 0 560 280"
+        preserveAspectRatio="xMidYMid slice"
+        style={{ width: '100%', height: '100%', display: 'block' }}
       >
-        <svg
-          viewBox="0 0 560 280"
-          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block' }}
-        >
-          <defs>
-            <pattern id="garageBlueprintGrid" width="28" height="28" patternUnits="userSpaceOnUse">
-              <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#131c2e" strokeWidth="1" />
-            </pattern>
-          </defs>
-          <rect width="560" height="280" fill="url(#garageBlueprintGrid)" />
+        <defs>
+          <linearGradient id="garageWallGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#121a2a" />
+            <stop offset="100%" stopColor="#1b263b" />
+          </linearGradient>
+          <linearGradient id="lightBeam" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="rgba(253, 224, 71, 0.16)" />
+            <stop offset="100%" stopColor="rgba(253, 224, 71, 0)" />
+          </linearGradient>
+          <pattern id="safetyStripe" width="16" height="8" patternTransform="rotate(45 0 0)" patternUnits="userSpaceOnUse">
+            <rect width="8" height="8" fill="#d97706" />
+            <rect x="8" width="8" height="8" fill="#0f172a" />
+          </pattern>
+        </defs>
 
-          {/* Top Workshop Header Strip */}
-          <rect x="0" y="0" width="560" height="24" fill="#111726" />
-          <line x1="0" y1="24" x2="560" y2="24" stroke="#26334d" strokeWidth="1.5" />
-          <text x="14" y="16" fill={accentHex} fontSize="9.5" fontWeight="800">
-            XƯỞNG CƠ KHÍ · (1) SIẾT 2 ỐC LỎNG TRÊN [{activePart.code}] · (2) BẤM CÂN LỰC CỜ-LÊ ĐỂ MỞ PHIẾU SỬA CHỮA
-          </text>
+        {/* Workshop Background Wall & Concrete Floor */}
+        <rect width="560" height="215" fill="url(#garageWallGrad)" />
+        <rect y="210" width="560" height="6" fill="url(#safetyStripe)" />
+        <rect y="216" width="560" height="64" fill="#151d2a" />
 
-          {/* Hydraulic Lift Platform & Pillars */}
-          <rect x="36" y="226" width="330" height="12" rx="4" fill="#334155" stroke="#475569" />
-          <rect x="105" y="238" width="24" height="38" fill="#1e293b" stroke="#475569" />
-          <rect x="275" y="238" width="24" height="38" fill="#1e293b" stroke="#475569" />
+        {/* Overhead Industrial Lamp Fixtures & Light Cones */}
+        <polygon points="110,14 230,14 275,216 65,216" fill="url(#lightBeam)" />
+        <rect x="135" y="6" width="70" height="8" rx="3" fill="#475569" stroke="#cbd5e1" strokeWidth="1" />
+        <rect x="142" y="13" width="56" height="3" fill="#fde047" />
 
-          {/* Rear & Front Wheels with Rotating Brake Discs */}
-          <g transform="translate(95, 178)">
-            <circle cx="0" cy="0" r="38" fill="#0f172a" stroke="#64748b" strokeWidth="7" />
-            <circle
-              cx="0"
-              cy="0"
-              r="18"
-              fill="none"
-              stroke="#94a3b8"
-              strokeWidth="2.5"
-              strokeDasharray="6 4"
-              transform={`rotate(${(crankPhase * 55) % 360})`}
-            />
+        {/* Background Wall Pegboard with Tool Silhouettes */}
+        <rect x="18" y="34" width="82" height="92" rx="6" fill="#0f172a" stroke="#334155" strokeWidth="1.5" />
+        {/* Hanging Wrench Silhouette */}
+        <path d="M 36 48 L 36 86 M 32 46 C 32 41, 40 41, 40 46" stroke="#64748b" strokeWidth="3.5" strokeLinecap="round" fill="none" />
+        {/* Hanging Screwdriver Silhouette */}
+        <rect x="54" y="45" width="8" height="16" rx="2" fill="#d97706" />
+        <line x1="58" y1="61" x2="58" y2="88" stroke="#94a3b8" strokeWidth="2.5" />
+        {/* Hanging Pliers Silhouette */}
+        <path d="M 76 48 L 82 64 L 74 86 M 84 48 L 78 64 L 86 86" stroke="#64748b" strokeWidth="2.5" fill="none" />
+
+        {/* Background Red Rolling Tool Cabinet */}
+        <rect x="295" y="132" width="58" height="78" rx="4" fill="#7f1d1d" stroke="#b91c1c" strokeWidth="1.5" />
+        {[144, 160, 176, 192].map(dy => (
+          <g key={dy}>
+            <rect x="301" y={dy} width="46" height="11" rx="2" fill="#991b1b" stroke="#f87171" strokeWidth="0.8" />
+            <line x1="316" y1={dy + 5} x2="332" y2={dy + 5} stroke="#cbd5e1" strokeWidth="1.5" />
           </g>
-          <g transform="translate(325, 178)">
-            <circle cx="0" cy="0" r="38" fill="#0f172a" stroke="#64748b" strokeWidth="7" />
-            <circle
-              cx="0"
-              cy="0"
-              r="20"
-              fill="none"
-              stroke="#f59e0b"
-              strokeWidth="2.5"
-              strokeDasharray="8 4"
-              transform={`rotate(${(crankPhase * 55) % 360})`}
-            />
-          </g>
+        ))}
 
-          {/* Cutaway Chassis & Animated Piston Cylinder Block */}
-          <path
-            d="M 110 122 L 185 114 L 245 84 L 305 80 L 285 162 L 180 168 Z"
-            fill="#1e293b"
-            stroke={accentHex}
+        {/* Mechanic Technician Character Avatar standing on Left */}
+        <g transform="translate(48, 178)">
+          {/* Legs & Boots */}
+          <rect x="-10" y="16" width="8" height="22" rx="3" fill="#1e3a8a" />
+          <rect x="2" y="16" width="8" height="22" rx="3" fill="#1e3a8a" />
+          {/* Blue Coverall Torso */}
+          <rect x="-13" y="-12" width="26" height="30" rx="6" fill="#2563eb" stroke="#60a5fa" strokeWidth="1.2" />
+          {/* Mechanic Head & Yellow Hard Hat */}
+          <circle cx="0" cy="-22" r="10" fill="#fde68a" />
+          <path d="M -12 -24 C -12 -34, 12 -34, 12 -24 Z" fill="#eab308" stroke="#ca8a04" strokeWidth="1" />
+          {/* Arm Holding Steel Wrench */}
+          <path d="M 11 -4 L 24 -10" stroke="#2563eb" strokeWidth="6" strokeLinecap="round" />
+          <path d="M 24 -10 L 34 -22" stroke="#cbd5e1" strokeWidth="3.5" strokeLinecap="round" />
+          <circle cx="35" cy="-24" r="4" fill="none" stroke="#cbd5e1" strokeWidth="2" />
+        </g>
+
+        {/* Hydraulic Lift Platform & Pillars */}
+        <rect x="64" y="220" width="296" height="10" rx="4" fill="#334155" stroke="#64748b" />
+        <rect x="122" y="230" width="22" height="46" fill="#1e293b" stroke="#475569" />
+        <rect x="278" y="230" width="22" height="46" fill="#1e293b" stroke="#475569" />
+
+        {/* Rear & Front Wheels with Rotating Perforated Brake Discs */}
+        <g transform="translate(95, 178)">
+          <circle cx="0" cy="0" r="36" fill="#0f172a" stroke="#475569" strokeWidth="7" />
+          <circle
+            cx="0"
+            cy="0"
+            r="17"
+            fill="none"
+            stroke="#94a3b8"
             strokeWidth="2.5"
+            strokeDasharray="6 4"
+            transform={`rotate(${(crankPhase * 55) % 360})`}
           />
-          <rect x="190" y="114" width="68" height="54" rx="7" fill="#090d16" stroke="#94a3b8" strokeWidth="2" />
-          {/* Moving Piston inside Cylinder */}
-          <rect
-            x="204"
-            y={128 + pistonOffset}
-            width="40"
-            height="22"
-            rx="4"
-            fill={isStageRepaired ? '#3fc07a' : '#f97316'}
-            stroke="#f8fafc"
-            strokeWidth="1.5"
+          <circle cx="0" cy="0" r="6" fill="#64748b" />
+        </g>
+        <g transform="translate(325, 178)">
+          <circle cx="0" cy="0" r="36" fill="#0f172a" stroke="#475569" strokeWidth="7" />
+          <circle
+            cx="0"
+            cy="0"
+            r="19"
+            fill="none"
+            stroke="#eab308"
+            strokeWidth="2.5"
+            strokeDasharray="8 4"
+            transform={`rotate(${(crankPhase * 55) % 360})`}
           />
-          <line
-            x1="224"
-            y1={150 + pistonOffset}
-            x2="224"
-            y2="166"
-            stroke="#cbd5e1"
-            strokeWidth="4"
+          {/* Brake Caliper Silhouette */}
+          <rect x="-22" y="-10" width="9" height="16" rx="2" fill="#dc2626" />
+          <circle cx="0" cy="0" r="6" fill="#64748b" />
+        </g>
+
+        {/* Cutaway Motorcycle Chassis & Animated Piston Cylinder Block */}
+        <path
+          d="M 110 122 L 185 114 L 245 84 L 305 80 L 285 162 L 180 168 Z"
+          fill="#1e293b"
+          stroke={accentHex}
+          strokeWidth="2.5"
+        />
+        {/* Fuel Tank Silhouette */}
+        <path d="M 192 98 C 205 76, 255 76, 268 96 L 220 106 Z" fill={accentHex} opacity="0.88" />
+        {/* Cutaway Cylinder Block */}
+        <rect x="190" y="114" width="68" height="54" rx="7" fill="#090d16" stroke="#94a3b8" strokeWidth="2" />
+        {/* Reciprocating Piston & Connecting Rod */}
+        <rect
+          x="204"
+          y={128 + pistonOffset}
+          width="40"
+          height="20"
+          rx="3"
+          fill={isStageRepaired ? '#3fc07a' : '#d97706'}
+          stroke="#f8fafc"
+          strokeWidth="1.5"
+        />
+        <line
+          x1="224"
+          y1={148 + pistonOffset}
+          x2="224"
+          y2="165"
+          stroke="#cbd5e1"
+          strokeWidth="4"
+          strokeLinecap="round"
+        />
+
+        {/* Visual Hot Exhaust Pipe & Rising Heat Waves Hazard (No Text Box!) */}
+        <g
+          style={{ cursor: 'pointer' }}
+          onClick={() => {
+            onHazardHit?.();
+            addPopup(155, 178, '-8%', '#e5566f');
+          }}
+        >
+          <path d="M 248 164 L 155 186 L 78 172" fill="none" stroke="#e5566f" strokeWidth="6" strokeLinecap="round" />
+          {/* Glowing Heat & Smoke Plumes */}
+          <path
+            d={`M 140 ${178 - (crankPhase % 6)} Q 145 166, 138 156`}
+            fill="none"
+            stroke="#fca5a5"
+            strokeWidth="2"
             strokeLinecap="round"
           />
-
-          {/* Overheat / High-Voltage Spark Hazard Zone on Machine */}
-          <g
-            style={{ cursor: 'pointer' }}
-            onClick={() => {
-              onHazardHit?.();
-              addPopup(155, 185, '-8% BỎNG NHIỆT PÔ XE!', '#e5566f');
-            }}
-          >
-            <path d="M 248 164 L 155 186 L 78 172" fill="none" stroke="#e5566f" strokeWidth="5" strokeLinecap="round" />
-            <rect x="128" y="176" width="58" height="15" rx="4" fill="rgba(229, 86, 111, 0.2)" stroke="#e5566f" />
-            <text x="157" y="186.5" textAnchor="middle" fill="#fca5a5" fontSize="7.5" fontWeight="800">
-              PÔ NÓNG 180°C
-            </text>
-          </g>
-
-          {/* Machine Component Nodes on Cutaway Vehicle */}
-          {machineAssemblies.map((part, idx) => {
-            const isTarget = idx === activeIdx;
-            const isFixed = idx < activeStageIndex || (isTarget && isStageRepaired);
-            const mapX = [224, 325, 224, 152, 95][idx];
-            const mapY = [138, 178, 92, 122, 178][idx];
-            const color = isFixed ? '#3fc07a' : isTarget ? '#ef4444' : '#64748b';
-
-            return (
-              <g
-                key={part.code}
-                style={{ cursor: 'pointer' }}
-                onClick={() => {
-                  if (isTarget) {
-                    handleTriggerFullRepair();
-                  }
-                }}
-              >
-                {isTarget && !isFixed && (
-                  <circle
-                    cx={mapX}
-                    cy={mapY}
-                    r="24"
-                    fill="rgba(239, 68, 68, 0.16)"
-                    stroke="#ef4444"
-                    strokeWidth="2"
-                    strokeDasharray="4 2"
-                  />
-                )}
-                <circle cx={mapX} cy={mapY} r={isTarget ? 13 : 9} fill="#090d16" stroke={color} strokeWidth="2.5" />
-                <text x={mapX} y={mapY + 3} textAnchor="middle" fill={color} fontSize="8" fontWeight="800">
-                  {isFixed ? 'OK' : part.code.split('-')[0]}
-                </text>
-              </g>
-            );
-          })}
-
-          {/* RIGHT WORKBENCH PANEL: Close-Up Fault Disassembly & Live Torque Calibration Gauge */}
-          <rect
-            x="376"
-            y="34"
-            width="172"
-            height="234"
-            rx="10"
-            fill="#111726"
-            stroke={accentHex}
-            strokeWidth="1.5"
+          <path
+            d={`M 162 ${180 - (crankPhase % 6)} Q 168 168, 160 158`}
+            fill="none"
+            stroke="#fca5a5"
+            strokeWidth="2"
+            strokeLinecap="round"
           />
-          <text x="462" y="52" textAnchor="middle" fill={accentHex} fontSize="9.5" fontWeight="800">
-            BÀN THÁO LẮP [{activePart.code}]
-          </text>
-          <text x="462" y="65" textAnchor="middle" fill="#f8fafc" fontSize="8.5" fontWeight="700">
-            {activePart.short.slice(0, 25)}
-          </text>
+        </g>
 
-          {/* Interactive Loose Bolts to Tighten with Wrench */}
-          {activePart.bolts.map((bolt, bIdx) => {
-            const isTight = Boolean(tightenedBolts[bolt.id]);
-            const bx = bIdx === 0 ? 422 : 502;
-            const by = 104;
-            return (
-              <g
-                key={bolt.id}
-                data-testid={`garage-bolt-${bIdx}`}
-                style={{ cursor: 'pointer' }}
-                onClick={() => handleTightenBolt(bolt.id, bx, by, bolt.label)}
-              >
+        {/* Visual Component Hotspots on Cutaway Machine */}
+        {machineAssemblies.map((part, idx) => {
+          const isTarget = idx === activeIdx;
+          const isFixed = idx < activeStageIndex || (isTarget && isStageRepaired);
+          const color = isFixed ? '#3fc07a' : isTarget ? '#e5566f' : '#64748b';
+
+          return (
+            <g
+              key={part.code}
+              data-testid={isTarget ? 'garage-engage-repair-btn' : undefined}
+              style={{ cursor: 'pointer' }}
+              onClick={() => {
+                if (isTarget) {
+                  handleTriggerFullRepair();
+                }
+              }}
+            >
+              {isTarget && !isFixed && (
                 <circle
-                  cx={bx}
-                  cy={by}
-                  r="19"
-                  fill={isTight ? '#172a1d' : '#2c1a20'}
-                  stroke={isTight ? '#3fc07a' : '#f59e0b'}
-                  strokeWidth="2.5"
-                  strokeDasharray={isTight ? undefined : '4 2'}
+                  cx={part.x}
+                  cy={part.y}
+                  r="22"
+                  fill="rgba(229, 86, 111, 0.2)"
+                  stroke="#e5566f"
+                  strokeWidth="2"
+                  strokeDasharray="4 2"
                 />
-                <polygon
-                  points={`${bx},${by - 10} ${bx + 9},${by - 5} ${bx + 9},${by + 5} ${bx},${by + 10} ${bx - 9},${by + 5} ${bx - 9},${by - 5}`}
-                  fill="#0b0f19"
-                  stroke={isTight ? '#3fc07a' : '#fbbf24'}
-                  strokeWidth="1.5"
-                />
-                <text x={bx} y={by + 3} textAnchor="middle" fill="#f8fafc" fontSize="7.5" fontWeight="800">
-                  {isTight ? 'ĐÃ SIẾT' : 'VẶN ỐC'}
-                </text>
-                <text x={bx} y={by + 31} textAnchor="middle" fill="#cbd5e1" fontSize="7.5" fontWeight="700">
-                  {bolt.label}
-                </text>
-              </g>
-            );
-          })}
+              )}
+              <circle cx={part.x} cy={part.y} r={isTarget ? 11 : 7} fill="#090d16" stroke={color} strokeWidth="2.5" />
+              {/* Gear Tooth Crosshair inside Node */}
+              <circle cx={part.x} cy={part.y} r="3.5" fill={color} />
+            </g>
+          );
+        })}
 
-          {/* Oscillating Torque Wrench Calibration Bar */}
-          <text x="462" y="156" textAnchor="middle" fill="#94a3b8" fontSize="8" fontWeight="700">
-            ĐỒNG HỒ CÂN LỰC SIẾT CỜ-LÊ (N·m)
+        {/* RIGHT WORKBENCH PANEL: Visual Tool Selector, 3D Hex Bolts & Radial Torque Gauge */}
+        <rect
+          x="374"
+          y="16"
+          width="174"
+          height="248"
+          rx="12"
+          fill="#111726"
+          stroke={accentHex}
+          strokeWidth="1.5"
+        />
+
+        {/* Visual 3-Tool Tray inside Workbench (OBD Scanner / Multimeter / Wrench) */}
+        {sceneDescriptor.tools.map((tool, tIdx) => {
+          const isSelected = tool.id === selectedToolId;
+          const tx = 398 + tIdx * 54;
+          const ty = 42;
+          return (
+            <g
+              key={tool.id}
+              style={{ cursor: 'pointer' }}
+              onClick={() => setSelectedToolId(tool.id)}
+            >
+              <rect
+                x={tx - 22}
+                y={ty - 18}
+                width="44"
+                height="36"
+                rx="7"
+                fill={isSelected ? '#162038' : '#0b0f19'}
+                stroke={isSelected ? accentHex : '#26334d'}
+                strokeWidth={isSelected ? 2 : 1.2}
+              />
+              {tIdx === 0 && (
+                /* OBD Waveform Scanner Icon */
+                <g>
+                  <rect x={tx - 12} y={ty - 11} width="24" height="16" rx="2" fill="#090d16" stroke="#38bdf8" strokeWidth="1.2" />
+                  <polyline points={`${tx - 9},${ty - 3} ${tx - 4},${ty - 8} ${tx + 1},${ty} ${tx + 8},${ty - 5}`} fill="none" stroke="#3fc07a" strokeWidth="1.5" />
+                </g>
+              )}
+              {tIdx === 1 && (
+                /* Voltage Multimeter Icon */
+                <g>
+                  <circle cx={tx} cy={ty - 3} r="9" fill="#090d16" stroke="#eab308" strokeWidth="1.3" />
+                  <line x1={tx} y1={ty - 3} x2={tx + 5} y2={ty - 8} stroke="#e5566f" strokeWidth="1.5" />
+                </g>
+              )}
+              {tIdx === 2 && (
+                /* Ratchet Torque Wrench Icon */
+                <g>
+                  <line x1={tx - 10} y1={ty + 4} x2={tx + 8} y2={ty - 8} stroke="#cbd5e1" strokeWidth="3.5" strokeLinecap="round" />
+                  <circle cx={tx + 9} cy={ty - 9} r="4.5" fill="#090d16" stroke={accentHex} strokeWidth="2" />
+                </g>
+              )}
+              <text x={tx} y={ty + 14} textAnchor="middle" fill={isSelected ? accentHex : '#94a3b8'} fontSize="6.5" fontWeight="800">
+                {tool.badgeCode}
+              </text>
+            </g>
+          );
+        })}
+
+        {/* 2 Visual 3D Hexagonal Bolts with Animated Wrench Jaws */}
+        {activePart.bolts.map((bolt, bIdx) => {
+          const isTight = Boolean(tightenedBolts[bolt.id]);
+          const bx = bIdx === 0 ? 422 : 500;
+          const by = 112;
+          return (
+            <g
+              key={bolt.id}
+              data-testid={`garage-bolt-${bIdx}`}
+              style={{ cursor: 'pointer' }}
+              onClick={() => handleTightenBolt(bolt.id, bx, by)}
+            >
+              <circle
+                cx={bx}
+                cy={by}
+                r="24"
+                fill={isTight ? '#172a1d' : '#2c1a20'}
+                stroke={isTight ? '#3fc07a' : '#d97706'}
+                strokeWidth="2"
+                strokeDasharray={isTight ? undefined : '4 2'}
+              />
+              {/* Metallic Hex Nut Shape */}
+              <polygon
+                points={`${bx},${by - 14} ${bx + 12},${by - 7} ${bx + 12},${by + 7} ${bx},${by + 14} ${bx - 12},${by + 7} ${bx - 12},${by - 7}`}
+                fill={isTight ? '#334155' : '#1e293b'}
+                stroke={isTight ? '#3fc07a' : '#fbbf24'}
+                strokeWidth="2"
+              />
+              {/* Inner Bolt Thread Ring */}
+              <circle
+                cx={bx}
+                cy={by}
+                r="6"
+                fill="#090d16"
+                stroke={isTight ? '#3fc07a' : '#94a3b8'}
+                strokeWidth="2"
+              />
+              {/* Animated Wrench Jaw Clamping if Loose */}
+              {!isTight && (
+                <path
+                  d={`M ${bx - 18} ${by + 14} L ${bx - 8} ${by + 6}`}
+                  stroke="#cbd5e1"
+                  strokeWidth="4"
+                  strokeLinecap="round"
+                />
+              )}
+            </g>
+          );
+        })}
+
+        {/* Visual Radial/Linear Torque Wrench Calibration Meter */}
+        <g
+          data-testid="garage-torque-calibrate-btn"
+          style={{ cursor: 'pointer' }}
+          onClick={handleCalibrateTorque}
+        >
+          <rect x="390" y="154" width="142" height="58" rx="9" fill="#0b0f19" stroke={calibrated ? '#3fc07a' : '#26334d'} strokeWidth="1.5" />
+          <text x="461" y="168" textAnchor="middle" fill="#94a3b8" fontSize="7.5" fontWeight="800">
+            TORQUE (N·m)
           </text>
-          <rect x="392" y="164" width="140" height="16" rx="5" fill="#090d16" stroke="#26334d" />
-          {/* Green Sweet Spot Zone */}
-          <rect x="460" y="166" width="44" height="12" rx="3" fill="rgba(63, 192, 122, 0.28)" stroke="#3fc07a" />
-          {/* Moving Torque Needle */}
+          {/* Calibration Track */}
+          <rect x="402" y="175" width="118" height="14" rx="5" fill="#111726" stroke="#334155" />
+          {/* Green Sweet-Spot Target Zone */}
+          <rect x="460" y="177" width="38" height="10" rx="3" fill="rgba(63, 192, 122, 0.35)" stroke="#3fc07a" />
+          {/* Sweeping Torque Needle */}
           <rect
-            x={392 + (torqueNeedle / 100) * 134}
-            y="161"
+            x={402 + (torqueNeedle / 100) * 112}
+            y="172"
             width="5"
-            height="22"
+            height="20"
             rx="2"
-            fill="#f8fafc"
+            fill={calibrated ? '#3fc07a' : '#f8fafc'}
           />
+          {/* Wrench Icon + Lock Indicator */}
+          <circle cx="461" cy="201" r="6" fill={calibrated ? '#3fc07a' : accentHex} />
+        </g>
 
-          {/* Calibrate Torque Button inside SVG Workbench */}
-          <g
-            data-testid="garage-torque-calibrate-btn"
-            style={{ cursor: 'pointer' }}
-            onClick={handleCalibrateTorque}
-          >
-            <rect
-              x="392"
-              y="190"
-              width="140"
-              height="28"
-              rx="6"
-              fill={calibrated ? '#172a1d' : '#1e293b'}
-              stroke={calibrated ? '#3fc07a' : '#38bdf8'}
-              strokeWidth="1.5"
-            />
-            <text x="462" y="207.5" textAnchor="middle" fill="#f8fafc" fontSize="8.5" fontWeight="800">
-              {calibrated ? 'ĐÃ CÂN LỰC CHUẨN (+10Đ)' : 'BẤM CHỐT LỰC SIẾT (+10Đ)'}
-            </text>
-          </g>
+        {/* Visual Repair Readiness Progress Bar */}
+        <rect x="390" y="226" width="142" height="10" rx="5" fill="#090d16" stroke="#26334d" />
+        <rect
+          x="392"
+          y="228"
+          width={Math.round((repairReadiness / 100) * 138)}
+          height="6"
+          rx="3"
+          fill="#3fc07a"
+        />
+        <text x="461" y="250" textAnchor="middle" fill="#cbd5e1" fontSize="8" fontWeight="800">
+          [{activePart.code}] {repairReadiness}%
+        </text>
 
-          {/* Repair Readiness Progress Bar */}
-          <text x="462" y="234" textAnchor="middle" fill="#cbd5e1" fontSize="8" fontWeight="700">
-            Tiến độ tháo lắp: {repairReadiness}%
+        {popups.map(p => (
+          <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+            {p.text}
           </text>
-          <rect x="392" y="240" width="140" height="8" rx="4" fill="#090d16" />
-          <rect
-            x="392"
-            y="240"
-            width={Math.round((repairReadiness / 100) * 140)}
-            height="8"
-            rx="4"
-            fill="#3fc07a"
-          />
-
-          {popups.map(p => (
-            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="9.5" fontWeight="800">
-              {p.text}
-            </text>
-          ))}
-        </svg>
-      </div>
-
-      {/* Garage Mechanic Tool Rack & Repair Trigger Bar */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '10px',
-          padding: '10px 14px',
-          backgroundColor: '#0b0f19',
-          border: '1px solid #1e293b',
-          borderRadius: '10px',
-          flexWrap: 'wrap',
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          {sceneDescriptor.tools.map(tool => {
-            const isSelected = tool.id === selectedToolId;
-            return (
-              <button
-                key={tool.id}
-                type="button"
-                onClick={() => setSelectedToolId(tool.id)}
-                style={{
-                  height: '36px',
-                  padding: '0 11px',
-                  borderRadius: '7px',
-                  backgroundColor: isSelected ? '#162038' : '#111726',
-                  border: `1.5px solid ${isSelected ? accentHex : '#26334d'}`,
-                  color: '#f8fafc',
-                  fontSize: '12px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                <span style={{ color: isSelected ? accentHex : '#94a3b8', fontWeight: 800 }}>
-                  [{tool.badgeCode}]
-                </span>{' '}
-                {tool.label.split('&')[0].trim()}
-              </button>
-            );
-          })}
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-          <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
-            Ốc đã siết: <strong style={{ color: '#3fc07a' }}>{tightenedCount}/2</strong> · Thưởng:{' '}
-            <strong style={{ color: accentHex }}>+{skillBonusScore}</strong>
-          </span>
-          <button
-            type="button"
-            data-testid="garage-engage-repair-btn"
-            onClick={handleTriggerFullRepair}
-            style={{
-              height: '40px',
-              padding: '0 16px',
-              borderRadius: '8px',
-              backgroundColor: accentHex,
-              border: 'none',
-              color: '#090d16',
-              fontSize: '13px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            CHẨN ĐOÁN &amp; SỬA [{activePart.code}] (Space)
-          </button>
-        </div>
-      </div>
+        ))}
+      </svg>
 
       <InGameChallengePopup
         sceneDescriptor={sceneDescriptor}
@@ -933,17 +966,15 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
 
 /* ============================================================================
  * SCENE 3: KITCHEN & FOOD SAFETY LAB SCENE (F&B CULINARY / HACCP)
- * Unique Mechanic: 3-Lane Commercial Kitchen Conveyor & Cooking Station Game!
- * Ingredients & Cross-Contamination Hazards move down 3 lanes (Red Raw Board,
- * >75°C Flame Stove, White Cooked & Sample Tray). Player moves the Chef across
- * lanes to catch/process safe ingredients and avoid bacteria to complete the dish.
+ * Visuals: Commercial Kitchen Background (Tiled Backsplash, Stainless Hood,
+ * Hanging Cookware, Red Raw Cutting Board, Flame Gas Stove, White Cold Station),
+ * Illustrated Chef with Toque Hat, Visual Fish/Steak/Soup/Salad Sprites & Spiky Bacteria!
  * ============================================================================ */
 interface KitchenConveyorItem {
   id: number;
   lane: 0 | 1 | 2;
   y: number;
-  label: string;
-  tempBadge: string;
+  spriteKind: 'SALMON' | 'DRUMSTICK' | 'SALAD' | 'BACTERIA';
   isHazard: boolean;
   processed: boolean;
 }
@@ -966,62 +997,44 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
     onContinueStage,
     stageInspected,
     onInspectStage,
-    skillBonusScore,
     isPaused,
     onCollectBonus,
     onHazardHit,
   } = props;
 
-  const [selectedToolId, setSelectedToolId] = useState<string>(
-    sceneDescriptor.tools[0]?.id || 'tool_temp_probe'
-  );
-  const accentHex = config.palette.accentColor || '#10B981';
+  const selectedToolId = sceneDescriptor.tools[0]?.id || 'tool_temp_probe';
+  const accentHex = config.palette.accentColor || '#0d9488';
 
   const stageRecipes = [
     {
-      code: 'MÓN-01',
+      code: 'HACCP-01',
       dishName: 'Phi-lê Cá Hồi Bảo Quản Lạnh Chuẩn FIFO',
       alertLine: 'Kiểm soát nguyên liệu nhập bếp (+2°C..+4°C) & loại bỏ thực phẩm rã đông sai cách',
-      safeItems: ['Cá Hồi +3°C', 'Thịt Tươi FIFO', 'Rau Hữu Cơ'],
-      hazardLabel: 'Thịt Ôi +16°C',
     },
     {
-      code: 'MÓN-02',
+      code: 'HACCP-02',
       dishName: 'Thịt Bò Cấp Đông Sâu (-18°C)',
       alertLine: 'Giám sát nhiệt độ tủ đông -18°C & bọc kín tránh nhiễm lạnh chéo',
-      safeItems: ['Thăn Bò -18°C', 'Tôm Cấp Đông', 'Tem Hạn Dùng'],
-      hazardLabel: 'Đá Tan Nhiễm Khuẩn',
     },
     {
-      code: 'MÓN-03',
+      code: 'HACCP-03',
       dishName: 'Gà Áp Chảo Phân Tách Dao Thớt Sống - Chín',
       alertLine: 'Dùng Thớt Đỏ cho đồ sống & Thớt Trắng cho đồ chín chống nhiễm chéo Salmonella',
-      safeItems: ['Thớt Đỏ (Sống)', 'Thớt Trắng (Chín)', 'Dao Khử Trùng'],
-      hazardLabel: 'Dao Sống Cắt Đồ Chín',
     },
     {
-      code: 'MÓN-04',
+      code: 'HACCP-04',
       dishName: 'Súp Bò Hầm Nấu Chín Tâm Thực Phẩm (>75°C)',
       alertLine: 'Đo nhiệt kế tâm thực phẩm đạt trên 75°C để tiêu diệt hoàn toàn vi sinh vật',
-      safeItems: ['Súp Sôi 79°C', 'Ức Gà Chín 78°C', 'Sốt Nóng 82°C'],
-      hazardLabel: 'Thịt Tái Sống 48°C',
     },
     {
-      code: 'MÓN-05',
+      code: 'HACCP-05',
       dishName: 'Khay Suất Ăn & Hộp Lưu Mẫu Niêm Phong 24h',
       alertLine: 'Niêm phong hộp lưu mẫu 150g bảo quản ở +2°C..+4°C trong suốt 24 giờ',
-      safeItems: ['Hộp Mẫu 24h', 'Tem Niêm Phong', 'Khay Khử Khuẩn'],
-      hazardLabel: 'Mẫu Không Nhãn',
     },
   ];
 
   const activeRecipe = stageRecipes[activeStageIndex % stageRecipes.length];
-  const laneXCoords: [number, number, number] = [125, 280, 435];
-  const laneTitles = [
-    { title: 'LÀN 1: THỚT ĐỎ (ĐỒ SỐNG)', color: '#f97316', badge: 'SƠ CHẾ SỐNG' },
-    { title: 'LÀN 2: BẾP LỬA (>75°C)', color: '#ef4444', badge: 'NẤU CHÍN' },
-    { title: 'LÀN 3: THỚT TRẮNG & LƯU MẪU', color: '#10b981', badge: 'RA MÓN SẠCH' },
-  ];
+  const laneXCoords: [number, number, number] = [120, 275, 430];
 
   const [chefLane, setChefLane] = useState<0 | 1 | 2>(1);
   const [dishProgress, setDishProgress] = useState<number>(0);
@@ -1039,51 +1052,37 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
     setPopups(prev => [...prev.slice(-4), { id: Date.now() + Math.random(), x, y, text, color }]);
   }, []);
 
-  // Reset kitchen conveyor items when stage changes
   useEffect(() => {
     setDishProgress(stageInspected ? 100 : 0);
     setItems([
-      {
-        id: 1,
-        lane: 0,
-        y: 62,
-        label: activeRecipe.safeItems[0],
-        tempBadge: '+3.5°C',
-        isHazard: false,
-        processed: false,
-      },
-      {
-        id: 2,
-        lane: 1,
-        y: 112,
-        label: activeRecipe.safeItems[1],
-        tempBadge: '>75°C',
-        isHazard: false,
-        processed: false,
-      },
-      {
-        id: 3,
-        lane: 2,
-        y: 82,
-        label: activeRecipe.hazardLabel,
-        tempBadge: 'NHIỄM CHÉO!',
-        isHazard: true,
-        processed: false,
-      },
-      {
-        id: 4,
-        lane: 2,
-        y: 36,
-        label: activeRecipe.safeItems[2],
-        tempBadge: 'HACCP OK',
-        isHazard: false,
-        processed: false,
-      },
+      { id: 1, lane: 0, y: 64, spriteKind: 'SALMON', isHazard: false, processed: false },
+      { id: 2, lane: 1, y: 118, spriteKind: 'DRUMSTICK', isHazard: false, processed: false },
+      { id: 3, lane: 2, y: 86, spriteKind: 'BACTERIA', isHazard: true, processed: false },
+      { id: 4, lane: 2, y: 38, spriteKind: 'SALAD', isHazard: false, processed: false },
     ]);
-  }, [activeStageIndex, activeRecipe.code, stageInspected]);
+  }, [activeStageIndex, stageInspected]);
 
-  // Keyboard A/D or Left/Right to move Chef between the 3 kitchen lanes
+  const handleChopOrCookInLane = useCallback(
+    (targetLane?: 0 | 1 | 2) => {
+      const laneToUse = targetLane !== undefined ? targetLane : chefLaneRef.current;
+      setChefLane(laneToUse);
+      onCollectBonus?.(10);
+      addPopup(laneXCoords[laneToUse], 182, '+10Đ', '#3fc07a');
+      setDishProgress(prev => {
+        const next = Math.min(100, prev + 40);
+        if (next >= 100 && lockedStageRef.current !== activeStageIndex) {
+          lockedStageRef.current = activeStageIndex;
+          setTimeout(() => onInspectStage(selectedToolId), 80);
+        }
+        return next;
+      });
+    },
+    [activeStageIndex, selectedToolId, onCollectBonus, onInspectStage, addPopup]
+  );
+
+  // Keyboard A/D or Left/Right to switch lanes; Space to chop/cook
   useEffect(() => {
+    if (isPaused || stageInspected) return;
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -1091,29 +1090,30 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
         setChefLane(prev => (prev > 0 ? ((prev - 1) as 0 | 1 | 2) : 0));
       } else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
         setChefLane(prev => (prev < 2 ? ((prev + 1) as 0 | 1 | 2) : 2));
+      } else if (e.key === ' ') {
+        e.preventDefault();
+        handleChopOrCookInLane();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [isPaused, stageInspected, handleChopOrCookInLane]);
 
   // Conveyor belt simulation tick
   useEffect(() => {
     if (isPaused || stageInspected) return;
-
     const timer = window.setInterval(() => {
       setItems(prevItems =>
         prevItems.map(item => {
-          let nextY = item.y + 1.85;
-          if (nextY >= 205) {
-            // Reached the Chef's Prep Counter at y = 205
+          const nextY = item.y + 1.85;
+          if (nextY >= 198) {
             if (item.lane === chefLaneRef.current && !item.processed) {
               if (item.isHazard) {
                 onHazardHit?.();
-                addPopup(laneXCoords[item.lane], 190, `-8% ${item.label}`, '#e5566f');
+                addPopup(laneXCoords[item.lane], 185, '-8%', '#e5566f');
               } else {
                 onCollectBonus?.(10);
-                addPopup(laneXCoords[item.lane], 190, `+10Đ ĐÃ CHẾ BIẾN ${item.label}`, '#3fc07a');
+                addPopup(laneXCoords[item.lane], 185, '+10Đ', '#3fc07a');
                 setDishProgress(prev => {
                   const next = Math.min(100, prev + 35);
                   if (next >= 100 && lockedStageRef.current !== activeStageIndex) {
@@ -1124,18 +1124,12 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
                 });
               }
             }
-            // Respawn at top of conveyor
-            return {
-              ...item,
-              y: 34,
-              processed: false,
-            };
+            return { ...item, y: 38, processed: false };
           }
           return { ...item, y: nextY };
         })
       );
     }, 45);
-
     return () => clearInterval(timer);
   }, [
     isPaused,
@@ -1148,26 +1142,6 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
     addPopup,
   ]);
 
-  const handleChopOrCookInLane = (targetLane?: 0 | 1 | 2) => {
-    const laneToUse = targetLane !== undefined ? targetLane : chefLane;
-    setChefLane(laneToUse);
-    onCollectBonus?.(10);
-    addPopup(
-      laneXCoords[laneToUse],
-      184,
-      `+10Đ SƠ CHẾ & NẤU TẠI LÀN ${laneToUse + 1}`,
-      '#3fc07a'
-    );
-    setDishProgress(prev => {
-      const next = Math.min(100, prev + 40);
-      if (next >= 100 && lockedStageRef.current !== activeStageIndex) {
-        lockedStageRef.current = activeStageIndex;
-        setTimeout(() => onInspectStage(selectedToolId), 90);
-      }
-      return next;
-    });
-  };
-
   return (
     <div
       data-testid="scene-kitchen-food-safety"
@@ -1175,309 +1149,258 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
         position: 'relative',
         width: '100%',
         height: '100%',
-        backgroundColor: '#090d16',
-        padding: '12px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        gap: '10px',
+        backgroundColor: '#0c1a20',
         overflow: 'hidden',
       }}
     >
-      {/* 3-Lane Commercial Kitchen Conveyor & Prep Station Canvas */}
-      <div
-        style={{
-          position: 'relative',
-          flex: 1,
-          minHeight: 0,
-          backgroundColor: '#0b0f19',
-          border: '1.5px solid #1e293b',
-          borderRadius: '12px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
-        }}
+      <svg
+        viewBox="0 0 560 280"
+        preserveAspectRatio="xMidYMid slice"
+        style={{ width: '100%', height: '100%', display: 'block' }}
       >
-        <svg
-          viewBox="0 0 560 280"
-          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block' }}
+        <defs>
+          <pattern id="kitchenCeramicTile" width="24" height="24" patternUnits="userSpaceOnUse">
+            <rect width="24" height="24" fill="#102229" />
+            <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#18323c" strokeWidth="1" />
+          </pattern>
+        </defs>
+
+        {/* Commercial Kitchen Tiled Wall & Stainless Steel Hood Background */}
+        <rect width="560" height="205" fill="url(#kitchenCeramicTile)" />
+        {/* Stainless Exhaust Hood at Top */}
+        <polygon points="40,0 520,0 545,28 15,28" fill="#1e293b" stroke="#475569" strokeWidth="1.5" />
+        {[90, 180, 270, 360, 450].map(hx => (
+          <rect key={hx} x={hx - 22} y="6" width="44" height="14" rx="2" fill="#0f172a" stroke="#334155" />
+        ))}
+
+        {/* Hanging Copper Pan & Ladle on Background Wall Rack */}
+        <line x1="16" y1="42" x2="62" y2="42" stroke="#94a3b8" strokeWidth="2" />
+        <line x1="28" y1="42" x2="28" y2="56" stroke="#cbd5e1" strokeWidth="2" />
+        <circle cx="28" cy="64" r="10" fill="#b45309" stroke="#f59e0b" strokeWidth="1.5" />
+        <line x1="48" y1="42" x2="48" y2="68" stroke="#cbd5e1" strokeWidth="2" />
+        <circle cx="48" cy="71" r="5" fill="#94a3b8" />
+
+        {/* Stainless Steel Kitchen Prep Counter at Bottom */}
+        <rect x="0" y="198" width="560" height="82" fill="#1e293b" stroke="#475569" strokeWidth="2" />
+
+        {/* Serving Dish Cloche & Progress Platter (Top Right) */}
+        <g
+          data-testid="kitchen-engage-haccp-btn"
+          style={{ cursor: 'pointer' }}
+          onClick={() => {
+            setDishProgress(100);
+            onInspectStage(selectedToolId);
+          }}
         >
-          <defs>
-            <pattern id="kitchenFloorTiles" width="28" height="28" patternUnits="userSpaceOnUse">
-              <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#112228" strokeWidth="1" />
-            </pattern>
-          </defs>
-          <rect width="560" height="280" fill="url(#kitchenFloorTiles)" />
-
-          {/* Top Order Ticket & Dish Progress Bar */}
-          <rect x="0" y="0" width="560" height="26" fill="#111726" />
-          <text x="14" y="17" fill={accentHex} fontSize="9.5" fontWeight="800">
-            BẾP CHẾ BIẾN [{activeRecipe.code}] {activeRecipe.dishName.toUpperCase()} · TIẾN ĐỘ MÓN: {dishProgress}%
+          <rect x="492" y="38" width="58" height="68" rx="8" fill="#111726" stroke="#3fc07a" strokeWidth="1.5" />
+          {/* Silver Cloche Platter */}
+          <ellipse cx="521" cy="76" rx="22" ry="7" fill="#94a3b8" />
+          <path d="M 503 74 C 503 54, 539 54, 539 74 Z" fill="#cbd5e1" opacity={dishProgress >= 100 ? 0.35 : 0.85} />
+          <circle cx="521" cy="54" r="3.5" fill="#cbd5e1" />
+          {/* Cooked Dish Portions Appearing on Platter */}
+          {dishProgress >= 30 && <circle cx="514" cy="73" r="5" fill="#fb7185" />}
+          {dishProgress >= 65 && <circle cx="523" cy="72" r="5" fill="#fbbf24" />}
+          {dishProgress >= 95 && <circle cx="528" cy="74" r="4.5" fill="#3fc07a" />}
+          <text x="521" y="96" textAnchor="middle" fill="#3fc07a" fontSize="8" fontWeight="800">
+            {dishProgress}%
           </text>
-          <rect x="440" y="7" width="106" height="12" rx="4" fill="#090d16" stroke="#26334d" />
-          <rect
-            x="442"
-            y="9"
-            width={Math.round((dishProgress / 100) * 102)}
-            height="8"
-            rx="3"
-            fill="#3fc07a"
-          />
+        </g>
 
-          {/* 3 Vertical Kitchen Conveyor Belts & Prep Stations */}
-          {([0, 1, 2] as const).map(laneIdx => {
-            const cx = laneXCoords[laneIdx];
-            const meta = laneTitles[laneIdx];
-            const isChefHere = chefLane === laneIdx;
+        {/* 3 Visual Conveyor Belts & Distinct Prep Stations */}
+        {([0, 1, 2] as const).map(laneIdx => {
+          const cx = laneXCoords[laneIdx];
+          const isChefHere = chefLane === laneIdx;
+          const stationAccent = laneIdx === 0 ? '#e5566f' : laneIdx === 1 ? '#d97706' : '#3fc07a';
 
-            return (
-              <g
-                key={laneIdx}
-                data-testid={`kitchen-lane-${laneIdx}`}
-                style={{ cursor: 'pointer' }}
-                onClick={() => handleChopOrCookInLane(laneIdx)}
-              >
-                {/* Conveyor Track */}
-                <rect
-                  x={cx - 62}
-                  y="32"
-                  width="124"
-                  height="168"
-                  rx="8"
-                  fill="#0e1624"
-                  stroke={isChefHere ? meta.color : '#1e293b'}
-                  strokeWidth={isChefHere ? 2 : 1.2}
+          return (
+            <g
+              key={laneIdx}
+              data-testid={`kitchen-lane-${laneIdx}`}
+              style={{ cursor: 'pointer' }}
+              onClick={() => handleChopOrCookInLane(laneIdx)}
+            >
+              {/* Conveyor Belt Rollers */}
+              <rect
+                x={cx - 52}
+                y="34"
+                width="104"
+                height="164"
+                rx="8"
+                fill="#0d1720"
+                stroke={isChefHere ? stationAccent : '#1e293b'}
+                strokeWidth={isChefHere ? 2.2 : 1.2}
+              />
+              {[56, 86, 116, 146, 176].map(ry => (
+                <line
+                  key={ry}
+                  x1={cx - 46}
+                  y1={ry}
+                  x2={cx + 46}
+                  y2={ry}
+                  stroke="#1c2d38"
+                  strokeWidth="2.5"
+                  strokeDasharray="8 5"
                 />
-                {[55, 85, 115, 145, 175].map(ry => (
-                  <line
-                    key={ry}
-                    x1={cx - 54}
-                    y1={ry}
-                    x2={cx + 54}
-                    y2={ry}
-                    stroke="#1e293b"
-                    strokeWidth="2"
-                    strokeDasharray="6 4"
-                  />
-                ))}
+              ))}
 
-                {/* Top Lane Header */}
-                <rect x={cx - 58} y="35" width="116" height="18" rx="4" fill="#111726" />
-                <text x={cx} y="47" textAnchor="middle" fill={meta.color} fontSize="8" fontWeight="800">
-                  {meta.title}
-                </text>
+              {/* Station 0: Red Raw Cutting Board & Chef Knife Illustration */}
+              {laneIdx === 0 && (
+                <g transform={`translate(${cx}, 218)`}>
+                  <rect x="-44" y="-12" width="88" height="26" rx="5" fill="#991b1b" stroke="#f87171" strokeWidth="1.5" />
+                  <circle cx="-34" cy="1" r="3" fill="#0d1720" />
+                  {/* Chef Knife Blade & Handle */}
+                  <path d="M -12 -4 L 22 -4 C 22 4, 8 6, -12 4 Z" fill="#e2e8f0" />
+                  <rect x="-24" y="-3" width="12" height="5" rx="2" fill="#0f172a" />
+                </g>
+              )}
 
-                {/* Bottom Stainless Steel Prep Station (Red Board / Flame Stove / White Tray) */}
-                <rect
-                  x={cx - 64}
-                  y="202"
-                  width="128"
-                  height="48"
-                  rx="8"
-                  fill={isChefHere ? '#152824' : '#111726'}
-                  stroke={meta.color}
-                  strokeWidth={isChefHere ? 2.5 : 1.5}
-                />
-                {laneIdx === 0 && (
-                  <rect x={cx - 36} y="209" width="72" height="16" rx="4" fill="#7f1d1d" stroke="#ef4444" />
-                )}
-                {laneIdx === 1 && (
-                  <g>
-                    <circle cx={cx - 18} cy="217" r="9" fill="#451a03" stroke="#f97316" strokeWidth="2" />
-                    <circle cx={cx + 18} cy="217" r="9" fill="#451a03" stroke="#f97316" strokeWidth="2" />
-                  </g>
-                )}
-                {laneIdx === 2 && (
-                  <rect x={cx - 36} y="209" width="72" height="16" rx="4" fill="#e2e8f0" stroke="#3fc07a" />
-                )}
-                <text x={cx} y="241" textAnchor="middle" fill="#f8fafc" fontSize="8.5" fontWeight="800">
-                  {meta.badge} {isChefHere ? '(ĐANG ĐỨNG)' : '(CHẠM CHỌN)'}
-                </text>
-              </g>
-            );
-          })}
+              {/* Station 1: Dual Gas Burner Stove with Blue/Orange Flames & Skillet */}
+              {laneIdx === 1 && (
+                <g
+                  data-testid="kitchen-prep-action-btn"
+                  transform={`translate(${cx}, 218)`}
+                >
+                  <rect x="-46" y="-14" width="92" height="28" rx="5" fill="#0f172a" stroke="#d97706" strokeWidth="1.5" />
+                  {/* Left & Right Burner Rings + Flames */}
+                  <circle cx="-20" cy="0" r="11" fill="#1e293b" stroke="#38bdf8" strokeWidth="2" strokeDasharray="3 2" />
+                  <circle cx="20" cy="0" r="11" fill="#1e293b" stroke="#38bdf8" strokeWidth="2" strokeDasharray="3 2" />
+                  <polygon points="-20,-9 -15,2 -25,2" fill="#f97316" />
+                  <polygon points="20,-9 25,2 15,2" fill="#f97316" />
+                </g>
+              )}
 
-          {/* Falling Ingredients & Cross-Contamination Hazards on the 3 Belts */}
-          {items.map(item => {
-            const ix = laneXCoords[item.lane];
-            const boxColor = item.isHazard ? '#e5566f' : '#3fc07a';
-            const fillBg = item.isHazard ? '#2c1a20' : '#132820';
+              {/* Station 2: White Sanitized Cutting Board & Cold Glass Container */}
+              {laneIdx === 2 && (
+                <g transform={`translate(${cx}, 218)`}>
+                  <rect x="-44" y="-12" width="88" height="26" rx="5" fill="#f1f5f9" stroke="#3fc07a" strokeWidth="2" />
+                  {/* Cold Sealed Glass Sample Box */}
+                  <rect x="-16" y="-8" width="32" height="18" rx="3" fill="#bae6fd" stroke="#0284c7" strokeWidth="1.5" />
+                  <line x1="-16" y1="-4" x2="16" y2="-4" stroke="#0284c7" strokeWidth="3" />
+                </g>
+              )}
+            </g>
+          );
+        })}
 
-            return (
-              <g
-                key={item.id}
-                style={{ cursor: 'pointer' }}
-                onClick={e => {
-                  e.stopPropagation();
-                  if (item.isHazard) {
-                    // Clicking a hazard discards it into the bio-trash bin!
-                    onCollectBonus?.(10);
-                    addPopup(ix, item.y, '+10Đ ĐÃ LOẠI BỎ MẦM KHUẨN!', '#38bdf8');
-                    setItems(prev => prev.map(it => (it.id === item.id ? { ...it, y: 34 } : it)));
-                  } else {
-                    handleChopOrCookInLane(item.lane);
-                  }
-                }}
-              >
-                <rect
-                  x={ix - 46}
-                  y={item.y - 16}
-                  width="92"
-                  height="32"
-                  rx="7"
-                  fill={fillBg}
-                  stroke={boxColor}
-                  strokeWidth="2"
-                />
-                <text x={ix} y={item.y - 2} textAnchor="middle" fill="#f8fafc" fontSize="8.5" fontWeight="800">
-                  {item.label}
-                </text>
-                <text x={ix} y={item.y + 10} textAnchor="middle" fill={boxColor} fontSize="7.5" fontWeight="800">
-                  {item.isHazard ? '[!] HỦY NGAY' : `${item.tempBadge} (+10Đ)`}
-                </text>
-              </g>
-            );
-          })}
+        {/* Visual Falling Ingredients & Spiky Bacteria Monsters on Conveyor Belts */}
+        {items.map(item => {
+          const ix = laneXCoords[item.lane];
+          return (
+            <g
+              key={item.id}
+              style={{ cursor: 'pointer' }}
+              onClick={e => {
+                e.stopPropagation();
+                if (item.isHazard) {
+                  onCollectBonus?.(10);
+                  addPopup(ix, item.y, '+10Đ', '#38bdf8');
+                  setItems(prev => prev.map(it => (it.id === item.id ? { ...it, y: 38 } : it)));
+                } else {
+                  handleChopOrCookInLane(item.lane);
+                }
+              }}
+              transform={`translate(${ix}, ${item.y})`}
+            >
+              {/* Tray Plate Backing */}
+              <ellipse
+                cx="0"
+                cy="2"
+                rx="32"
+                ry="16"
+                fill={item.isHazard ? '#2c1a20' : '#132820'}
+                stroke={item.isHazard ? '#e5566f' : '#3fc07a'}
+                strokeWidth="2"
+              />
 
-          {/* Player Chef Avatar at the Active Prep Station */}
-          <g transform={`translate(${laneXCoords[chefLane]}, 258)`}>
-            <circle cx="0" cy="0" r="16" fill="#0f172a" stroke="#3fc07a" strokeWidth="2.5" />
-            {/* Chef Toque Hat */}
-            <rect x="-10" y="-15" width="20" height="9" rx="4" fill="#f8fafc" />
-            <text x="0" y="5" textAnchor="middle" fill="#3fc07a" fontSize="8" fontWeight="800">
-              CHEF
-            </text>
-          </g>
+              {item.spriteKind === 'SALMON' && (
+                /* Visual Fresh Salmon Steak with White Marbling Stripes */
+                <g>
+                  <path d="M -20 -4 C -10 -12, 14 -12, 22 -2 C 14 8, -10 8, -20 -4 Z" fill="#fb7185" stroke="#fecdd3" strokeWidth="1.2" />
+                  <line x1="-10" y1="-7" x2="-4" y2="3" stroke="#fff1f2" strokeWidth="1.8" />
+                  <line x1="0" y1="-8" x2="6" y2="3" stroke="#fff1f2" strokeWidth="1.8" />
+                  <line x1="10" y1="-6" x2="14" y2="2" stroke="#fff1f2" strokeWidth="1.8" />
+                </g>
+              )}
 
-          {popups.map(p => (
-            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="9.5" fontWeight="800">
-              {p.text}
-            </text>
-          ))}
-        </svg>
-      </div>
+              {item.spriteKind === 'DRUMSTICK' && (
+                /* Visual Golden Roasted Chicken Leg & Steam */
+                <g>
+                  <ellipse cx="-5" cy="0" rx="14" ry="9" fill="#d97706" stroke="#fde68a" strokeWidth="1.2" />
+                  <rect x="7" y="-2.5" width="12" height="5" rx="2" fill="#f8fafc" />
+                  <circle cx="20" cy="-3" r="3.5" fill="#f8fafc" />
+                  <circle cx="20" cy="2" r="3.5" fill="#f8fafc" />
+                </g>
+              )}
 
-      {/* Kitchen Controls & Serving Inspection Bar */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '10px',
-          padding: '10px 14px',
-          backgroundColor: '#0b0f19',
-          border: '1px solid #1e293b',
-          borderRadius: '10px',
-          flexWrap: 'wrap',
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            onClick={() => setChefLane(prev => (prev > 0 ? ((prev - 1) as 0 | 1 | 2) : 0))}
-            style={{
-              height: '36px',
-              padding: '0 11px',
-              borderRadius: '7px',
-              backgroundColor: '#161f30',
-              border: '1px solid #2e3c56',
-              color: '#f8fafc',
-              fontSize: '12px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            ← Làn Trái (A)
-          </button>
-          <button
-            type="button"
-            data-testid="kitchen-prep-action-btn"
-            onClick={() => handleChopOrCookInLane()}
-            style={{
-              height: '36px',
-              padding: '0 13px',
-              borderRadius: '7px',
-              backgroundColor: '#172a1d',
-              border: '1.5px solid #3fc07a',
-              color: '#3fc07a',
-              fontSize: '12px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            Sơ Chế / Nấu Món (+10Đ)
-          </button>
-          <button
-            type="button"
-            onClick={() => setChefLane(prev => (prev < 2 ? ((prev + 1) as 0 | 1 | 2) : 2))}
-            style={{
-              height: '36px',
-              padding: '0 11px',
-              borderRadius: '7px',
-              backgroundColor: '#161f30',
-              border: '1px solid #2e3c56',
-              color: '#f8fafc',
-              fontSize: '12px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            Làn Phải (D) →
-          </button>
-        </div>
+              {item.spriteKind === 'SALAD' && (
+                /* Visual Fresh Green Salad Leaf & Cherry Tomatoes */
+                <g>
+                  <circle cx="-6" cy="0" r="9" fill="#22c55e" />
+                  <circle cx="5" cy="-2" r="8" fill="#16a34a" />
+                  <circle cx="-2" cy="-2" r="4" fill="#ef4444" />
+                  <circle cx="7" cy="3" r="3.5" fill="#ef4444" />
+                </g>
+              )}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          {sceneDescriptor.tools.map(tool => {
-            const isSelected = tool.id === selectedToolId;
-            return (
-              <button
-                key={tool.id}
-                type="button"
-                onClick={() => setSelectedToolId(tool.id)}
-                style={{
-                  height: '34px',
-                  padding: '0 10px',
-                  borderRadius: '6px',
-                  backgroundColor: isSelected ? '#162038' : '#111726',
-                  border: `1px solid ${isSelected ? accentHex : '#26334d'}`,
-                  color: '#f8fafc',
-                  fontSize: '11.5px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                [{tool.badgeCode}]
-              </button>
-            );
-          })}
-          <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
-            Thưởng bếp: <strong style={{ color: accentHex }}>+{skillBonusScore}</strong>
-          </span>
-          <button
-            type="button"
-            data-testid="kitchen-engage-haccp-btn"
-            onClick={() => {
-              setDishProgress(100);
-              onInspectStage(selectedToolId);
-            }}
-            style={{
-              height: '40px',
-              padding: '0 16px',
-              borderRadius: '8px',
-              backgroundColor: accentHex,
-              border: 'none',
-              color: '#090d16',
-              fontSize: '13px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            KIỂM ĐỊNH &amp; RA MÓN [{activeRecipe.code}] (Space)
-          </button>
-        </div>
-      </div>
+              {item.spriteKind === 'BACTERIA' && (
+                /* Visual Spiky Bio-Hazard Bacteria Germ with Angry Eyes */
+                <g>
+                  {[0, 45, 90, 135, 180, 225, 270, 315].map(deg => {
+                    const rad = (deg * Math.PI) / 180;
+                    return (
+                      <line
+                        key={deg}
+                        x1="0"
+                        y1="0"
+                        x2={Math.cos(rad) * 16}
+                        y2={Math.sin(rad) * 14}
+                        stroke="#84cc16"
+                        strokeWidth="2.5"
+                        strokeLinecap="round"
+                      />
+                    );
+                  })}
+                  <circle cx="0" cy="0" r="10" fill="#365314" stroke="#e5566f" strokeWidth="1.5" />
+                  <circle cx="-3.5" cy="-2" r="2" fill="#ef4444" />
+                  <circle cx="3.5" cy="-2" r="2" fill="#ef4444" />
+                  <path d="M -4 4 Q 0 1, 4 4" fill="none" stroke="#f8fafc" strokeWidth="1.5" />
+                </g>
+              )}
+            </g>
+          );
+        })}
+
+        {/* Illustrated Chef Character at the Active Prep Station (Toque Hat, Coat, Neckerchief) */}
+        <g
+          transform={`translate(${laneXCoords[chefLane]}, 254)`}
+          style={{ cursor: 'pointer' }}
+          onClick={() => handleChopOrCookInLane()}
+        >
+          {/* White Double-Breasted Chef Coat */}
+          <path d="M -18 24 L -15 2 C -15 -4, 15 -4, 15 2 L 18 24 Z" fill="#f8fafc" stroke="#cbd5e1" strokeWidth="1.5" />
+          {/* Red Chef Neckerchief */}
+          <polygon points="-7,2 7,2 0,11" fill="#e5566f" />
+          {/* Double Row Coat Buttons */}
+          <circle cx="-5" cy="13" r="1.5" fill="#334155" />
+          <circle cx="5" cy="13" r="1.5" fill="#334155" />
+          {/* Chef Head */}
+          <circle cx="0" cy="-8" r="10" fill="#fde68a" stroke="#d97706" strokeWidth="1" />
+          <circle cx="-3.5" cy="-9" r="1.3" fill="#0f172a" />
+          <circle cx="3.5" cy="-9" r="1.3" fill="#0f172a" />
+          <path d="M -3 -5 Q 0 -2, 3 -5" fill="none" stroke="#0f172a" strokeWidth="1.2" />
+          {/* Puffy White Chef Toque Blanche Hat */}
+          <rect x="-9" y="-19" width="18" height="5" rx="1.5" fill="#e2e8f0" />
+          <circle cx="-6" cy="-24" r="6" fill="#ffffff" />
+          <circle cx="0" cy="-26" r="7" fill="#ffffff" />
+          <circle cx="6" cy="-24" r="6" fill="#ffffff" />
+        </g>
+
+        {popups.map(p => (
+          <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+            {p.text}
+          </text>
+        ))}
+      </svg>
 
       <InGameChallengePopup
         sceneDescriptor={sceneDescriptor}
@@ -1505,10 +1428,10 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
 
 /* ============================================================================
  * SCENE 4: CUSTOMER CONSULTATION, SHOWROOM, RESTAURANT SERVICE & NEGOTIATION
- * Unique Mechanic: Fetch-Match-Deliver Showroom / Dining Hall Floor Game!
- * Player checks the Customer's Order Bubble on the right, picks up the matching
- * Product / Menu Dish / Proposal from the 3 Display Shelves on the left, carries
- * it across the hall (dodging a patrolling service cart), and delivers it!
+ * Visuals: Luxury Showroom / Dining Hall Background (Panoramic Windows, Pendant
+ * Chandeliers, Marble Floor, Central Runner Carpet), 3 Visual Product Pedestals,
+ * Advisor Character Carrying Visual Item, Wheeled Service Trolley, and Customer
+ * with Visual Item Thought Bubble!
  * ============================================================================ */
 export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonProps> = props => {
   const {
@@ -1528,36 +1451,20 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
     onContinueStage,
     stageInspected,
     onInspectStage,
-    skillBonusScore,
     isPaused,
     onCollectBonus,
     onHazardHit,
   } = props;
 
-  const [selectedToolId, setSelectedToolId] = useState<string>(
-    sceneDescriptor.tools[0]?.id || 'tool_needs_discovery'
-  );
+  const selectedToolId = sceneDescriptor.tools[0]?.id || 'tool_needs_discovery';
   const variant = sceneDescriptor.consultationVariant || 'BUSINESS_NEGOTIATION';
-  const accentHex = config.palette.accentColor || '#0EA5E9';
+  const accentHex = config.palette.accentColor || '#0284c7';
 
-  const shelfCatalog =
-    variant === 'SHOWROOM_MOTO'
-      ? [
-          { idx: 0, code: 'XE-GA', label: 'Xe Tay Ga Cốp 37L SmartKey', y: 74 },
-          { idx: 1, code: 'XE-ABS', label: 'Xe Thể Thao Phanh ABS 2 Kênh', y: 144 },
-          { idx: 2, code: 'GÓI-VIP', label: 'Hồ Sơ Trả Góp 0% & Sổ Bảo Hành', y: 214 },
-        ]
-      : variant === 'RESTAURANT_DINING'
-        ? [
-            { idx: 0, code: 'MENU-AN', label: 'Thực Đơn Không Đậu Phộng/Hải Sản', y: 74 },
-            { idx: 1, code: 'MÓN-VIP', label: 'Khay Bít-tết Nóng & Rượu Vang', y: 144 },
-            { idx: 2, code: 'VOUCHER', label: 'Tráng Miệng Miễn Phí & Hóa Đơn VAT', y: 214 },
-          ]
-        : [
-            { idx: 0, code: 'SLA-99', label: 'Hồ Sơ Kiến Trúc & Cam Kết SLA 99.9%', y: 74 },
-            { idx: 1, code: 'BẢNG-ROI', label: 'Báo Cáo Hoàn Vốn ROI & Tối Ưu Chi Phí', y: 144 },
-            { idx: 2, code: 'HỢP-ĐỒNG', label: 'Bản Thảo Hợp Đồng Thương Mại Win-Win', y: 214 },
-          ];
+  const shelfCatalog = [
+    { idx: 0, code: 'MẪU-01', y: 72 },
+    { idx: 1, code: 'MẪU-02', y: 146 },
+    { idx: 2, code: 'MẪU-03', y: 220 },
+  ];
 
   const customerQueue =
     variant === 'SHOWROOM_MOTO'
@@ -1579,18 +1486,23 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
           ];
 
   const activeCustomer = customerQueue[activeStageIndex % customerQueue.length];
-  const requiredShelf = shelfCatalog[activeCustomer.wantShelf];
 
-  const [advisorPos, setAdvisorPos] = useState<{ x: number; y: number }>({ x: 225, y: 144 });
+  const [advisorPos, setAdvisorPos] = useState<{ x: number; y: number }>({ x: 215, y: 146 });
   const [carryingIdx, setCarryingIdx] = useState<number | null>(null);
   const [cartY, setCartY] = useState<number>(65);
   const [patience, setPatience] = useState<number>(100);
   const [popups, setPopups] = useState<FloatingFeedbackText[]>([]);
   const cartDirRef = useRef<1 | -1>(1);
+  const carryingRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    carryingRef.current = carryingIdx;
+  }, [carryingIdx]);
 
   useEffect(() => {
     setCarryingIdx(null);
-    setAdvisorPos({ x: 220, y: 144 });
+    carryingRef.current = null;
+    setAdvisorPos({ x: 215, y: 146 });
     setPatience(100);
   }, [activeStageIndex]);
 
@@ -1598,12 +1510,11 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
     setPopups(prev => [...prev.slice(-4), { id: Date.now() + Math.random(), x, y, text, color }]);
   }, []);
 
-  // Patrolling service cart & customer patience tick
   useEffect(() => {
     if (isPaused || stageInspected) return;
     const timer = window.setInterval(() => {
       setCartY(prev => {
-        let next = prev + cartDirRef.current * 3.6;
+        let next = prev + cartDirRef.current * 3.4;
         if (next >= 225) {
           next = 225;
           cartDirRef.current = -1;
@@ -1618,29 +1529,83 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
     return () => clearInterval(timer);
   }, [isPaused, stageInspected]);
 
-  const handlePickShelfItem = (shelfIdx: number) => {
-    const shelf = shelfCatalog[shelfIdx];
-    setAdvisorPos({ x: 175, y: shelf.y });
-    setCarryingIdx(shelfIdx);
-    onCollectBonus?.(10);
-    const isMatched = shelfIdx === activeCustomer.wantShelf;
-    addPopup(
-      140,
-      shelf.y - 16,
-      isMatched ? `+10Đ ĐÃ LẤY ĐÚNG [${shelf.code}]` : `+10Đ ĐÃ CẦM [${shelf.code}]`,
-      isMatched ? '#3fc07a' : '#38bdf8'
-    );
-  };
+  const handlePickShelfItem = useCallback(
+    (shelfIdx: number) => {
+      const shelf = shelfCatalog[shelfIdx] || shelfCatalog[0];
+      setAdvisorPos({ x: 175, y: shelf.y });
+      setCarryingIdx(shelfIdx);
+      carryingRef.current = shelfIdx;
+      onCollectBonus?.(10);
+      addPopup(120, shelf.y - 18, '+10Đ', '#3fc07a');
+    },
+    [onCollectBonus, addPopup]
+  );
 
-  const handleDeliverToCustomer = () => {
-    if (carryingIdx === null) {
+  const handleDeliverToCustomer = useCallback(() => {
+    if (carryingRef.current === null) {
       setCarryingIdx(activeCustomer.wantShelf);
+      carryingRef.current = activeCustomer.wantShelf;
       onCollectBonus?.(10);
     }
-    setAdvisorPos({ x: 375, y: 144 });
-    addPopup(435, 92, `+15Đ GIAO [${requiredShelf.code}] & TƯ VẤN`, '#3fc07a');
+    setAdvisorPos({ x: 365, y: 146 });
+    addPopup(445, 92, '+15Đ', '#3fc07a');
     onInspectStage(selectedToolId);
-  };
+  }, [activeCustomer.wantShelf, onCollectBonus, addPopup, onInspectStage, selectedToolId]);
+
+  // Keyboard 1-3 picks shelf; Space picks required item or delivers to customer
+  useEffect(() => {
+    if (isPaused || stageInspected) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === '1') handlePickShelfItem(0);
+      else if (e.key === '2') handlePickShelfItem(1);
+      else if (e.key === '3') handlePickShelfItem(2);
+      else if (e.key === ' ') {
+        e.preventDefault();
+        if (carryingRef.current === null) {
+          handlePickShelfItem(activeCustomer.wantShelf);
+        } else {
+          handleDeliverToCustomer();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isPaused, stageInspected, activeCustomer.wantShelf, handlePickShelfItem, handleDeliverToCustomer]);
+
+  // Helper to draw visual product icon (0 = Scooter/Salad/Shield, 1 = SportMoto/Steak/Chart, 2 = GiftKey/Cake/Contract)
+  const renderProductVisual = (idx: number, scale = 1) => (
+    <g transform={`scale(${scale})`}>
+      {idx === 0 && (
+        /* Visual Scooter / Fresh Dish / Gold Shield */
+        <g>
+          <circle cx="-12" cy="8" r="6" fill="#0f172a" stroke="#cbd5e1" strokeWidth="2" />
+          <circle cx="12" cy="8" r="6" fill="#0f172a" stroke="#cbd5e1" strokeWidth="2" />
+          <path d="M -14 6 L -6 -6 L 4 -6 L 10 4 L 14 -10" fill="none" stroke="#38bdf8" strokeWidth="3.5" strokeLinecap="round" />
+          <ellipse cx="-2" cy="-6" rx="7" ry="3" fill="#f8fafc" />
+        </g>
+      )}
+      {idx === 1 && (
+        /* Visual Sport Performance Item / Sizzling Platter / Rising Chart */
+        <g>
+          <circle cx="-13" cy="8" r="6.5" fill="#0f172a" stroke="#eab308" strokeWidth="2" />
+          <circle cx="13" cy="8" r="6.5" fill="#0f172a" stroke="#eab308" strokeWidth="2" />
+          <polygon points="-12,6 -2,-9 14,-5 6,6" fill="#e5566f" />
+          <circle cx="0" cy="-12" r="4" fill="#fde047" />
+        </g>
+      )}
+      {idx === 2 && (
+        /* Visual VIP Package / Warranty Key & Contract Scroll */
+        <g>
+          <rect x="-14" y="-10" width="28" height="20" rx="4" fill="#1e293b" stroke="#eab308" strokeWidth="2" />
+          <line x1="-14" y1="0" x2="14" y2="0" stroke="#eab308" strokeWidth="2" />
+          <line x1="0" y1="-10" x2="0" y2="10" stroke="#eab308" strokeWidth="2" />
+          <circle cx="0" cy="0" r="4" fill="#3fc07a" />
+        </g>
+      )}
+    </g>
+  );
 
   return (
     <div
@@ -1649,285 +1614,181 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
         position: 'relative',
         width: '100%',
         height: '100%',
-        backgroundColor: '#090d16',
-        padding: '12px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        gap: '10px',
+        backgroundColor: '#0e1626',
         overflow: 'hidden',
       }}
     >
-      {/* Fetch-Match-Deliver Showroom / Dining Service Hall */}
-      <div
-        style={{
-          position: 'relative',
-          flex: 1,
-          minHeight: 0,
-          backgroundColor: '#0b0f19',
-          border: '1.5px solid #1e293b',
-          borderRadius: '12px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
-        }}
+      <svg
+        viewBox="0 0 560 280"
+        preserveAspectRatio="xMidYMid slice"
+        style={{ width: '100%', height: '100%', display: 'block' }}
       >
-        <svg
-          viewBox="0 0 560 280"
-          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block' }}
-        >
-          <defs>
-            <pattern id="hallCarpetGrid" width="32" height="32" patternUnits="userSpaceOnUse">
-              <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#141e30" strokeWidth="1" />
-            </pattern>
-          </defs>
-          <rect width="560" height="280" fill="url(#hallCarpetGrid)" />
+        <defs>
+          <pattern id="showroomMarble" width="40" height="40" patternUnits="userSpaceOnUse">
+            <rect width="40" height="40" fill="#121c2e" />
+            <path d="M 40 0 L 0 0 0 40" fill="none" stroke="#1b2840" strokeWidth="1" />
+          </pattern>
+        </defs>
 
-          {/* Top Service Header */}
-          <rect x="0" y="0" width="560" height="24" fill="#111726" />
-          <text x="14" y="16" fill={accentHex} fontSize="9.5" fontWeight="800">
-            SẢNH PHỤC VỤ · (1) LẤY [{requiredShelf.code}] TRÊN KỆ TRÁI · (2) MANG SANG BÀN [{activeCustomer.code}] BÊN PHẢI
-          </text>
+        {/* Showroom Marble Floor & Panoramic Skylight Windows */}
+        <rect width="560" height="280" fill="url(#showroomMarble)" />
+        {/* Top Panoramic Glass Windows */}
+        {[40, 160, 280, 400].map(wx => (
+          <rect
+            key={wx}
+            x={wx}
+            y="6"
+            width="105"
+            height="24"
+            rx="4"
+            fill="#16243b"
+            stroke="#263b5e"
+            strokeWidth="1.2"
+          />
+        ))}
+        {/* Central Royal Carpet Runner */}
+        <rect x="155" y="116" width="240" height="60" rx="8" fill="#172554" stroke="#1d4ed8" strokeWidth="1.5" opacity="0.7" />
 
-          {/* LEFT ZONE: 3 Product / Menu Display Shelves */}
-          <text x="88" y="40" textAnchor="middle" fill="#94a3b8" fontSize="8.5" fontWeight="800">
-            KỆ TRƯNG BÀY / QUẦY MÓN
-          </text>
-          {shelfCatalog.map(shelf => {
-            const isRequired = shelf.idx === activeCustomer.wantShelf;
-            const isPicked = carryingIdx === shelf.idx;
-            return (
-              <g
-                key={shelf.code}
-                data-testid={`consultation-shelf-${shelf.idx}`}
-                style={{ cursor: 'pointer' }}
-                onClick={() => handlePickShelfItem(shelf.idx)}
-              >
-                <rect
-                  x="16"
-                  y={shelf.y - 24}
-                  width="144"
-                  height="48"
-                  rx="8"
-                  fill={isPicked ? '#172a1d' : isRequired ? '#162038' : '#111726'}
-                  stroke={isPicked ? '#3fc07a' : isRequired ? accentHex : '#26334d'}
-                  strokeWidth={isRequired || isPicked ? 2.2 : 1.5}
-                />
-                <text
-                  x="26"
-                  y={shelf.y - 7}
-                  fill={isPicked ? '#3fc07a' : isRequired ? accentHex : '#cbd5e1'}
-                  fontSize="8.5"
-                  fontWeight="800"
-                >
-                  [{shelf.code}] {isRequired ? '· KHÁCH CẦN' : ''}
-                </text>
-                <text x="26" y={shelf.y + 8} fill="#f8fafc" fontSize="8" fontWeight="700">
-                  {shelf.label.slice(0, 24)}
-                </text>
-                <text x="26" y={shelf.y + 19} fill="#3fc07a" fontSize="7.5" fontWeight="800">
-                  {isPicked ? '[ĐANG CẦM TRÊN TAY]' : 'CHẠM ĐỂ LẤY (+10Đ)'}
-                </text>
-              </g>
-            );
-          })}
+        {/* Decorative Potted Plants in Showroom Corners */}
+        <g transform="translate(355, 42)">
+          <rect x="-8" y="4" width="16" height="12" rx="3" fill="#b45309" />
+          <circle cx="0" cy="-3" r="10" fill="#15803d" />
+          <circle cx="-6" cy="0" r="7" fill="#22c55e" />
+          <circle cx="6" cy="0" r="7" fill="#22c55e" />
+        </g>
 
-          {/* CENTER AISLE: Moving Service Cart Obstacle */}
-          <line x1="280" y1="36" x2="280" y2="255" stroke="#1e293b" strokeWidth="2" strokeDasharray="5 5" />
-          <g
-            style={{ cursor: 'pointer' }}
-            onClick={() => {
-              onHazardHit?.();
-              addPopup(280, cartY - 12, '-8% VA XE ĐẨY SẢNH!', '#e5566f');
-            }}
-          >
-            <rect
-              x="254"
-              y={cartY - 16}
-              width="52"
-              height="32"
-              rx="6"
-              fill="rgba(229, 86, 111, 0.2)"
-              stroke="#e5566f"
-              strokeWidth="2"
-            />
-            <text x="280" y={cartY + 3} textAnchor="middle" fill="#fca5a5" fontSize="7.5" fontWeight="800">
-              XE ĐẨY
-            </text>
-          </g>
-
-          {/* Player Advisor Avatar Carrying Item Across Hall */}
-          <g
-            transform={`translate(${advisorPos.x}, ${advisorPos.y})`}
-            style={{ cursor: 'pointer' }}
-            onClick={handleDeliverToCustomer}
-          >
-            <circle cx="0" cy="0" r="18" fill="#0f172a" stroke={accentHex} strokeWidth="2.5" />
-            <text x="0" y="3" textAnchor="middle" fill="#f8fafc" fontSize="8" fontWeight="800">
-              PRO
-            </text>
-            {carryingIdx !== null && (
-              <g transform="translate(0, -28)">
-                <rect x="-34" y="-10" width="68" height="16" rx="4" fill="#172a1d" stroke="#3fc07a" strokeWidth="1.5" />
-                <text x="0" y="1" textAnchor="middle" fill="#3fc07a" fontSize="7.5" fontWeight="800">
-                  {shelfCatalog[carryingIdx]?.code}
-                </text>
-              </g>
-            )}
-          </g>
-
-          {/* RIGHT ZONE: Active Customer Booth with Request Bubble & Patience Bar */}
-          <g
-            data-testid="consultation-customer-booth"
-            style={{ cursor: 'pointer' }}
-            onClick={handleDeliverToCustomer}
-          >
-            <rect
-              x="384"
-              y="46"
-              width="160"
-              height="198"
-              rx="12"
-              fill="#111726"
-              stroke={activeFeedback?.isCorrect ? '#3fc07a' : accentHex}
-              strokeWidth="2"
-            />
-            <text x="464" y="68" textAnchor="middle" fill={accentHex} fontSize="9.5" fontWeight="800">
-              {activeCustomer.code} · {activeCustomer.name}
-            </text>
-
-            {/* Customer Order Speech Bubble */}
-            <rect x="396" y="78" width="136" height="54" rx="8" fill="#090d16" stroke="#26334d" />
-            <text x="464" y="94" textAnchor="middle" fill="#fbbf24" fontSize="8.5" fontWeight="800">
-              YÊU CẦU: [{requiredShelf.code}]
-            </text>
-            <text x="464" y="109" textAnchor="middle" fill="#e2e8f0" fontSize="7.5" fontWeight="600">
-              {activeCustomer.need.slice(0, 28)}
-            </text>
-            <text x="464" y="121" textAnchor="middle" fill="#94a3b8" fontSize="7.5">
-              {activeCustomer.need.slice(28, 56)}
-            </text>
-
-            {/* Customer Avatar & Table */}
-            <circle cx="464" cy="160" r="18" fill="#1e293b" stroke="#f8fafc" strokeWidth="2" />
-            <text x="464" y="163" textAnchor="middle" fill="#f8fafc" fontSize="8" fontWeight="800">
-              VIP
-            </text>
-
-            {/* Patience Meter */}
-            <text x="464" y="196" textAnchor="middle" fill="#94a3b8" fontSize="8" fontWeight="700">
-              Độ kiên nhẫn chờ phục vụ: {Math.round(patience)}%
-            </text>
-            <rect x="404" y="202" width="120" height="8" rx="4" fill="#090d16" />
-            <rect
-              x="404"
-              y="202"
-              width={Math.round((patience / 100) * 120)}
-              height="8"
-              rx="4"
-              fill={patience > 50 ? '#3fc07a' : '#f59e0b'}
-            />
-
-            <rect x="404" y="216" width="120" height="20" rx="5" fill={accentHex} />
-            <text x="464" y="229" textAnchor="middle" fill="#090d16" fontSize="8.5" fontWeight="800">
-              GIAO [{requiredShelf.code}] &amp; TƯ VẤN
-            </text>
-          </g>
-
-          {popups.map(p => (
-            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="9.5" fontWeight="800">
-              {p.text}
-            </text>
-          ))}
-        </svg>
-      </div>
-
-      {/* Bottom Showroom Shelf Picker & Delivery Action Bar */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '10px',
-          padding: '10px 14px',
-          backgroundColor: '#0b0f19',
-          border: '1px solid #1e293b',
-          borderRadius: '10px',
-          flexWrap: 'wrap',
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-          {shelfCatalog.map(shelf => (
-            <button
+        {/* LEFT ZONE: 3 Illuminated Visual Display Pedestals */}
+        {shelfCatalog.map(shelf => {
+          const isRequired = shelf.idx === activeCustomer.wantShelf;
+          const isPicked = carryingIdx === shelf.idx;
+          return (
+            <g
               key={shelf.code}
-              type="button"
+              data-testid={`consultation-shelf-${shelf.idx}`}
+              style={{ cursor: 'pointer' }}
               onClick={() => handlePickShelfItem(shelf.idx)}
-              style={{
-                height: '36px',
-                padding: '0 11px',
-                borderRadius: '7px',
-                backgroundColor: carryingIdx === shelf.idx ? '#172a1d' : '#161f30',
-                border: `1.5px solid ${carryingIdx === shelf.idx ? '#3fc07a' : '#2e3c56'}`,
-                color: '#f8fafc',
-                fontSize: '12px',
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
+              transform={`translate(82, ${shelf.y})`}
             >
-              Lấy [{shelf.code}] (+10Đ)
-            </button>
-          ))}
-        </div>
+              {/* Glowing Display Pedestal Base */}
+              <ellipse
+                cx="0"
+                cy="14"
+                rx="54"
+                ry="16"
+                fill={isPicked ? '#172a1d' : isRequired ? '#162038' : '#0f172a'}
+                stroke={isPicked ? '#3fc07a' : isRequired ? accentHex : '#334155'}
+                strokeWidth={isRequired || isPicked ? 2.5 : 1.5}
+              />
+              {/* Visual Product Illustration on Pedestal */}
+              <g transform="translate(0, -4)">{renderProductVisual(shelf.idx, 1.15)}</g>
+            </g>
+          );
+        })}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          {sceneDescriptor.tools.map(tool => {
-            const isSelected = tool.id === selectedToolId;
-            return (
-              <button
-                key={tool.id}
-                type="button"
-                onClick={() => setSelectedToolId(tool.id)}
-                style={{
-                  height: '34px',
-                  padding: '0 9px',
-                  borderRadius: '6px',
-                  backgroundColor: isSelected ? '#162038' : '#111726',
-                  border: `1px solid ${isSelected ? accentHex : '#26334d'}`,
-                  color: '#f8fafc',
-                  fontSize: '11.5px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                [{tool.badgeCode}]
-              </button>
-            );
-          })}
-          <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
-            Thưởng: <strong style={{ color: accentHex }}>+{skillBonusScore}</strong>
-          </span>
-          <button
-            type="button"
+        {/* CENTER AISLE: Wheeled 2-Tier Service Trolley Obstacle (No Text Box!) */}
+        <g
+          style={{ cursor: 'pointer' }}
+          onClick={() => {
+            onHazardHit?.();
+            addPopup(278, cartY - 16, '-8%', '#e5566f');
+          }}
+          transform={`translate(278, ${cartY})`}
+        >
+          {/* Trolley Frame & 2 Trays */}
+          <rect x="-20" y="-14" width="40" height="6" rx="2" fill="#94a3b8" />
+          <rect x="-20" y="0" width="40" height="6" rx="2" fill="#94a3b8" />
+          <line x1="-16" y1="-18" x2="-16" y2="10" stroke="#cbd5e1" strokeWidth="2.5" />
+          <line x1="16" y1="-18" x2="16" y2="10" stroke="#cbd5e1" strokeWidth="2.5" />
+          {/* Warning Cone on Trolley */}
+          <polygon points="0,-26 -7,-14 7,-14" fill="#eab308" stroke="#ca8a04" strokeWidth="1" />
+          {/* 2 Wheels */}
+          <circle cx="-14" cy="13" r="4.5" fill="#0f172a" stroke="#e5566f" strokeWidth="2" />
+          <circle cx="14" cy="13" r="4.5" fill="#0f172a" stroke="#e5566f" strokeWidth="2" />
+        </g>
+
+        {/* Illustrated Advisor / Server Character Carrying Visual Item */}
+        <g
+          transform={`translate(${advisorPos.x}, ${advisorPos.y})`}
+          style={{ cursor: 'pointer' }}
+          onClick={handleDeliverToCustomer}
+        >
+          {/* Suit Torso & Tie */}
+          <path d="M -14 22 L -12 0 C -12 -5, 12 -5, 12 0 L 14 22 Z" fill="#1e293b" stroke={accentHex} strokeWidth="1.5" />
+          <polygon points="-3,0 3,0 0,14" fill={accentHex} />
+          {/* Advisor Head */}
+          <circle cx="0" cy="-11" r="9.5" fill="#fde68a" />
+          <path d="M -9 -14 C -8 -22, 8 -22, 9 -14 Z" fill="#0f172a" />
+          {/* Silver Tray & Visual Carried Product */}
+          {carryingIdx !== null && (
+            <g transform="translate(22, -4)">
+              <ellipse cx="0" cy="8" rx="18" ry="5" fill="#cbd5e1" stroke="#475569" strokeWidth="1" />
+              {renderProductVisual(carryingIdx, 0.78)}
+            </g>
+          )}
+        </g>
+
+        {/* RIGHT ZONE: Customer Table, Seated Customer & Visual Thought Bubble */}
+        <g
+          data-testid="consultation-customer-booth"
+          style={{ cursor: 'pointer' }}
+          onClick={handleDeliverToCustomer}
+          transform="translate(465, 155)"
+        >
+          {/* Circular Reception Rug & Table */}
+          <circle
+            cx="0"
+            cy="22"
+            r="56"
+            fill="#111726"
+            stroke={activeFeedback?.isCorrect ? '#3fc07a' : accentHex}
+            strokeWidth="2"
+          />
+          <ellipse cx="-18" cy="24" rx="22" ry="12" fill="#1e293b" stroke="#64748b" strokeWidth="1.5" />
+
+          {/* Customer Character Silhouette */}
+          <path d="M 4 36 L 6 12 C 6 6, 28 6, 28 12 L 30 36 Z" fill="#334155" stroke="#94a3b8" strokeWidth="1.5" />
+          <circle cx="17" cy="0" r="10.5" fill="#fde68a" />
+          <path d="M 7 -3 C 7 -12, 27 -12, 27 -3 Z" fill="#475569" />
+
+          {/* Visual Cloud Thought Bubble Showing Desired Product */}
+          <g
             data-testid="consultation-deliver-btn"
-            onClick={handleDeliverToCustomer}
-            style={{
-              height: '40px',
-              padding: '0 16px',
-              borderRadius: '8px',
-              backgroundColor: accentHex,
-              border: 'none',
-              color: '#090d16',
-              fontSize: '13px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
+            transform="translate(-4, -64)"
           >
-            GIAO HÀNG &amp; TƯ VẤN [{activeCustomer.code}] (Space)
-          </button>
-        </div>
-      </div>
+            <circle cx="14" cy="44" r="3.5" fill="#f8fafc" />
+            <circle cx="8" cy="34" r="5" fill="#f8fafc" />
+            <rect
+              x="-44"
+              y="-28"
+              width="88"
+              height="54"
+              rx="22"
+              fill="#0f172a"
+              stroke={patience > 50 ? '#3fc07a' : '#eab308'}
+              strokeWidth="2.5"
+            />
+            {/* Exact Visual Illustration of the Product Customer Wants */}
+            <g transform="translate(0, -2)">{renderProductVisual(activeCustomer.wantShelf, 1.1)}</g>
+
+            {/* Patience Bar inside Bubble Rim */}
+            <rect x="-26" y="16" width="52" height="5" rx="2.5" fill="#1e293b" />
+            <rect
+              x="-26"
+              y="16"
+              width={Math.round((patience / 100) * 52)}
+              height="5"
+              rx="2.5"
+              fill={patience > 50 ? '#3fc07a' : '#eab308'}
+            />
+          </g>
+        </g>
+
+        {popups.map(p => (
+          <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+            {p.text}
+          </text>
+        ))}
+      </svg>
 
       <InGameChallengePopup
         sceneDescriptor={sceneDescriptor}
@@ -1955,10 +1816,9 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
 
 /* ============================================================================
  * SCENE 5: CODING IDE & SOFTWARE DEBUGGER
- * Unique Mechanic: 2D Side-View Cyber Platformer Game!
- * Player controls CodeBot with real gravity, jumping across multi-tier logic
- * platforms (if/else, for-loop, async/await), shooting Compile Lasers at
- * crawling Red Bugs, collecting Binary Data Orbs, and reaching the Terminal Portal!
+ * Visuals: 2D Digital Circuit World Background (Motherboard Towers, Copper
+ * Data Traces, Gold-Pinned IC Chip Platforms), Jet-Boot Robot Sprite,
+ * 6-Legged Red Mechanical Bug Beetle, Emerald Data Crystals & Swirling Warp Portal!
  * ============================================================================ */
 export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = props => {
   const {
@@ -1978,16 +1838,13 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
     onContinueStage,
     stageInspected,
     onInspectStage,
-    skillBonusScore,
     isPaused,
     onCollectBonus,
     onHazardHit,
   } = props;
 
-  const [selectedToolId, setSelectedToolId] = useState<string>(
-    sceneDescriptor.tools[0]?.id || 'tool_step_debugger'
-  );
-  const accentHex = config.palette.accentColor || '#3B82F6';
+  const selectedToolId = sceneDescriptor.tools[0]?.id || 'tool_step_debugger';
+  const accentHex = config.palette.accentColor || '#38bdf8';
 
   const stageModules = [
     { code: 'MOD-01', name: 'types_guard.ts', bug: 'TypeError: Undefined payload input' },
@@ -1998,12 +1855,11 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
   ];
   const activeMod = stageModules[activeStageIndex % stageModules.length];
 
-  // Platforms in the 560x280 2D side-view world
   const platforms = [
-    { x1: 20, x2: 540, y: 246, label: 'MAIN_THREAD_GROUND()' },
-    { x1: 110, x2: 235, y: 192, label: 'if (payload !== null)' },
-    { x1: 255, x2: 385, y: 144, label: 'for (let i = 0; i < len; i++)' },
-    { x1: 395, x2: 530, y: 98, label: 'await runUnitSuite()' },
+    { x1: 20, x2: 540, y: 246 },
+    { x1: 110, x2: 235, y: 192 },
+    { x1: 255, x2: 385, y: 144 },
+    { x1: 395, x2: 530, y: 98 },
   ];
 
   const [botPos, setBotPos] = useState<{ x: number; y: number }>({ x: 58, y: 246 });
@@ -2011,6 +1867,7 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
   const [bugAlive, setBugAlive] = useState<boolean>(true);
   const [laserBeam, setLaserBeam] = useState<{ x1: number; y1: number; x2: number; y2: number } | null>(null);
   const [orbsCollected, setOrbsCollected] = useState<[boolean, boolean]>([false, false]);
+  const [portalSpin, setPortalSpin] = useState<number>(0);
   const [popups, setPopups] = useState<FloatingFeedbackText[]>([]);
 
   const physRef = useRef({
@@ -2050,16 +1907,35 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
     p.vx = 115;
   }, []);
 
-  // Keyboard listeners for 2D Platformer
+  const handleShootBugLaser = useCallback(() => {
+    setLaserBeam({ x1: physRef.current.x + 12, y1: physRef.current.y - 18, x2: bugX, y2: 132 });
+    setBugAlive(false);
+    onCollectBonus?.(10);
+    addPopup(bugX, 112, '+10Đ', '#3fc07a');
+    setTimeout(() => setLaserBeam(null), 280);
+  }, [bugX, onCollectBonus, addPopup]);
+
+  const handleReachPortalNow = useCallback(() => {
+    physRef.current.x = 475;
+    physRef.current.y = 98;
+    setBotPos({ x: 475, y: 98 });
+    addPopup(475, 58, '+15Đ', '#38bdf8');
+    onInspectStage(selectedToolId);
+  }, [addPopup, onInspectStage, selectedToolId]);
+
   useEffect(() => {
+    if (isPaused || stageInspected) return;
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
       if (e.key === 'a' || e.key === 'A' || e.key === 'ArrowLeft') physRef.current.keys.left = true;
       if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') physRef.current.keys.right = true;
-      if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp') {
+      if (e.key === 'w' || e.key === 'W' || e.key === 'ArrowUp' || e.key === ' ') {
         e.preventDefault();
         triggerBotJump();
+      } else if (e.key === 'f' || e.key === 'F' || e.key === 'e' || e.key === 'E') {
+        e.preventDefault();
+        handleShootBugLaser();
       }
     };
     const onKeyUp = (e: KeyboardEvent) => {
@@ -2072,14 +1948,15 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [triggerBotJump]);
+  }, [isPaused, stageInspected, triggerBotJump, handleShootBugLaser]);
 
-  // 30fps Platformer Physics & Bug Patrol Loop
   useEffect(() => {
     if (isPaused || stageInspected) return;
     const timer = window.setInterval(() => {
       const p = physRef.current;
       const dt = 0.035;
+
+      setPortalSpin(prev => (prev + 6) % 360);
 
       if (p.keys.left) p.vx = -150;
       else if (p.keys.right) p.vx = 150;
@@ -2091,7 +1968,6 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
       p.y += p.vy * dt;
       p.grounded = false;
 
-      // Platform landing check
       for (const plat of platforms) {
         if (p.x >= plat.x1 - 10 && p.x <= plat.x2 + 10) {
           if (prevY <= plat.y + 4 && p.y >= plat.y && p.vy >= 0) {
@@ -2111,7 +1987,6 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
 
       setBotPos({ x: Math.round(p.x), y: Math.round(p.y) });
 
-      // Patrol Bug on Platform 2 (x: 265..375, y: 144)
       setBugX(prevBx => {
         let nextBx = prevBx + p.bugDir * 2.8;
         if (nextBx > 372) {
@@ -2124,52 +1999,30 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
         return nextBx;
       });
 
-      // Check Binary Data Orb pickup
       setOrbsCollected(prev => {
         const next: [boolean, boolean] = [prev[0], prev[1]];
         if (!next[0] && Math.hypot(p.x - 172, p.y - 16 - 168) < 28) {
           next[0] = true;
           onCollectBonus?.(10);
-          addPopup(172, 152, '+10Đ DATA BIT [1]', '#3fc07a');
+          addPopup(172, 148, '+10Đ', '#3fc07a');
         }
         if (!next[1] && Math.hypot(p.x - 320, p.y - 16 - 118) < 28) {
           next[1] = true;
           onCollectBonus?.(10);
-          addPopup(320, 102, '+10Đ DATA BIT [0]', '#3fc07a');
+          addPopup(320, 98, '+10Đ', '#3fc07a');
         }
         return next;
       });
 
-      // Check reaching Terminal Portal on top-right platform (x=475, y=98)
       if (Math.hypot(p.x - 475, p.y - 98) < 34 && p.portalTriggeredStage !== activeStageIndex) {
         p.portalTriggeredStage = activeStageIndex;
-        addPopup(475, 62, '+15Đ MỞ TERMINAL PORTAL', '#38bdf8');
+        addPopup(475, 58, '+15Đ', '#38bdf8');
         setTimeout(() => onInspectStage(selectedToolId), 60);
       }
     }, 35);
 
     return () => clearInterval(timer);
   }, [isPaused, stageInspected, activeStageIndex, selectedToolId, onCollectBonus, onInspectStage, addPopup]);
-
-  const handleShootBugLaser = () => {
-    if (!bugAlive) {
-      triggerBotJump();
-      return;
-    }
-    setLaserBeam({ x1: botPos.x + 12, y1: botPos.y - 16, x2: bugX, y2: 132 });
-    setBugAlive(false);
-    onCollectBonus?.(10);
-    addPopup(bugX, 114, '+10Đ ĐÃ DIỆT BUG RUNTIME!', '#3fc07a');
-    setTimeout(() => setLaserBeam(null), 280);
-  };
-
-  const handleReachPortalNow = () => {
-    physRef.current.x = 475;
-    physRef.current.y = 98;
-    setBotPos({ x: 475, y: 98 });
-    addPopup(475, 62, '+15Đ MỞ BẢN VÁ CODE PATCH', '#38bdf8');
-    onInspectStage(selectedToolId);
-  };
 
   return (
     <div
@@ -2178,319 +2031,200 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
         position: 'relative',
         width: '100%',
         height: '100%',
-        backgroundColor: '#070a12',
-        padding: '12px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        gap: '10px',
+        backgroundColor: '#070b14',
         overflow: 'hidden',
       }}
     >
-      {/* 2D Side-Scrolling Cyber Code Platformer Canvas */}
-      <div
-        style={{
-          position: 'relative',
-          flex: 1,
-          minHeight: 0,
-          backgroundColor: '#090d16',
-          border: '1.5px solid #1e293b',
-          borderRadius: '12px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
-        }}
+      <svg
+        viewBox="0 0 560 280"
+        preserveAspectRatio="xMidYMid slice"
+        style={{ width: '100%', height: '100%', display: 'block' }}
       >
-        <svg
-          viewBox="0 0 560 280"
-          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block' }}
-        >
-          <defs>
-            <pattern id="cyberPlatformGrid" width="28" height="28" patternUnits="userSpaceOnUse">
-              <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#111a2e" strokeWidth="1" />
-            </pattern>
-          </defs>
-          <rect width="560" height="280" fill="url(#cyberPlatformGrid)" />
+        <defs>
+          <linearGradient id="cyberSkyGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#060913" />
+            <stop offset="100%" stopColor="#0d172a" />
+          </linearGradient>
+        </defs>
 
-          {/* Top Status Strip */}
-          <rect x="0" y="0" width="560" height="24" fill="#0d1322" />
-          <text x="14" y="16" fill={accentHex} fontSize="9.5" fontWeight="800">
-            CYBER PLATFORMER [{activeMod.code}] · NHẢY BẬC THỀM LOGIC, BẮN HẠ BUG &amp; TỚI CỔNG TERMINAL ({activeMod.name})
-          </text>
+        {/* Digital Circuit World Background (Motherboard Towers & Copper Traces) */}
+        <rect width="560" height="280" fill="url(#cyberSkyGrad)" />
+        {[45, 130, 220, 310, 410, 505].map((tx, i) => (
+          <g key={tx} opacity="0.38">
+            <rect x={tx - 18} y={60 + (i % 3) * 28} width="36" height="190" fill="#0f1d36" stroke="#1e3a5f" />
+            <line x1={tx} y1={70 + (i % 3) * 28} x2={tx} y2="246" stroke="#38bdf8" strokeWidth="1" strokeDasharray="4 8" />
+          </g>
+        ))}
 
-          {/* Elevated Code Logic Platforms */}
-          {platforms.map((plat, idx) => (
-            <g
-              key={plat.label}
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                physRef.current.x = (plat.x1 + plat.x2) / 2;
-                physRef.current.y = plat.y;
-                setBotPos({ x: Math.round(physRef.current.x), y: plat.y });
-              }}
-            >
-              <rect
-                x={plat.x1}
-                y={plat.y}
-                width={plat.x2 - plat.x1}
-                height={idx === 0 ? 22 : 12}
-                rx="4"
-                fill={idx === 0 ? '#111726' : '#162038'}
-                stroke={idx === 3 ? '#3fc07a' : accentHex}
-                strokeWidth="1.5"
-              />
-              <text
-                x={(plat.x1 + plat.x2) / 2}
-                y={plat.y + (idx === 0 ? 14 : 9)}
-                textAnchor="middle"
-                fill="#94a3b8"
-                fontSize="7.5"
-                fontWeight="700"
-              >
-                {plat.label}
-              </text>
-            </g>
-          ))}
-
-          {/* Syntax Spike Hazard on Ground Floor */}
+        {/* Elevated Gold-Pinned IC Hardware Platforms */}
+        {platforms.map((plat, idx) => (
           <g
+            key={plat.y}
+            data-testid={idx === 1 ? 'coding-jump-btn' : undefined}
             style={{ cursor: 'pointer' }}
             onClick={() => {
-              onHazardHit?.();
-              addPopup(235, 224, '-8% LỖI MEMORY LEAK!', '#e5566f');
+              triggerBotJump();
+              physRef.current.x = (plat.x1 + plat.x2) / 2;
+              physRef.current.y = plat.y;
+              setBotPos({ x: Math.round(physRef.current.x), y: plat.y });
             }}
           >
-            <polygon
-              points="210,246 220,228 230,246 240,228 250,246 260,228 270,246"
-              fill="#e5566f"
-            />
-            <text x="240" y="222" textAnchor="middle" fill="#fca5a5" fontSize="7.5" fontWeight="800">
-              MEMORY LEAK
-            </text>
-          </g>
-
-          {/* Collectible Binary Data Orbs (0/1) */}
-          {!orbsCollected[0] && (
-            <g
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                setOrbsCollected(prev => [true, prev[1]]);
-                onCollectBonus?.(10);
-                addPopup(172, 152, '+10Đ DATA BIT [1]', '#3fc07a');
-              }}
-            >
-              <circle cx="172" cy="168" r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
-              <text x="172" y="171.5" textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
-                +10
-              </text>
-            </g>
-          )}
-          {!orbsCollected[1] && (
-            <g
-              style={{ cursor: 'pointer' }}
-              onClick={() => {
-                setOrbsCollected(prev => [prev[0], true]);
-                onCollectBonus?.(10);
-                addPopup(320, 102, '+10Đ DATA BIT [0]', '#3fc07a');
-              }}
-            >
-              <circle cx="320" cy="118" r="12" fill="#172a1d" stroke="#3fc07a" strokeWidth="2" />
-              <text x="320" y="121.5" textAnchor="middle" fill="#3fc07a" fontSize="8.5" fontWeight="800">
-                +10
-              </text>
-            </g>
-          )}
-
-          {/* Crawling Red Bug Monster on Platform 2 */}
-          {bugAlive && (
-            <g
-              style={{ cursor: 'pointer' }}
-              onClick={handleShootBugLaser}
-            >
-              <rect x={bugX - 18} y="120" width="36" height="22" rx="6" fill="#2c1a20" stroke="#ef4444" strokeWidth="2" />
-              <text x={bugX} y="134" textAnchor="middle" fill="#ef4444" fontSize="8" fontWeight="800">
-                BUG!
-              </text>
-            </g>
-          )}
-
-          {/* Compile Laser Beam */}
-          {laserBeam && (
-            <line
-              x1={laserBeam.x1}
-              y1={laserBeam.y1}
-              x2={laserBeam.x2}
-              y2={laserBeam.y2}
-              stroke="#38bdf8"
-              strokeWidth="3.5"
-            />
-          )}
-
-          {/* Terminal Portal Gate on Top-Right Platform */}
-          <g
-            style={{ cursor: 'pointer' }}
-            onClick={handleReachPortalNow}
-          >
+            {/* Gold IC Pins under elevated platforms */}
+            {idx > 0 &&
+              Array.from({ length: 8 }, (_, k) => {
+                const px = plat.x1 + 12 + k * ((plat.x2 - plat.x1 - 24) / 7);
+                return <rect key={k} x={px} y={plat.y + 10} width="3" height="6" fill="#eab308" />;
+              })}
             <rect
-              x="435"
-              y="44"
-              width="82"
-              height="52"
-              rx="8"
-              fill="#111726"
-              stroke={activeFeedback?.isCorrect ? '#3fc07a' : '#38bdf8'}
-              strokeWidth="2.5"
+              x={plat.x1}
+              y={plat.y}
+              width={plat.x2 - plat.x1}
+              height={idx === 0 ? 28 : 11}
+              rx="4"
+              fill={idx === 0 ? '#0f172a' : '#152844'}
+              stroke={idx === 3 ? '#3fc07a' : accentHex}
+              strokeWidth="1.8"
             />
-            <text x="476" y="63" textAnchor="middle" fill="#38bdf8" fontSize="8.5" fontWeight="800">
-              PORTAL [{activeMod.code}]
-            </text>
-            <text x="476" y="76" textAnchor="middle" fill="#f8fafc" fontSize="8" fontWeight="700">
-              {activeMod.name}
-            </text>
-            <text x="476" y="88" textAnchor="middle" fill="#3fc07a" fontSize="7.5" fontWeight="800">
-              [CHẠM MỞ PATCH]
-            </text>
           </g>
+        ))}
 
-          {/* Player CodeBot Avatar */}
-          <g transform={`translate(${botPos.x}, ${botPos.y - 16})`}>
-            <rect x="-15" y="-16" width="30" height="32" rx="7" fill="#090d16" stroke="#38bdf8" strokeWidth="2.5" />
-            <rect x="-9" y="-10" width="18" height="8" rx="2" fill="#38bdf8" />
-            <text x="0" y="9" textAnchor="middle" fill="#f8fafc" fontSize="7.5" fontWeight="800">
-              BOT
-            </text>
-          </g>
+        {/* Red Laser Sawteeth Hazard Pit on Ground Floor (No Text!) */}
+        <g
+          style={{ cursor: 'pointer' }}
+          onClick={() => {
+            onHazardHit?.();
+            addPopup(240, 222, '-8%', '#e5566f');
+          }}
+        >
+          <polygon
+            points="205,246 213,225 221,246 229,225 237,246 245,225 253,246 261,225 269,246"
+            fill="#e5566f"
+            stroke="#fca5a5"
+            strokeWidth="1"
+          />
+        </g>
 
-          {popups.map(p => (
-            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="9.5" fontWeight="800">
-              {p.text}
-            </text>
-          ))}
-        </svg>
-      </div>
-
-      {/* Platformer Action Bar */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '10px',
-          padding: '10px 14px',
-          backgroundColor: '#0b0f19',
-          border: '1px solid #1e293b',
-          borderRadius: '10px',
-          flexWrap: 'wrap',
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-          <button
-            type="button"
+        {/* Visual Emerald Hexagonal Data Crystals (Collectibles) */}
+        {!orbsCollected[0] && (
+          <g
+            style={{ cursor: 'pointer' }}
             onClick={() => {
-              physRef.current.x = Math.max(36, physRef.current.x - 45);
-              setBotPos({ x: Math.round(physRef.current.x), y: Math.round(physRef.current.y) });
+              setOrbsCollected(prev => [true, prev[1]]);
+              onCollectBonus?.(10);
+              addPopup(172, 148, '+10Đ', '#3fc07a');
             }}
-            style={{
-              height: '36px',
-              padding: '0 11px',
-              borderRadius: '7px',
-              backgroundColor: '#161f30',
-              border: '1px solid #2e3c56',
-              color: '#f8fafc',
-              fontSize: '12px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
+            transform="translate(172, 166)"
           >
-            ← Chạy Trái (A)
-          </button>
-          <button
-            type="button"
-            data-testid="coding-jump-btn"
-            onClick={triggerBotJump}
-            style={{
-              height: '36px',
-              padding: '0 13px',
-              borderRadius: '7px',
-              backgroundColor: '#162038',
-              border: '1.5px solid #38bdf8',
-              color: '#38bdf8',
-              fontSize: '12px',
-              fontWeight: 800,
-              cursor: 'pointer',
+            <polygon points="0,-13 10,0 0,13 -10,0" fill="#10b981" stroke="#a7f3d0" strokeWidth="1.5" />
+            <polygon points="0,-7 5,0 0,7 -5,0" fill="#ecfdf5" />
+          </g>
+        )}
+        {!orbsCollected[1] && (
+          <g
+            style={{ cursor: 'pointer' }}
+            onClick={() => {
+              setOrbsCollected(prev => [prev[0], true]);
+              onCollectBonus?.(10);
+              addPopup(320, 98, '+10Đ', '#3fc07a');
             }}
+            transform="translate(320, 116)"
           >
-            Nhảy Bậc Thềm (W / ↑)
-          </button>
-          <button
-            type="button"
-            data-testid="coding-shoot-bug-btn"
-            onClick={handleShootBugLaser}
-            style={{
-              height: '36px',
-              padding: '0 13px',
-              borderRadius: '7px',
-              backgroundColor: '#172a1d',
-              border: '1.5px solid #3fc07a',
-              color: '#3fc07a',
-              fontSize: '12px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            Bắn Tia Diệt Bug (+10Đ)
-          </button>
-        </div>
+            <polygon points="0,-13 10,0 0,13 -10,0" fill="#10b981" stroke="#a7f3d0" strokeWidth="1.5" />
+            <polygon points="0,-7 5,0 0,7 -5,0" fill="#ecfdf5" />
+          </g>
+        )}
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          {sceneDescriptor.tools.map(tool => {
-            const isSelected = tool.id === selectedToolId;
-            return (
-              <button
-                key={tool.id}
-                type="button"
-                onClick={() => setSelectedToolId(tool.id)}
-                style={{
-                  height: '34px',
-                  padding: '0 9px',
-                  borderRadius: '6px',
-                  backgroundColor: isSelected ? '#162038' : '#111726',
-                  border: `1px solid ${isSelected ? accentHex : '#26334d'}`,
-                  color: '#f8fafc',
-                  fontSize: '11.5px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                [{tool.badgeCode}]
-              </button>
-            );
-          })}
-          <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
-            Thưởng code: <strong style={{ color: accentHex }}>+{skillBonusScore}</strong>
-          </span>
-          <button
-            type="button"
-            data-testid="coding-engage-portal-btn"
-            onClick={handleReachPortalNow}
-            style={{
-              height: '40px',
-              padding: '0 16px',
-              borderRadius: '8px',
-              backgroundColor: accentHex,
-              border: 'none',
-              color: '#090d16',
-              fontSize: '13px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
+        {/* Visual 6-Legged Red Mechanical Bug Beetle on Platform 2 */}
+        {bugAlive && (
+          <g
+            data-testid="coding-shoot-bug-btn"
+            style={{ cursor: 'pointer' }}
+            onClick={handleShootBugLaser}
+            transform={`translate(${bugX}, 132)`}
           >
-            NẠP PATCH [{activeMod.code}] (Space)
-          </button>
-        </div>
-      </div>
+            {/* 6 Mechanical Beetle Legs */}
+            <path d="M -12 2 L -20 10 M -4 4 L -10 11 M 4 4 L 10 11 M 12 2 L 20 10" stroke="#e5566f" strokeWidth="2" strokeLinecap="round" />
+            {/* Armored Red Beetle Shell */}
+            <ellipse cx="0" cy="0" rx="15" ry="9" fill="#7f1d1d" stroke="#e5566f" strokeWidth="2" />
+            <line x1="-15" y1="0" x2="15" y2="0" stroke="#fca5a5" strokeWidth="1" />
+            {/* Glowing Eyes & Pincers */}
+            <circle cx="-10" cy="-3" r="2.2" fill="#fde047" />
+            <circle cx="10" cy="-3" r="2.2" fill="#fde047" />
+          </g>
+        )}
+
+        {/* Cyan Compile Laser Beam */}
+        {laserBeam && (
+          <line
+            x1={laserBeam.x1}
+            y1={laserBeam.y1}
+            x2={laserBeam.x2}
+            y2={laserBeam.y2}
+            stroke="#38bdf8"
+            strokeWidth="4"
+          />
+        )}
+
+        {/* Swirling Multi-Ring Quantum Warp Portal on Top-Right Platform */}
+        <g
+          data-testid="coding-engage-portal-btn"
+          style={{ cursor: 'pointer' }}
+          onClick={handleReachPortalNow}
+          transform="translate(472, 62)"
+        >
+          <ellipse
+            cx="0"
+            cy="0"
+            rx="22"
+            ry="32"
+            fill="rgba(56, 189, 248, 0.16)"
+            stroke="#38bdf8"
+            strokeWidth="2.5"
+            strokeDasharray="8 4"
+            transform={`rotate(${portalSpin * 0.2})`}
+          />
+          <ellipse
+            cx="0"
+            cy="0"
+            rx="13"
+            ry="22"
+            fill="#0b1528"
+            stroke="#3fc07a"
+            strokeWidth="2"
+          />
+          <circle cx="0" cy="0" r="6" fill="#38bdf8" />
+        </g>
+
+        {/* Visual CodeBot 2D Robot Sprite (Antenna, Visor Eyes, Power Core, Jet Boots) */}
+        <g
+          transform={`translate(${botPos.x}, ${botPos.y - 18})`}
+          style={{ cursor: 'pointer' }}
+          onClick={triggerBotJump}
+        >
+          {/* Jet Thruster Flames when Jumping */}
+          {!physRef.current.grounded && (
+            <polygon points="-8,18 -4,28 0,18 4,28 8,18" fill="#38bdf8" />
+          )}
+          {/* Robot Legs */}
+          <rect x="-9" y="10" width="6" height="8" rx="2" fill="#64748b" />
+          <rect x="3" y="10" width="6" height="8" rx="2" fill="#64748b" />
+          {/* Robot Armored Body & Head */}
+          <rect x="-13" y="-12" width="26" height="23" rx="6" fill="#1e293b" stroke="#38bdf8" strokeWidth="2" />
+          {/* Glowing Visor Screen & Eyes */}
+          <rect x="-9" y="-8" width="18" height="9" rx="3" fill="#090d16" />
+          <circle cx="-4" cy="-3.5" r="2.2" fill="#38bdf8" />
+          <circle cx="4" cy="-3.5" r="2.2" fill="#38bdf8" />
+          {/* Top Antenna */}
+          <line x1="0" y1="-12" x2="0" y2="-19" stroke="#94a3b8" strokeWidth="2" />
+          <circle cx="0" cy="-20" r="3" fill="#3fc07a" />
+        </g>
+
+        {popups.map(p => (
+          <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+            {p.text}
+          </text>
+        ))}
+      </svg>
 
       <InGameChallengePopup
         sceneDescriptor={sceneDescriptor}
@@ -2518,16 +2252,16 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
 
 /* ============================================================================
  * SCENE 6: CYBER DEFENSE SOC RADAR & THREAT INTERCEPTOR
- * Unique Mechanic: 360° Orbital Core Shield & Active Malware Interceptor Game!
- * Incoming Malware Missiles (Ransomware, SQLi, DDoS, Phishing) fly from the
- * outer perimeter toward the central CORE VAULT. Player rotates the Orbital
- * Firewall Shield and fires Pulse Lasers to destroy packets before impact!
+ * Visuals: Cyber Fortress Background (4 Corner Illuminated Server Racks,
+ * Fiber-Optic Conduits, Rotating Radar Sweep), Shielded Octagon Core with
+ * Golden Padlock Emblem, Twin-Barrel Orbital Shield Turret, and Visual
+ * Malware Missiles & Cyber Spiders!
  * ============================================================================ */
 interface IncomingThreatPacket {
   id: number;
   angle: number;
   dist: number;
-  label: string;
+  spriteKind: 'MISSILE' | 'SPIDER' | 'DRILL';
 }
 
 export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = props => {
@@ -2548,32 +2282,29 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
     onContinueStage,
     stageInspected,
     onInspectStage,
-    skillBonusScore,
     isPaused,
     onCollectBonus,
     onHazardHit,
   } = props;
 
-  const [selectedToolId, setSelectedToolId] = useState<string>(
-    sceneDescriptor.tools[0]?.id || 'tool_node_quarantine'
-  );
-  const accentHex = config.palette.accentColor || '#10B981';
+  const selectedToolId = sceneDescriptor.tools[0]?.id || 'tool_node_quarantine';
+  const accentHex = config.palette.accentColor || '#3fc07a';
 
   const socWaves = [
-    { id: 'WAVE-01', name: 'Mail Gateway', threat: 'Phishing & Spoofing Payload', packetTag: 'PHISHING' },
-    { id: 'WAVE-02', name: 'IAM / MFA Auth', threat: 'Brute-force Credential Attack', packetTag: 'BRUTE-FORCE' },
-    { id: 'WAVE-03', name: 'App Cluster WAF', threat: 'SQLi / XSS Injection Vector', packetTag: 'SQL-INJECT' },
-    { id: 'WAVE-04', name: 'Encrypted Vault', threat: 'Ransomware Data Exfiltration', packetTag: 'RANSOMWARE' },
-    { id: 'WAVE-05', name: 'Core SIEM/SOAR', threat: 'Zero-Day Privilege Escalation', packetTag: 'ZERO-DAY' },
+    { id: 'SOC-01', name: 'Mail Gateway', threat: 'Phishing & Spoofing Payload' },
+    { id: 'SOC-02', name: 'IAM / MFA Auth', threat: 'Brute-force Credential Attack' },
+    { id: 'SOC-03', name: 'App Cluster WAF', threat: 'SQLi / XSS Injection Vector' },
+    { id: 'SOC-04', name: 'Encrypted Vault', threat: 'Ransomware Data Exfiltration' },
+    { id: 'SOC-05', name: 'Core SIEM/SOAR', threat: 'Zero-Day Privilege Escalation' },
   ];
   const activeWave = socWaves[activeStageIndex % socWaves.length];
 
   const [shieldAngle, setShieldAngle] = useState<number>(0);
   const [interceptedCount, setInterceptedCount] = useState<number>(0);
   const [packets, setPackets] = useState<IncomingThreatPacket[]>([
-    { id: 1, angle: 0.4, dist: 122, label: activeWave.packetTag },
-    { id: 2, angle: 2.4, dist: 138, label: 'DDOS-SYN' },
-    { id: 3, angle: 4.5, dist: 152, label: 'MALWARE' },
+    { id: 1, angle: 0.4, dist: 120, spriteKind: 'MISSILE' },
+    { id: 2, angle: 2.4, dist: 136, spriteKind: 'SPIDER' },
+    { id: 3, angle: 4.5, dist: 150, spriteKind: 'DRILL' },
   ]);
   const [laserTarget, setLaserTarget] = useState<{ x: number; y: number } | null>(null);
   const [popups, setPopups] = useState<FloatingFeedbackText[]>([]);
@@ -2588,18 +2319,48 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
   useEffect(() => {
     setInterceptedCount(stageInspected ? 3 : 0);
     setPackets([
-      { id: 1, angle: 0.4, dist: 122, label: activeWave.packetTag },
-      { id: 2, angle: 2.4, dist: 138, label: 'DDOS-SYN' },
-      { id: 3, angle: 4.5, dist: 152, label: 'MALWARE' },
+      { id: 1, angle: 0.4, dist: 120, spriteKind: 'MISSILE' },
+      { id: 2, angle: 2.4, dist: 136, spriteKind: 'SPIDER' },
+      { id: 3, angle: 4.5, dist: 150, spriteKind: 'DRILL' },
     ]);
-  }, [activeStageIndex, activeWave.packetTag, stageInspected]);
+  }, [activeStageIndex, stageInspected]);
 
   const addPopup = useCallback((x: number, y: number, text: string, color: string) => {
     setPopups(prev => [...prev.slice(-4), { id: Date.now() + Math.random(), x, y, text, color }]);
   }, []);
 
-  // Keyboard A/D or Left/Right rotates the Orbital Firewall Shield
+  const handleFireFirewallPulse = useCallback(
+    (targetPacket?: IncomingThreatPacket) => {
+      const pkt = targetPacket || packets[0];
+      if (!pkt) return;
+      const px = 280 + Math.cos(pkt.angle) * pkt.dist;
+      const py = 140 + Math.sin(pkt.angle) * pkt.dist;
+      setShieldAngle(pkt.angle);
+      setLaserTarget({ x: px, y: py });
+      setTimeout(() => setLaserTarget(null), 240);
+
+      onCollectBonus?.(10);
+      addPopup(px, py - 12, '+10Đ', '#3fc07a');
+      setPackets(prev =>
+        prev.map(it =>
+          it.id === pkt.id ? { ...it, dist: 148, angle: (it.angle + 1.9) % (Math.PI * 2) } : it
+        )
+      );
+      setInterceptedCount(c => {
+        const nextC = c + 1;
+        if (nextC >= 3 && lockedWaveRef.current !== activeStageIndex) {
+          lockedWaveRef.current = activeStageIndex;
+          setTimeout(() => onInspectStage(selectedToolId), 90);
+        }
+        return nextC;
+      });
+    },
+    [packets, activeStageIndex, selectedToolId, onCollectBonus, onInspectStage, addPopup]
+  );
+
+  // Keyboard A/D rotates shield; Space fires laser pulse
   useEffect(() => {
+    if (isPaused || stageInspected) return;
     const onKeyDown = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement)?.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA') return;
@@ -2607,32 +2368,31 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
         setShieldAngle(prev => prev - 0.55);
       } else if (e.key === 'd' || e.key === 'D' || e.key === 'ArrowRight') {
         setShieldAngle(prev => prev + 0.55);
+      } else if (e.key === ' ') {
+        e.preventDefault();
+        handleFireFirewallPulse();
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [isPaused, stageInspected, handleFireFirewallPulse]);
 
-  // Radial Malware Missile Approach & Orbital Shield Collision Loop
   useEffect(() => {
     if (isPaused || stageInspected) return;
-
     const timer = window.setInterval(() => {
       setPackets(prev =>
         prev.map(pkt => {
           const nextDist = pkt.dist - 2.1;
-          // Check Orbital Shield Ring at radius 48..58
           if (nextDist <= 56 && nextDist >= 42) {
             const diff = Math.atan2(
               Math.sin(pkt.angle - shieldAngleRef.current),
               Math.cos(pkt.angle - shieldAngleRef.current)
             );
             if (Math.abs(diff) <= 1.05) {
-              // Blocked by Orbital Firewall Shield!
               const px = 280 + Math.cos(pkt.angle) * 52;
-              const py = 148 + Math.sin(pkt.angle) * 52;
+              const py = 140 + Math.sin(pkt.angle) * 52;
               onCollectBonus?.(10);
-              addPopup(px, py - 10, `+10Đ CHẶN ${pkt.label}`, '#3fc07a');
+              addPopup(px, py - 10, '+10Đ', '#3fc07a');
               setInterceptedCount(c => {
                 const nextC = c + 1;
                 if (nextC >= 3 && lockedWaveRef.current !== activeStageIndex) {
@@ -2644,17 +2404,15 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
               return { ...pkt, dist: 145, angle: (pkt.angle + 2.1) % (Math.PI * 2) };
             }
           }
-          // Check Core Vault impact at radius <= 28
           if (nextDist <= 28) {
             onHazardHit?.();
-            addPopup(280, 112, `-8% THỦNG TƯỜNG LỬA (${pkt.label})`, '#e5566f');
+            addPopup(280, 106, '-8%', '#e5566f');
             return { ...pkt, dist: 148, angle: (pkt.angle + 1.7) % (Math.PI * 2) };
           }
           return { ...pkt, dist: nextDist };
         })
       );
     }, 45);
-
     return () => clearInterval(timer);
   }, [
     isPaused,
@@ -2667,39 +2425,14 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
     addPopup,
   ]);
 
-  const handleFireFirewallPulse = (targetPacket?: IncomingThreatPacket) => {
-    const pkt = targetPacket || packets[0];
-    if (!pkt) return;
-    const px = 280 + Math.cos(pkt.angle) * pkt.dist;
-    const py = 148 + Math.sin(pkt.angle) * pkt.dist;
-    setShieldAngle(pkt.angle);
-    setLaserTarget({ x: px, y: py });
-    setTimeout(() => setLaserTarget(null), 240);
-
-    onCollectBonus?.(10);
-    addPopup(px, py - 12, `+10Đ BẮN HẠ ${pkt.label}`, '#3fc07a');
-    setPackets(prev =>
-      prev.map(it =>
-        it.id === pkt.id ? { ...it, dist: 148, angle: (it.angle + 1.9) % (Math.PI * 2) } : it
-      )
-    );
-    setInterceptedCount(c => {
-      const nextC = c + 1;
-      if (nextC >= 3 && lockedWaveRef.current !== activeStageIndex) {
-        lockedWaveRef.current = activeStageIndex;
-        setTimeout(() => onInspectStage(selectedToolId), 90);
-      }
-      return nextC;
-    });
-  };
-
-  // Compute Orbital Shield Arc SVG path around (280, 148) with radius 52
   const arcStart = shieldAngle - 0.95;
   const arcEnd = shieldAngle + 0.95;
-  const sx1 = 280 + Math.cos(arcStart) * 52;
-  const sy1 = 148 + Math.sin(arcStart) * 52;
-  const sx2 = 280 + Math.cos(arcEnd) * 52;
-  const sy2 = 148 + Math.sin(arcEnd) * 52;
+  const sx1 = 280 + Math.cos(arcStart) * 54;
+  const sy1 = 140 + Math.sin(arcStart) * 54;
+  const sx2 = 280 + Math.cos(arcEnd) * 54;
+  const sy2 = 140 + Math.sin(arcEnd) * 54;
+  const turretX = 280 + Math.cos(shieldAngle) * 54;
+  const turretY = 140 + Math.sin(shieldAngle) * 54;
 
   return (
     <div
@@ -2708,257 +2441,187 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
         position: 'relative',
         width: '100%',
         height: '100%',
-        backgroundColor: '#050a10',
-        padding: '12px 16px',
-        display: 'flex',
-        flexDirection: 'column',
-        justifyContent: 'space-between',
-        gap: '10px',
+        backgroundColor: '#050b12',
         overflow: 'hidden',
       }}
     >
-      {/* 360° Orbital Core Shield & Malware Interceptor Canvas */}
-      <div
-        style={{
-          position: 'relative',
-          flex: 1,
-          minHeight: 0,
-          backgroundColor: '#060b12',
-          border: '1.5px solid #1f3a3d',
-          borderRadius: '12px',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          overflow: 'hidden',
+      <svg
+        viewBox="0 0 560 280"
+        preserveAspectRatio="xMidYMid slice"
+        style={{ width: '100%', height: '100%', display: 'block', cursor: 'crosshair' }}
+        onClick={e => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const svgX = ((e.clientX - rect.left) / rect.width) * 560;
+          const svgY = ((e.clientY - rect.top) / rect.height) * 280;
+          const angle = Math.atan2(svgY - 140, svgX - 280);
+          setShieldAngle(angle);
         }}
       >
-        <svg
-          viewBox="0 0 560 280"
-          style={{ width: '100%', height: '100%', maxHeight: '100%', display: 'block', cursor: 'crosshair' }}
-          onClick={e => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            const svgX = ((e.clientX - rect.left) / rect.width) * 560;
-            const svgY = ((e.clientY - rect.top) / rect.height) * 280;
-            const angle = Math.atan2(svgY - 148, svgX - 280);
-            setShieldAngle(angle);
-          }}
-        >
-          <defs>
-            <pattern id="socCoreGrid" width="28" height="28" patternUnits="userSpaceOnUse">
-              <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#0d1f26" strokeWidth="1" />
-            </pattern>
-          </defs>
-          <rect width="560" height="280" fill="url(#socCoreGrid)" />
+        <defs>
+          <pattern id="socHexGrid" width="28" height="28" patternUnits="userSpaceOnUse">
+            <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#0b1d26" strokeWidth="1" />
+          </pattern>
+        </defs>
+        <rect width="560" height="280" fill="url(#socHexGrid)" />
 
-          <rect x="0" y="0" width="560" height="24" fill="#0c1420" />
-          <text x="14" y="16" fill={accentHex} fontSize="9.5" fontWeight="800">
-            PHÁO ĐÀI SOC [{activeWave.id}] · XOAY KHIÊN (A/D) &amp; BẮN HẠ 3 ĐỢT MÃ ĐỘC ({Math.min(3, interceptedCount)}/3) ĐỂ KHÓA {activeWave.name.toUpperCase()}
-          </text>
-
-          {/* Radar Concentric Perimeter Rings */}
-          <circle cx="280" cy="148" r="120" fill="none" stroke="#112a32" strokeWidth="1.2" strokeDasharray="4 4" />
-          <circle cx="280" cy="148" r="85" fill="none" stroke="#112a32" strokeWidth="1.2" strokeDasharray="4 4" />
-          <circle cx="280" cy="148" r="52" fill="none" stroke="#163840" strokeWidth="1.5" />
-
-          {/* Rotating Orbital Firewall Shield Arc */}
-          <path
-            d={`M ${sx1} ${sy1} A 52 52 0 0 1 ${sx2} ${sy2}`}
-            fill="none"
-            stroke="#3fc07a"
-            strokeWidth="7"
-            strokeLinecap="round"
-          />
-
-          {/* Laser Interceptor Beam */}
-          {laserTarget && (
-            <line
-              x1="280"
-              y1="148"
-              x2={laserTarget.x}
-              y2={laserTarget.y}
-              stroke="#38bdf8"
-              strokeWidth="4"
-            />
-          )}
-
-          {/* Central Protected CORE VAULT */}
+        {/* 4 Illuminated Server Racks in the Corners Connected by Fiber Conduits */}
+        {[
+          { x: 24, y: 24 },
+          { x: 488, y: 24 },
+          { x: 24, y: 210 },
+          { x: 488, y: 210 },
+        ].map((rack, rIdx) => (
           <g
+            key={rIdx}
+            data-testid={rIdx === 0 ? 'cyber-rotate-left-btn' : rIdx === 1 ? 'cyber-rotate-right-btn' : undefined}
             style={{ cursor: 'pointer' }}
-            onClick={() => onInspectStage(selectedToolId)}
+            onClick={e => {
+              e.stopPropagation();
+              setShieldAngle(prev => prev + (rIdx % 2 === 0 ? -0.65 : 0.65));
+            }}
           >
-            <circle
-              cx="280"
-              cy="148"
-              r="28"
-              fill="#0b1320"
-              stroke={activeFeedback?.isCorrect ? '#3fc07a' : '#38bdf8'}
-              strokeWidth="3"
+            <line
+              x1={rack.x + 24}
+              y1={rack.y + 22}
+              x2="280"
+              y2="140"
+              stroke="#112e38"
+              strokeWidth="2.5"
+              strokeDasharray="6 4"
             />
-            <text x="280" y="145" textAnchor="middle" fill="#f8fafc" fontSize="8.5" fontWeight="800">
-              CORE VAULT
-            </text>
-            <text x="280" y="156" textAnchor="middle" fill="#3fc07a" fontSize="7.5" fontWeight="800">
-              {Math.min(3, interceptedCount)}/3 LOCKED
-            </text>
-          </g>
-
-          {/* Incoming Malware Missiles Flying Toward Core */}
-          {packets.map(pkt => {
-            const px = 280 + Math.cos(pkt.angle) * pkt.dist;
-            const py = 148 + Math.sin(pkt.angle) * pkt.dist;
-            return (
-              <g
-                key={pkt.id}
-                style={{ cursor: 'pointer' }}
-                onClick={e => {
-                  e.stopPropagation();
-                  handleFireFirewallPulse(pkt);
-                }}
-              >
-                <line
-                  x1={px}
-                  y1={py}
-                  x2={280 + Math.cos(pkt.angle) * (pkt.dist + 18)}
-                  y2={148 + Math.sin(pkt.angle) * (pkt.dist + 18)}
-                  stroke="#ef4444"
-                  strokeWidth="2.5"
-                />
-                <circle cx={px} cy={py} r="14" fill="#2c1a20" stroke="#ef4444" strokeWidth="2" />
-                <text x={px} y={py + 3} textAnchor="middle" fill="#fca5a5" fontSize="7" fontWeight="800">
-                  {pkt.label.slice(0, 6)}
-                </text>
+            <rect x={rack.x} y={rack.y} width="48" height="44" rx="5" fill="#0b1522" stroke="#1e3a4c" strokeWidth="1.5" />
+            {[8, 18, 28].map(ly => (
+              <g key={ly}>
+                <rect x={rack.x + 6} y={rack.y + ly} width="36" height="6" rx="2" fill="#132638" />
+                <circle cx={rack.x + 11} cy={rack.y + ly + 3} r="1.8" fill="#3fc07a" />
+                <circle cx={rack.x + 17} cy={rack.y + ly + 3} r="1.8" fill="#38bdf8" />
               </g>
-            );
-          })}
+            ))}
+          </g>
+        ))}
 
-          {popups.map(p => (
-            <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="9.5" fontWeight="800">
-              {p.text}
-            </text>
+        {/* Radar Perimeter Rings */}
+        <circle cx="280" cy="140" r="122" fill="none" stroke="#102b36" strokeWidth="1.2" strokeDasharray="4 4" />
+        <circle cx="280" cy="140" r="88" fill="none" stroke="#102b36" strokeWidth="1.2" strokeDasharray="4 4" />
+        <circle cx="280" cy="140" r="54" fill="none" stroke="#163840" strokeWidth="1.5" />
+
+        {/* Rotating Orbital Firewall Energy Shield Arc & Turret Head */}
+        <path
+          d={`M ${sx1} ${sy1} A 54 54 0 0 1 ${sx2} ${sy2}`}
+          fill="none"
+          stroke="#3fc07a"
+          strokeWidth="7"
+          strokeLinecap="round"
+        />
+        <circle
+          data-testid="cyber-fire-pulse-btn"
+          cx={turretX}
+          cy={turretY}
+          r="8"
+          fill="#090d16"
+          stroke="#38bdf8"
+          strokeWidth="2.5"
+          style={{ cursor: 'pointer' }}
+          onClick={e => {
+            e.stopPropagation();
+            handleFireFirewallPulse();
+          }}
+        />
+
+        {/* Laser Interceptor Beam */}
+        {laserTarget && (
+          <line
+            x1="280"
+            y1="140"
+            x2={laserTarget.x}
+            y2={laserTarget.y}
+            stroke="#38bdf8"
+            strokeWidth="4"
+          />
+        )}
+
+        {/* Central Shielded Server Vault with Golden Security Padlock Icon */}
+        <g
+          data-testid="cyber-engage-threat-btn"
+          style={{ cursor: 'pointer' }}
+          onClick={e => {
+            e.stopPropagation();
+            onInspectStage(selectedToolId);
+          }}
+          transform="translate(280, 140)"
+        >
+          <polygon
+            points="0,-28 20,-20 28,0 20,20 0,28 -20,20 -28,0 -20,-20"
+            fill="#0b1524"
+            stroke={activeFeedback?.isCorrect ? '#3fc07a' : '#38bdf8'}
+            strokeWidth="2.5"
+          />
+          {/* Padlock Shackle & Body */}
+          <path d="M -5 -3 L -5 -8 C -5 -13, 5 -13, 5 -8 L 5 -3" fill="none" stroke="#eab308" strokeWidth="2.2" />
+          <rect x="-8" y="-3" width="16" height="13" rx="3" fill="#eab308" />
+          <circle cx="0" cy="3" r="2" fill="#090d16" />
+
+          {/* 3 Gem Indicators for 3/3 Intercepted Threats */}
+          {[0, 1, 2].map(gIdx => (
+            <circle
+              key={gIdx}
+              cx={-10 + gIdx * 10}
+              cy="18"
+              r="3"
+              fill={interceptedCount > gIdx ? '#3fc07a' : '#1e293b'}
+            />
           ))}
-        </svg>
-      </div>
+        </g>
 
-      {/* Orbital Shield & Turret Controls */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '10px',
-          padding: '10px 14px',
-          backgroundColor: '#0b0f19',
-          border: '1px solid #1e293b',
-          borderRadius: '10px',
-          flexWrap: 'wrap',
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            data-testid="cyber-rotate-left-btn"
-            onClick={() => setShieldAngle(prev => prev - 0.65)}
-            style={{
-              height: '36px',
-              padding: '0 11px',
-              borderRadius: '7px',
-              backgroundColor: '#161f30',
-              border: '1px solid #2e3c56',
-              color: '#f8fafc',
-              fontSize: '12px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            ↺ Xoay Khiên Trái (A)
-          </button>
-          <button
-            type="button"
-            data-testid="cyber-fire-pulse-btn"
-            onClick={() => handleFireFirewallPulse()}
-            style={{
-              height: '36px',
-              padding: '0 13px',
-              borderRadius: '7px',
-              backgroundColor: '#172a1d',
-              border: '1.5px solid #3fc07a',
-              color: '#3fc07a',
-              fontSize: '12px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            Bắn Xung Chặn Mã Độc (+10Đ)
-          </button>
-          <button
-            type="button"
-            data-testid="cyber-rotate-right-btn"
-            onClick={() => setShieldAngle(prev => prev + 0.65)}
-            style={{
-              height: '36px',
-              padding: '0 11px',
-              borderRadius: '7px',
-              backgroundColor: '#161f30',
-              border: '1px solid #2e3c56',
-              color: '#f8fafc',
-              fontSize: '12px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            Xoay Khiên Phải (D) ↻
-          </button>
-        </div>
+        {/* Visual Malware Missiles & Cyber Spiders Flying Toward Core */}
+        {packets.map(pkt => {
+          const px = 280 + Math.cos(pkt.angle) * pkt.dist;
+          const py = 140 + Math.sin(pkt.angle) * pkt.dist;
+          const degTowardsCore = ((pkt.angle + Math.PI) * 180) / Math.PI;
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          {sceneDescriptor.tools.map(tool => {
-            const isSelected = tool.id === selectedToolId;
-            return (
-              <button
-                key={tool.id}
-                type="button"
-                onClick={() => setSelectedToolId(tool.id)}
-                style={{
-                  height: '34px',
-                  padding: '0 9px',
-                  borderRadius: '6px',
-                  backgroundColor: isSelected ? '#162038' : '#111726',
-                  border: `1px solid ${isSelected ? accentHex : '#26334d'}`,
-                  color: '#f8fafc',
-                  fontSize: '11.5px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                }}
-              >
-                [{tool.badgeCode}]
-              </button>
-            );
-          })}
-          <span style={{ fontSize: '12px', color: '#94a3b8', fontVariantNumeric: 'tabular-nums' }}>
-            Đã chặn: <strong style={{ color: '#3fc07a' }}>{interceptedCount}</strong> · Thưởng:{' '}
-            <strong style={{ color: accentHex }}>+{skillBonusScore}</strong>
-          </span>
-          <button
-            type="button"
-            data-testid="cyber-engage-threat-btn"
-            onClick={() => onInspectStage(selectedToolId)}
-            style={{
-              height: '40px',
-              padding: '0 16px',
-              borderRadius: '8px',
-              backgroundColor: accentHex,
-              border: 'none',
-              color: '#090d16',
-              fontSize: '13px',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            CÔ LẬP [{activeWave.id}] (Space)
-          </button>
-        </div>
-      </div>
+          return (
+            <g
+              key={pkt.id}
+              style={{ cursor: 'pointer' }}
+              onClick={e => {
+                e.stopPropagation();
+                handleFireFirewallPulse(pkt);
+              }}
+              transform={`translate(${px}, ${py}) rotate(${degTowardsCore})`}
+            >
+              {pkt.spriteKind === 'MISSILE' && (
+                /* Red Cyber Warhead Missile with Exhaust Flame */
+                <g>
+                  <polygon points="14,0 -6,-8 -6,8" fill="#e5566f" stroke="#fca5a5" strokeWidth="1.2" />
+                  <polygon points="-6,-5 -15,-9 -11,0 -15,9 -6,5" fill="#f97316" />
+                </g>
+              )}
+              {pkt.spriteKind === 'SPIDER' && (
+                /* 6-Legged Mechanical Malware Spider */
+                <g>
+                  <path d="M -6 -12 L 0 0 L -6 12 M 2 -12 L 0 0 L 2 12" stroke="#e5566f" strokeWidth="2" fill="none" />
+                  <circle cx="0" cy="0" r="8" fill="#4c0519" stroke="#e5566f" strokeWidth="2" />
+                  <circle cx="4" cy="-2.5" r="1.8" fill="#fde047" />
+                  <circle cx="4" cy="2.5" r="1.8" fill="#fde047" />
+                </g>
+              )}
+              {pkt.spriteKind === 'DRILL' && (
+                /* Spinning Exploit Drill Spike */
+                <g>
+                  <polygon points="15,0 -8,-9 -4,0 -8,9" fill="#fb7185" stroke="#f87171" strokeWidth="1.5" />
+                  <circle cx="-3" cy="0" r="3" fill="#e5566f" />
+                </g>
+              )}
+            </g>
+          );
+        })}
+
+        {popups.map(p => (
+          <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+            {p.text}
+          </text>
+        ))}
+      </svg>
 
       <InGameChallengePopup
         sceneDescriptor={sceneDescriptor}

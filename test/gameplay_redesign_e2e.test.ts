@@ -173,20 +173,45 @@ async function runGameplayRedesignE2E(): Promise<void> {
 
       await sleep(900);
 
-      // 2. Verify active 2D scene renders and Pause/Resume works
+      // 2. Verify active 2D scene renders, NO bottom control bar exists, and Cách chơi / Pause work
       const sceneCheck = await page.eval(`(() => {
         const sceneEl = document.querySelector('[data-testid="${sc.expectedSceneTestId}"]');
         const pauseBtn = document.querySelector('[data-testid="hud-pause-button"]');
+        const howToPlayBtn = document.querySelector('[data-testid="hud-how-to-play-button"]');
         const inlinePopupBefore = document.querySelector('[data-testid="ingame-challenge-popup"]');
+        const bottomButtonsInScene = sceneEl ? sceneEl.querySelectorAll('button').length : -1;
         return {
           sceneFound: Boolean(sceneEl),
           pauseBtnFound: Boolean(pauseBtn),
+          howToPlayBtnFound: Boolean(howToPlayBtn),
           popupHiddenInitially: !inlinePopupBefore,
+          bottomButtonsInScene,
           sceneText: sceneEl ? sceneEl.innerText : '',
         };
       })()`);
       assert.equal(sceneCheck.sceneFound, true, `${sc.key}: Scene ${sc.expectedSceneTestId} must render`);
       assert.equal(sceneCheck.pauseBtnFound, true, `${sc.key}: HUD pause button must render`);
+      assert.equal(sceneCheck.howToPlayBtnFound, true, `${sc.key}: HUD Cách chơi button must render`);
+      assert.equal(
+        sceneCheck.bottomButtonsInScene,
+        0,
+        `${sc.key}: Bottom control bar and HTML buttons inside 2D scene must be completely removed`
+      );
+
+      // Verify Cách chơi modal opens and closes cleanly
+      await page.eval(`document.querySelector('[data-testid="hud-how-to-play-button"]').click()`);
+      await sleep(200);
+      const tutorialCheck = await page.eval(`(() => {
+        const banner = document.querySelector('[data-testid="scene-tutorial-banner"]');
+        const closeBtn = document.querySelector('[data-testid="close-how-to-play-btn"]');
+        const text = banner ? banner.innerText : '';
+        if (closeBtn) closeBtn.click();
+        return { opened: Boolean(banner), hasCloseBtn: Boolean(closeBtn), textLen: text.length };
+      })()`);
+      assert.equal(tutorialCheck.opened, true, `${sc.key}: Cách chơi modal must open when clicked`);
+      assert.equal(tutorialCheck.hasCloseBtn, true, `${sc.key}: Cách chơi modal must have Đóng button`);
+      assert.ok(tutorialCheck.textLen > 30, `${sc.key}: Cách chơi modal must contain scene-specific instructions`);
+      await sleep(200);
 
       if (!sc.isRunner) {
         assert.equal(
@@ -205,7 +230,7 @@ async function runGameplayRedesignE2E(): Promise<void> {
         await page.eval(`document.querySelector('[data-testid="hud-pause-button"]').click()`);
         await sleep(250);
 
-        // Stage 1: Execute the UNIQUE industry gameplay mechanic to trigger the challenge popup!
+        // Stage 1: Execute the UNIQUE industry gameplay mechanic directly on 2D SVG objects to trigger the challenge popup!
         if (sc.key === 'moto_garage') {
           // Mechanic: Tighten 2 loose bolts + calibrate torque meter -> auto-opens challenge!
           await page.eval(`(() => {
@@ -224,13 +249,13 @@ async function runGameplayRedesignE2E(): Promise<void> {
             document.querySelector('[data-testid="kitchen-lane-2"]')
           )`);
           assert.equal(hasThreeLanes, true, 'Kitchen game must render 3 conveyor prep lanes');
-          // Chop/cook 3 ingredients across lanes to reach 100% dish progress -> auto-opens HACCP popup!
+          // Chop/cook 3 ingredients across lanes via SVG chef / prep zone -> auto-opens HACCP popup!
           await page.eval(`(() => {
             const prepBtn = document.querySelector('[data-testid="kitchen-prep-action-btn"]');
             if (prepBtn) {
-              prepBtn.click();
-              prepBtn.click();
-              prepBtn.click();
+              prepBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+              prepBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+              prepBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
             }
           })()`);
         } else if (sc.key === 'moto_showroom') {
@@ -247,20 +272,20 @@ async function runGameplayRedesignE2E(): Promise<void> {
             const jumpBtn = document.querySelector('[data-testid="coding-jump-btn"]');
             const shootBtn = document.querySelector('[data-testid="coding-shoot-bug-btn"]');
             const portalBtn = document.querySelector('[data-testid="coding-engage-portal-btn"]');
-            if (jumpBtn) jumpBtn.click();
-            if (shootBtn) shootBtn.click();
-            if (portalBtn) portalBtn.click();
+            if (jumpBtn) jumpBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            if (shootBtn) shootBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+            if (portalBtn) portalBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
           })()`);
         } else if (sc.key === 'it_cyber_soc') {
           // Mechanic: Rotate orbital shield and fire 3 firewall laser pulses to intercept 3 malware packets!
           await page.eval(`(() => {
             const rotL = document.querySelector('[data-testid="cyber-rotate-left-btn"]');
             const fireBtn = document.querySelector('[data-testid="cyber-fire-pulse-btn"]');
-            if (rotL) rotL.click();
+            if (rotL) rotL.dispatchEvent(new MouseEvent('click', { bubbles: true }));
             if (fireBtn) {
-              fireBtn.click();
-              fireBtn.click();
-              fireBtn.click();
+              fireBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+              fireBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+              fireBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
             }
           })()`);
         }
@@ -299,10 +324,22 @@ async function runGameplayRedesignE2E(): Promise<void> {
           `${sc.key}: Challenge popup must close when resuming 2D gameplay in Stage 2`
         );
 
-        // Stage 2: Trigger primary action -> Answer -> Finish Game
+        // Stage 2: Trigger in-scene SVG target directly -> Answer -> Finish Game
         await page.eval(`(() => {
-          const primaryBtn = Array.from(document.querySelectorAll('button')).find(b => b.textContent.includes('(Space)'));
-          if (primaryBtn) primaryBtn.click();
+          const selectors = [
+            '[data-testid="garage-engage-repair-btn"]',
+            '[data-testid="kitchen-engage-haccp-btn"]',
+            '[data-testid="consultation-deliver-btn"]',
+            '[data-testid="coding-engage-portal-btn"]',
+            '[data-testid="cyber-engage-threat-btn"]',
+          ];
+          for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el) {
+              el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+              break;
+            }
+          }
         })()`);
         await sleep(450);
 
