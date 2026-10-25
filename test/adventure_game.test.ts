@@ -838,7 +838,7 @@ async function runAdventureGameTests() {
     ],
     { preferredIndustryId: 'MOTORCYCLE_TRAFFIC', questionCount: 5 }
   );
-  assert.equal(motoSalesAnalysis.themePresetId, 'theme_biz_retail');
+  assert.equal(motoSalesAnalysis.themePresetId, 'theme_moto_showroom');
   assert.equal(motoSalesAnalysis.gameplayArchetype, 'SCENARIO_DECISION_SIM');
   assert.equal(motoSalesAnalysis.controlScheme, 'SCENARIO_CASE_DECISION');
   assert.equal(motoSalesAnalysis.questionTriggerMode, 'CASE_CONSULTATION');

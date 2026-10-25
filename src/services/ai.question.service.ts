@@ -1095,7 +1095,22 @@ export class AiQuestionService {
                     ? rawResponse.adventureProposal || rawResponse.adventureConfig
                     : undefined;
                 const mergedRawConfig = {
-                  ...(aiProposal && typeof aiProposal === 'object' ? aiProposal : {}),
+                  ...(aiProposal && typeof aiProposal === 'object'
+                    ? {
+                        ...aiProposal,
+                        industryId: fallbackAdventure.industryId,
+                        themePresetId: fallbackAdventure.themePresetId,
+                        subEnvironment: fallbackAdventure.subEnvironment,
+                        gameplayArchetype: fallbackAdventure.gameplayArchetype,
+                        controlScheme: fallbackAdventure.controlScheme,
+                        questionTriggerMode: fallbackAdventure.questionTriggerMode,
+                        decorStyle: fallbackAdventure.decorStyle,
+                        avatarId: fallbackAdventure.avatarId,
+                        avatarLabel: fallbackAdventure.avatarLabel,
+                        obstacleTypes: fallbackAdventure.obstacleTypes,
+                        interactiveObjects: fallbackAdventure.interactiveObjects,
+                      }
+                    : {}),
                   ...(request.adventureConfig && typeof request.adventureConfig === 'object'
                     ? request.adventureConfig
                     : {}),

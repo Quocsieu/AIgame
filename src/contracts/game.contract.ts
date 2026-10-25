@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   AdventureConfigSchema,
+  GenerateAdventureConfigInputSchema,
   IndustryIdEnum,
 } from './adventure.contract.js';
 import {
@@ -189,8 +190,9 @@ export const GameSettingsSchema = z.object({
   questionCount: z.number().int().min(1).max(100).default(5),
   timePerQuestion: z.number().int().min(5).max(120).default(20),
   scoringMode: ScoringModeEnum.default('STANDARD'),
-  mixedDistribution: MixedQuestionDistributionSchema.optional(),
   adventureConfig: AdventureConfigSchema.optional(),
+  mixedDistribution: MixedQuestionDistributionSchema.optional(),
+
 });
 export type GameSettings = z.infer<typeof GameSettingsSchema>;
 
@@ -236,7 +238,8 @@ export const GenerateGameRequestSchema = z.object({
   industryId: IndustryIdEnum.optional(),
   customIndustryName: z.string().trim().max(120).optional(),
   adventureSelectionMode: z.enum(['AI_DETECT', 'MANUAL']).optional(),
-  adventureConfig: AdventureConfigSchema.optional(),
+  adventureConfig: GenerateAdventureConfigInputSchema.optional(),
+
 }).refine(data => data.sourceId || (data.sourceIds && data.sourceIds.length > 0) || (data.sources && data.sources.length > 0), {
   message: 'Either "sourceId", "sourceIds", or "sources" must be provided.',
   path: ['sourceId'],
@@ -250,9 +253,10 @@ export const UpdateGameQuestionsRequestSchema = z.object({
   settings: z
     .object({
       timePerQuestion: z.number().int().min(5).max(120).optional(),
+      adventureConfig: GenerateAdventureConfigInputSchema.optional(),
       scoringMode: ScoringModeEnum.optional(),
       mixedDistribution: MixedQuestionDistributionSchema.optional(),
-      adventureConfig: AdventureConfigSchema.optional(),
+    
     })
     .optional(),
   isPublic: z.boolean().optional(),

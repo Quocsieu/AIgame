@@ -433,7 +433,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     const types: ObstacleType[] =
       effectiveConfig.obstacleTypes.length > 0
         ? effectiveConfig.obstacleTypes
-        : ['TRAFFIC_CONE', 'OIL_BARREL', 'BARRIER_GATE'];
+        : ['TRAFFIC_CONE', 'CARGO_CRATE', 'BARRIER_GATE'];
 
     for (let stageIdx = 0; stageIdx < totalStages; stageIdx++) {
       const segmentStart =
@@ -513,6 +513,36 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   useEffect(() => {
     physicsRef.current.obstacles = initialWorldObstacles.map(o => ({ ...o }));
   }, [initialWorldObstacles]);
+
+  // Reset engine state completely when gameId or archetype/preset changes
+  useEffect(() => {
+    setPreviewStarted(false);
+    setPreviewStageIdx(0);
+    setPreviewFeedback(null);
+    setPreviewFinished(false);
+    setPreviewScore(0);
+    setPreviewCorrectCount(0);
+    setPreviewWrongCount(0);
+    setPreviewStreak(0);
+    setPreviewMaxStreak(0);
+    setActiveModalOpen(false);
+    setSelectedChoice('');
+    setTextAnswer('');
+    setSkillBonusScore(0);
+    setObstaclesClearedCount(0);
+    setObstaclesHitCount(0);
+    setEnergyPercent(100);
+    setNearCheckpointIndex(null);
+    setReachedFinishGate(false);
+    setPlayerProgressPercent(0);
+    physicsRef.current.playerX = 90;
+    physicsRef.current.playerY = 0;
+    physicsRef.current.vy = 0;
+    physicsRef.current.vx = 0;
+    physicsRef.current.cameraX = 0;
+    physicsRef.current.particles = [];
+    physicsRef.current.unlockedStageCount = 0;
+  }, [game.gameId, effectiveConfig.themePresetId, effectiveConfig.gameplayArchetype]);
 
   // Keep unlockedStageCount in sync with activeStageIndex & activeFeedback
   useEffect(() => {

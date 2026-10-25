@@ -301,7 +301,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [adventureIndustryMode, setAdventureIndustryMode] = useState<'AI_DETECT' | IndustryId>('AI_DETECT');
   const [customIndustryName, setCustomIndustryName] = useState<string>('');
   const [adventureConfig, setAdventureConfig] = useState<AdventureConfig>(() =>
-    buildDefaultAdventureConfig('theme_moto_garage', 5)
+    buildDefaultAdventureConfig('theme_edu_campus', 5)
   );
   const [isReanalyzingAdventure, setIsReanalyzingAdventure] = useState<boolean>(false);
   const [showAdventureFullscreenPreview, setShowAdventureFullscreenPreview] = useState<boolean>(false);
@@ -500,10 +500,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }
   };
 
-  const handleGenerate = async (targetSourceId?: string): Promise<GameSpecification | null> => {
+  const handleGenerate = async (
+    targetSourceId?: string,
+    overrideSources?: IngestedSource[]
+  ): Promise<GameSpecification | null> => {
     if (isGenerating) return null;
 
-    const sIds = ingestedSources.map(s => s.sourceId);
+    const activeSources =
+      overrideSources && overrideSources.length > 0 ? overrideSources : ingestedSources;
+    const sIds = activeSources.map(s => s.sourceId);
     const primaryId = targetSourceId || sIds[0] || null;
     if (!primaryId) {
       toast.error('Vui lòng hoàn thành Bước 2 (Nhập nội dung nguồn) trước.', 'Chưa có nội dung');
@@ -536,8 +541,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     try {
       const spec = await generateGame({
         sourceId: primaryId,
-        sourceIds: sIds,
-        sources: ingestedSources,
+
+        sourceIds: sIds.length > 0 ? sIds : [primaryId],
+        sources: activeSources,
+
         gameType,
         difficulty,
         scoringMode,
@@ -642,6 +649,57 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }
 
     let primarySourceId: string | undefined = ingestedSources[0]?.sourceId;
+    let activeSourcesForRun: IngestedSource[] = ingestedSources;
+
+    if (sourceTab === 'TOPIC' && hasTopic) {
+      try {
+        setIsIngesting(true);
+        const sources = await ingestSources({ sampleText: topicFocus.trim() });
+        setIngestedSources(sources);
+        activeSourcesForRun = sources;
+        primarySourceId = sources[0]?.sourceId;
+      } catch (err: any) {
+        toast.error(err.message || 'Không thể xử lý nội dung chủ đề.', 'Lỗi nạp chủ đề');
+        return;
+      } finally {
+        setIsIngesting(false);
+      }
+    } else if (
+      (sourceTab === 'URL' && cleanUrls.length > 0) ||
+      (sourceTab === 'FILE' && hasFiles) ||
+      cleanUrls.length > 0 ||
+      hasFiles
+    ) {
+      try {
+        setIsIngesting(true);
+        const sources = await ingestSources({
+          urls: sourceTab === 'URL' || cleanUrls.length > 0 ? cleanUrls : [],
+          files: sourceTab === 'FILE' || hasFiles ? files : [],
+        });
+        setIngestedSources(sources);
+        setSelectedSections([]);
+        activeSourcesForRun = sources;
+        primarySourceId = sources[0]?.sourceId;
+      } catch (err: any) {
+        toast.error(err.message || 'Không thể trích xuất nội dung nguồn.', 'Lỗi nhập dữ liệu');
+        return;
+      } finally {
+        setIsIngesting(false);
+      }
+    } else if (hasTopic) {
+      try {
+        setIsIngesting(true);
+        const sources = await ingestSources({ sampleText: topicFocus.trim() });
+        setIngestedSources(sources);
+        activeSourcesForRun = sources;
+        primarySourceId = sources[0]?.sourceId;
+      } catch (err: any) {
+        toast.error(err.message || 'Không thể xử lý nội dung chủ đề.', 'Lỗi nạp chủ đề');
+        return;
+      } finally {
+        setIsIngesting(false);
+      }
+    }
 
     if (!primarySourceId && hasTopic && !cleanUrls.length && !hasFiles) {
       try {
@@ -665,7 +723,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     setSavedForLater(false);
     setShowQuestionEditor(false);
     setIsModeModalOpen(false);
-    await handleGenerate(primarySourceId);
+    await handleGenerate(primarySourceId, activeSourcesForRun);
   };
 
   // Validate entire specification before Room Creation or Single-Player Practice
@@ -730,7 +788,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             ...(spec!.gameType === 'ADVENTURE'
               ? {
                   adventureConfig: syncAdventureStagesWithQuestions(
-                    adventureConfig,
+                    spec!.settings?.adventureConfig || adventureConfig,
                     spec!.questions
                   ),
                 }
@@ -945,7 +1003,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           ...(generatedSpec.gameType === 'ADVENTURE'
             ? {
                 adventureConfig: syncAdventureStagesWithQuestions(
-                  adventureConfig,
+                  generatedSpec.settings?.adventureConfig || adventureConfig,
                   generatedSpec.questions
                 ),
               }
@@ -2874,7 +2932,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   {generatedSpec.gameType === 'ADVENTURE' && (
                     <LegacyConfiguratorNoop
                       config={syncAdventureStagesWithQuestions(
-                        adventureConfig,
+                        generatedSpec.settings?.adventureConfig || adventureConfig,
                         generatedSpec.questions
                       )}
                       questions={generatedSpec.questions}
@@ -2904,6 +2962,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                           const proposal = await analyzeAdventureContextApi({
                             sourceIds: ingestedSources.map(s => s.sourceId),
                             sources: ingestedSources,
+
                             topicFocus: topicFocus.trim() || undefined,
                             questionCount: generatedSpec.questions.length,
                           });

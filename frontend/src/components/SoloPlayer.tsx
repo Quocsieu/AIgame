@@ -421,6 +421,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     return (
       <div className="w-full h-full">
         <AdventureGameEngine
+          key={activeGameSpec.gameId}
           game={activeGameSpec}
           adventureConfig={activeGameSpec.settings?.adventureConfig}
           mode="LIVE_SESSION"

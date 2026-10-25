@@ -143,7 +143,7 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePresetItem> =
     subEnvironment: 'Trạm Kỹ Thuật & Gara Bảo Dưỡng Xe Máy',
     environmentTitle: 'Trạm Kỹ Thuật & Gara Bảo Dưỡng',
     environmentSubtitle:
-      'Vượt chướng ngại vật trong xưởng dịch vụ, kiểm tra phụ tùng và hoàn thành quy trình bảo dưỡng',
+      'Chẩn đoán kỹ thuật trong xưởng dịch vụ, kiểm tra phụ tùng và hoàn thành quy trình bảo dưỡng',
     decorStyle: 'GARAGE_WORKSHOP',
     avatarId: 'MOTO_RIDER',
     avatarLabel: 'Kỹ thuật viên Xe máy',
@@ -211,6 +211,44 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePresetItem> =
       'Đoạn Đường Trơn Trượt',
       'Giao Lộ Phức Tạp',
       'Trạm Về Đích',
+    ],
+  },
+  theme_moto_showroom: {
+    presetId: 'theme_moto_showroom',
+    industryId: 'MOTORCYCLE_TRAFFIC',
+    subEnvironment: 'Showroom Xe Máy & Tư Vấn Khách Hàng',
+    environmentTitle: 'Showroom Tư Vấn & Chăm Sóc Khách Hàng Xe Máy',
+    environmentSubtitle:
+      'Tiếp đón khách hàng tại đại lý xe máy, phân tích nhu cầu di chuyển - ngân sách và tư vấn dòng xe phù hợp',
+    decorStyle: 'CORPORATE_PLAZA',
+    avatarId: 'SALES_ADVISOR',
+    avatarLabel: 'Chuyên viên Tư vấn Showroom',
+    palette: {
+      skyTop: '#1E1B4B',
+      skyBottom: '#312E81',
+      horizonGlow: '#818CF8',
+      groundTop: '#334155',
+      groundBottom: '#1E293B',
+      roadSurface: '#0F172A',
+      roadLine: '#38BDF8',
+      accentColor: '#6366F1',
+      buildingPrimary: '#1E293B',
+      buildingSecondary: '#3730A3',
+    },
+    obstacleTypes: ['CARGO_CRATE', 'BARRIER_GATE', 'TRAFFIC_CONE'],
+    checkpointNames: [
+      'Quầy Đón Tiếp & Khai Thác Nhu Cầu',
+      'Khu Trưng Bày Dòng Xe Tay Ga & Xe Số',
+      'Trạm Tư Vấn Tính Năng & Mức Tiêu Hao Nhiên Liệu',
+      'Bàn Tư Vấn Giá Lăn Bánh & Trả Góp',
+      'Quầy Chốt Đơn & Bàn Giao Xe Mới',
+    ],
+    zoneLabels: [
+      'Sảnh Đón Khách Đại Lý',
+      'Khu Trưng Bày Trung Tâm',
+      'Khu Tư Vấn Trải Nghiệm',
+      'Quầy Tài Chính & Bảo Hiểm',
+      'Khu Bàn Giao & Hậu Mãi',
     ],
   },
   theme_biz_retail: {
@@ -295,7 +333,7 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePresetItem> =
     subEnvironment: 'Dây Chuyền Nhà Máy & Kiểm Định Chất Lượng (QA/QC)',
     environmentTitle: 'Dây Chuyền Nhà Máy & An Toàn Sản Xuất',
     environmentSubtitle:
-      'Tuần tra dây chuyền công nghiệp, né tránh vật cản cơ khí và kiểm định tiêu chuẩn kỹ thuật tại từng trạm',
+      'Tuần tra dây chuyền công nghiệp, kiểm tra máy móc và kiểm định tiêu chuẩn kỹ thuật tại từng trạm',
     decorStyle: 'FACTORY_PLANT',
     avatarId: 'FACTORY_ENGINEER',
     avatarLabel: 'Kỹ sư Vận hành',
@@ -371,7 +409,7 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePresetItem> =
     subEnvironment: 'Trung Tâm Dữ Liệu (Data Center) & Hạ Tầng Cloud',
     environmentTitle: 'Hành Lang Trung Tâm Dữ Liệu & Kiến Trúc Hệ Thống',
     environmentSubtitle:
-      'Di chuyển qua các cụm máy chủ, vượt qua các xung đột hệ thống và xử lý câu hỏi kỹ thuật tại mỗi Node',
+      'Giám sát các cụm máy chủ, phát hiện xung đột hệ thống và xử lý câu hỏi kỹ thuật tại mỗi Node',
     decorStyle: 'CYBER_DATACENTER',
     avatarId: 'CYBER_BOT',
     avatarLabel: 'Kỹ sư Hệ thống / DevSecOps',
@@ -406,10 +444,10 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePresetItem> =
   theme_it_cyberlab: {
     presetId: 'theme_it_cyberlab',
     industryId: 'IT_TECHNOLOGY',
-    subEnvironment: 'Phòng Lab An Ninh Mạng & Phát Triển Phần Mềm',
-    environmentTitle: 'Chiến Dịch Phòng Thủ An Ninh Mạng & Code Review',
+    subEnvironment: 'Phòng Lab An Ninh Mạng & Trung Tâm Phản Ứng Sự Cố (SOC)',
+    environmentTitle: 'Chiến Dịch Phòng Thủ An Ninh Mạng & SOC',
     environmentSubtitle:
-      'Né tránh các gói mã độc, vượt tường lửa và giải quyết các chốt kiểm tra bảo mật thông tin',
+      'Phát hiện cảnh báo mã độc, khoanh vùng tấn công tường lửa và giải quyết các chốt bảo mật thông tin',
     decorStyle: 'CYBER_DATACENTER',
     avatarId: 'CYBER_BOT',
     avatarLabel: 'Chuyên gia An ninh mạng',
@@ -439,6 +477,44 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePresetItem> =
       'Kho Dữ Liệu Mã Hóa',
       'Phòng Lab Kiểm Thử',
       'Trung Tâm SOC',
+    ],
+  },
+  theme_it_coding_lab: {
+    presetId: 'theme_it_coding_lab',
+    industryId: 'IT_TECHNOLOGY',
+    subEnvironment: 'Phòng Lab Kỹ Thuật Phần Mềm & Gỡ Lỗi Code (Debugging)',
+    environmentTitle: 'Trạm Phân Tích Mã Nguồn, Kiểm Thử & Sửa Lỗi Phần Mềm',
+    environmentSubtitle:
+      'Kiểm tra từng module mã nguồn trên bàn kỹ thuật số, phát hiện lỗi logic/exception và xác nhận Unit Test',
+    decorStyle: 'CYBER_DATACENTER',
+    avatarId: 'CYBER_BOT',
+    avatarLabel: 'Kỹ sư Phần mềm / Lập trình viên',
+    palette: {
+      skyTop: '#020617',
+      skyBottom: '#1E1B4B',
+      horizonGlow: '#38BDF8',
+      groundTop: '#0F172A',
+      groundBottom: '#020617',
+      roadSurface: '#0B1120',
+      roadLine: '#60A5FA',
+      accentColor: '#3B82F6',
+      buildingPrimary: '#0F172A',
+      buildingSecondary: '#1E3A8A',
+    },
+    obstacleTypes: ['BUG_DRONE', 'SERVER_FIREWALL', 'BARRIER_GATE'],
+    checkpointNames: [
+      'Module 01: Kiểm Tra Cú Pháp & Kiểu Dữ Liệu',
+      'Module 02: Phân Tích Luồng Điều Khiển & Vòng Lặp',
+      'Module 03: Gỡ Lỗi (Debug) Stack Trace & Exception',
+      'Module 04: Tối Ưu Hàm & Cấu Trúc Dữ Liệu',
+      'Module 05: Kiểm Thử Đơn Vị (Unit Test) & Clean Code',
+    ],
+    zoneLabels: [
+      'IDE Static Analyzer',
+      'Control Flow Inspector',
+      'Runtime Debugger',
+      'Algorithm Profiler',
+      'Automated Test Runner',
     ],
   },
   theme_med_hospital: {
@@ -517,13 +593,89 @@ export const ADVENTURE_THEME_PRESETS: Record<string, AdventureThemePresetItem> =
       'Hội Đồng Đánh Giá',
     ],
   },
+  theme_fnb_kitchen_safety: {
+    presetId: 'theme_fnb_kitchen_safety',
+    industryId: 'FNB_HOSPITALITY',
+    subEnvironment: 'Khu Bếp Trung Tâm & Kiểm Định Vệ Sinh An Toàn Thực Phẩm',
+    environmentTitle: 'Kiểm Soát Vệ Sinh An Toàn Thực Phẩm & Quy Trình Bếp Một Chiều',
+    environmentSubtitle:
+      'Kiểm tra các trạm sơ chế, bảo quản lạnh và lưu mẫu thực phẩm để ngăn ngừa nguy cơ nhiễm khuẩn chéo',
+    decorStyle: 'FACTORY_PLANT',
+    avatarId: 'FACTORY_ENGINEER',
+    avatarLabel: 'Giám sát An toàn Thực phẩm (QA/HACCP)',
+    palette: {
+      skyTop: '#0F172A',
+      skyBottom: '#134E4A',
+      horizonGlow: '#10B981',
+      groundTop: '#1E293B',
+      groundBottom: '#0F172A',
+      roadSurface: '#0F172A',
+      roadLine: '#34D399',
+      accentColor: '#10B981',
+      buildingPrimary: '#1E293B',
+      buildingSecondary: '#065F46',
+    },
+    obstacleTypes: ['BIOHAZARD_CART', 'CARGO_CRATE', 'BARRIER_GATE'],
+    checkpointNames: [
+      'Trạm Kiểm Định Nguồn Gốc Nguyên Liệu Tươi Sống',
+      'Trạm Giám Sát Nhiệt Độ Tủ Đông & Tủ Mát',
+      'Trạm Sơ Chế Chống Nhiễm Khuẩn Chéo (Sống - Chín)',
+      'Trạm Chế Biến Nhiệt & Vệ Sinh Bề Mặt Bếp',
+      'Trạm Lưu Mẫu Thức Ăn 24h & Kiểm Tra Đầu Ra',
+    ],
+    zoneLabels: [
+      'Khu Tiếp Nhận Nguyên Liệu',
+      'Kho Bảo Quản Lạnh',
+      'Khu Sơ Chế Thực Phẩm',
+      'Bếp Nấu Trung Tâm',
+      'Tủ Lưu Mẫu & Kiểm Định',
+    ],
+  },
+  theme_fnb_service: {
+    presetId: 'theme_fnb_service',
+    industryId: 'FNB_HOSPITALITY',
+    subEnvironment: 'Không Gian Nhà Hàng & Nghệ Thuật Phục Vụ Thực Khách',
+    environmentTitle: 'Tình Huống Phục Vụ Thực Khách & Trải Nghiệm Nhà Hàng',
+    environmentSubtitle:
+      'Tiếp đón thực khách, tư vấn thực đơn, ghi nhận lưu ý dị ứng và xử lý khéo léo các tình huống tại bàn tiệc',
+    decorStyle: 'CORPORATE_PLAZA',
+    avatarId: 'SALES_ADVISOR',
+    avatarLabel: 'Quản lý Sảnh & Chuyên viên Phục vụ',
+    palette: {
+      skyTop: '#1C1917',
+      skyBottom: '#44403C',
+      horizonGlow: '#F59E0B',
+      groundTop: '#292524',
+      groundBottom: '#1C1917',
+      roadSurface: '#1C1917',
+      roadLine: '#FBBF24',
+      accentColor: '#D97706',
+      buildingPrimary: '#292524',
+      buildingSecondary: '#78350F',
+    },
+    obstacleTypes: ['CARGO_CRATE', 'BARRIER_GATE', 'TRAFFIC_CONE'],
+    checkpointNames: [
+      'Quầy Lễ Tân Đón Tiếp & Xếp Bàn Thực Khách',
+      'Bàn Tư Vấn Thực Đơn & Ghi Nhận Dị Ứng',
+      'Trạm Phục Vụ Món Ăn Đúng Thứ Tự Chuẩn',
+      'Tình Huống Xử Lý Khiếu Nại Món Ra Chậm',
+      'Quầy Thanh Toán & Chăm Sóc Hậu Mãi Thực Khách',
+    ],
+    zoneLabels: [
+      'Sảnh Đón Tiếp Nhà Hàng',
+      'Khu Bàn Tiệc Chính',
+      'Quầy Điều Phối Ra Món',
+      'Khu Chăm Sóc Thực Khách',
+      'Quầy Thu Ngân & Tiễn Khách',
+    ],
+  },
   theme_edu_campus: {
     presetId: 'theme_edu_campus',
     industryId: 'EDUCATION_GENERAL',
     subEnvironment: 'Khuôn Viên Học Viện & Hành Trình Tri Thức',
     environmentTitle: 'Hành Trình Khám Phá Tri Thức & Thực Hành',
     environmentSubtitle:
-      'Điều khiển nhân vật vượt qua các thử thách trên đường đi và mở khóa từng trạm kiến thức',
+      'Phân tích các tình huống học thuật - thực tiễn và mở khóa từng trạm kiến thức',
     decorStyle: 'ACADEMY_CAMPUS',
     avatarId: 'EXPLORER_RUNNER',
     avatarLabel: 'Nhà Thám hiểm Tri thức',
@@ -561,9 +713,9 @@ export const INDUSTRY_CATALOG: IndustryCatalogOption[] = [
   {
     industryId: 'MOTORCYCLE_TRAFFIC',
     label: 'Xe máy, Bảo dưỡng & An toàn Giao thông',
-    shortDesc: 'Gara kỹ thuật xe máy, phụ tùng, dầu nhớt hoặc sa hình lái xe an toàn',
+    shortDesc: 'Gara kỹ thuật xe máy, sa hình lái xe an toàn hoặc tư vấn bán xe showroom',
     defaultPresetId: 'theme_moto_garage',
-    presetIds: ['theme_moto_garage', 'theme_moto_circuit'],
+    presetIds: ['theme_moto_garage', 'theme_moto_circuit', 'theme_moto_showroom'],
     icon: '🏍️',
   },
   {
@@ -585,9 +737,9 @@ export const INDUSTRY_CATALOG: IndustryCatalogOption[] = [
   {
     industryId: 'IT_TECHNOLOGY',
     label: 'Công nghệ Thông tin, Phần mềm & An ninh mạng',
-    shortDesc: 'Trung tâm dữ liệu Server/Cloud, kiến trúc phần mềm, Cyber Security',
-    defaultPresetId: 'theme_it_datacenter',
-    presetIds: ['theme_it_datacenter', 'theme_it_cyberlab'],
+    shortDesc: 'Phòng lab lập trình/gỡ lỗi code, trung tâm dữ liệu Cloud, Cyber Security SOC',
+    defaultPresetId: 'theme_it_coding_lab',
+    presetIds: ['theme_it_coding_lab', 'theme_it_cyberlab', 'theme_it_datacenter'],
     icon: '💻',
   },
   {
@@ -609,9 +761,9 @@ export const INDUSTRY_CATALOG: IndustryCatalogOption[] = [
   {
     industryId: 'FNB_HOSPITALITY',
     label: 'F&B, Nhà hàng, Khách sạn & Chuỗi dịch vụ',
-    shortDesc: 'Vận hành chuỗi cửa hàng dịch vụ, vệ sinh an toàn thực phẩm & trải nghiệm khách',
-    defaultPresetId: 'theme_biz_retail',
-    presetIds: ['theme_biz_retail', 'theme_mfg_warehouse'],
+    shortDesc: 'Kiểm soát vệ sinh an toàn thực phẩm bếp (HACCP) & nghệ thuật phục vụ thực khách',
+    defaultPresetId: 'theme_fnb_service',
+    presetIds: ['theme_fnb_kitchen_safety', 'theme_fnb_service', 'theme_biz_retail'],
     icon: '🍽️',
   },
   {
@@ -632,14 +784,183 @@ export const INDUSTRY_CATALOG: IndustryCatalogOption[] = [
   },
 ];
 
+export function resolveGameplayArchetypeDetails(
+  presetId: string,
+  industryId: IndustryId
+): {
+  gameplayArchetype: GameplayArchetype;
+  controlScheme: ControlScheme;
+  questionTriggerMode: QuestionTriggerMode;
+  winConditionSummary: string;
+  interactiveObjects: string[];
+} {
+  if (presetId === 'theme_moto_circuit' || presetId === 'theme_mfg_warehouse') {
+    return {
+      gameplayArchetype: 'TRAFFIC_RUNNER_SIM',
+      controlScheme: 'RUNNER_JUMP_CHECKPOINT',
+      questionTriggerMode: 'CHECKPOINT_GATE',
+      winConditionSummary:
+        'Điều khiển phương tiện vượt chướng ngại vật trên lộ trình và hoàn thành các chốt sát hạch',
+      interactiveObjects:
+        presetId === 'theme_mfg_warehouse'
+          ? [
+              'Cổng Nhập kho & Kiểm đếm',
+              'Hành lang Kệ cao tầng',
+              'Băng chuyền Phân loại',
+              'Trạm Kiểm soát Tồn kho',
+              'Bến Xuất hàng Logistics',
+            ]
+          : [
+              'Chốt Xuất phát & Kiểm tra An toàn',
+              'Giao lộ Tín hiệu & Phân làn',
+              'Đoạn đường Phanh khẩn cấp',
+              'Khu vực Quan sát Điểm mù',
+              'Trạm Sát hạch Về đích',
+            ],
+    };
+  }
+  if (presetId === 'theme_moto_garage') {
+    return {
+      gameplayArchetype: 'DIAGNOSTIC_WORKBENCH_SIM',
+      controlScheme: 'WORKBENCH_NODE_INSPECT',
+      questionTriggerMode: 'COMPONENT_DIAGNOSIS',
+      winConditionSummary:
+        'Quét chẩn đoán từng cụm kỹ thuật xe máy trên bàn máy và xử lý chính xác toàn bộ phiếu bảo dưỡng',
+      interactiveObjects: [
+        'Cụm Động cơ & Dầu nhớt',
+        'Hệ thống Phanh & Lốp an toàn',
+        'Hệ thống Đánh lửa Bugi',
+        'Hệ thống Điện & Ắc quy',
+        'Bộ Truyền động & Nhông xích',
+      ],
+    };
+  }
+  if (presetId === 'theme_mfg_factory' || industryId === 'MANUFACTURING_INDUSTRIAL') {
+    return {
+      gameplayArchetype: 'DIAGNOSTIC_WORKBENCH_SIM',
+      controlScheme: 'WORKBENCH_NODE_INSPECT',
+      questionTriggerMode: 'COMPONENT_DIAGNOSIS',
+      winConditionSummary:
+        'Kiểm tra các trạm máy trên dây chuyền sản xuất, phát hiện lỗi kỹ thuật và xác nhận tiêu chuẩn QA/QC - 5S',
+      interactiveObjects: [
+        'Trạm Bảo hộ PPE & 5S',
+        'Cụm Máy Gia công Cơ khí',
+        'Băng chuyền Lắp ráp Tự động',
+        'Bàn Đo kiểm Chất lượng QA/QC',
+        'Trạm Đóng gói & Xuất xưởng',
+      ],
+    };
+  }
+  if (presetId === 'theme_fnb_kitchen_safety') {
+    return {
+      gameplayArchetype: 'DIAGNOSTIC_WORKBENCH_SIM',
+      controlScheme: 'WORKBENCH_NODE_INSPECT',
+      questionTriggerMode: 'COMPONENT_DIAGNOSIS',
+      winConditionSummary:
+        'Kiểm định từng trạm trong khu bếp một chiều, phát hiện nguy cơ mất vệ sinh an toàn thực phẩm và xác nhận chuẩn HACCP',
+      interactiveObjects: [
+        'Trạm Tiếp nhận & Kiểm tra Nguyên liệu tươi sống',
+        'Tủ Đông & Kho Lạnh Bảo quản Nhiệt độ chuẩn',
+        'Bàn Sơ chế Phân tách Dao thớt Sống - Chín',
+        'Khu Bếp Nấu Trung tâm & Kiểm soát Nhiệt độ',
+        'Tủ Lưu mẫu Thực phẩm 24h & Khử trùng',
+      ],
+    };
+  }
+  if (presetId === 'theme_it_coding_lab') {
+    return {
+      gameplayArchetype: 'DIAGNOSTIC_WORKBENCH_SIM',
+      controlScheme: 'WORKBENCH_NODE_INSPECT',
+      questionTriggerMode: 'COMPONENT_DIAGNOSIS',
+      winConditionSummary:
+        'Phân tích các module mã nguồn trên bàn kiểm thử, chẩn đoán lỗi cú pháp/logic và hoàn thành bộ kiểm thử phần mềm',
+      interactiveObjects: [
+        'Module 01: Kiểm tra Cú pháp & Kiểu dữ liệu',
+        'Module 02: Phân tích Vòng lặp & Luồng điều khiển',
+        'Module 03: Gỡ lỗi (Debug) Exception & Stack Trace',
+        'Module 04: Tối ưu Thuật toán & Cấu trúc dữ liệu',
+        'Module 05: Bộ Kiểm thử Đơn vị (Unit Test Suite)',
+      ],
+    };
+  }
+  if (
+    presetId === 'theme_it_cyberlab' ||
+    presetId === 'theme_it_datacenter' ||
+    industryId === 'IT_TECHNOLOGY'
+  ) {
+    return {
+      gameplayArchetype: 'CYBER_DEFENSE_CONSOLE_SIM',
+      controlScheme: 'SOC_NODE_TRIAGE',
+      questionTriggerMode: 'INCIDENT_CONTAINMENT',
+      winConditionSummary:
+        'Giám sát sơ đồ mạng SOC, cô lập các Node cảnh báo bảo mật và giải quyết phiếu phản ứng sự cố',
+      interactiveObjects: [
+        'Cổng Lọc Email Anti-Phishing',
+        'Trạm Xác thực Đa yếu tố (MFA)',
+        'Kho Dữ liệu Mã hóa (DLP)',
+        'Tường lửa WAF & Quét Lỗ hổng',
+        'Trung tâm Phản ứng Sự cố SOC',
+      ],
+    };
+  }
+  if (presetId === 'theme_moto_showroom') {
+    return {
+      gameplayArchetype: 'SCENARIO_DECISION_SIM',
+      controlScheme: 'SCENARIO_CASE_DECISION',
+      questionTriggerMode: 'CASE_CONSULTATION',
+      winConditionSummary:
+        'Tiếp nhận hồ sơ khách hàng tại từng quầy showroom xe máy, phân tích nhu cầu và đưa ra quyết định tư vấn chốt đơn tối ưu',
+      interactiveObjects: [
+        'Hồ sơ Nhu cầu & Ngân sách Khách hàng',
+        'Khu Trưng bày Dòng xe Chủ lực',
+        'Bảng So sánh Tính năng & Tiết kiệm Nhiên liệu',
+        'Tình huống Tư vấn Trả góp & Xử lý Từ chối',
+        'Quầy Bàn giao Xe & Chăm sóc Hậu mãi',
+      ],
+    };
+  }
+  if (presetId === 'theme_fnb_service') {
+    return {
+      gameplayArchetype: 'SCENARIO_DECISION_SIM',
+      controlScheme: 'SCENARIO_CASE_DECISION',
+      questionTriggerMode: 'CASE_CONSULTATION',
+      winConditionSummary:
+        'Tiếp nhận tình huống tại từng bàn thực khách, tư vấn thực đơn chuẩn xác và xử lý chuyên nghiệp mọi yêu cầu dịch vụ',
+      interactiveObjects: [
+        'Quầy Lễ tân Đón khách & Xác nhận Đặt bàn',
+        'Bàn Thực khách & Tư vấn Thực đơn Đặc sản',
+        'Phiếu Ghi nhận Dị ứng & Yêu cầu Đặc biệt',
+        'Tình huống Xử lý Món ăn Trễ giờ Cao điểm',
+        'Quầy Thanh toán & Chăm sóc Thực khách',
+      ],
+    };
+  }
+  return {
+    gameplayArchetype: 'SCENARIO_DECISION_SIM',
+    controlScheme: 'SCENARIO_CASE_DECISION',
+    questionTriggerMode: 'CASE_CONSULTATION',
+    winConditionSummary:
+      'Tiếp nhận hồ sơ tình huống thực tế, phân tích dữ kiện chuyên môn và ra quyết định chuẩn xác',
+    interactiveObjects: [
+      'Hồ sơ Tình huống Chặng 1',
+      'Dữ kiện Phân tích Chuyên môn',
+      'Tiêu chuẩn Quy trình Nghiệp vụ',
+      'Phương án Xử lý Trọng tâm',
+      'Tổng kết & Đánh giá Chuẩn đầu ra',
+    ],
+  };
+}
+
 export function buildDefaultAdventureConfig(
-  presetId: string = 'theme_moto_garage',
+  presetId: string = 'theme_edu_campus',
   questionCount: number = 5,
   questions?: GameQuestion[]
 ): AdventureConfig {
-  const preset = ADVENTURE_THEME_PRESETS[presetId] || ADVENTURE_THEME_PRESETS.theme_moto_garage;
+  const preset = ADVENTURE_THEME_PRESETS[presetId] || ADVENTURE_THEME_PRESETS.theme_edu_campus;
   const industryOption =
-    INDUSTRY_CATALOG.find(item => item.industryId === preset.industryId) || INDUSTRY_CATALOG[0];
+    INDUSTRY_CATALOG.find(item => item.industryId === preset.industryId) ||
+    INDUSTRY_CATALOG.find(item => item.industryId === 'EDUCATION_GENERAL') ||
+    INDUSTRY_CATALOG[0];
 
   const totalStages = Math.max(1, questions ? questions.length : questionCount);
   const stages: AdventureStage[] = [];
@@ -654,16 +975,19 @@ export function buildDefaultAdventureConfig(
         (i >= preset.checkpointNames.length ? ` #${i + 1}` : ''),
       zoneLabel: `${preset.zoneLabels[i % preset.zoneLabels.length]}${sectionHint}`.slice(0, 120),
       obstacleType: preset.obstacleTypes[i % preset.obstacleTypes.length],
-      hintBanner: `Chặng ${i + 1}/${totalStages}: Vượt chướng ngại vật để mở khóa câu hỏi`,
+      hintBanner: `Chặng ${i + 1}/${totalStages}: Hoàn thành tình huống để mở khóa chặng tiếp theo`,
     });
   }
+
+  const archetypeDetails = resolveGameplayArchetypeDetails(preset.presetId, preset.industryId);
 
   return {
     version: 1,
     industryId: preset.industryId,
     industryLabel: industryOption.label,
     subEnvironment: preset.subEnvironment,
-    learningObjective: 'Vượt qua các chướng ngại vật chuyên ngành và hoàn thành câu hỏi tại từng trạm kiểm tra',
+    learningObjective:
+      'Phân tích tình huống chuyên môn và hoàn thành câu hỏi tại từng trạm kiểm tra',
     aiDetectedIndustry: true,
     aiConfidence: 0.85,
     aiReasoning: 'Được đề xuất dựa trên phân tích nội dung tài liệu nguồn',
@@ -680,6 +1004,11 @@ export function buildDefaultAdventureConfig(
     speedMultiplier: 1,
     reducedMotion: false,
     questionTypes: ['MULTIPLE_CHOICE', 'QUICK_BUTTON'],
+    gameplayArchetype: archetypeDetails.gameplayArchetype,
+    controlScheme: archetypeDetails.controlScheme,
+    questionTriggerMode: archetypeDetails.questionTriggerMode,
+    winConditionSummary: archetypeDetails.winConditionSummary,
+    interactiveObjects: [...archetypeDetails.interactiveObjects],
     stages,
   };
 }
@@ -707,8 +1036,11 @@ export function applyPresetToAdventureConfig(
     });
   }
 
+  const archetypeDetails = resolveGameplayArchetypeDetails(preset.presetId, preset.industryId);
+
   return {
     ...current,
+    industryId: preset.industryId,
     themePresetId: preset.presetId,
     subEnvironment: preset.subEnvironment,
     environmentTitle: preset.environmentTitle,
@@ -718,98 +1050,12 @@ export function applyPresetToAdventureConfig(
     avatarLabel: preset.avatarLabel,
     palette: { ...preset.palette },
     obstacleTypes: [...preset.obstacleTypes],
+    gameplayArchetype: archetypeDetails.gameplayArchetype,
+    controlScheme: archetypeDetails.controlScheme,
+    questionTriggerMode: archetypeDetails.questionTriggerMode,
+    winConditionSummary: archetypeDetails.winConditionSummary,
+    interactiveObjects: [...archetypeDetails.interactiveObjects],
     stages,
-  };
-}
-
-export function resolveGameplayArchetypeDetails(
-  presetId: string,
-  industryId: IndustryId
-): {
-  gameplayArchetype: GameplayArchetype;
-  controlScheme: ControlScheme;
-  questionTriggerMode: QuestionTriggerMode;
-  winConditionSummary: string;
-  interactiveObjects: string[];
-} {
-  if (presetId === 'theme_moto_circuit' || presetId === 'theme_mfg_warehouse') {
-    return {
-      gameplayArchetype: 'TRAFFIC_RUNNER_SIM',
-      controlScheme: 'RUNNER_JUMP_CHECKPOINT',
-      questionTriggerMode: 'CHECKPOINT_GATE',
-      winConditionSummary:
-        'Điều khiển phương tiện vượt chướng ngại vật trên lộ trình và hoàn thành các chốt sát hạch',
-      interactiveObjects: [
-        'Chốt Xuất phát & Kiểm tra An toàn',
-        'Giao lộ Tín hiệu & Phân làn',
-        'Đoạn đường Phanh khẩn cấp',
-        'Khu vực Quan sát Điểm mù',
-        'Trạm Sát hạch Về đích',
-      ],
-    };
-  }
-  if (
-    presetId === 'theme_moto_garage' ||
-    presetId === 'theme_mfg_factory' ||
-    industryId === 'MANUFACTURING_INDUSTRIAL'
-  ) {
-    return {
-      gameplayArchetype: 'DIAGNOSTIC_WORKBENCH_SIM',
-      controlScheme: 'WORKBENCH_NODE_INSPECT',
-      questionTriggerMode: 'COMPONENT_DIAGNOSIS',
-      winConditionSummary:
-        'Quét chẩn đoán từng cụm kỹ thuật/trạm máy trên bàn kỹ thuật và xử lý chính xác toàn bộ phiếu kiểm định',
-      interactiveObjects:
-        industryId === 'MANUFACTURING_INDUSTRIAL'
-          ? [
-              'Trạm Bảo hộ PPE & 5S',
-              'Cụm Máy Gia công Cơ khí',
-              'Băng chuyền Lắp ráp Tự động',
-              'Bàn Đo kiểm Chất lượng QA/QC',
-              'Trạm Đóng gói & Xuất xưởng',
-            ]
-          : [
-              'Cụm Động cơ & Dầu nhớt',
-              'Hệ thống Phanh & Lốp an toàn',
-              'Hệ thống Đánh lửa Bugi',
-              'Hệ thống Điện & Ắc quy',
-              'Bộ Truyền động & Nhông xích',
-            ],
-    };
-  }
-  if (
-    presetId === 'theme_it_cyberlab' ||
-    presetId === 'theme_it_datacenter' ||
-    industryId === 'IT_TECHNOLOGY'
-  ) {
-    return {
-      gameplayArchetype: 'CYBER_DEFENSE_CONSOLE_SIM',
-      controlScheme: 'SOC_NODE_TRIAGE',
-      questionTriggerMode: 'INCIDENT_CONTAINMENT',
-      winConditionSummary:
-        'Giám sát sơ đồ mạng SOC, cô lập các Node cảnh báo bảo mật và giải quyết phiếu phản ứng sự cố',
-      interactiveObjects: [
-        'Cổng Lọc Email Anti-Phishing',
-        'Trạm Xác thực Đa yếu tố (MFA)',
-        'Kho Dữ liệu Mã hóa (DLP)',
-        'Tường lửa WAF & Quét Lỗ hổng',
-        'Trung tâm Phản ứng Sự cố SOC',
-      ],
-    };
-  }
-  return {
-    gameplayArchetype: 'SCENARIO_DECISION_SIM',
-    controlScheme: 'SCENARIO_CASE_DECISION',
-    questionTriggerMode: 'CASE_CONSULTATION',
-    winConditionSummary:
-      'Tiếp nhận hồ sơ tình huống thực tế, phân tích dữ kiện chuyên môn và ra quyết định chuẩn xác',
-    interactiveObjects: [
-      'Hồ sơ Tình huống Chặng 1',
-      'Dữ kiện Phân tích Chuyên môn',
-      'Tiêu chuẩn Quy trình Nghiệp vụ',
-      'Phương án Xử lý Trọng tâm',
-      'Tổng kết & Đánh giá Chuẩn đầu ra',
-    ],
   };
 }
 
@@ -817,9 +1063,10 @@ export function syncAdventureStagesWithQuestions(
   config: AdventureConfig | undefined,
   questions: GameQuestion[]
 ): AdventureConfig {
-  const base = config || buildDefaultAdventureConfig('theme_moto_garage', questions.length || 5, questions);
+  const base =
+    config || buildDefaultAdventureConfig('theme_edu_campus', questions.length || 5, questions);
   const preset =
-    ADVENTURE_THEME_PRESETS[base.themePresetId] || ADVENTURE_THEME_PRESETS.theme_moto_garage;
+    ADVENTURE_THEME_PRESETS[base.themePresetId] || ADVENTURE_THEME_PRESETS.theme_edu_campus;
   const totalStages = Math.max(1, questions.length);
   const stages: AdventureStage[] = [];
   for (let i = 0; i < totalStages; i++) {
@@ -855,4 +1102,3 @@ export function syncAdventureStagesWithQuestions(
     stages,
   };
 }
-
