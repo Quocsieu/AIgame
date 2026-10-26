@@ -289,6 +289,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSavingSpec, setIsSavingSpec] = useState(false);
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
+  const isIngestingRef = useRef(false);
+  const isGeneratingRef = useRef(false);
+  const activeIngestPromiseRef = useRef<Promise<IngestedSource[] | null> | null>(null);
 
   // Modal Chọn chế độ chơi (Luồng 1 & Luồng 2)
   const [isModeModalOpen, setIsModeModalOpen] = useState(false);
@@ -425,8 +428,38 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     setFiles(prev => prev.filter((_, i) => i !== idx));
   };
 
+  const runTrackedIngestion = (
+    ingestTask: () => Promise<IngestedSource[] | null>
+  ): Promise<IngestedSource[] | null> => {
+    if (activeIngestPromiseRef.current) {
+      return activeIngestPromiseRef.current;
+    }
+
+    isIngestingRef.current = true;
+    setIsIngesting(true);
+
+    const trackedPromise = (async () => {
+      try {
+        return await ingestTask();
+      } finally {
+        activeIngestPromiseRef.current = null;
+        isIngestingRef.current = false;
+        setIsIngesting(false);
+      }
+    })();
+
+    activeIngestPromiseRef.current = trackedPromise;
+    return trackedPromise;
+  };
+
   const handleIngest = async (): Promise<string | null> => {
-    if (isIngesting) return null;
+    if (isIngesting || isIngestingRef.current) {
+      if (activeIngestPromiseRef.current) {
+        const awaited = await activeIngestPromiseRef.current;
+        return awaited?.[0]?.sourceId || null;
+      }
+      return null;
+    }
 
     const cleanUrls = urls.map(u => u.trim()).filter(Boolean);
     if (cleanUrls.length === 0 && files.length === 0) {
@@ -470,47 +503,77 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       }
     }
 
-    setIsIngesting(true);
-    const toastId = toast.loading('Đang xử lý và trích xuất nội dung nguồn...');
+    const ingestedList = await runTrackedIngestion(async () => {
+      const toastId = toast.loading('Đang xử lý và trích xuất nội dung nguồn...');
+      try {
+        const sources = await ingestSources({
+          urls: cleanUrls,
+          files,
+        });
+        const validSources = Array.isArray(sources)
+          ? sources.filter(s => s && typeof s.sourceId === 'string' && s.sourceId.trim().length > 0)
+          : [];
+        if (validSources.length === 0) {
+          throw new Error('Không tìm thấy ID nguồn hợp lệ sau khi trích xuất tài liệu.');
+        }
 
-    try {
-      const sources = await ingestSources({
-        urls: cleanUrls,
-        files,
-      });
+        toast.removeToast(toastId);
+        setIngestedSources(validSources);
+        setSelectedSections([]);
+        const totalChars = validSources.reduce(
+          (acc, s) => acc + (s.metadata?.characterCount || 0),
+          0
+        );
 
-      toast.removeToast(toastId);
-      setIngestedSources(sources);
-      setSelectedSections([]);
-      const firstSource = sources[0];
-      const totalChars = sources.reduce((acc, s) => acc + (s.metadata?.characterCount || 0), 0);
+        toast.success(
+          `Đã nạp thành công ${validSources.length} nguồn tài liệu (${totalChars.toLocaleString('vi-VN')} ký tự).`,
+          'Trích xuất thành công'
+        );
+        setCurrentStep(3);
+        return validSources;
+      } catch (err: any) {
+        toast.removeToast(toastId);
+        toast.error(err.message || 'Không thể trích xuất nội dung nguồn.', 'Lỗi nhập dữ liệu');
+        return null;
+      }
+    });
 
-      toast.success(
-        `Đã nạp thành công ${sources.length} nguồn tài liệu (${totalChars.toLocaleString('vi-VN')} ký tự).`,
-        'Trích xuất thành công'
-      );
-      setCurrentStep(3);
-      return firstSource.sourceId;
-    } catch (err: any) {
-      toast.removeToast(toastId);
-      toast.error(err.message || 'Không thể trích xuất nội dung nguồn.', 'Lỗi nhập dữ liệu');
-      return null;
-    } finally {
-      setIsIngesting(false);
-    }
+    return ingestedList?.[0]?.sourceId || null;
   };
 
   const handleGenerate = async (
     targetSourceId?: string,
     overrideSources?: IngestedSource[]
   ): Promise<GameSpecification | null> => {
-    if (isGenerating) return null;
+    if (isGenerating || isGeneratingRef.current) return null;
 
-    const activeSources =
-      overrideSources && overrideSources.length > 0 ? overrideSources : ingestedSources;
-    const sIds = activeSources.map(s => s.sourceId);
-    const primaryId = targetSourceId || sIds[0] || null;
-    if (!primaryId) {
+    let resolvedOverrideSources = overrideSources;
+    if (
+      (!resolvedOverrideSources || resolvedOverrideSources.length === 0) &&
+      activeIngestPromiseRef.current
+    ) {
+      const awaitedSources = await activeIngestPromiseRef.current;
+      if (!awaitedSources || awaitedSources.length === 0) {
+        return null;
+      }
+      resolvedOverrideSources = awaitedSources;
+    }
+
+    const activeSources = (
+      resolvedOverrideSources && resolvedOverrideSources.length > 0
+        ? resolvedOverrideSources
+        : ingestedSources
+    ).filter(s => s && typeof s.sourceId === 'string' && s.sourceId.trim().length > 0);
+
+    const cleanTargetId = typeof targetSourceId === 'string' ? targetSourceId.trim() : '';
+    const sIds = Array.from(
+      new Set([
+        ...(cleanTargetId ? [cleanTargetId] : []),
+        ...activeSources.map(s => s.sourceId.trim()),
+      ])
+    );
+    const primaryId = cleanTargetId || sIds[0] || null;
+    if (!primaryId || sIds.length === 0) {
       toast.error('Vui lòng hoàn thành Bước 2 (Nhập nội dung nguồn) trước.', 'Chưa có nội dung');
       return null;
     }
@@ -535,15 +598,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       return null;
     }
 
+    isGeneratingRef.current = true;
     setIsGenerating(true);
     const toastId = toast.loading('Đang yêu cầu AI tổng hợp câu hỏi và phương án trả lời...');
 
     try {
       const spec = await generateGame({
         sourceId: primaryId,
-
-        sourceIds: sIds.length > 0 ? sIds : [primaryId],
-        sources: activeSources,
+        sourceIds: sIds,
+        sources: activeSources.length > 0 ? activeSources : undefined,
 
         gameType,
         difficulty,
@@ -605,13 +668,32 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       }
       return null;
     } finally {
+      isGeneratingRef.current = false;
       setIsGenerating(false);
     }
   };
 
   const handleCreateGameUnified = async () => {
-    // Chống submit trùng lặp
-    if (isGenerating || isIngesting) {
+    // Chống submit trùng lặp đồng bộ (ngăn double-click trước khi React kịp re-render)
+    if (isGenerating || isGeneratingRef.current) {
+      return;
+    }
+
+    // Nếu quá trình tải/trích xuất nguồn đang diễn ra, tự động đợi hoàn tất rồi mới tạo game (Trường hợp A)
+    if (activeIngestPromiseRef.current || isIngesting || isIngestingRef.current) {
+      if (activeIngestPromiseRef.current) {
+        const awaitedSources = await activeIngestPromiseRef.current;
+        const validAwaited = (awaitedSources || []).filter(
+          s => s && typeof s.sourceId === 'string' && s.sourceId.trim().length > 0
+        );
+        if (validAwaited.length === 0) {
+          return;
+        }
+        setSavedForLater(false);
+        setShowQuestionEditor(false);
+        setIsModeModalOpen(false);
+        await handleGenerate(validAwaited[0].sourceId.trim(), validAwaited);
+      }
       return;
     }
 
@@ -624,8 +706,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     const cleanUrls = urls.map(u => u.trim()).filter(Boolean);
     const hasFiles = files.length > 0;
     const hasTopic = topicFocus.trim().length > 0;
+    const validExistingSources = ingestedSources.filter(
+      s => s && typeof s.sourceId === 'string' && s.sourceId.trim().length > 0
+    );
 
-    if (!cleanUrls.length && !hasFiles && !hasTopic && ingestedSources.length === 0) {
+    if (!cleanUrls.length && !hasFiles && !hasTopic && validExistingSources.length === 0) {
       toast.error('Vui lòng dán link URL, chọn file tài liệu hoặc nhập chủ đề trước khi tạo.', 'Thiếu nguồn nội dung');
       return;
     }
@@ -648,82 +733,71 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       setCustomGameTitle(trimmedTitle);
     }
 
-    let primarySourceId: string | undefined = ingestedSources[0]?.sourceId;
-    let activeSourcesForRun: IngestedSource[] = ingestedSources;
+    let activeSourcesForRun: IngestedSource[] = validExistingSources;
 
     if (sourceTab === 'TOPIC' && hasTopic) {
-      try {
-        setIsIngesting(true);
-        const sources = await ingestSources({ sampleText: topicFocus.trim() });
-        setIngestedSources(sources);
-        activeSourcesForRun = sources;
-        primarySourceId = sources[0]?.sourceId;
-      } catch (err: any) {
-        toast.error(err.message || 'Không thể xử lý nội dung chủ đề.', 'Lỗi nạp chủ đề');
-        return;
-      } finally {
-        setIsIngesting(false);
-      }
+      const ingested = await runTrackedIngestion(async () => {
+        try {
+          const sources = await ingestSources({ sampleText: topicFocus.trim() });
+          setIngestedSources(sources);
+          return sources;
+        } catch (err: any) {
+          toast.error(err.message || 'Không thể xử lý nội dung chủ đề.', 'Lỗi nạp chủ đề');
+          return null;
+        }
+      });
+      if (!ingested || ingested.length === 0) return;
+      activeSourcesForRun = ingested;
     } else if (
       (sourceTab === 'URL' && cleanUrls.length > 0) ||
       (sourceTab === 'FILE' && hasFiles) ||
       cleanUrls.length > 0 ||
       hasFiles
     ) {
-      try {
-        setIsIngesting(true);
-        const sources = await ingestSources({
-          urls: sourceTab === 'URL' || cleanUrls.length > 0 ? cleanUrls : [],
-          files: sourceTab === 'FILE' || hasFiles ? files : [],
-        });
-        setIngestedSources(sources);
-        setSelectedSections([]);
-        activeSourcesForRun = sources;
-        primarySourceId = sources[0]?.sourceId;
-      } catch (err: any) {
-        toast.error(err.message || 'Không thể trích xuất nội dung nguồn.', 'Lỗi nhập dữ liệu');
-        return;
-      } finally {
-        setIsIngesting(false);
-      }
+      const ingested = await runTrackedIngestion(async () => {
+        try {
+          const sources = await ingestSources({
+            urls: sourceTab === 'URL' || cleanUrls.length > 0 ? cleanUrls : [],
+            files: sourceTab === 'FILE' || hasFiles ? files : [],
+          });
+          setIngestedSources(sources);
+          setSelectedSections([]);
+          return sources;
+        } catch (err: any) {
+          toast.error(err.message || 'Không thể trích xuất nội dung nguồn.', 'Lỗi nhập dữ liệu');
+          return null;
+        }
+      });
+      if (!ingested || ingested.length === 0) return;
+      activeSourcesForRun = ingested;
     } else if (hasTopic) {
-      try {
-        setIsIngesting(true);
-        const sources = await ingestSources({ sampleText: topicFocus.trim() });
-        setIngestedSources(sources);
-        activeSourcesForRun = sources;
-        primarySourceId = sources[0]?.sourceId;
-      } catch (err: any) {
-        toast.error(err.message || 'Không thể xử lý nội dung chủ đề.', 'Lỗi nạp chủ đề');
-        return;
-      } finally {
-        setIsIngesting(false);
-      }
+      const ingested = await runTrackedIngestion(async () => {
+        try {
+          const sources = await ingestSources({ sampleText: topicFocus.trim() });
+          setIngestedSources(sources);
+          return sources;
+        } catch (err: any) {
+          toast.error(err.message || 'Không thể xử lý nội dung chủ đề.', 'Lỗi nạp chủ đề');
+          return null;
+        }
+      });
+      if (!ingested || ingested.length === 0) return;
+      activeSourcesForRun = ingested;
     }
 
-    if (!primarySourceId && hasTopic && !cleanUrls.length && !hasFiles) {
-      try {
-        setIsIngesting(true);
-        const sources = await ingestSources({ sampleText: topicFocus.trim() });
-        setIngestedSources(sources);
-        primarySourceId = sources[0]?.sourceId;
-      } catch (err: any) {
-        toast.error(err.message || 'Không thể xử lý nội dung chủ đề.', 'Lỗi nạp chủ đề');
-        return;
-      } finally {
-        setIsIngesting(false);
-      }
-    }
-    if (!primarySourceId && (cleanUrls.length > 0 || hasFiles)) {
-      const newSourceId = await handleIngest();
-      if (!newSourceId) return;
-      primarySourceId = newSourceId;
+    const validActiveSources = activeSourcesForRun.filter(
+      s => s && typeof s.sourceId === 'string' && s.sourceId.trim().length > 0
+    );
+    const primarySourceId = validActiveSources[0]?.sourceId?.trim();
+    if (!primarySourceId || validActiveSources.length === 0) {
+      toast.error('Không tìm thấy ID nguồn hợp lệ. Vui lòng nhập nội dung nguồn trước.', 'Thiếu nguồn nội dung');
+      return;
     }
 
     setSavedForLater(false);
     setShowQuestionEditor(false);
     setIsModeModalOpen(false);
-    await handleGenerate(primarySourceId, activeSourcesForRun);
+    await handleGenerate(primarySourceId, validActiveSources);
   };
 
   // Validate entire specification before Room Creation or Single-Player Practice

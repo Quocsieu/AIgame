@@ -163,7 +163,19 @@ gameRouter.post(
       const requestData = parseResult.data;
 
       // 2. Retrieve normalized source content from sources passback or store fallback
-      const sourceIds: string[] = requestData.sourceIds || (requestData.sourceId ? [requestData.sourceId] : []);
+      const sourceIds: string[] = Array.from(
+        new Set(
+          [
+            ...(Array.isArray(requestData.sourceIds) ? requestData.sourceIds : []),
+            ...(typeof requestData.sourceId === 'string' ? [requestData.sourceId] : []),
+            ...(Array.isArray(requestData.sources)
+              ? requestData.sources.map(s => s?.sourceId)
+              : []),
+          ]
+            .map(id => (typeof id === 'string' ? id.trim() : ''))
+            .filter(id => id.length > 0)
+        )
+      );
 
       // Verify ownership access on stored sources if any
       for (const sid of sourceIds) {
@@ -178,12 +190,23 @@ gameRouter.post(
         }
       }
 
+      const validInlineSources = Array.isArray(requestData.sources)
+        ? requestData.sources.filter(
+            doc => doc && typeof doc.sourceId === 'string' && doc.sourceId.trim().length > 0
+          )
+        : [];
+      const storedDocuments = sourceStore.getMany(sourceIds);
       const documents =
-        requestData.sources && requestData.sources.length > 0
-          ? requestData.sources
-          : sourceStore.getMany(sourceIds);
+        validInlineSources.length > 0 ? validInlineSources : storedDocuments;
 
       if (documents.length === 0) {
+        if (sourceIds.length === 0) {
+          throw new AppError(
+            'INVALID_REQUEST',
+            'Request validation failed: sourceId: Either "sourceId", "sourceIds", or "sources" must be provided.',
+            400
+          );
+        }
         throw new AppError(
           'SOURCE_NOT_FOUND',
           `None of the requested source IDs (${sourceIds.join(', ')}) were found in the system. Please ingest source content first.`,
@@ -241,11 +264,17 @@ gameRouter.post(
   (req: Request, res: Response, next: NextFunction) => {
     try {
       const body = req.body || {};
-      const sourceIds: string[] = Array.isArray(body.sourceIds)
-        ? body.sourceIds
-        : typeof body.sourceId === 'string'
-          ? [body.sourceId]
-          : [];
+      const sourceIds: string[] = Array.from(
+        new Set(
+          [
+            ...(Array.isArray(body.sourceIds) ? body.sourceIds : []),
+            ...(typeof body.sourceId === 'string' ? [body.sourceId] : []),
+            ...(Array.isArray(body.sources) ? body.sources.map((s: any) => s?.sourceId) : []),
+          ]
+            .map(id => (typeof id === 'string' ? id.trim() : ''))
+            .filter(id => id.length > 0)
+        )
+      );
       const documents =
         Array.isArray(body.sources) && body.sources.length > 0
           ? body.sources

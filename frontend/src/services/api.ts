@@ -212,7 +212,18 @@ export async function ingestSources(params: {
     (err as any).code = data.error?.code;
     throw err;
   }
-  return data.data.sources;
+  const rawSources: IngestedSource[] = Array.isArray(data?.data?.sources) ? data.data.sources : [];
+  const validSources = rawSources.filter(
+    s => s && typeof s.sourceId === 'string' && s.sourceId.trim().length > 0
+  );
+  if (validSources.length === 0) {
+    const err = new Error(
+      'Không tìm thấy nội dung hoặc ID nguồn hợp lệ sau khi trích xuất tài liệu. Vui lòng kiểm tra lại tệp hoặc URL.'
+    );
+    (err as any).code = 'INGESTION_EMPTY_SOURCE_ID';
+    throw err;
+  }
+  return validSources;
 }
 
 export async function generateGame(params: {
@@ -230,10 +241,44 @@ export async function generateGame(params: {
   mixedDistribution?: MixedQuestionDistribution;
   adventureConfig?: Partial<AdventureConfig>;
 }): Promise<GameSpecification> {
+  const validSources = Array.isArray(params.sources)
+    ? params.sources.filter(
+        s => s && typeof s.sourceId === 'string' && s.sourceId.trim().length > 0
+      )
+    : undefined;
+  const cleanSourceIds = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(params.sourceIds) ? params.sourceIds : []),
+        ...(typeof params.sourceId === 'string' ? [params.sourceId] : []),
+        ...((validSources || []).map(s => s.sourceId)),
+      ]
+        .map(id => (typeof id === 'string' ? id.trim() : ''))
+        .filter(id => id.length > 0)
+    )
+  );
+  const cleanPrimaryId =
+    (typeof params.sourceId === 'string' && params.sourceId.trim().length > 0
+      ? params.sourceId.trim()
+      : undefined) || cleanSourceIds[0];
+
+  if (!cleanPrimaryId && cleanSourceIds.length === 0 && (!validSources || validSources.length === 0)) {
+    const err = new Error('Vui lòng nạp nội dung nguồn hợp lệ trước khi tạo trò chơi.');
+    (err as any).code = 'SOURCE_ID_MISSING';
+    throw err;
+  }
+
+  const sanitizedPayload = {
+    ...params,
+    sourceId: cleanPrimaryId,
+    sourceIds: cleanSourceIds,
+    sources: validSources && validSources.length > 0 ? validSources : undefined,
+  };
+
   const res = await fetch(`${API_BASE_URL}/games/generate`, {
     method: 'POST',
     headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(params),
+    body: JSON.stringify(sanitizedPayload),
   });
   const data = await res.json();
   if (!data.success) {

@@ -240,10 +240,24 @@ export const GenerateGameRequestSchema = z.object({
   adventureSelectionMode: z.enum(['AI_DETECT', 'MANUAL']).optional(),
   adventureConfig: GenerateAdventureConfigInputSchema.optional(),
 
-}).refine(data => data.sourceId || (data.sourceIds && data.sourceIds.length > 0) || (data.sources && data.sources.length > 0), {
-  message: 'Either "sourceId", "sourceIds", or "sources" must be provided.',
-  path: ['sourceId'],
-});
+}).refine(
+  data => {
+    const hasValidSourceId =
+      typeof data.sourceId === 'string' && data.sourceId.trim().length > 0;
+    const hasValidSourceIds =
+      Array.isArray(data.sourceIds) &&
+      data.sourceIds.some(id => typeof id === 'string' && id.trim().length > 0);
+    const hasValidSources =
+      Array.isArray(data.sources) &&
+      data.sources.length > 0 &&
+      data.sources.some(s => typeof s?.sourceId === 'string' && s.sourceId.trim().length > 0);
+    return hasValidSourceId || hasValidSourceIds || hasValidSources;
+  },
+  {
+    message: 'Either "sourceId", "sourceIds", or "sources" must be provided.',
+    path: ['sourceId'],
+  }
+);
 export type GenerateGameRequest = z.infer<typeof GenerateGameRequestSchema>;
 
 export const UpdateGameQuestionsRequestSchema = z.object({
