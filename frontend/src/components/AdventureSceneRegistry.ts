@@ -1,4 +1,9 @@
 import type { AdventureConfig, GameplayArchetype, IndustryId } from '../types/index.js';
+import {
+  ADVENTURE_THEME_PRESETS,
+  INDUSTRY_CATALOG,
+  resolveGameplayArchetypeDetails,
+} from '../config/adventureThemes.js';
 
 export type SceneRendererId =
   | 'TRAFFIC_ROAD_RUNNER_SCENE'
@@ -66,15 +71,37 @@ export interface SceneRendererDescriptor {
  * from an AdventureConfig (considering gameplayArchetype, themePresetId, and industryId).
  */
 export function resolveSceneRendererDescriptor(config: AdventureConfig): SceneRendererDescriptor {
-  const presetId = config.themePresetId || '';
-  const archetype: GameplayArchetype = config.gameplayArchetype || 'DIAGNOSTIC_WORKBENCH_SIM';
-  const industryId: IndustryId = config.industryId || 'EDUCATION_GENERAL';
+  const rawPresetId = config.themePresetId || '';
+  const rawPreset = rawPresetId ? ADVENTURE_THEME_PRESETS[rawPresetId] : undefined;
+  const industryId: IndustryId = config.industryId || rawPreset?.industryId || 'EDUCATION_GENERAL';
+  const industryCatalogEntry = INDUSTRY_CATALOG.find(item => item.industryId === industryId);
+
+  const presetId =
+    rawPreset &&
+    (industryId === 'CUSTOM' ||
+      !config.industryId ||
+      rawPreset.industryId === industryId ||
+      industryCatalogEntry?.presetIds.includes(rawPresetId))
+      ? rawPresetId
+      : industryCatalogEntry?.defaultPresetId || rawPresetId;
+
+  const archetypeFallback = resolveGameplayArchetypeDetails(presetId, industryId);
+  const archetype: GameplayArchetype =
+    config.gameplayArchetype &&
+    (industryId === 'CUSTOM' ||
+      !presetId ||
+      config.gameplayArchetype === archetypeFallback.gameplayArchetype)
+      ? config.gameplayArchetype
+      : archetypeFallback.gameplayArchetype;
 
   // 1. TRAFFIC / LOGISTICS ROAD RUNNER SCENE
   if (
-    archetype === 'TRAFFIC_RUNNER_SIM' ||
     presetId === 'theme_moto_circuit' ||
-    presetId === 'theme_mfg_warehouse'
+    presetId === 'theme_mfg_warehouse' ||
+    ((industryId === 'MOTORCYCLE_TRAFFIC' ||
+      industryId === 'MANUFACTURING_INDUSTRIAL' ||
+      industryId === 'CUSTOM') &&
+      archetype === 'TRAFFIC_RUNNER_SIM')
   ) {
     const isWarehouse =
       presetId === 'theme_mfg_warehouse' || industryId === 'MANUFACTURING_INDUSTRIAL';
@@ -245,7 +272,10 @@ export function resolveSceneRendererDescriptor(config: AdventureConfig): SceneRe
   }
 
   // 3. CODING IDE & SOFTWARE DEBUGGER SCENE (IT Coding / Debugging)
-  if (presetId === 'theme_it_coding_lab') {
+  if (
+    presetId === 'theme_it_coding_lab' ||
+    (industryId === 'IT_TECHNOLOGY' && archetype === 'DIAGNOSTIC_WORKBENCH_SIM')
+  ) {
     return {
       sceneId: 'CODING_IDE_DEBUGGER_SCENE',
       sceneBadge: 'IDE PHÂN TÍCH MÃ NGUỒN & DEBUGGER',
@@ -324,9 +354,12 @@ export function resolveSceneRendererDescriptor(config: AdventureConfig): SceneRe
 
   // 4. MECHANICAL DIAGNOSTIC GARAGE & FACTORY WORKBENCH SCENE
   if (
-    archetype === 'DIAGNOSTIC_WORKBENCH_SIM' ||
     presetId === 'theme_moto_garage' ||
-    presetId === 'theme_mfg_factory'
+    presetId === 'theme_mfg_factory' ||
+    ((industryId === 'MOTORCYCLE_TRAFFIC' ||
+      industryId === 'MANUFACTURING_INDUSTRIAL' ||
+      industryId === 'CUSTOM') &&
+      archetype === 'DIAGNOSTIC_WORKBENCH_SIM')
   ) {
     const isFactory =
       presetId === 'theme_mfg_factory' || industryId === 'MANUFACTURING_INDUSTRIAL';

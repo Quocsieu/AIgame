@@ -1183,7 +1183,7 @@ export const INDUSTRY_CATALOG: IndustryCatalogItem[] = [
     industryId: 'FNB_HOSPITALITY',
     label: 'F&B, Nhà hàng, Khách sạn & Chuỗi dịch vụ',
     shortDesc: 'Kiểm soát vệ sinh an toàn thực phẩm bếp (HACCP) & nghệ thuật phục vụ thực khách',
-    defaultPresetId: 'theme_fnb_service',
+    defaultPresetId: 'theme_fnb_kitchen_safety',
     presetIds: ['theme_fnb_kitchen_safety', 'theme_fnb_service', 'theme_biz_retail'],
     keywords: [
       'nhà hàng',
@@ -1196,6 +1196,12 @@ export const INDUSTRY_CATALOG: IndustryCatalogItem[] = [
       'thực khách',
       'thực đơn',
       'bếp',
+      'nhà bếp',
+      'đầu bếp',
+      'nấu ăn',
+      'chế biến',
+      'món ăn',
+      'nguyên liệu',
       'vệ sinh an toàn thực phẩm',
       'nhiễm khuẩn chéo',
       'lưu mẫu thức ăn',
@@ -1230,10 +1236,17 @@ export function analyzeSourceContentForAdventure(
     questions?: GameQuestion[];
   }
 ): AdventureConfig {
-  const combinedText = [
+  const priorityText = [
     options?.topicFocus || '',
     options?.customIndustryLabel || '',
-    ...documents.map(d => `${d.title || ''} ${d.text || ''}`),
+    ...documents.map(d => d.title || ''),
+  ]
+    .join(' \n ')
+    .toLowerCase();
+
+  const combinedText = [
+    priorityText,
+    ...documents.map(d => d.text || ''),
     ...(options?.questions || []).map(q => `${q.question || ''} ${q.explanation || ''}`),
   ]
     .join(' \n ')
@@ -1250,8 +1263,12 @@ export function analyzeSourceContentForAdventure(
     let score = 0;
     const hits: string[] = [];
     for (const kw of item.keywords) {
-      if (combinedText.includes(kw.toLowerCase())) {
+      const normalizedKw = kw.toLowerCase();
+      if (combinedText.includes(normalizedKw)) {
         score += kw.includes(' ') ? 3 : 1;
+        if (priorityText.includes(normalizedKw)) {
+          score += 4;
+        }
         hits.push(kw);
       }
     }
@@ -1422,6 +1439,11 @@ export function analyzeSourceContentForAdventure(
       'lưu mẫu',
       'nguyên liệu tươi sống',
       'sơ chế',
+      'nhà bếp',
+      'bếp một chiều',
+      'đầu bếp',
+      'nấu ăn',
+      'chế biến',
     ].filter(w => combinedText.includes(w)).length;
     const serviceHits = [
       'phục vụ khách hàng',
@@ -1440,7 +1462,9 @@ export function analyzeSourceContentForAdventure(
     ].filter(w => combinedText.includes(w)).length;
 
     selectedPresetId =
-      foodSafetyHits > serviceHits ? 'theme_fnb_kitchen_safety' : 'theme_fnb_service';
+      foodSafetyHits > serviceHits || (foodSafetyHits === serviceHits && serviceHits < 2)
+        ? 'theme_fnb_kitchen_safety'
+        : 'theme_fnb_service';
   }
 
   const preset =
@@ -1546,6 +1570,13 @@ export function sanitizeAdventureConfig(
   const parsedIndustry = IndustryIdEnum.safeParse(candidate.industryId);
   const industryId = parsedIndustry.success ? parsedIndustry.data : fallback.industryId;
   const catalogForIndustry = INDUSTRY_CATALOG.find(i => i.industryId === industryId);
+  const fallbackPresetMatchesIndustry =
+    !catalogForIndustry ||
+    industryId === 'CUSTOM' ||
+    catalogForIndustry.presetIds.includes(fallback.themePresetId);
+  const safeFallbackPresetId = fallbackPresetMatchesIndustry
+    ? fallback.themePresetId
+    : catalogForIndustry.defaultPresetId;
 
   const presetId =
     typeof candidate.themePresetId === 'string' &&
@@ -1554,7 +1585,7 @@ export function sanitizeAdventureConfig(
       industryId === 'CUSTOM' ||
       catalogForIndustry.presetIds.includes(candidate.themePresetId))
       ? candidate.themePresetId
-      : fallback.themePresetId;
+      : safeFallbackPresetId;
   const preset = ADVENTURE_THEME_PRESETS[presetId] || ADVENTURE_THEME_PRESETS.theme_edu_campus;
 
   const parsedAvatar = AvatarIdEnum.safeParse(candidate.avatarId);
@@ -1642,10 +1673,8 @@ export function sanitizeAdventureConfig(
   const parsedArchetype = GameplayArchetypeEnum.safeParse(candidate.gameplayArchetype);
   const gameplayArchetype: GameplayArchetype =
     parsedArchetype.success &&
-    (!candidate.themePresetId ||
-      preset.gameplayArchetype === parsedArchetype.data ||
-      industryId === 'CUSTOM' ||
-      industryId === 'EDUCATION_GENERAL')
+    (preset.gameplayArchetype === parsedArchetype.data ||
+      (industryId === 'CUSTOM' && Boolean(candidate.gameplayArchetype)))
       ? parsedArchetype.data
       : preset.gameplayArchetype || fallback.gameplayArchetype;
 

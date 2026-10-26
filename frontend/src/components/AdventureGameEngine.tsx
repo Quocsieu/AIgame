@@ -624,8 +624,10 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   }, [activeQuestion, activeStageIndex, isPaused]);
 
   const handleCollectArenaBonus = useCallback((bonusPoints: number) => {
-    setSkillBonusScore(prev => prev + bonusPoints);
-    playClickSound();
+    setSkillBonusScore(prev => Math.max(0, prev + bonusPoints));
+    if (bonusPoints > 0) {
+      playClickSound();
+    }
   }, []);
 
   const handleArenaHazardHit = useCallback(() => {
@@ -1261,14 +1263,15 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         const horizontalOverlap = playerRight > obsLeft + 4 && playerLeft < obsRight - 4;
         const verticalOverlap = playerBottom > obsTop + 6 && playerTop < 0;
 
-        if (horizontalOverlap && verticalOverlap && now > p.invulnerableUntil) {
+        if (!obs.hit && horizontalOverlap && verticalOverlap && now > p.invulnerableUntil) {
           obs.hit = true;
           p.invulnerableUntil = now + 900;
           p.playerX = Math.max(40, obsLeft - 28);
           p.vy = -260;
           p.isGrounded = false;
           setObstaclesHitCount(prev => prev + 1);
-          setEnergyPercent(prev => Math.max(10, prev - 10));
+          setEnergyPercent(prev => Math.max(10, prev - 12));
+          setSkillBonusScore(prev => Math.max(0, prev - 5));
           spawnBurstParticles(obs.x + obs.width / 2, -obs.height / 2, '#EF4444');
           spawnFloatingText(
             obs.x,
@@ -1698,7 +1701,10 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             }}
           >
             <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 500 }}>Điểm</span>
-            <strong style={{ fontSize: '14px', color: accentHex, fontWeight: 700 }}>
+            <strong
+              data-testid="hud-total-score"
+              style={{ fontSize: '14px', color: accentHex, fontWeight: 700 }}
+            >
               {totalDisplayScore}
             </strong>
           </div>
@@ -1714,6 +1720,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           >
             <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 500 }}>An toàn</span>
             <strong
+              data-testid="hud-safety-percent"
               style={{
                 fontSize: '14px',
                 color: energyPercent >= 50 ? '#3fc07a' : '#e5566f',
@@ -2645,6 +2652,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 <div style={{ padding: '14px 16px', borderRight: '1px solid #222d42' }}>
                   <div style={{ fontSize: '12px', color: '#94a3b8' }}>Tổng điểm</div>
                   <div
+                    data-testid="victory-total-score"
                     style={{
                       fontSize: '25px',
                       fontWeight: 700,
@@ -2652,8 +2660,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       marginTop: '4px',
                     }}
                   >
-                    {(mode === 'LIVE_SESSION' ? liveFinalResult?.totalScore || 0 : previewScore) +
-                      skillBonusScore}
+                    {(mode === 'LIVE_SESSION'
+                      ? (liveFinalResult?.totalScore ?? liveScore)
+                      : previewScore) + skillBonusScore}
                   </div>
                 </div>
 

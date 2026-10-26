@@ -531,6 +531,7 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
   );
 
   const handleCalibrateTorque = useCallback(() => {
+    if (calibratedRef.current) return;
     calibratedRef.current = true;
     setCalibrated(true);
     onCollectBonus?.(10);
@@ -541,11 +542,12 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
   }, [onCollectBonus, addPopup, onInspectStage, selectedToolId]);
 
   const handleTriggerFullRepair = useCallback(() => {
+    if (stageInspected) return;
     calibratedRef.current = true;
     setCalibrated(true);
     addPopup(activePart.x, activePart.y - 22, '+15Đ', '#38bdf8');
     onInspectStage(selectedToolId);
-  }, [activePart.x, activePart.y, addPopup, onInspectStage, selectedToolId]);
+  }, [stageInspected, activePart.x, activePart.y, addPopup, onInspectStage, selectedToolId]);
 
   // Space key tightens remaining bolts and locks torque calibration
   useEffect(() => {
@@ -755,11 +757,15 @@ export const MechanicalDiagnosticGarageScene: React.FC<InteractiveSceneCommonPro
           return (
             <g
               key={part.code}
-              data-testid={isTarget ? 'garage-engage-repair-btn' : undefined}
+              data-testid={isTarget ? 'garage-engage-repair-btn' : `garage-wrong-part-${idx}`}
               style={{ cursor: 'pointer' }}
               onClick={() => {
                 if (isTarget) {
                   handleTriggerFullRepair();
+                } else if (!isFixed) {
+                  onHazardHit?.();
+                  onCollectBonus?.(-5);
+                  addPopup(part.x, part.y - 14, 'SAI CỤM -5Đ', '#e5566f');
                 }
               }}
             >
@@ -1064,6 +1070,7 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
 
   const handleChopOrCookInLane = useCallback(
     (targetLane?: 0 | 1 | 2) => {
+      if (stageInspected || lockedStageRef.current === activeStageIndex) return;
       const laneToUse = targetLane !== undefined ? targetLane : chefLaneRef.current;
       setChefLane(laneToUse);
       onCollectBonus?.(10);
@@ -1077,7 +1084,7 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
         return next;
       });
     },
-    [activeStageIndex, selectedToolId, onCollectBonus, onInspectStage, addPopup]
+    [stageInspected, activeStageIndex, selectedToolId, onCollectBonus, onInspectStage, addPopup]
   );
 
   // Keyboard A/D or Left/Right to switch lanes; Space to chop/cook
@@ -1288,12 +1295,15 @@ export const KitchenFoodSafetyLabScene: React.FC<InteractiveSceneCommonProps> = 
           return (
             <g
               key={item.id}
+              data-testid={item.isHazard ? 'kitchen-hazard-item' : `kitchen-ingredient-${item.id}`}
               style={{ cursor: 'pointer' }}
               onClick={e => {
                 e.stopPropagation();
                 if (item.isHazard) {
-                  onCollectBonus?.(10);
-                  addPopup(ix, item.y, '+10Đ', '#38bdf8');
+                  onHazardHit?.();
+                  onCollectBonus?.(-5);
+                  setDishProgress(prev => Math.max(0, prev - 15));
+                  addPopup(ix, item.y, 'NHIỄM KHUẨN -5Đ', '#e5566f');
                   setItems(prev => prev.map(it => (it.id === item.id ? { ...it, y: 38 } : it)));
                 } else {
                   handleChopOrCookInLane(item.lane);
@@ -1494,6 +1504,7 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
   const [popups, setPopups] = useState<FloatingFeedbackText[]>([]);
   const cartDirRef = useRef<1 | -1>(1);
   const carryingRef = useRef<number | null>(null);
+  const shelfBonusClaimedRef = useRef<boolean>(false);
 
   useEffect(() => {
     carryingRef.current = carryingIdx;
@@ -1502,6 +1513,7 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
   useEffect(() => {
     setCarryingIdx(null);
     carryingRef.current = null;
+    shelfBonusClaimedRef.current = false;
     setAdvisorPos({ x: 215, y: 146 });
     setPatience(100);
   }, [activeStageIndex]);
@@ -1531,26 +1543,58 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
 
   const handlePickShelfItem = useCallback(
     (shelfIdx: number) => {
+      if (stageInspected) return;
       const shelf = shelfCatalog[shelfIdx] || shelfCatalog[0];
       setAdvisorPos({ x: 175, y: shelf.y });
       setCarryingIdx(shelfIdx);
       carryingRef.current = shelfIdx;
-      onCollectBonus?.(10);
-      addPopup(120, shelf.y - 18, '+10Đ', '#3fc07a');
+      if (shelfIdx === activeCustomer.wantShelf) {
+        if (!shelfBonusClaimedRef.current) {
+          shelfBonusClaimedRef.current = true;
+          onCollectBonus?.(10);
+          addPopup(120, shelf.y - 18, '+10Đ', '#3fc07a');
+        } else {
+          addPopup(120, shelf.y - 18, 'ĐÃ CHỌN MẪU', '#38bdf8');
+        }
+      } else {
+        addPopup(120, shelf.y - 18, 'SAI MẪU YÊU CẦU!', '#eab308');
+      }
     },
-    [onCollectBonus, addPopup]
+    [stageInspected, activeCustomer.wantShelf, onCollectBonus, addPopup]
   );
 
   const handleDeliverToCustomer = useCallback(() => {
+    if (stageInspected) return;
+    if (carryingRef.current !== null && carryingRef.current !== activeCustomer.wantShelf) {
+      setAdvisorPos({ x: 365, y: 146 });
+      setCarryingIdx(null);
+      carryingRef.current = null;
+      setPatience(prev => Math.max(15, prev - 20));
+      onHazardHit?.();
+      onCollectBonus?.(-5);
+      addPopup(445, 92, 'GIAO SAI MẪU -5Đ', '#e5566f');
+      return;
+    }
     if (carryingRef.current === null) {
       setCarryingIdx(activeCustomer.wantShelf);
       carryingRef.current = activeCustomer.wantShelf;
-      onCollectBonus?.(10);
+      if (!shelfBonusClaimedRef.current) {
+        shelfBonusClaimedRef.current = true;
+        onCollectBonus?.(10);
+      }
     }
     setAdvisorPos({ x: 365, y: 146 });
     addPopup(445, 92, '+15Đ', '#3fc07a');
     onInspectStage(selectedToolId);
-  }, [activeCustomer.wantShelf, onCollectBonus, addPopup, onInspectStage, selectedToolId]);
+  }, [
+    stageInspected,
+    activeCustomer.wantShelf,
+    onHazardHit,
+    onCollectBonus,
+    addPopup,
+    onInspectStage,
+    selectedToolId,
+  ]);
 
   // Keyboard 1-3 picks shelf; Space picks required item or delivers to customer
   useEffect(() => {
@@ -1880,6 +1924,8 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
     bugDir: 1 as 1 | -1,
     portalTriggeredStage: -1,
   });
+  const bugAliveRef = useRef<boolean>(true);
+  const hazardCooldownRef = useRef<number>(0);
 
   useEffect(() => {
     physRef.current.x = 58;
@@ -1887,6 +1933,7 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
     physRef.current.vx = 0;
     physRef.current.vy = 0;
     physRef.current.grounded = true;
+    bugAliveRef.current = true;
     setBotPos({ x: 58, y: 246 });
     setBugAlive(true);
     setOrbsCollected([false, false]);
@@ -1908,6 +1955,8 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
   }, []);
 
   const handleShootBugLaser = useCallback(() => {
+    if (!bugAliveRef.current) return;
+    bugAliveRef.current = false;
     setLaserBeam({ x1: physRef.current.x + 12, y1: physRef.current.y - 18, x2: bugX, y2: 132 });
     setBugAlive(false);
     onCollectBonus?.(10);
@@ -1916,12 +1965,14 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
   }, [bugX, onCollectBonus, addPopup]);
 
   const handleReachPortalNow = useCallback(() => {
+    if (stageInspected) return;
+    physRef.current.portalTriggeredStage = activeStageIndex;
     physRef.current.x = 475;
     physRef.current.y = 98;
     setBotPos({ x: 475, y: 98 });
     addPopup(475, 58, '+15Đ', '#38bdf8');
     onInspectStage(selectedToolId);
-  }, [addPopup, onInspectStage, selectedToolId]);
+  }, [stageInspected, activeStageIndex, addPopup, onInspectStage, selectedToolId]);
 
   useEffect(() => {
     if (isPaused || stageInspected) return;
@@ -1996,6 +2047,22 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
           nextBx = 268;
           p.bugDir = 1;
         }
+        const now = Date.now();
+        const hitPit = p.y >= 242 && p.x >= 208 && p.x <= 266;
+        const hitBug =
+          bugAliveRef.current && Math.abs(p.x - nextBx) < 18 && Math.abs(p.y - 144) < 18;
+        if ((hitPit || hitBug) && now > hazardCooldownRef.current) {
+          hazardCooldownRef.current = now + 900;
+          p.x = 58;
+          p.y = 246;
+          p.vx = 0;
+          p.vy = 0;
+          p.grounded = true;
+          setBotPos({ x: 58, y: 246 });
+          onHazardHit?.();
+          onCollectBonus?.(-5);
+          addPopup(hitPit ? 240 : nextBx, hitPit ? 218 : 112, 'CHẠM BẪY -5Đ', '#e5566f');
+        }
         return nextBx;
       });
 
@@ -2022,7 +2089,16 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
     }, 35);
 
     return () => clearInterval(timer);
-  }, [isPaused, stageInspected, activeStageIndex, selectedToolId, onCollectBonus, onInspectStage, addPopup]);
+  }, [
+    isPaused,
+    stageInspected,
+    activeStageIndex,
+    selectedToolId,
+    onHazardHit,
+    onCollectBonus,
+    onInspectStage,
+    addPopup,
+  ]);
 
   return (
     <div
@@ -2090,10 +2166,12 @@ export const CodingIdeDebuggerScene: React.FC<InteractiveSceneCommonProps> = pro
 
         {/* Red Laser Sawteeth Hazard Pit on Ground Floor (No Text!) */}
         <g
+          data-testid="coding-hazard-pit"
           style={{ cursor: 'pointer' }}
           onClick={() => {
             onHazardHit?.();
-            addPopup(240, 222, '-8%', '#e5566f');
+            onCollectBonus?.(-5);
+            addPopup(240, 222, 'CHẠM BẪY -5Đ', '#e5566f');
           }}
         >
           <polygon
@@ -2311,13 +2389,16 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
 
   const shieldAngleRef = useRef<number>(0);
   const lockedWaveRef = useRef<number>(-1);
+  const interceptedCountRef = useRef<number>(0);
 
   useEffect(() => {
     shieldAngleRef.current = shieldAngle;
   }, [shieldAngle]);
 
   useEffect(() => {
-    setInterceptedCount(stageInspected ? 3 : 0);
+    const initialCount = stageInspected ? 3 : 0;
+    interceptedCountRef.current = initialCount;
+    setInterceptedCount(initialCount);
     setPackets([
       { id: 1, angle: 0.4, dist: 120, spriteKind: 'MISSILE' },
       { id: 2, angle: 2.4, dist: 136, spriteKind: 'SPIDER' },
@@ -2331,8 +2412,10 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
 
   const handleFireFirewallPulse = useCallback(
     (targetPacket?: IncomingThreatPacket) => {
+      if (stageInspected || interceptedCountRef.current >= 3) return;
       const pkt = targetPacket || packets[0];
       if (!pkt) return;
+      interceptedCountRef.current += 1;
       const px = 280 + Math.cos(pkt.angle) * pkt.dist;
       const py = 140 + Math.sin(pkt.angle) * pkt.dist;
       setShieldAngle(pkt.angle);
@@ -2355,7 +2438,7 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
         return nextC;
       });
     },
-    [packets, activeStageIndex, selectedToolId, onCollectBonus, onInspectStage, addPopup]
+    [stageInspected, packets, activeStageIndex, selectedToolId, onCollectBonus, onInspectStage, addPopup]
   );
 
   // Keyboard A/D rotates shield; Space fires laser pulse

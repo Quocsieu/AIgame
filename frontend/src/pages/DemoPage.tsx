@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { GameModeSelectionModal } from '../components/GameModeSelectionModal.js';
 
 import {
-  buildDefaultAdventureConfig,
+  applyPresetToAdventureConfig, buildDefaultAdventureConfig,
   INDUSTRY_CATALOG,
   syncAdventureStagesWithQuestions,
 } from '../config/adventureThemes.js';
@@ -1924,7 +1924,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     <button
                       key={`chip_${ind.industryId}`}
                       type="button"
-                      onClick={() => setAdventureIndustryMode(ind.industryId)}
+                      onClick={() => { setAdventureIndustryMode(ind.industryId); setAdventureConfig(prev => applyPresetToAdventureConfig({ ...prev, industryId: ind.industryId, industryLabel: ind.label, aiDetectedIndustry: false }, ind.defaultPresetId, generatedSpec?.questions || [])); }}
                       style={{
                         textAlign: 'left',
                         padding: '0.4rem 0.6rem',
@@ -1952,7 +1952,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               </div>
               <select
                 value={adventureIndustryMode}
-                onChange={e => setAdventureIndustryMode(e.target.value as 'AI_DETECT' | IndustryId)}
+                onChange={e => { const val = e.target.value as 'AI_DETECT' | IndustryId; setAdventureIndustryMode(val); if (val !== 'AI_DETECT') { const cat = INDUSTRY_CATALOG.find(item => item.industryId === val); if (cat) setAdventureConfig(prev => applyPresetToAdventureConfig({ ...prev, industryId: cat.industryId, industryLabel: cat.label, aiDetectedIndustry: false }, cat.defaultPresetId, generatedSpec?.questions || [])); } }}
                 style={{
                   width: '100%',
                   backgroundColor: 'var(--bg-card)',

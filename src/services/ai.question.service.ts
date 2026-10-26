@@ -1080,11 +1080,11 @@ export class AiQuestionService {
           ? {
               adventureConfig: (() => {
                 const preferredIndustryId =
-                  request.adventureConfig && request.adventureConfig.aiDetectedIndustry === false
+                  (request.adventureConfig && request.adventureConfig.aiDetectedIndustry !== true && Boolean(request.adventureConfig.industryId))
                     ? request.adventureConfig.industryId
                     : undefined;
                 const fallbackAdventure = analyzeSourceContentForAdventure(documents, {
-                  preferredIndustryId,
+                  preferredIndustryId: request.industryId || preferredIndustryId,
                   customIndustryLabel: request.adventureConfig?.industryLabel,
                   topicFocus: request.topicFocus,
                   questionCount: validatedQuestions.length,
