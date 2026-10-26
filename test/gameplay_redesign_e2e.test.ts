@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+process.chdir(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'));
 import request from 'supertest';
-import { app } from '../src/app.js';
 import { gameStore } from '../src/game/game.store.js';
 import { aiQuestionService } from '../src/services/ai.question.service.js';
 import { authService } from '../src/services/auth.service.js';
@@ -10,6 +12,7 @@ import { Browser, sleep } from '../../../WEB_2064/ASM/.agents/skills/design-tast
 
 async function runGameplayRedesignE2E(): Promise<void> {
   console.log('=== KIỂM THỬ E2E TRÌNH DUYỆT THẬT — ĐA DẠNG GAMEPLAY 2D THEO NGÀNH NGHỀ ===\n');
+  const { app } = await import('../src/app.js');
 
   const testEmail = `gameplay_2d_${Date.now()}@example.com`;
   const reg = authService.register({

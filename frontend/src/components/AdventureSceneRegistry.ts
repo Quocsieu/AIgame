@@ -11,7 +11,9 @@ export type SceneRendererId =
   | 'KITCHEN_FOOD_SAFETY_LAB_SCENE'
   | 'CUSTOMER_CONSULTATION_SHOWROOM_SCENE'
   | 'CODING_IDE_DEBUGGER_SCENE'
-  | 'CYBER_DEFENSE_SOC_RADAR_SCENE';
+  | 'CYBER_DEFENSE_SOC_RADAR_SCENE'
+  | 'MEDICAL_CLINICAL_TRIAGE_SCENE'
+  | 'ACADEMY_KNOWLEDGE_LAB_SCENE';
 
 export type ConsultationSubVariant =
   | 'SHOWROOM_MOTO'
@@ -51,7 +53,9 @@ export interface SceneRendererDescriptor {
     | 'ONE_WAY_KITCHEN_HACCP_FLOORPLAN'
     | 'INTERACTIVE_CONSULTATION_STAGE'
     | 'SIMULATED_CODE_IDE_DEBUGGER'
-    | 'NETWORK_TOPOLOGY_SOC_RADAR';
+    | 'NETWORK_TOPOLOGY_SOC_RADAR'
+    | 'MEDICAL_TRIAGE_VITAL_MONITOR'
+    | 'ACADEMY_CONSTELLATION_CIRCUIT';
   primaryMetricLabel: string;
   secondaryMetricLabel: string;
   clearedMetricLabel: string;
@@ -190,28 +194,36 @@ export function resolveSceneRendererDescriptor(config: AdventureConfig): SceneRe
     };
   }
 
-  // 2. KITCHEN & FOOD SAFETY LAB SCENE (F&B Kitchen / HACCP)
+  // 2. KITCHEN & FOOD SAFETY LAB SCENE (F&B Kitchen / Restaurant / HACCP)
   if (
     presetId === 'theme_fnb_kitchen_safety' ||
-    (industryId === 'FNB_HOSPITALITY' && archetype === 'DIAGNOSTIC_WORKBENCH_SIM')
+    presetId === 'theme_fnb_service' ||
+    industryId === 'FNB_HOSPITALITY'
   ) {
+    const isRestaurantService = presetId === 'theme_fnb_service';
     return {
       sceneId: 'KITCHEN_FOOD_SAFETY_LAB_SCENE',
-      sceneBadge: 'BẾP MỘT CHIỀU & KIỂM ĐỊNH VSATTP (HACCP)',
-      sceneTitle: 'Sơ Đồ Bếp Một Chiều, Kiểm Soát Nhiệt Độ & Chống Nhiễm Khuẩn Chéo',
+      sceneBadge: isRestaurantService
+        ? 'BẾP NHÀ HÀNG & CHẾ BIẾN MÓN ĂN CHUẨN BÀN TIỆC'
+        : 'BẾP MỘT CHIỀU & KIỂM ĐỊNH VSATTP (HACCP)',
+      sceneTitle: isRestaurantService
+        ? 'Băng Chuyền Chế Biến Món Ăn Nhà Hàng, Lọc Dị Ứng & Ra Món Bàn Tiệc'
+        : 'Sơ Đồ Bếp Một Chiều, Kiểm Soát Nhiệt Độ & Chống Nhiễm Khuẩn Chéo',
       sceneSubtitle:
-        'Kiểm tra từng khu vực sơ chế - bảo quản - nấu nướng, đo nhiệt độ thực phẩm và xử lý nguy cơ mất an toàn vệ sinh thực phẩm',
+        'Điều khiển Đầu bếp qua 3 làn băng chuyền để thu thập nguyên liệu tươi sạch, loại bỏ thực phẩm nhiễm khuẩn và hoàn tất khay món ăn đạt chuẩn',
       layoutSignature: 'KITCHEN_ONE_WAY_FLOORPLAN_WITH_THERMOMETER_AND_HACCP_BOARD',
       visualCanvasType: 'ONE_WAY_KITCHEN_HACCP_FLOORPLAN',
-      primaryMetricLabel: 'Chỉ số Vệ sinh HACCP',
+      primaryMetricLabel: isRestaurantService ? 'Chất lượng Món ăn & Phục vụ' : 'Chỉ số Vệ sinh HACCP',
       secondaryMetricLabel: 'Nhiệt độ Bảo quản / Chế biến',
       clearedMetricLabel: 'Trạm bếp đạt chuẩn VSATTP',
-      step1PromptLabel: 'Chọn dụng cụ kiểm tra VSATTP và quét khu vực bếp đang cảnh báo',
-      step1ActionButtonLabel: 'ĐO NHIỆT ĐỘ & KIỂM TRA TRẠM BẾP (Space)',
-      step1CompletedBadge: 'ĐÃ ĐO KIỂM MẪU THỰC PHẨM',
-      questionPanelTitle: 'Phiếu Kiểm Soát Quy Trình Chế Biến & Vệ Sinh Thực Phẩm',
-      questionChoicePrefix: 'Thao tác chuẩn Bếp / HACCP',
-      continueActionLabel: 'Đóng dấu Đạt chuẩn HACCP & Chuyển sang khu bếp kế tiếp (Space)',
+      step1PromptLabel: 'Di chuyển Đầu bếp thu thập đủ 3 nguyên liệu sạch trên băng chuyền và tránh vi khuẩn',
+      step1ActionButtonLabel: 'SƠ CHẾ & HOÀN THÀNH KHAY MÓN (Space)',
+      step1CompletedBadge: 'ĐÃ HOÀN THÀNH KHAY MÓN ĂN',
+      questionPanelTitle: isRestaurantService
+        ? 'Phiếu Kiểm Tra Nghiệp Vụ Chế Biến & Phục Vụ Thực Khách'
+        : 'Phiếu Kiểm Soát Quy Trình Chế Biến & Vệ Sinh Thực Phẩm',
+      questionChoicePrefix: 'Thao tác chuẩn Bếp / Nhà hàng',
+      continueActionLabel: 'Đóng dấu Đạt chuẩn & Chuyển sang bàn / trạm bếp kế tiếp (Space)',
       tools: [
         {
           id: 'tool_temp_probe',
@@ -528,20 +540,177 @@ export function resolveSceneRendererDescriptor(config: AdventureConfig): SceneRe
     };
   }
 
-  // 6. CUSTOMER CONSULTATION, SHOWROOM, RESTAURANT SERVICE & NEGOTIATION SCENE
+  // 6. MEDICAL CLINICAL TRIAGE & PHARMA VITAL MONITOR SCENE (HEALTHCARE_TRAINING)
+  if (
+    industryId === 'HEALTHCARE_TRAINING' ||
+    presetId === 'theme_med_hospital' ||
+    presetId === 'theme_med_academy'
+  ) {
+    const isPharma = presetId === 'theme_med_academy';
+    return {
+      sceneId: 'MEDICAL_CLINICAL_TRIAGE_SCENE',
+      sceneBadge: isPharma
+        ? 'PHÒNG KIỂM ĐỊNH DƯỢC LÝ & NHÀ THUỐC GPP'
+        : 'TRUNG TÂM CẤP CỨU LÂM SÀNG & THEO DÕI SINH HIỆU ICU',
+      sceneTitle: isPharma
+        ? 'Trạm Kiểm Soát Dược Liệu, Tương Tác Thuốc & Quy Chuẩn Bảo Quản GPP'
+        : 'Màn Hình Sinh Hiệu ECG/SpO2, Phân Loại Cấp Cứu & Chống Nhiễm Khuẩn',
+      sceneSubtitle:
+        'Chọn thiết bị y khoa chuyên dụng, ổn định 3 chỉ số sinh hiệu / tiêu chuẩn dược lý đang cảnh báo và khử nhiễm mầm bệnh sinh học',
+      layoutSignature: 'MEDICAL_ICU_TRIAGE_MONITOR_WITH_VITAL_WAVEFORMS_AND_BIOHAZARD_SHIELD',
+      visualCanvasType: 'MEDICAL_TRIAGE_VITAL_MONITOR',
+      primaryMetricLabel: isPharma ? 'Độ An Toàn Dược Lý GPP' : 'Chỉ Số Sinh Hiệu Ổn Định',
+      secondaryMetricLabel: 'Nhịp Tim & SpO2 Chuẩn',
+      clearedMetricLabel: 'Ca lâm sàng / dược lý đã xử trí',
+      step1PromptLabel: 'Chọn thiết bị y khoa đúng chuẩn và ổn định các trạm sinh hiệu trước khi mầm bệnh lan rộng',
+      step1ActionButtonLabel: 'ỔN ĐỊNH SINH HIỆU & HỘI CHẨN (Space)',
+      step1CompletedBadge: 'ĐÃ ỔN ĐỊNH CHỈ SỐ LÂM SÀNG',
+      questionPanelTitle: isPharma
+        ? 'Phiếu Thẩm Định Đơn Thuốc & Tư Vấn Dược Lâm Sàng'
+        : 'Hồ Sơ Hội Chẩn Cấp Cứu & Phác Đồ Xử Trí Y Khoa',
+      questionChoicePrefix: 'Phác đồ xử trí',
+      continueActionLabel: 'Xác nhận y lệnh & Chuyển sang ca tiếp theo (Space)',
+      tools: [
+        {
+          id: 'tool_ecg_defib',
+          label: 'Máy Theo Dõi Điện Tim ECG & Huyết Áp',
+          shortHint: 'Đo nhịp tim, huyết áp động mạch và ổn định tuần hoàn cấp cứu',
+          badgeCode: 'ECG/BP',
+          actionVerb: 'Đo & ổn định tuần hoàn',
+        },
+        {
+          id: 'tool_spo2_ventilator',
+          label: 'Mặt Nạ Oxy SpO2 & Khử Khuẩn Vô Trùng',
+          shortHint: 'Kiểm soát bão hòa oxy máu và cách ly nguy cơ nhiễm khuẩn bệnh viện',
+          badgeCode: 'SpO2',
+          actionVerb: 'Hỗ trợ hô hấp & vô khuẩn',
+        },
+        {
+          id: 'tool_pharma_protocol',
+          label: 'Bộ Kiểm Định Tương Tác Thuốc & Liều Lượng GPP',
+          shortHint: 'Rà soát chống chỉ định, liều dùng và điều kiện bảo quản thuốc 2-8°C',
+          badgeCode: 'RX-GPP',
+          actionVerb: 'Thẩm định dược lý',
+        },
+      ],
+      hotspotLabels:
+        config.interactiveObjects && config.interactiveObjects.length > 0
+          ? config.interactiveObjects
+          : [
+              'Trạm Phân loại Cấp cứu (Triage) & Đo Sinh hiệu',
+              'Khu Theo dõi Điện tim ECG & Huyết áp',
+              'Buồng Kiểm soát Nhiễm khuẩn & Khử trùng',
+              'Trạm Thẩm định Dược lý & Tương tác thuốc',
+              'Hội đồng Hội chẩn & Xuất viện An toàn',
+            ],
+      tutorial: {
+        tutorialTitle: 'Hướng dẫn Ổn định Sinh hiệu Lâm sàng & Thẩm định Y Dược',
+        roleTitle: config.avatarLabel || 'Bác sĩ Nội trú / Dược sĩ Lâm sàng',
+        compactBannerText:
+          'Trung tâm Y khoa: Chọn thiết bị y tế (phím 1-3), chạm vào Trạm sinh hiệu tương ứng đang báo động để ổn định chỉ số (+10đ) và tránh mầm bệnh sinh học (-5đ).',
+        objectiveSummary:
+          'Sử dụng đúng thiết bị y khoa để ổn định các chỉ số sinh hiệu/dược lý của bệnh nhân, ngăn chặn mầm bệnh lây nhiễm và đưa ra phác đồ điều trị chính xác.',
+        controlInstructions: [
+          'Chọn 1 trong 3 thiết bị y khoa (1: Máy ECG/Huyết áp, 2: Oxy SpO2 & Vô khuẩn, 3: Phác đồ Dược GPP).',
+          'Chạm vào Trạm sinh hiệu yêu cầu đúng thiết bị đó (+10 điểm) và nhấn Space hoặc nút Hội chẩn để mở câu hỏi (+15 điểm).',
+          'Áp dụng sai thiết bị y khoa hoặc chạm phải Mầm bệnh Sinh học đỏ sẽ bị cảnh báo và trừ điểm (-5 điểm).',
+        ],
+        interactionSteps: [
+          'Bước 1: Quan sát biểu tượng thiết bị y tế đang yêu cầu tại Trạm sinh hiệu bệnh nhân.',
+          'Bước 2: Chọn đúng thiết bị trên khay y cụ và kích hoạt điều trị ổn định sinh hiệu.',
+          'Bước 3: Trả lời câu hỏi hội chẩn chuyên môn để hoàn tất ca lâm sàng.',
+        ],
+        rightWrongImpactSummary:
+          'Can thiệp đúng thiết bị và trả lời đúng phác đồ giúp tăng Chỉ số Sinh hiệu Ổn định (+20%). Thao tác sai hoặc chạm mầm bệnh làm giảm Sinh hiệu (-5đ / -12%).',
+        winConditionSummary:
+          config.winConditionSummary ||
+          'Ổn định sinh hiệu và xử trí thành công toàn bộ các ca lâm sàng trong tua trực.',
+      },
+    };
+  }
+
+  // 7. ACADEMY KNOWLEDGE LAB & RESEARCH OBSERVATORY SCENE (EDUCATION_GENERAL)
+  if (industryId === 'EDUCATION_GENERAL' || presetId === 'theme_edu_campus') {
+    return {
+      sceneId: 'ACADEMY_KNOWLEDGE_LAB_SCENE',
+      sceneBadge: 'ĐÀI QUAN SÁT TRI THỨC & PHÒNG LAB HỌC THUẬT 2D',
+      sceneTitle: 'Mạng Lưới Tinh Vân Tri Thức, Giải Mã Luận Điểm & Cổng Nghiên Cứu Học Thuật',
+      sceneSubtitle:
+        'Kết nối các Nút Tinh Vân Tri Thức theo đúng mạch tư duy, né tránh Nhiễu Ngụy Biện và kích hoạt Cổng Nghiên Cứu để mở thử thách học thuật',
+      layoutSignature: 'ACADEMY_OBSERVATORY_CONSTELLATION_NODES_AND_RESEARCH_PORTAL',
+      visualCanvasType: 'ACADEMY_CONSTELLATION_CIRCUIT',
+      primaryMetricLabel: 'Chỉ Số Tư Duy & Học Thuật',
+      secondaryMetricLabel: 'Năng lượng Tinh vân Tri thức',
+      clearedMetricLabel: 'Chuyên đề nghiên cứu hoàn tất',
+      step1PromptLabel: 'Kích hoạt các Nút Tinh Vân Tri Thức sáng xanh và tránh hạt Nhiễu Ngụy Biện đỏ',
+      step1ActionButtonLabel: 'KÍCH HOẠT CỔNG NGHIÊN CỨU (Space)',
+      step1CompletedBadge: 'ĐÃ KẾT NỐI MẠCH TRI THỨC',
+      questionPanelTitle: 'Hội Đồng Bảo Vệ Chuyên Đề & Kiểm Chứng Tri Thức',
+      questionChoicePrefix: 'Luận điểm khoa học',
+      continueActionLabel: 'Ghi nhận Công trình & Chuyển sang Chuyên đề tiếp theo (Space)',
+      tools: [
+        {
+          id: 'tool_concept_lens',
+          label: 'Thấu Kính Phân Tích Khái Niệm Nền Tảng',
+          shortHint: 'Giải mã định nghĩa cốt lõi, nguyên lý cơ bản và từ khóa trọng tâm',
+          badgeCode: 'CONCEPT',
+          actionVerb: 'Phân tích khái niệm',
+        },
+        {
+          id: 'tool_logic_synthesizer',
+          label: 'Bộ Tổng Hợp Lập Luận & Tư Duy Phản Biện',
+          shortHint: 'Liên kết dữ kiện, loại trừ ngụy biện và kiểm chứng giả thuyết',
+          badgeCode: 'LOGIC',
+          actionVerb: 'Tổng hợp lập luận',
+        },
+        {
+          id: 'tool_case_application',
+          label: 'Mô Hình Ứng Dụng Thực Tiễn & Giải Quyết Vấn Đề',
+          shortHint: 'Áp dụng lý thuyết vào tình huống thực tế để rút ra kết luận đúng',
+          badgeCode: 'APPLY',
+          actionVerb: 'Ứng dụng thực tiễn',
+        },
+      ],
+      hotspotLabels:
+        config.interactiveObjects && config.interactiveObjects.length > 0
+          ? config.interactiveObjects
+          : [
+              'Thư viện Khái niệm & Nguyên lý Cốt lõi',
+              'Phòng Lab Phân tích Dữ kiện & Phản biện',
+              'Đài Quan sát Tổng hợp Mô hình Lý thuyết',
+              'Trung tâm Mô phỏng Ứng dụng Thực tiễn',
+              'Hội trường Bảo vệ Luận án Xuất sắc',
+            ],
+      tutorial: {
+        tutorialTitle: 'Hướng dẫn Khai phá Mạng lưới Tri thức & Bảo vệ Chuyên đề',
+        roleTitle: config.avatarLabel || 'Nhà Nghiên cứu / Học giả Khám phá',
+        compactBannerText:
+          'Phòng Lab Học thuật: Chạm hoặc nhấn phím 1-3 để kích hoạt các Nút Tinh Vân Tri Thức (+10đ), tránh hạt Nhiễu Ngụy Biện đỏ (-5đ) và mở Cổng Nghiên Cứu (Space).',
+        objectiveSummary:
+          'Thu thập và kết nối các nút tri thức trong Đài Quan Sát Học Thuật, loại bỏ nhiễu sai lệch và trả lời chính xác các câu hỏi kiểm chứng chuyên đề.',
+        controlInstructions: [
+          'Nhấn phím 1 - 3 hoặc chạm trực tiếp vào 3 Nút Tinh Vân Tri Thức để nạp năng lượng học thuật (+10 điểm/nút).',
+          'Tránh chạm vào Hạt Nhiễu Ngụy Biện màu đỏ đang di chuyển ngang qua mạch tri thức (-5 điểm).',
+          'Khi mạch tri thức đã nạp đủ, nhấn phím Space hoặc chạm vào Cổng Nghiên Cứu trung tâm (+15 điểm) để mở câu hỏi chuyên đề.',
+        ],
+        interactionSteps: [
+          'Bước 1: Kích hoạt các Nút Tinh Vân Tri Thức để nối sáng sơ đồ chòm sao học thuật.',
+          'Bước 2: Mở Cổng Nghiên Cứu trung tâm để nhận câu hỏi từ Hội đồng.',
+          'Bước 3: Chọn luận điểm chính xác nhất để hoàn thành chuyên đề.',
+        ],
+        rightWrongImpactSummary:
+          'Kết nối đúng nút tri thức và trả lời đúng giúp tăng Chỉ số Tư duy (+20%). Chạm phải Nhiễu Ngụy Biện hoặc trả lời sai làm giảm năng lượng học thuật (-5đ / -12%).',
+        winConditionSummary:
+          config.winConditionSummary ||
+          'Hoàn thành toàn bộ các chuyên đề nghiên cứu và bảo vệ xuất sắc tại Hội trường Học thuật.',
+      },
+    };
+  }
+
+  // 8. CUSTOMER CONSULTATION, SHOWROOM & B2B NEGOTIATION SCENE
   let consultationVariant: ConsultationSubVariant = 'BUSINESS_NEGOTIATION';
   if (presetId === 'theme_moto_showroom' || industryId === 'MOTORCYCLE_TRAFFIC') {
     consultationVariant = 'SHOWROOM_MOTO';
-  } else if (presetId === 'theme_fnb_service' || industryId === 'FNB_HOSPITALITY') {
-    consultationVariant = 'RESTAURANT_DINING';
-  } else if (
-    industryId === 'HEALTHCARE_TRAINING' ||
-    industryId === 'EDUCATION_GENERAL' ||
-    presetId === 'theme_med_hospital' ||
-    presetId === 'theme_med_academy' ||
-    presetId === 'theme_edu_campus'
-  ) {
-    consultationVariant = 'CLINICAL_AND_ACADEMY';
   }
 
   if (consultationVariant === 'SHOWROOM_MOTO') {
@@ -622,115 +791,23 @@ export function resolveSceneRendererDescriptor(config: AdventureConfig): SceneRe
     };
   }
 
-  if (consultationVariant === 'RESTAURANT_DINING') {
-    return {
-      sceneId: 'CUSTOMER_CONSULTATION_SHOWROOM_SCENE',
-      consultationVariant: 'RESTAURANT_DINING',
-      sceneBadge: 'KHÔNG GIAN NHÀ HÀNG & PHỤC VỤ THỰC KHÁCH',
-      sceneTitle: 'Bàn Tiệc Nhà Hàng, Ghi Nhận Order/Dị Ứng & Xử Lý Tình Huống Phục Vụ',
-      sceneSubtitle:
-        'Đón tiếp thực khách tại bàn, kiểm tra phiếu ghi chú khẩu vị - dị ứng thực phẩm và lựa chọn cách giao tiếp, phục vụ chuẩn mực nhà hàng',
-      layoutSignature: 'RESTAURANT_DINING_TABLE_WITH_ORDER_TICKET_GUEST_MOOD_AND_SERVICE_DIALOGUE',
-      visualCanvasType: 'INTERACTIVE_CONSULTATION_STAGE',
-      primaryMetricLabel: 'Mức Độ Hài Lòng Thực Khách',
-      secondaryMetricLabel: 'Chất lượng Phục vụ Bàn tiệc',
-      clearedMetricLabel: 'Bàn thực khách phục vụ hoàn tất',
-      step1PromptLabel: 'Nhấn vào Phiếu Order / Yêu cầu của Thực khách tại bàn để kiểm tra chi tiết',
-      step1ActionButtonLabel: 'TIẾP NHẬN YÊU CẦU & GHI CHÚ BÀN TIỆC (Space)',
-      step1CompletedBadge: 'ĐÃ XÁC NHẬN PHIẾU ORDER BÀN TIỆC',
-      questionPanelTitle: 'Tình Huống Giao Tiếp & Phục Vụ Thực Khách Tại Bàn',
-      questionChoicePrefix: 'Nghiệp vụ phục vụ',
-      continueActionLabel: 'Thực khách hài lòng · Chuyển sang bàn / tình huống kế tiếp (Space)',
-      tools: [
-        {
-          id: 'tool_menu_allergy',
-          label: 'Sổ Thực Đơn & Ghi Chú Dị Ứng Thực Phẩm',
-          shortHint: 'Tư vấn món đặc sản, kiểm tra thành phần gây dị ứng và khẩu vị riêng',
-          badgeCode: 'MENU',
-          actionVerb: 'Tư vấn thực đơn & dị ứng',
-        },
-        {
-          id: 'tool_table_etiquette',
-          label: 'Quy Chuẩn Phục Vụ Bàn Tiệc (Fine Dining / Casual)',
-          shortHint: 'Đảm bảo thứ tự lên món, hướng phục vụ và tác phong chuyên nghiệp',
-          badgeCode: 'SERVE',
-          actionVerb: 'Kiểm tra quy chuẩn lên món',
-        },
-        {
-          id: 'tool_service_recovery',
-          label: 'Nghiệp Vụ Xử Lý Phàn Nàn & Chăm Sóc Thực Khách',
-          shortHint: 'Lắng nghe cầu thị, xin lỗi khéo léo và đề xuất phương án đền bù hợp lý',
-          badgeCode: 'CARE',
-          actionVerb: 'Xử lý tình huống khéo léo',
-        },
-      ],
-      hotspotLabels:
-        config.interactiveObjects && config.interactiveObjects.length > 0
-          ? config.interactiveObjects
-          : [
-              'Sảnh Lễ tân Đón khách & Sắp xếp vị trí bàn',
-              'Bàn Thực khách: Tư vấn Thực đơn & Ghi nhận Dị ứng',
-              'Quầy Ra món: Kiểm tra Thứ tự & Nhiệt độ Món ăn',
-              'Bàn Tiệc: Xử lý khéo léo khi món ra chậm / sự cố',
-              'Quầy Thanh toán: Cảm ơn & Lấy phản hồi Thực khách',
-            ],
-      tutorial: {
-        tutorialTitle: 'Hướng dẫn Nghệ thuật Phục vụ Thực khách & Xử lý Tình huống Nhà hàng',
-        roleTitle: config.avatarLabel || 'Quản lý Sảnh & Chuyên viên Phục vụ Nhà hàng',
-        compactBannerText:
-          'Phục vụ Nhà hàng: (1) Nhấn "Tiếp nhận Yêu cầu & Ghi chú bàn tiệc" để xem khẩu vị/dị ứng hoặc vấn đề của thực khách, (2) Chọn cách ứng xử & phục vụ chuyên nghiệp nhất.',
-        objectiveSummary:
-          'Mang lại trải nghiệm ẩm thực trọn vẹn cho thực khách thông qua việc đón tiếp chu đáo, tư vấn món ăn an toàn, phục vụ đúng quy chuẩn và hóa giải khéo léo mọi phàn nàn.',
-        controlInstructions: [
-          'Quan sát biểu cảm của Thực khách tại bàn tiệc và chỉ số Mức Độ Hài Lòng Thực Khách.',
-          'Nhấn vào Phiếu Order Bàn Tiệc hoặc nút "TIẾP NHẬN YÊU CẦU & GHI CHÚ BÀN TIỆC" (phím Space) để xem chi tiết yêu cầu đặc biệt của khách (+15 điểm nghiệp vụ).',
-          'Chọn cách ứng xử và phục vụ phù hợp nhất trong khung Tình Huống Phục Vụ (phím 1 - 4 hoặc chuột).',
-        ],
-        interactionSteps: [
-          'Bước 1: Kiểm tra Phiếu Order, lưu ý dị ứng và tâm trạng của thực khách tại bàn.',
-          'Bước 2: Lắng nghe yêu cầu hoặc lời phàn nàn của thực khách trong khung hội thoại.',
-          'Bước 3: Chọn hành động/lời nói chuẩn mực để nâng cao trải nghiệm và sự hài lòng của khách.',
-        ],
-        rightWrongImpactSummary:
-          'Phục vụ tinh tế, đúng chuẩn giúp thực khách mỉm cười hài lòng (+20% Hài lòng) và đánh giá 5 sao. Ứng xử thiếu chuyên nghiệp làm giảm thiện cảm của khách (-15%).',
-        winConditionSummary:
-          config.winConditionSummary ||
-          'Xử lý xuất sắc toàn bộ các tình huống phục vụ bàn tiệc và giữ chỉ số hài lòng thực khách ở mức cao nhất.',
-      },
-    };
-  }
-
-  // BUSINESS NEGOTIATION OR CLINICAL/ACADEMY CONSULTATION
+  // BUSINESS NEGOTIATION & B2B SOLUTION CONSULTATION
   return {
     sceneId: 'CUSTOMER_CONSULTATION_SHOWROOM_SCENE',
-    consultationVariant,
-    sceneBadge:
-      consultationVariant === 'CLINICAL_AND_ACADEMY'
-        ? 'PHÒNG HỘI CHẨN & TÌNH HUỐNG CHUYÊN MÔN'
-        : 'BÀN ĐÀM PHÁN THƯƠNG MẠI & TƯ VẤN GIẢI PHÁP',
-    sceneTitle:
-      consultationVariant === 'CLINICAL_AND_ACADEMY'
-        ? 'Mô Phỏng Thẩm Định Hồ Sơ Tình Huống & Ra Quyết Định Chuyên Môn'
-        : 'Mô Phỏng Tư Vấn Sản Phẩm, Xử Lý Từ Chối & Thương Lượng Hợp Đồng',
+    consultationVariant: 'BUSINESS_NEGOTIATION',
+    sceneBadge: 'BÀN ĐÀM PHÁN THƯƠNG MẠI & TƯ VẤN GIẢI PHÁP',
+    sceneTitle: 'Mô Phỏng Tư Vấn Sản Phẩm, Xử Lý Từ Chối & Thương Lượng Hợp Đồng',
     sceneSubtitle:
-      consultationVariant === 'CLINICAL_AND_ACADEMY'
-        ? 'Phân tích dữ kiện hồ sơ thực tế, kiểm tra các chỉ số trọng tâm và đưa ra quyết định xử lý chính xác'
-        : 'Phân tích bài toán của đối tác/khách hàng, trình bày giá trị giải pháp (ROI), tháo gỡ rào cản thương lượng và ký kết thỏa thuận',
+      'Phân tích bài toán của đối tác/khách hàng, trình bày giá trị giải pháp (ROI), tháo gỡ rào cản thương lượng và ký kết thỏa thuận',
     layoutSignature: 'EXECUTIVE_NEGOTIATION_DESK_WITH_TRUST_GAUGE_CLUE_CARDS_AND_PITCH_SELECTOR',
     visualCanvasType: 'INTERACTIVE_CONSULTATION_STAGE',
-    primaryMetricLabel:
-      consultationVariant === 'CLINICAL_AND_ACADEMY'
-        ? 'Độ Chính Xác Chuyên Môn'
-        : 'Chỉ Số Tín Nhiệm & Chốt Deal',
+    primaryMetricLabel: 'Chỉ Số Tín Nhiệm & Chốt Deal',
     secondaryMetricLabel: 'Tiến độ Thương lượng',
     clearedMetricLabel: 'Tình huống đàm phán thành công',
     step1PromptLabel: 'Nhấn vào Hồ sơ Đối tác / Dữ kiện Tình huống để phân tích thông tin trọng yếu',
     step1ActionButtonLabel: 'PHÂN TÍCH HỒ SƠ & NHU CẦU ĐỐI TÁC (Space)',
     step1CompletedBadge: 'ĐÃ MỞ DỮ KIỆN TRỌNG TÂM',
-    questionPanelTitle:
-      consultationVariant === 'CLINICAL_AND_ACADEMY'
-        ? 'Bảng Quyết Định Xử Trí Tình Huống Chuyên Môn'
-        : 'Bàn Đàm Phán Giải Pháp & Phản Hồi Thương Lượng',
+    questionPanelTitle: 'Bàn Đàm Phán Giải Pháp & Phản Hồi Thương Lượng',
     questionChoicePrefix: 'Phương án đề xuất',
     continueActionLabel: 'Xác nhận thỏa thuận & Chuyển sang chặng đàm phán kế tiếp (Space)',
     tools: [
@@ -767,10 +844,7 @@ export function resolveSceneRendererDescriptor(config: AdventureConfig): SceneRe
             'Bước 5: Chốt Thỏa thuận Hợp đồng & Cam kết Đồng hành',
           ],
     tutorial: {
-      tutorialTitle:
-        consultationVariant === 'CLINICAL_AND_ACADEMY'
-          ? 'Hướng dẫn Phân tích Hồ sơ & Ra quyết định Tình huống'
-          : 'Hướng dẫn Tư vấn Giải pháp & Thương lượng Thương mại',
+      tutorialTitle: 'Hướng dẫn Tư vấn Giải pháp & Thương lượng Thương mại',
       roleTitle: config.avatarLabel || 'Chuyên viên Tư vấn & Đàm phán',
       compactBannerText:
         'Bàn Đàm phán & Tư vấn: (1) Nhấn "Phân tích Hồ sơ & Nhu cầu Đối tác" (hoặc phím Space) để mở dữ kiện trọng tâm, (2) Chọn phương án đàm phán / tư vấn tối ưu để đạt đồng thuận.',

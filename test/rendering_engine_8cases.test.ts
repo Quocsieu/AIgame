@@ -113,10 +113,10 @@ async function runRenderingEngine8CasesVerification(): Promise<void> {
       ],
       expectedPresetId: 'theme_fnb_service',
       expectedArchetype: 'SCENARIO_DECISION_SIM',
-      expectedSceneId: 'CUSTOMER_CONSULTATION_SHOWROOM_SCENE',
-      expectedConsultationVariant: 'RESTAURANT_DINING',
-      expectedVisualType: 'INTERACTIVE_CONSULTATION_STAGE',
-      mustContainTutorialKeywords: ['Thực khách', 'Phiếu Order', 'bàn tiệc'],
+      expectedSceneId: 'KITCHEN_FOOD_SAFETY_LAB_SCENE',
+      expectedConsultationVariant: undefined,
+      expectedVisualType: 'ONE_WAY_KITCHEN_HACCP_FLOORPLAN',
+      mustContainTutorialKeywords: ['Bếp Một Chiều', 'HACCP', 'Nhiệt kế'],
       mustNotContainKeywords: ['Xe tự chạy về phía trước', 'Chạm nút NHẢY ở góc dưới phải', 'động cơ xe máy'],
     },
     {
@@ -353,10 +353,8 @@ async function runRenderingEngine8CasesVerification(): Promise<void> {
   );
   assert.equal(motoScenes.size, 3, 'All 3 Motorcycle games must render in 3 distinct scenes');
 
-  const fnbScenes = new Set(
-    resolvedRecords.slice(3, 5).map(r => `${r.sceneId}:${r.consultationVariant || ''}`)
-  );
-  assert.equal(fnbScenes.size, 2, 'Both Restaurant games must render in 2 distinct scenes');
+  const fnbPresets = new Set(resolvedRecords.slice(3, 5).map(r => `${r.sceneId}:${r.presetId}`));
+  assert.equal(fnbPresets.size, 2, 'Both Restaurant games must resolve their 2 distinct F&B presets in Kitchen scene');
 
   const itScenes = new Set(
     resolvedRecords.slice(6, 8).map(r => `${r.sceneId}:${r.consultationVariant || ''}`)

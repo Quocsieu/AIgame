@@ -139,22 +139,34 @@ async function runAuditTests() {
       forbiddenScenes: ['TRAFFIC_ROAD_RUNNER_SCENE', 'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE'],
     },
     {
-      name: 'Nhà hàng / Phục vụ bàn (theme_fnb_service)',
+      name: 'Nhà hàng / Phục vụ bàn & Tiệc (theme_fnb_service)',
       partialConfig: { industryId: 'FNB_HOSPITALITY', themePresetId: 'theme_fnb_service', stages: [] },
-      expectedSceneId: 'CUSTOMER_CONSULTATION_SHOWROOM_SCENE',
-      forbiddenScenes: ['TRAFFIC_ROAD_RUNNER_SCENE', 'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE'],
+      expectedSceneId: 'KITCHEN_FOOD_SAFETY_LAB_SCENE',
+      forbiddenScenes: [
+        'TRAFFIC_ROAD_RUNNER_SCENE',
+        'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE',
+        'CUSTOMER_CONSULTATION_SHOWROOM_SCENE',
+      ],
     },
     {
       name: 'Lập trình / Gỡ lỗi (chỉ có industryId IT_TECHNOLOGY, thiếu themePresetId)',
       partialConfig: { industryId: 'IT_TECHNOLOGY', stages: [] },
       expectedSceneId: 'CODING_IDE_DEBUGGER_SCENE',
-      forbiddenScenes: ['TRAFFIC_ROAD_RUNNER_SCENE', 'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE'],
+      forbiddenScenes: [
+        'TRAFFIC_ROAD_RUNNER_SCENE',
+        'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE',
+        'CUSTOMER_CONSULTATION_SHOWROOM_SCENE',
+      ],
     },
     {
       name: 'An ninh mạng (IT_TECHNOLOGY + theme_it_cyberlab)',
       partialConfig: { industryId: 'IT_TECHNOLOGY', themePresetId: 'theme_it_cyberlab', stages: [] },
       expectedSceneId: 'CYBER_DEFENSE_SOC_RADAR_SCENE',
-      forbiddenScenes: ['TRAFFIC_ROAD_RUNNER_SCENE', 'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE'],
+      forbiddenScenes: [
+        'TRAFFIC_ROAD_RUNNER_SCENE',
+        'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE',
+        'CUSTOMER_CONSULTATION_SHOWROOM_SCENE',
+      ],
     },
     {
       name: 'Kinh doanh / Bán hàng (BUSINESS_SALES bị rò rỉ TRAFFIC_RUNNER_SIM)',
@@ -167,16 +179,24 @@ async function runAuditTests() {
       forbiddenScenes: ['TRAFFIC_ROAD_RUNNER_SCENE', 'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE'],
     },
     {
-      name: 'Y tế / Bệnh viện (HEALTHCARE_TRAINING thiếu gameplayArchetype)',
+      name: 'Y tế / Bệnh viện & Dược phẩm (HEALTHCARE_TRAINING)',
       partialConfig: { industryId: 'HEALTHCARE_TRAINING', stages: [] },
-      expectedSceneId: 'CUSTOMER_CONSULTATION_SHOWROOM_SCENE',
-      forbiddenScenes: ['TRAFFIC_ROAD_RUNNER_SCENE', 'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE'],
+      expectedSceneId: 'MEDICAL_CLINICAL_TRIAGE_SCENE',
+      forbiddenScenes: [
+        'TRAFFIC_ROAD_RUNNER_SCENE',
+        'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE',
+        'CUSTOMER_CONSULTATION_SHOWROOM_SCENE',
+      ],
     },
     {
-      name: 'Giáo dục / Đào tạo chung (Legacy config thiếu gameplayArchetype & themePresetId)',
+      name: 'Giáo dục / Đào tạo chung (EDUCATION_GENERAL)',
       partialConfig: { industryId: 'EDUCATION_GENERAL', stages: [] },
-      expectedSceneId: 'CUSTOMER_CONSULTATION_SHOWROOM_SCENE',
-      forbiddenScenes: ['TRAFFIC_ROAD_RUNNER_SCENE', 'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE'],
+      expectedSceneId: 'ACADEMY_KNOWLEDGE_LAB_SCENE',
+      forbiddenScenes: [
+        'TRAFFIC_ROAD_RUNNER_SCENE',
+        'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE',
+        'CUSTOMER_CONSULTATION_SHOWROOM_SCENE',
+      ],
     },
   ];
 
@@ -405,6 +425,100 @@ async function runAuditTests() {
   const cyberGameId = genCyber.body.data.gameId;
   gameStore.save({ ...genCyber.body.data, isPublic: true }, Date.now(), reg.user.userId, true);
 
+  // Real creation flow for the 3 industries the user manually tested:
+  // 1) FNB_HOSPITALITY with banquet/restaurant service text (vanlocphatpalace.com style -> theme_fnb_service)
+  const ingestFnbBanquet = await request(app)
+    .post('/api/content/ingest')
+    .set(authHeader)
+    .send({
+      sampleText:
+        'Trung tâm hội nghị tiệc cưới Vạn Lộc Phát Palace: phục vụ thực khách tại bàn tiệc, tư vấn thực đơn món ăn đặc sản, ghi nhận dị ứng thực phẩm và chăm sóc khách hàng.',
+    })
+    .expect(200);
+  const srcFnbBanquet = ingestFnbBanquet.body.data.sources[0];
+  const genFnbBanquet = await request(app)
+    .post('/api/games/generate')
+    .set(authHeader)
+    .send({
+      sourceIds: [srcFnbBanquet.sourceId],
+      gameType: 'ADVENTURE',
+      questionCount: 2,
+      timePerQuestion: 20,
+      difficulty: 'MEDIUM',
+      scoringMode: 'STANDARD',
+      title: 'Đấu trường Nhà hàng Tiệc cưới Vạn Lộc Phát',
+      adventureConfig: {
+        industryId: 'FNB_HOSPITALITY',
+        aiDetectedIndustry: false,
+        questionTypes: ['MULTIPLE_CHOICE'],
+      },
+    })
+    .expect(200);
+  const fnbBanquetGameId = genFnbBanquet.body.data.gameId;
+  gameStore.save({ ...genFnbBanquet.body.data, isPublic: true }, Date.now(), reg.user.userId, true);
+
+  // 2) HEALTHCARE_TRAINING (medinet style -> theme_med_academy / theme_med_hospital)
+  const ingestMed = await request(app)
+    .post('/api/content/ingest')
+    .set(authHeader)
+    .send({
+      sampleText:
+        'Sở Y Tế TP.HCM Medinet: quy trình kiểm soát nhiễm khuẩn bệnh viện, theo dõi sinh hiệu bệnh nhân cấp cứu, thẩm định đơn thuốc và bảo quản dược phẩm nhà thuốc GPP.',
+    })
+    .expect(200);
+  const srcMed = ingestMed.body.data.sources[0];
+  const genMed = await request(app)
+    .post('/api/games/generate')
+    .set(authHeader)
+    .send({
+      sourceIds: [srcMed.sourceId],
+      gameType: 'ADVENTURE',
+      questionCount: 2,
+      timePerQuestion: 20,
+      difficulty: 'MEDIUM',
+      scoringMode: 'STANDARD',
+      title: 'Đấu trường Y tế & Dược lâm sàng Medinet',
+      adventureConfig: {
+        industryId: 'HEALTHCARE_TRAINING',
+        aiDetectedIndustry: false,
+        questionTypes: ['MULTIPLE_CHOICE'],
+      },
+    })
+    .expect(200);
+  const medGameId = genMed.body.data.gameId;
+  gameStore.save({ ...genMed.body.data, isPublic: true }, Date.now(), reg.user.userId, true);
+
+  // 3) EDUCATION_GENERAL (giaoduc.net.vn style -> theme_edu_campus)
+  const ingestEdu = await request(app)
+    .post('/api/content/ingest')
+    .set(authHeader)
+    .send({
+      sampleText:
+        'Tạp chí điện tử Giáo dục Việt Nam: phương pháp nghiên cứu học thuật, tư duy phản biện, đánh giá năng lực học sinh sinh viên và đổi mới chương trình đào tạo.',
+    })
+    .expect(200);
+  const srcEdu = ingestEdu.body.data.sources[0];
+  const genEdu = await request(app)
+    .post('/api/games/generate')
+    .set(authHeader)
+    .send({
+      sourceIds: [srcEdu.sourceId],
+      gameType: 'ADVENTURE',
+      questionCount: 2,
+      timePerQuestion: 20,
+      difficulty: 'MEDIUM',
+      scoringMode: 'STANDARD',
+      title: 'Đấu trường Giáo dục & Học thuật',
+      adventureConfig: {
+        industryId: 'EDUCATION_GENERAL',
+        aiDetectedIndustry: false,
+        questionTypes: ['MULTIPLE_CHOICE'],
+      },
+    })
+    .expect(200);
+  const eduGameId = genEdu.body.data.gameId;
+  gameStore.save({ ...genEdu.body.data, isPublic: true }, Date.now(), reg.user.userId, true);
+
   const server = http.createServer(app);
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
   const addr = server.address() as { port: number };
@@ -439,6 +553,16 @@ async function runAuditTests() {
         domDebug.testIds.includes('scene-customer-consultation-business_negotiation'),
         true,
         `BUSINESS_SALES game must render business consultation scene, found testIds=${JSON.stringify(domDebug.testIds)} text=${domDebug.text}`
+      );
+      assert.equal(
+        domDebug.testIds.includes('visual-item-b2b-shield'),
+        true,
+        'BUSINESS_SALES consultation scene must render B2B solution artifacts (SLA Shield, ROI Chart, Contract)'
+      );
+      assert.equal(
+        domDebug.testIds.includes('visual-item-moto-scooter'),
+        false,
+        'BUSINESS_SALES consultation scene must NEVER render motorcycle/scooter graphics'
       );
 
       // Stage 1 wants shelf #0. Let's pick WRONG shelf #1!
@@ -776,6 +900,160 @@ async function runAuditTests() {
       );
       await page.close();
       console.log('  [PASS] An ninh mạng SOC: Bắn xung tường lửa chống cộng điểm lặp sau khi đã chặn đủ 3 gói tin độc');
+    }
+
+    // 6. E2E Test cho 3 ngành người dùng tạo thủ công: FNB_HOSPITALITY (banquet), HEALTHCARE_TRAINING (medinet), EDUCATION_GENERAL (giaoduc)
+    {
+      // 6a. FNB_HOSPITALITY banquet/service game must render 3-lane Kitchen scene, NOT vehicle delivery
+      const page = await browser.newPage({ width: 1440, height: 900 });
+      await page.goto(`${baseUrl}/?play=${fnbBanquetGameId}`, { settleMs: 900 });
+      for (let w = 0; w < 16; w++) {
+        const clicked = await page.eval(`(() => {
+          const el = document.querySelector('[data-testid="scene-pregame-briefing"]');
+          if (!el) return false;
+          const btn = el.querySelector('button');
+          if (btn) btn.click();
+          return true;
+        })()`);
+        if (clicked) break;
+        await sleep(250);
+      }
+      await sleep(700);
+      const fnbBanquetCheck = await page.eval(`(() => {
+        return {
+          hasKitchenScene: Boolean(document.querySelector('[data-testid="scene-kitchen-food-safety"]')),
+          hasThreeLanes: Boolean(document.querySelector('[data-testid="kitchen-lane-0"]') && document.querySelector('[data-testid="kitchen-lane-2"]')),
+          hasConsultationShelf: Boolean(document.querySelector('[data-testid="consultation-shelf-0"]')),
+        };
+      })()`);
+      assert.equal(fnbBanquetCheck.hasKitchenScene, true, 'FNB banquet game must render Kitchen 3-lane scene');
+      assert.equal(fnbBanquetCheck.hasThreeLanes, true, 'FNB banquet game must have 3 conveyor lanes');
+      assert.equal(fnbBanquetCheck.hasConsultationShelf, false, 'FNB banquet game must NOT render vehicle delivery shelves');
+      await page.close();
+      console.log('  [PASS] FNB_HOSPITALITY (bàn tiệc / thực khách): Hiển thị đúng Bếp Băng Chuyền 3 Làn (không dùng giao diện giao xe)');
+    }
+
+    {
+      // 6b. HEALTHCARE_TRAINING game must render MedicalClinicalTriageScene & enforce tool/biohazard rules
+      const page = await browser.newPage({ width: 1440, height: 900 });
+      await page.goto(`${baseUrl}/?play=${medGameId}`, { settleMs: 900 });
+      for (let w = 0; w < 16; w++) {
+        const clicked = await page.eval(`(() => {
+          const el = document.querySelector('[data-testid="scene-pregame-briefing"]');
+          if (!el) return false;
+          const btn = el.querySelector('button');
+          if (btn) btn.click();
+          return true;
+        })()`);
+        if (clicked) break;
+        await sleep(250);
+      }
+      await sleep(700);
+
+      const medSceneCheck = await page.eval(`(() => {
+        return {
+          hasMedScene: Boolean(document.querySelector('[data-testid="scene-medical-clinical-triage"]')),
+          hasEcgTool: Boolean(document.querySelector('[data-testid="medical-tool-0"]')),
+          hasConsultationShelf: Boolean(document.querySelector('[data-testid="consultation-shelf-0"]')),
+        };
+      })()`);
+      assert.equal(medSceneCheck.hasMedScene, true, 'HEALTHCARE_TRAINING must render MedicalClinicalTriageScene');
+      assert.equal(medSceneCheck.hasEcgTool, true, 'HEALTHCARE_TRAINING must render medical instrument stations');
+      assert.equal(medSceneCheck.hasConsultationShelf, false, 'HEALTHCARE_TRAINING must NOT render vehicle delivery shelves');
+
+      // Stage 1 requires tool #0 (ECG). Pick wrong tool #1 and click triage monitor -> penalized -5Đ (clamped at 0), popup stays closed!
+      await page.eval(`(() => {
+        const wrongTool = document.querySelector('[data-testid="medical-tool-1"]');
+        const triageBtn = document.querySelector('[data-testid="medical-engage-triage-btn"]');
+        if (wrongTool) wrongTool.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        if (triageBtn) triageBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      })()`);
+      await sleep(200);
+      const medWrongCheck = await page.eval(`(() => {
+        return {
+          popupOpen: Boolean(document.querySelector('[data-testid="ingame-challenge-popup"]')),
+          score: Number(document.querySelector('[data-testid="hud-total-score"]')?.textContent || '0'),
+        };
+      })()`);
+      assert.equal(medWrongCheck.popupOpen, false, 'Applying wrong medical tool must NOT open clinical question popup');
+      assert.equal(medWrongCheck.score, 0, 'Applying wrong medical tool at 0 points stays at 0');
+
+      // Now select correct tool #0 twice -> +10Đ once (no farming), then click biohazard spike -> -5Đ (score = 5), then engage triage -> +15Đ (score = 20) & opens popup!
+      await page.eval(`(() => {
+        const rightTool = document.querySelector('[data-testid="medical-tool-0"]');
+        if (rightTool) {
+          rightTool.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          rightTool.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        }
+        const biohazard = document.querySelector('[data-testid="medical-biohazard-spike"]');
+        if (biohazard) biohazard.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        const triageBtn = document.querySelector('[data-testid="medical-engage-triage-btn"]');
+        if (triageBtn) triageBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      })()`);
+      await sleep(300);
+      const medRightCheck = await page.eval(`(() => {
+        return {
+          popupOpen: Boolean(document.querySelector('[data-testid="ingame-challenge-popup"]')),
+          score: Number(document.querySelector('[data-testid="hud-total-score"]')?.textContent || '0'),
+        };
+      })()`);
+      assert.equal(medRightCheck.popupOpen, true, 'Applying correct medical tool to ICU monitor must open clinical question popup');
+      assert.equal(medRightCheck.score, 20, 'Medical scene score must be +10 (tool) - 5 (biohazard) + 15 (triage) = 20');
+      await page.close();
+      console.log('  [PASS] HEALTHCARE_TRAINING (Y tế / Dược): Hiển thị đúng Trung tâm Cấp cứu Sinh hiệu ICU & xử phạt đúng luật (+10Đ / -5Đ / +15Đ)');
+    }
+
+    {
+      // 6c. EDUCATION_GENERAL game must render AcademyKnowledgeLabScene & enforce node/glitch rules
+      const page = await browser.newPage({ width: 1440, height: 900 });
+      await page.goto(`${baseUrl}/?play=${eduGameId}`, { settleMs: 900 });
+      for (let w = 0; w < 16; w++) {
+        const clicked = await page.eval(`(() => {
+          const el = document.querySelector('[data-testid="scene-pregame-briefing"]');
+          if (!el) return false;
+          const btn = el.querySelector('button');
+          if (btn) btn.click();
+          return true;
+        })()`);
+        if (clicked) break;
+        await sleep(250);
+      }
+      await sleep(700);
+
+      const eduSceneCheck = await page.eval(`(() => {
+        return {
+          hasEduScene: Boolean(document.querySelector('[data-testid="scene-academy-knowledge-lab"]')),
+          hasNode0: Boolean(document.querySelector('[data-testid="academy-node-0"]')),
+          hasConsultationShelf: Boolean(document.querySelector('[data-testid="consultation-shelf-0"]')),
+        };
+      })()`);
+      assert.equal(eduSceneCheck.hasEduScene, true, 'EDUCATION_GENERAL must render AcademyKnowledgeLabScene');
+      assert.equal(eduSceneCheck.hasNode0, true, 'EDUCATION_GENERAL must render constellation knowledge nodes');
+      assert.equal(eduSceneCheck.hasConsultationShelf, false, 'EDUCATION_GENERAL must NOT render vehicle delivery shelves');
+
+      // Activate node 0 twice (+10Đ once), click glitch hazard (-5Đ -> 5), open research portal (+15Đ -> 20)
+      await page.eval(`(() => {
+        const n0 = document.querySelector('[data-testid="academy-node-0"]');
+        if (n0) {
+          n0.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+          n0.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        }
+        const glitch = document.querySelector('[data-testid="academy-glitch-hazard"]');
+        if (glitch) glitch.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+        const gate = document.querySelector('[data-testid="academy-engage-gate-btn"]');
+        if (gate) gate.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      })()`);
+      await sleep(300);
+      const eduScoreCheck = await page.eval(`(() => {
+        return {
+          popupOpen: Boolean(document.querySelector('[data-testid="ingame-challenge-popup"]')),
+          score: Number(document.querySelector('[data-testid="hud-total-score"]')?.textContent || '0'),
+        };
+      })()`);
+      assert.equal(eduScoreCheck.popupOpen, true, 'Engaging research portal must open academic question popup');
+      assert.equal(eduScoreCheck.score, 20, 'Academy scene score must be +10 (node) - 5 (glitch) + 15 (portal) = 20');
+      await page.close();
+      console.log('  [PASS] EDUCATION_GENERAL (Giáo dục / Học thuật): Hiển thị đúng Đài Quan Sát Tri Thức & xử phạt đúng luật (+10Đ / -5Đ / +15Đ)');
     }
   } finally {
     await browser.close();

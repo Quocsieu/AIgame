@@ -20,6 +20,8 @@ import {
   CustomerConsultationShowroomScene,
   CodingIdeDebuggerScene,
   CyberDefenseSocRadarScene,
+  MedicalClinicalTriageScene,
+  AcademyKnowledgeLabScene,
 } from './AdventureInteractiveScenes.js';
 
 function playTone(freq: number, durationSec: number, type: OscillatorType = 'sine'): void {
@@ -1932,6 +1934,10 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               return <CodingIdeDebuggerScene {...commonSceneProps} />;
             case 'CYBER_DEFENSE_SOC_RADAR_SCENE':
               return <CyberDefenseSocRadarScene {...commonSceneProps} />;
+            case 'MEDICAL_CLINICAL_TRIAGE_SCENE':
+              return <MedicalClinicalTriageScene {...commonSceneProps} />;
+            case 'ACADEMY_KNOWLEDGE_LAB_SCENE':
+              return <AcademyKnowledgeLabScene {...commonSceneProps} />;
             case 'CUSTOMER_CONSULTATION_SHOWROOM_SCENE':
             default:
               return <CustomerConsultationShowroomScene {...commonSceneProps} />;
@@ -2079,6 +2085,38 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
                     <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>KHÓA MỐI ĐE DỌA</strong>
                     Chặn đủ 3 mục tiêu tấn công để mở bảng câu hỏi phòng thủ SOC.
+                  </div>
+                </>
+              )}
+              {sceneDescriptor.sceneId === 'MEDICAL_CLINICAL_TRIAGE_SCENE' && (
+                <>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>CHỌN THIẾT BỊ Y KHOA</strong>
+                    Chạm vào khay thiết bị bên trái (hoặc phím <code>1-3</code>: ECG, SpO2, RX-GPP) theo chỉ định trên màn hình ICU.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>ỔN ĐỊNH SINH HIỆU</strong>
+                    Nhấn <code>Space</code> hoặc chạm vào Màn hình Sinh hiệu ICU bên phải để can thiệp và hội chẩn.
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>VÔ KHUẨN LÂM SÀNG</strong>
+                    Tránh chạm vào Mầm bệnh Sinh học màu đỏ đang di chuyển ở giữa phòng cấp cứu (<code>-5đ</code>).
+                  </div>
+                </>
+              )}
+              {sceneDescriptor.sceneId === 'ACADEMY_KNOWLEDGE_LAB_SCENE' && (
+                <>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>KÍCH HOẠT NÚT TRI THỨC</strong>
+                    Chạm vào 3 Nút Tinh Vân bên trái (hoặc phím <code>1-3</code>) để kết nối tia năng lượng học thuật (<code>+10đ</code>).
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>TRÁNH NHIỄU NGỤY BIỆN</strong>
+                    Không chạm vào Hạt Nhiễu Ngụy Biện màu đỏ đang bay cắt ngang mạch tri thức (<code>-5đ</code>).
+                  </div>
+                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
+                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>MỞ CỔNG NGHIÊN CỨU</strong>
+                    Nhấn <code>Space</code> hoặc chạm vào Cổng Nghiên Cứu trung tâm bên phải để bảo vệ chuyên đề.
                   </div>
                 </>
               )}

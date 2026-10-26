@@ -1618,38 +1618,74 @@ export const CustomerConsultationShowroomScene: React.FC<InteractiveSceneCommonP
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isPaused, stageInspected, activeCustomer.wantShelf, handlePickShelfItem, handleDeliverToCustomer]);
 
-  // Helper to draw visual product icon (0 = Scooter/Salad/Shield, 1 = SportMoto/Steak/Chart, 2 = GiftKey/Cake/Contract)
-  const renderProductVisual = (idx: number, scale = 1) => (
-    <g transform={`scale(${scale})`}>
-      {idx === 0 && (
-        /* Visual Scooter / Fresh Dish / Gold Shield */
-        <g>
-          <circle cx="-12" cy="8" r="6" fill="#0f172a" stroke="#cbd5e1" strokeWidth="2" />
-          <circle cx="12" cy="8" r="6" fill="#0f172a" stroke="#cbd5e1" strokeWidth="2" />
-          <path d="M -14 6 L -6 -6 L 4 -6 L 10 4 L 14 -10" fill="none" stroke="#38bdf8" strokeWidth="3.5" strokeLinecap="round" />
-          <ellipse cx="-2" cy="-6" rx="7" ry="3" fill="#f8fafc" />
+  // Helper to draw visual product icon (SHOWROOM_MOTO = Vehicles; BUSINESS_NEGOTIATION = B2B Solution Artifacts)
+  const renderProductVisual = (idx: number, scale = 1) => {
+    if (variant === 'SHOWROOM_MOTO') {
+      return (
+        <g transform={`scale(${scale})`}>
+          {idx === 0 && (
+            <g data-testid="visual-item-moto-scooter">
+              <circle cx="-12" cy="8" r="6" fill="#0f172a" stroke="#cbd5e1" strokeWidth="2" />
+              <circle cx="12" cy="8" r="6" fill="#0f172a" stroke="#cbd5e1" strokeWidth="2" />
+              <path d="M -14 6 L -6 -6 L 4 -6 L 10 4 L 14 -10" fill="none" stroke="#38bdf8" strokeWidth="3.5" strokeLinecap="round" />
+              <ellipse cx="-2" cy="-6" rx="7" ry="3" fill="#f8fafc" />
+            </g>
+          )}
+          {idx === 1 && (
+            <g data-testid="visual-item-moto-sport">
+              <circle cx="-13" cy="8" r="6.5" fill="#0f172a" stroke="#eab308" strokeWidth="2" />
+              <circle cx="13" cy="8" r="6.5" fill="#0f172a" stroke="#eab308" strokeWidth="2" />
+              <polygon points="-12,6 -2,-9 14,-5 6,6" fill="#e5566f" />
+              <circle cx="0" cy="-12" r="4" fill="#fde047" />
+            </g>
+          )}
+          {idx === 2 && (
+            <g data-testid="visual-item-moto-package">
+              <rect x="-14" y="-10" width="28" height="20" rx="4" fill="#1e293b" stroke="#eab308" strokeWidth="2" />
+              <line x1="-14" y1="0" x2="14" y2="0" stroke="#eab308" strokeWidth="2" />
+              <line x1="0" y1="-10" x2="0" y2="10" stroke="#eab308" strokeWidth="2" />
+              <circle cx="0" cy="0" r="4" fill="#3fc07a" />
+            </g>
+          )}
         </g>
-      )}
-      {idx === 1 && (
-        /* Visual Sport Performance Item / Sizzling Platter / Rising Chart */
-        <g>
-          <circle cx="-13" cy="8" r="6.5" fill="#0f172a" stroke="#eab308" strokeWidth="2" />
-          <circle cx="13" cy="8" r="6.5" fill="#0f172a" stroke="#eab308" strokeWidth="2" />
-          <polygon points="-12,6 -2,-9 14,-5 6,6" fill="#e5566f" />
-          <circle cx="0" cy="-12" r="4" fill="#fde047" />
-        </g>
-      )}
-      {idx === 2 && (
-        /* Visual VIP Package / Warranty Key & Contract Scroll */
-        <g>
-          <rect x="-14" y="-10" width="28" height="20" rx="4" fill="#1e293b" stroke="#eab308" strokeWidth="2" />
-          <line x1="-14" y1="0" x2="14" y2="0" stroke="#eab308" strokeWidth="2" />
-          <line x1="0" y1="-10" x2="0" y2="10" stroke="#eab308" strokeWidth="2" />
-          <circle cx="0" cy="0" r="4" fill="#3fc07a" />
-        </g>
-      )}
-    </g>
-  );
+      );
+    }
+
+    return (
+      <g transform={`scale(${scale})`}>
+        {idx === 0 && (
+          /* B2B SLA Security Shield & Checkmark */
+          <g data-testid="visual-item-b2b-shield">
+            <path
+              d="M 0 -14 L 13 -8 L 13 2 C 13 9, 6 14, 0 16 C -6 14, -13 9, -13 2 L -13 -8 Z"
+              fill="#0f172a"
+              stroke="#38bdf8"
+              strokeWidth="2.2"
+            />
+            <path d="M -5 1 L -1 5 L 6 -3" fill="none" stroke="#3fc07a" strokeWidth="2.5" strokeLinecap="round" />
+          </g>
+        )}
+        {idx === 1 && (
+          /* Rising ROI Analytics Bar Chart */
+          <g data-testid="visual-item-b2b-roi-chart">
+            <rect x="-14" y="-12" width="28" height="24" rx="3" fill="#0f172a" stroke="#eab308" strokeWidth="1.8" />
+            <rect x="-9" y="2" width="4" height="7" fill="#38bdf8" />
+            <rect x="-2" y="-3" width="4" height="12" fill="#eab308" />
+            <rect x="5" y="-8" width="4" height="17" fill="#3fc07a" />
+          </g>
+        )}
+        {idx === 2 && (
+          /* Executive Signed Contract & Gold Seal */
+          <g data-testid="visual-item-b2b-contract">
+            <rect x="-12" y="-13" width="24" height="26" rx="3" fill="#1e293b" stroke="#cbd5e1" strokeWidth="1.8" />
+            <line x1="-7" y1="-6" x2="7" y2="-6" stroke="#94a3b8" strokeWidth="2" />
+            <line x1="-7" y1="-1" x2="5" y2="-1" stroke="#94a3b8" strokeWidth="2" />
+            <circle cx="4" cy="6" r="4.5" fill="#eab308" />
+          </g>
+        )}
+      </g>
+    );
+  };
 
   return (
     <div
@@ -2729,3 +2765,684 @@ export const CyberDefenseSocRadarScene: React.FC<InteractiveSceneCommonProps> = 
     </div>
   );
 };
+
+/* ============================================================================
+ * SCENE 7: MEDICAL CLINICAL TRIAGE & PHARMA VITAL MONITOR (HEALTHCARE_TRAINING)
+ * Visuals: Sterile ICU / Pharma Lab Ward, 3 Medical Instrument Trays (ECG/BP,
+ * SpO2 Oxygen Mask, Rx/GPP Protocol), Patient Bed / Clinical Triage Monitor
+ * with Live ECG Waveform, and Drifting Biohazard Pathogen Spikes!
+ * ============================================================================ */
+export const MedicalClinicalTriageScene: React.FC<InteractiveSceneCommonProps> = props => {
+  const {
+    config,
+    sceneDescriptor,
+    activeStageIndex,
+    totalStages,
+    activeQuestion,
+    activeFeedback,
+    activeTimeRemaining,
+    submittingAnswer,
+    selectedChoice,
+    onSelectChoice,
+    textAnswer,
+    onChangeTextAnswer,
+    onSubmitAnswer,
+    onContinueStage,
+    stageInspected,
+    onInspectStage,
+    isPaused,
+    onCollectBonus,
+    onHazardHit,
+  } = props;
+
+  const selectedToolId = sceneDescriptor.tools[0]?.id || 'tool_ecg_defib';
+  const accentHex = config.palette.accentColor || '#14b8a6';
+
+  const clinicalCases = [
+    {
+      code: 'CA-ICU-01',
+      name: 'Cấp cứu Tuần hoàn & Điện tim ECG',
+      symptom: 'Nhịp nhanh thất & tụt huyết áp động mạch — cần ổn định ECG/BP',
+      requiredToolIdx: 0,
+    },
+    {
+      code: 'CA-ICU-02',
+      name: 'Suy Hô hấp & Kiểm soát Vô khuẩn SpO2',
+      symptom: 'SpO2 giảm dưới 90% kèm nguy cơ nhiễm khuẩn chéo — cần hỗ trợ Oxy & khử khuẩn',
+      requiredToolIdx: 1,
+    },
+    {
+      code: 'CA-GPP-03',
+      name: 'Thẩm định Tương tác Thuốc & Chuẩn GPP',
+      symptom: 'Đơn thuốc đa trị liệu & bảo quản vắc-xin 2-8°C — cần rà soát dược lý RX-GPP',
+      requiredToolIdx: 2,
+    },
+  ];
+  const activeCase = clinicalCases[activeStageIndex % clinicalCases.length];
+
+  const [equippedToolIdx, setEquippedToolIdx] = useState<number | null>(null);
+  const [vitalStabilized, setVitalStabilized] = useState<boolean>(false);
+  const [biohazardY, setBiohazardY] = useState<number>(72);
+  const [ecgPhase, setEcgPhase] = useState<number>(0);
+  const [popups, setPopups] = useState<FloatingFeedbackText[]>([]);
+
+  const equippedRef = useRef<number | null>(null);
+  const toolBonusClaimedRef = useRef<boolean>(false);
+  const bioDirRef = useRef<1 | -1>(1);
+
+  useEffect(() => {
+    equippedRef.current = equippedToolIdx;
+  }, [equippedToolIdx]);
+
+  useEffect(() => {
+    setEquippedToolIdx(null);
+    equippedRef.current = null;
+    toolBonusClaimedRef.current = false;
+    setVitalStabilized(false);
+  }, [activeStageIndex]);
+
+  const addPopup = useCallback((x: number, y: number, text: string, color: string) => {
+    setPopups(prev => [...prev.slice(-4), { id: Date.now() + Math.random(), x, y, text, color }]);
+  }, []);
+
+  useEffect(() => {
+    if (isPaused || stageInspected) return;
+    const timer = window.setInterval(() => {
+      setEcgPhase(prev => (prev + 1) % 40);
+      setBiohazardY(prev => {
+        let next = prev + bioDirRef.current * 3.2;
+        if (next >= 220) {
+          next = 220;
+          bioDirRef.current = -1;
+        } else if (next <= 56) {
+          next = 56;
+          bioDirRef.current = 1;
+        }
+        return next;
+      });
+    }, 55);
+    return () => clearInterval(timer);
+  }, [isPaused, stageInspected]);
+
+  const handleSelectMedicalTool = useCallback(
+    (toolIdx: number) => {
+      if (stageInspected) return;
+      setEquippedToolIdx(toolIdx);
+      equippedRef.current = toolIdx;
+      const toolY = 72 + toolIdx * 74;
+      if (toolIdx === activeCase.requiredToolIdx) {
+        if (!toolBonusClaimedRef.current) {
+          toolBonusClaimedRef.current = true;
+          onCollectBonus?.(10);
+          addPopup(110, toolY - 18, '+10Đ Y CỤ CHUẨN', '#3fc07a');
+        } else {
+          addPopup(110, toolY - 18, 'ĐÃ CHỌN Y CỤ', '#38bdf8');
+        }
+      } else {
+        addPopup(110, toolY - 18, 'SAI THIẾT BỊ Y KHOA!', '#eab308');
+      }
+    },
+    [stageInspected, activeCase.requiredToolIdx, onCollectBonus, addPopup]
+  );
+
+  const handleApplyClinicalTriage = useCallback(() => {
+    if (stageInspected) return;
+    if (equippedRef.current !== null && equippedRef.current !== activeCase.requiredToolIdx) {
+      setEquippedToolIdx(null);
+      equippedRef.current = null;
+      onHazardHit?.();
+      onCollectBonus?.(-5);
+      addPopup(420, 88, 'SAI PHÁC ĐỒ -5Đ', '#e5566f');
+      return;
+    }
+    if (equippedRef.current === null) {
+      setEquippedToolIdx(activeCase.requiredToolIdx);
+      equippedRef.current = activeCase.requiredToolIdx;
+      if (!toolBonusClaimedRef.current) {
+        toolBonusClaimedRef.current = true;
+        onCollectBonus?.(10);
+      }
+    }
+    setVitalStabilized(true);
+    addPopup(420, 88, 'ỔN ĐỊNH SINH HIỆU +15Đ', '#3fc07a');
+    onInspectStage(selectedToolId);
+  }, [
+    stageInspected,
+    activeCase.requiredToolIdx,
+    onHazardHit,
+    onCollectBonus,
+    addPopup,
+    onInspectStage,
+    selectedToolId,
+  ]);
+
+  useEffect(() => {
+    if (isPaused || stageInspected) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === '1') handleSelectMedicalTool(0);
+      else if (e.key === '2') handleSelectMedicalTool(1);
+      else if (e.key === '3') handleSelectMedicalTool(2);
+      else if (e.key === ' ') {
+        e.preventDefault();
+        if (equippedRef.current === null) {
+          handleSelectMedicalTool(activeCase.requiredToolIdx);
+        } else {
+          handleApplyClinicalTriage();
+        }
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isPaused, stageInspected, activeCase.requiredToolIdx, handleSelectMedicalTool, handleApplyClinicalTriage]);
+
+  const renderMedicalInstrumentIcon = (idx: number, scale = 1) => (
+    <g transform={`scale(${scale})`}>
+      {idx === 0 && (
+        /* ECG Heart Monitor & Defibrillator Pulse */
+        <g data-testid="visual-med-ecg">
+          <rect x="-15" y="-11" width="30" height="22" rx="4" fill="#091520" stroke="#14b8a6" strokeWidth="2" />
+          <polyline
+            points="-11,2 -5,2 -2,-7 2,7 5,-3 8,2 12,2"
+            fill="none"
+            stroke="#3fc07a"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </g>
+      )}
+      {idx === 1 && (
+        /* SpO2 Oxygen Mask & Sterile Cross */
+        <g data-testid="visual-med-spo2">
+          <circle cx="0" cy="0" r="13" fill="#091520" stroke="#38bdf8" strokeWidth="2" />
+          <rect x="-7" y="-2.5" width="14" height="5" rx="1.5" fill="#38bdf8" />
+          <rect x="-2.5" y="-7" width="5" height="14" rx="1.5" fill="#38bdf8" />
+        </g>
+      )}
+      {idx === 2 && (
+        /* Pharma Capsule & GPP Vial */
+        <g data-testid="visual-med-pharma">
+          <rect x="-12" y="-6" width="12" height="12" rx="6" fill="#e5566f" />
+          <rect x="0" y="-6" width="12" height="12" rx="6" fill="#f8fafc" />
+          <rect x="-12" y="-6" width="24" height="12" rx="6" fill="none" stroke="#eab308" strokeWidth="1.8" />
+        </g>
+      )}
+    </g>
+  );
+
+  return (
+    <div
+      data-testid="scene-medical-clinical-triage"
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#07131a',
+        overflow: 'hidden',
+      }}
+    >
+      <svg
+        viewBox="0 0 560 280"
+        preserveAspectRatio="xMidYMid slice"
+        style={{ width: '100%', height: '100%', display: 'block' }}
+      >
+        <defs>
+          <pattern id="icuGrid" width="28" height="28" patternUnits="userSpaceOnUse">
+            <rect width="28" height="28" fill="#07131a" />
+            <path d="M 28 0 L 0 0 0 28" fill="none" stroke="#0f2936" strokeWidth="1" />
+          </pattern>
+        </defs>
+        <rect width="560" height="280" fill="url(#icuGrid)" />
+
+        {/* Sterile ICU Header Strip & Medical Cross Emblem */}
+        <rect x="20" y="10" width="520" height="22" rx="5" fill="#0b222d" stroke="#134e4a" strokeWidth="1.2" />
+        <g transform="translate(36, 21)">
+          <rect x="-6" y="-2" width="12" height="4" fill="#14b8a6" />
+          <rect x="-2" y="-6" width="4" height="12" fill="#14b8a6" />
+        </g>
+
+        {/* LEFT ZONE: 3 Sterile Medical Instrument Stations (ECG/BP, SpO2, RX-GPP) */}
+        {[0, 1, 2].map(idx => {
+          const yPos = 72 + idx * 74;
+          const isRequired = idx === activeCase.requiredToolIdx;
+          const isEquipped = equippedToolIdx === idx;
+          return (
+            <g
+              key={idx}
+              data-testid={`medical-tool-${idx}`}
+              style={{ cursor: 'pointer' }}
+              onClick={() => handleSelectMedicalTool(idx)}
+              transform={`translate(84, ${yPos})`}
+            >
+              <rect
+                x="-52"
+                y="-22"
+                width="104"
+                height="44"
+                rx="10"
+                fill={isEquipped ? '#0d332b' : isRequired ? '#0c2938' : '#091a24'}
+                stroke={isEquipped ? '#3fc07a' : isRequired ? accentHex : '#1e3a4c'}
+                strokeWidth={isEquipped || isRequired ? 2.5 : 1.5}
+              />
+              {renderMedicalInstrumentIcon(idx, 1.1)}
+            </g>
+          );
+        })}
+
+        {/* CENTER ZONE: Drifting Biohazard Pathogen Spike (Clicking/Touching penalizes -5Đ) */}
+        <g
+          data-testid="medical-biohazard-spike"
+          style={{ cursor: 'pointer' }}
+          onClick={() => {
+            onHazardHit?.();
+            onCollectBonus?.(-5);
+            addPopup(258, biohazardY - 18, 'NHIỄM KHUẨN -5Đ', '#e5566f');
+          }}
+          transform={`translate(258, ${biohazardY})`}
+        >
+          <circle cx="0" cy="0" r="15" fill="#4c0519" stroke="#e5566f" strokeWidth="2.2" />
+          {[0, 60, 120, 180, 240, 300].map(deg => {
+            const rad = (deg * Math.PI) / 180;
+            return (
+              <line
+                key={deg}
+                x1={Math.cos(rad) * 12}
+                y1={Math.sin(rad) * 12}
+                x2={Math.cos(rad) * 20}
+                y2={Math.sin(rad) * 20}
+                stroke="#e5566f"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+              />
+            );
+          })}
+          <circle cx="-4" cy="-3" r="2.2" fill="#fde047" />
+          <circle cx="4" cy="-3" r="2.2" fill="#fde047" />
+        </g>
+
+        {/* Medic Avatar in Scrubs Carrying Equipped Medical Instrument */}
+        <g
+          transform="translate(196, 148)"
+          style={{ cursor: 'pointer' }}
+          onClick={handleApplyClinicalTriage}
+        >
+          <path d="M -14 24 L -12 0 C -12 -6, 12 -6, 12 0 L 14 24 Z" fill="#0d9488" stroke="#99f6e4" strokeWidth="1.5" />
+          <circle cx="0" cy="-12" r="9.5" fill="#fde68a" />
+          {/* Surgical Mask */}
+          <rect x="-6" y="-11" width="12" height="5" rx="2" fill="#e0f2fe" />
+          {equippedToolIdx !== null && (
+            <g transform="translate(22, -2)">{renderMedicalInstrumentIcon(equippedToolIdx, 0.78)}</g>
+          )}
+        </g>
+
+        {/* RIGHT ZONE: ICU Patient Vital Monitor & Clinical Bed Station */}
+        <g
+          data-testid="medical-engage-triage-btn"
+          style={{ cursor: 'pointer' }}
+          onClick={handleApplyClinicalTriage}
+          transform="translate(425, 148)"
+        >
+          {/* Multi-Parameter ICU Vital Monitor */}
+          <rect
+            x="-95"
+            y="-82"
+            width="190"
+            height="145"
+            rx="12"
+            fill="#061017"
+            stroke={vitalStabilized || activeFeedback?.isCorrect ? '#3fc07a' : accentHex}
+            strokeWidth="2.5"
+          />
+          {/* Live ECG Waveform Line */}
+          <polyline
+            points={`-80,-38 -50,-38 -36,-38 -24,${vitalStabilized ? -64 : -72} -12,${vitalStabilized ? -18 : -8} 0,-46 12,-38 45,-38 80,-38`}
+            fill="none"
+            stroke={vitalStabilized ? '#3fc07a' : '#eab308'}
+            strokeWidth="2.5"
+            strokeDashoffset={ecgPhase}
+          />
+          {/* Required Instrument Indicator Badge inside ICU Monitor */}
+          <g transform="translate(0, 12)">
+            <circle
+              cx="0"
+              cy="0"
+              r="24"
+              fill="#0b222d"
+              stroke={vitalStabilized ? '#3fc07a' : '#38bdf8'}
+              strokeWidth="2"
+            />
+            {renderMedicalInstrumentIcon(activeCase.requiredToolIdx, 1.15)}
+          </g>
+          {/* Vital Stability Bar */}
+          <rect x="-65" y="46" width="130" height="7" rx="3.5" fill="#1e293b" />
+          <rect
+            x="-65"
+            y="46"
+            width={vitalStabilized ? 130 : equippedToolIdx === activeCase.requiredToolIdx ? 95 : 52}
+            height="7"
+            rx="3.5"
+            fill={vitalStabilized ? '#3fc07a' : '#14b8a6'}
+          />
+        </g>
+
+        {popups.map(p => (
+          <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+            {p.text}
+          </text>
+        ))}
+      </svg>
+
+      <InGameChallengePopup
+        sceneDescriptor={sceneDescriptor}
+        activeStageIndex={activeStageIndex}
+        totalStages={totalStages}
+        targetCode={activeCase.code}
+        targetName={activeCase.name}
+        telemetryLine={`Triệu chứng / Yêu cầu: ${activeCase.symptom}`}
+        activeQuestion={activeQuestion}
+        activeFeedback={activeFeedback}
+        activeTimeRemaining={activeTimeRemaining}
+        submittingAnswer={submittingAnswer}
+        selectedChoice={selectedChoice}
+        onSelectChoice={onSelectChoice}
+        textAnswer={textAnswer}
+        onChangeTextAnswer={onChangeTextAnswer}
+        onSubmitAnswer={onSubmitAnswer}
+        onContinueStage={onContinueStage}
+        stageInspected={stageInspected}
+        accentHex={accentHex}
+      />
+    </div>
+  );
+};
+
+/* ============================================================================
+ * SCENE 8: ACADEMY KNOWLEDGE LAB & RESEARCH OBSERVATORY (EDUCATION_GENERAL)
+ * Visuals: Starlit Observatory Dome & Constellation Knowledge Circuit,
+ * 3 Interactive Constellation Knowledge Nodes, Moving Misconception Glitch Orb,
+ * and Central Research Synthesis Portal!
+ * ============================================================================ */
+export const AcademyKnowledgeLabScene: React.FC<InteractiveSceneCommonProps> = props => {
+  const {
+    config,
+    sceneDescriptor,
+    activeStageIndex,
+    totalStages,
+    activeQuestion,
+    activeFeedback,
+    activeTimeRemaining,
+    submittingAnswer,
+    selectedChoice,
+    onSelectChoice,
+    textAnswer,
+    onChangeTextAnswer,
+    onSubmitAnswer,
+    onContinueStage,
+    stageInspected,
+    onInspectStage,
+    isPaused,
+    onCollectBonus,
+    onHazardHit,
+  } = props;
+
+  const selectedToolId = sceneDescriptor.tools[0]?.id || 'tool_concept_lens';
+  const accentHex = config.palette.accentColor || '#38bdf8';
+
+  const researchTopics = [
+    {
+      code: 'LAB-01',
+      name: 'Khái Niệm Cốt Lõi & Nguyên Lý Nền Tảng',
+      focus: 'Kết nối các Nút Tinh Vân Tri Thức để xác lập hệ quy chiếu học thuật',
+    },
+    {
+      code: 'LAB-02',
+      name: 'Phân Tích Dữ Kiện & Tư Duy Phản Biện',
+      focus: 'Loại bỏ nhiễu ngụy biện và kiểm chứng giả thuyết nghiên cứu',
+    },
+    {
+      code: 'LAB-03',
+      name: 'Tổng Hợp Mô Hình & Ứng Dụng Thực Tiễn',
+      focus: 'Kích hoạt Cổng Nghiên Cứu trung tâm để bảo vệ kết luận chuyên đề',
+    },
+  ];
+  const activeTopic = researchTopics[activeStageIndex % researchTopics.length];
+
+  const constellationNodes = [
+    { idx: 0, x: 118, y: 74 },
+    { idx: 1, x: 118, y: 150 },
+    { idx: 2, x: 118, y: 222 },
+  ];
+
+  const [activatedNodes, setActivatedNodes] = useState<number[]>([]);
+  const [glitchY, setGlitchY] = useState<number>(80);
+  const [popups, setPopups] = useState<FloatingFeedbackText[]>([]);
+
+  const activatedRef = useRef<Set<number>>(new Set());
+  const glitchDirRef = useRef<1 | -1>(1);
+
+  useEffect(() => {
+    setActivatedNodes([]);
+    activatedRef.current = new Set();
+  }, [activeStageIndex]);
+
+  const addPopup = useCallback((x: number, y: number, text: string, color: string) => {
+    setPopups(prev => [...prev.slice(-4), { id: Date.now() + Math.random(), x, y, text, color }]);
+  }, []);
+
+  useEffect(() => {
+    if (isPaused || stageInspected) return;
+    const timer = window.setInterval(() => {
+      setGlitchY(prev => {
+        let next = prev + glitchDirRef.current * 3.3;
+        if (next >= 220) {
+          next = 220;
+          glitchDirRef.current = -1;
+        } else if (next <= 58) {
+          next = 58;
+          glitchDirRef.current = 1;
+        }
+        return next;
+      });
+    }, 55);
+    return () => clearInterval(timer);
+  }, [isPaused, stageInspected]);
+
+  const handleActivateNode = useCallback(
+    (nodeIdx: number) => {
+      if (stageInspected) return;
+      const node = constellationNodes[nodeIdx] || constellationNodes[0];
+      if (!activatedRef.current.has(nodeIdx)) {
+        activatedRef.current.add(nodeIdx);
+        setActivatedNodes(Array.from(activatedRef.current));
+        onCollectBonus?.(10);
+        addPopup(node.x, node.y - 20, '+10Đ TRI THỨC', '#3fc07a');
+      } else {
+        addPopup(node.x, node.y - 20, 'ĐÃ KẾT NỐI', '#38bdf8');
+      }
+    },
+    [stageInspected, onCollectBonus, addPopup]
+  );
+
+  const handleEngageResearchPortal = useCallback(() => {
+    if (stageInspected) return;
+    if (activatedRef.current.size === 0) {
+      activatedRef.current.add(0);
+      setActivatedNodes([0]);
+      onCollectBonus?.(10);
+    }
+    addPopup(425, 76, 'MỞ CỔNG NGHIÊN CỨU +15Đ', '#3fc07a');
+    onInspectStage(selectedToolId);
+  }, [stageInspected, onCollectBonus, addPopup, onInspectStage, selectedToolId]);
+
+  useEffect(() => {
+    if (isPaused || stageInspected) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === '1') handleActivateNode(0);
+      else if (e.key === '2') handleActivateNode(1);
+      else if (e.key === '3') handleActivateNode(2);
+      else if (e.key === ' ') {
+        e.preventDefault();
+        handleEngageResearchPortal();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [isPaused, stageInspected, handleActivateNode, handleEngageResearchPortal]);
+
+  return (
+    <div
+      data-testid="scene-academy-knowledge-lab"
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        backgroundColor: '#090f24',
+        overflow: 'hidden',
+      }}
+    >
+      <svg
+        viewBox="0 0 560 280"
+        preserveAspectRatio="xMidYMid slice"
+        style={{ width: '100%', height: '100%', display: 'block' }}
+      >
+        <defs>
+          <pattern id="academyStarGrid" width="36" height="36" patternUnits="userSpaceOnUse">
+            <rect width="36" height="36" fill="#090f24" />
+            <circle cx="18" cy="18" r="1.2" fill="#1e293b" />
+          </pattern>
+        </defs>
+        <rect width="560" height="280" fill="url(#academyStarGrid)" />
+
+        {/* Constellation Energy Beams Connecting Nodes to Research Portal */}
+        {constellationNodes.map(node => {
+          const isLit = activatedNodes.includes(node.idx);
+          return (
+            <line
+              key={`beam-${node.idx}`}
+              x1={node.x}
+              y1={node.y}
+              x2="425"
+              y2="144"
+              stroke={isLit ? '#3fc07a' : '#1e293b'}
+              strokeWidth={isLit ? 3 : 1.5}
+              strokeDasharray={isLit ? undefined : '5 5'}
+            />
+          );
+        })}
+
+        {/* LEFT ZONE: 3 Constellation Knowledge Beacons (Book, Atom, Telescope/Compass) */}
+        {constellationNodes.map(node => {
+          const isLit = activatedNodes.includes(node.idx);
+          return (
+            <g
+              key={node.idx}
+              data-testid={`academy-node-${node.idx}`}
+              style={{ cursor: 'pointer' }}
+              onClick={() => handleActivateNode(node.idx)}
+              transform={`translate(${node.x}, ${node.y})`}
+            >
+              <polygon
+                points="0,-24 22,-12 22,12 0,24 -22,12 -22,-12"
+                fill={isLit ? '#112e28' : '#111a36'}
+                stroke={isLit ? '#3fc07a' : accentHex}
+                strokeWidth="2.2"
+              />
+              {node.idx === 0 && (
+                /* Open Book & Knowledge Star */
+                <path
+                  d="M -10 -4 L 0 -1 L 10 -4 L 10 8 L 0 5 L -10 8 Z"
+                  fill="none"
+                  stroke="#38bdf8"
+                  strokeWidth="2"
+                />
+              )}
+              {node.idx === 1 && (
+                /* Atomic Orbit Rings */
+                <g>
+                  <ellipse cx="0" cy="0" rx="11" ry="4.5" fill="none" stroke="#eab308" strokeWidth="1.6" transform="rotate(30)" />
+                  <ellipse cx="0" cy="0" rx="11" ry="4.5" fill="none" stroke="#eab308" strokeWidth="1.6" transform="rotate(-30)" />
+                  <circle cx="0" cy="0" r="2.5" fill="#fde047" />
+                </g>
+              )}
+              {node.idx === 2 && (
+                /* Graduation Mortarboard Cap */
+                <g>
+                  <polygon points="0,-9 12,-3 0,3 -12,-3" fill="#3fc07a" />
+                  <rect x="-6" y="3" width="12" height="5" rx="1.5" fill="#cbd5e1" />
+                </g>
+              )}
+            </g>
+          );
+        })}
+
+        {/* CENTER ZONE: Moving Misconception Glitch Hazard (-5Đ if clicked) */}
+        <g
+          data-testid="academy-glitch-hazard"
+          style={{ cursor: 'pointer' }}
+          onClick={() => {
+            onHazardHit?.();
+            onCollectBonus?.(-5);
+            addPopup(270, glitchY - 18, 'NHIỄU NGỤY BIỆN -5Đ', '#e5566f');
+          }}
+          transform={`translate(270, ${glitchY})`}
+        >
+          <polygon points="0,-16 15,0 0,16 -15,0" fill="#4c0519" stroke="#e5566f" strokeWidth="2.2" />
+          <line x1="-5" y1="-5" x2="5" y2="5" stroke="#fde047" strokeWidth="2.2" />
+          <line x1="5" y1="-5" x2="-5" y2="5" stroke="#fde047" strokeWidth="2.2" />
+        </g>
+
+        {/* RIGHT ZONE: Central Research Synthesis Portal */}
+        <g
+          data-testid="academy-engage-gate-btn"
+          style={{ cursor: 'pointer' }}
+          onClick={handleEngageResearchPortal}
+          transform="translate(425, 144)"
+        >
+          <circle
+            cx="0"
+            cy="0"
+            r="56"
+            fill="#0d1633"
+            stroke={activeFeedback?.isCorrect ? '#3fc07a' : accentHex}
+            strokeWidth="2.5"
+          />
+          <circle cx="0" cy="0" r="38" fill="none" stroke="#eab308" strokeWidth="1.8" strokeDasharray="6 4" />
+          <polygon points="0,-22 19,11 -19,11" fill="none" stroke="#38bdf8" strokeWidth="2.2" />
+          <circle cx="0" cy="0" r="7" fill="#3fc07a" />
+        </g>
+
+        {popups.map(p => (
+          <text key={p.id} x={p.x} y={p.y} textAnchor="middle" fill={p.color} fontSize="10" fontWeight="800">
+            {p.text}
+          </text>
+        ))}
+      </svg>
+
+      <InGameChallengePopup
+        sceneDescriptor={sceneDescriptor}
+        activeStageIndex={activeStageIndex}
+        totalStages={totalStages}
+        targetCode={activeTopic.code}
+        targetName={activeTopic.name}
+        telemetryLine={activeTopic.focus}
+        activeQuestion={activeQuestion}
+        activeFeedback={activeFeedback}
+        activeTimeRemaining={activeTimeRemaining}
+        submittingAnswer={submittingAnswer}
+        selectedChoice={selectedChoice}
+        onSelectChoice={onSelectChoice}
+        textAnswer={textAnswer}
+        onChangeTextAnswer={onChangeTextAnswer}
+        onSubmitAnswer={onSubmitAnswer}
+        onContinueStage={onContinueStage}
+        stageInspected={stageInspected}
+        accentHex={accentHex}
+      />
+    </div>
+  );
+};
+
