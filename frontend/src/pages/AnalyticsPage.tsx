@@ -46,17 +46,29 @@ import type {
   ScoringMode,
 } from '../types/index.js';
 
+export type DiscoverTabKey = 'ALL' | 'PUBLISHED' | 'DRAFT' | 'MINE';
+type SortOptionKey = 'NEWEST' | 'UPDATED' | 'TITLE_ASC' | 'QUESTIONS_DESC';
+
+export interface LibraryFilterPreset {
+  search?: string;
+  gameType?: string;
+  industry?: string;
+  tab?: DiscoverTabKey;
+  nonce?: number;
+}
+
 interface AnalyticsPageProps {
+  mode?: 'overview' | 'library';
+  initialFilterPreset?: LibraryFilterPreset | null;
+  onNavigateToLibrary?: (preset?: LibraryFilterPreset) => void;
   onSelectSavedGame?: (spec: GameSpecification, autoStartSolo?: boolean) => void;
   onNavigateToHost?: (roomCode: string, hostToken: string) => void;
   onNavigateToSoloPresentation?: (spec: GameSpecification) => void;
   onNavigateToCreate?: (type?: GameType) => void;
 }
 
-type DiscoverTabKey = 'ALL' | 'PUBLISHED' | 'DRAFT' | 'MINE';
-type SortOptionKey = 'NEWEST' | 'UPDATED' | 'TITLE_ASC' | 'QUESTIONS_DESC';
-
 const PAGE_SIZE = 12;
+const OVERVIEW_FETCH_LIMIT = 100;
 
 export const formatGameTypeName = (type: string): string => {
   switch (type) {
@@ -150,7 +162,7 @@ const DISCOVER_FORMAT_COLLECTIONS: FormatCollectionItem[] = [
   },
 ];
 
-const GameCoverIllustration: React.FC<{ game: PersistedGameSummary }> = ({ game }) => {
+export const GameCoverIllustration: React.FC<{ game: PersistedGameSummary }> = ({ game }) => {
   const isAdventure = game.gameType === 'ADVENTURE';
   const industryId = (game.adventureConfig?.industryId || '').toLowerCase();
   const palette = game.adventureConfig?.palette;
@@ -372,11 +384,15 @@ const GameCoverIllustration: React.FC<{ game: PersistedGameSummary }> = ({ game 
 };
 
 export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
+  mode = 'overview',
+  initialFilterPreset,
+  onNavigateToLibrary,
   onSelectSavedGame,
   onNavigateToHost,
   onNavigateToSoloPresentation,
   onNavigateToCreate,
 }) => {
+  const isLibraryMode = mode === 'library';
   const toast = useToast();
 
   const [isLoading, setIsLoading] = useState(true);
@@ -482,19 +498,20 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const offset = (targetPage - 1) * PAGE_SIZE;
+      const fetchLimit = isLibraryMode ? PAGE_SIZE : OVERVIEW_FETCH_LIMIT;
+      const offset = isLibraryMode ? (targetPage - 1) * PAGE_SIZE : 0;
       const scopeParam: 'manage' | 'public' | 'mine' =
         tab === 'MINE' ? 'mine' : tab === 'PUBLISHED' ? 'manage' : 'manage';
       const effectiveStatus: 'ALL' | 'PUBLISHED' | 'DRAFT' =
         tab === 'PUBLISHED' ? 'PUBLISHED' : tab === 'DRAFT' ? 'DRAFT' : status;
 
       const data = await fetchSavedGames({
-        limit: PAGE_SIZE,
+        limit: fetchLimit,
         offset,
-        gameType: gameType !== 'ALL' ? gameType : undefined,
-        search: search.trim() || undefined,
-        status: effectiveStatus,
-        scope: scopeParam,
+        gameType: isLibraryMode && gameType !== 'ALL' ? gameType : undefined,
+        search: isLibraryMode ? search.trim() || undefined : undefined,
+        status: isLibraryMode ? effectiveStatus : 'ALL',
+        scope: isLibraryMode ? scopeParam : 'manage',
       });
       setSavedGames(data.games || []);
       const total = data.total ?? (data.games ? data.games.length : 0);
@@ -508,9 +525,34 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   };
 
   useEffect(() => {
+    if (!isLibraryMode || !initialFilterPreset) return;
+    const nextSearch = initialFilterPreset.search ?? '';
+    const nextType = initialFilterPreset.gameType ?? 'ALL';
+    const nextIndustry = initialFilterPreset.industry ?? 'ALL';
+    const nextTab: DiscoverTabKey = initialFilterPreset.tab ?? 'ALL';
+    const nextStatus: 'ALL' | 'PUBLISHED' | 'DRAFT' =
+      nextTab === 'PUBLISHED' ? 'PUBLISHED' : nextTab === 'DRAFT' ? 'DRAFT' : 'ALL';
+
+    setSearchQuery(nextSearch);
+    setSelectedTypeFilter(nextType);
+    setSelectedIndustryFilter(nextIndustry);
+    setDiscoverTab(nextTab);
+    setStatusFilter(nextStatus);
+    setPage(1);
+    loadSavedGames(1, nextSearch, nextType, nextStatus, nextTab);
+  }, [
+    isLibraryMode,
+    initialFilterPreset?.nonce,
+    initialFilterPreset?.search,
+    initialFilterPreset?.gameType,
+    initialFilterPreset?.industry,
+    initialFilterPreset?.tab,
+  ]);
+
+  useEffect(() => {
     setPage(1);
     loadSavedGames(1, searchQuery, selectedTypeFilter, statusFilter, discoverTab);
-  }, [selectedTypeFilter, statusFilter, discoverTab]);
+  }, [isLibraryMode, selectedTypeFilter, statusFilter, discoverTab]);
 
   const handleTabSelect = (nextTab: DiscoverTabKey) => {
     setDiscoverTab(nextTab);
@@ -536,6 +578,10 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    if (!isLibraryMode && onNavigateToLibrary) {
+      onNavigateToLibrary({ search: searchQuery.trim(), nonce: Date.now() });
+      return;
+    }
     setPage(1);
     loadSavedGames(1, searchQuery, selectedTypeFilter, statusFilter, discoverTab);
   };
@@ -988,6 +1034,15 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     };
   }, [savedGames]);
 
+  // Đếm số lượng bộ câu hỏi theo từng cách chơi thực tế trong kho
+  const formatCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const g of savedGames) {
+      counts[g.gameType] = (counts[g.gameType] || 0) + 1;
+    }
+    return counts;
+  }, [savedGames]);
+
   const hasActiveFilters =
     searchQuery.trim().length > 0 ||
     selectedTypeFilter !== 'ALL' ||
@@ -1105,7 +1160,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                 }}
               >
                 <ArrowLeftIcon size={14} />
-                <span>Quay lại Kho Game</span>
+                <span>{isLibraryMode ? 'Quay lại Thư viện' : 'Quay lại Kho Game'}</span>
               </button>
 
               <span
@@ -2052,7 +2107,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         <>
           {/* A. HEADER & KHU VỰC TÌM KIẾM TRUNG TÂM */}
           <section
-            aria-label="Khám phá kho game"
+            aria-label={isLibraryMode ? 'Thư viện bộ câu hỏi' : 'Khám phá kho game'}
             style={{
               backgroundColor: 'var(--bg-surface)',
               border: '1px solid var(--border-subtle)',
@@ -2085,7 +2140,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       lineHeight: 1.2,
                     }}
                   >
-                    Khám phá kho game
+                    {isLibraryMode ? 'Thư viện bộ câu hỏi' : 'Kho Game'}
                   </h1>
                   <span
                     style={{
@@ -2125,12 +2180,39 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     lineHeight: 1.5,
                   }}
                 >
-                  Tìm kiếm học liệu tương tác, khám phá theo cách chơi hoặc chủ đề ngành nghề, và tổ chức thi đấu trực tiếp.
+                  {isLibraryMode
+                    ? 'Quản lý toàn bộ các bộ câu hỏi trong kho: lọc theo trạng thái xuất bản, chỉnh sửa, lấy QR hoặc tổ chức phòng chơi trực tiếp.'
+                    : 'Tổng quan kho học liệu tương tác theo cách chơi, chủ đề ngành nghề và các bộ câu hỏi vừa được khởi tạo.'}
                 </p>
               </div>
 
-              {/* Cụm nút hành động chính: Tạo game + Làm mới + Xóa tất cả */}
+              {/* Cụm nút hành động chính: Mở Thư viện (khi ở Kho Game) + Tạo game + Làm mới + Xóa tất cả */}
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                {!isLibraryMode && onNavigateToLibrary && (
+                  <button
+                    id="overview-open-library-btn"
+                    type="button"
+                    onClick={() => onNavigateToLibrary({ tab: 'ALL', nonce: Date.now() })}
+                    style={{
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--text-primary)',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: '8px',
+                      padding: '0 14px',
+                      height: '38px',
+                      fontWeight: 700,
+                      fontSize: '0.84rem',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <BookOpenIcon size={15} />
+                    <span>Mở Thư viện</span>
+                  </button>
+                )}
+
                 <button
                   id="discover-create-game-btn"
                   type="button"
@@ -2180,30 +2262,32 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   <span>Làm mới</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => setIsConfirmDeleteAllOpen(true)}
-                  disabled={isLoading || totalCount === 0}
-                  title="Xóa toàn bộ game trong kho"
-                  style={{
-                    backgroundColor: 'transparent',
-                    color: 'var(--accent-rose)',
-                    border: '1px solid rgba(244, 63, 94, 0.35)',
-                    borderRadius: '8px',
-                    padding: '0 12px',
-                    height: '38px',
-                    fontWeight: 600,
-                    fontSize: '0.8rem',
-                    cursor: isLoading || totalCount === 0 ? 'not-allowed' : 'pointer',
-                    opacity: isLoading || totalCount === 0 ? 0.45 : 1,
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                  }}
-                >
-                  <TrashIcon size={13} />
-                  <span>Xóa tất cả</span>
-                </button>
+                {isLibraryMode && (
+                  <button
+                    type="button"
+                    onClick={() => setIsConfirmDeleteAllOpen(true)}
+                    disabled={isLoading || totalCount === 0}
+                    title="Xóa toàn bộ game trong kho"
+                    style={{
+                      backgroundColor: 'transparent',
+                      color: 'var(--accent-rose)',
+                      border: '1px solid rgba(244, 63, 94, 0.35)',
+                      borderRadius: '8px',
+                      padding: '0 12px',
+                      height: '38px',
+                      fontWeight: 600,
+                      fontSize: '0.8rem',
+                      cursor: isLoading || totalCount === 0 ? 'not-allowed' : 'pointer',
+                      opacity: isLoading || totalCount === 0 ? 0.45 : 1,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <TrashIcon size={13} />
+                    <span>Xóa tất cả</span>
+                  </button>
+                )}
               </div>
             </div>
 
@@ -2244,7 +2328,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     type="text"
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Tìm theo tên game, chủ đề, ngành nghề hoặc mô tả..."
+                    placeholder={
+                      isLibraryMode
+                        ? 'Tìm bộ câu hỏi theo tên game, chủ đề, ngành nghề hoặc mô tả...'
+                        : 'Nhập từ khóa để tìm bộ câu hỏi trong Thư viện...'
+                    }
                     aria-label="Tìm kiếm kho game"
                     style={{
                       width: '100%',
@@ -2265,8 +2353,10 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       aria-label="Xóa từ khóa tìm kiếm"
                       onClick={() => {
                         setSearchQuery('');
-                        setPage(1);
-                        loadSavedGames(1, '', selectedTypeFilter, statusFilter, discoverTab);
+                        if (isLibraryMode) {
+                          setPage(1);
+                          loadSavedGames(1, '', selectedTypeFilter, statusFilter, discoverTab);
+                        }
                       }}
                       style={{
                         position: 'absolute',
@@ -2300,7 +2390,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     flexShrink: 0,
                   }}
                 >
-                  Tìm kiếm
+                  {isLibraryMode ? 'Tìm kiếm' : 'Tìm trong Thư viện'}
                 </button>
               </form>
 
@@ -2370,122 +2460,73 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               </div>
             </div>
 
-            {/* B. ĐIỀU HƯỚNG TAB & THANH CÔNG CỤ LỌC / SẮP XẾP */}
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '12px',
-                paddingTop: '12px',
-                borderTop: '1px solid var(--border-subtle)',
-              }}
-            >
-              {/* Tabs phân loại dựa trên dữ liệu thực tế */}
+            {/* B. ĐIỀU HƯỚNG TAB & THANH CÔNG CỤ LỌC / SẮP XẾP (TRONG THƯ VIỆN) */}
+            {isLibraryMode && (
               <div
-                role="tablist"
-                aria-label="Phân loại kho game"
                 style={{
                   display: 'flex',
+                  justifyContent: 'space-between',
                   alignItems: 'center',
-                  gap: '6px',
                   flexWrap: 'wrap',
+                  gap: '12px',
+                  paddingTop: '12px',
+                  borderTop: '1px solid var(--border-subtle)',
                 }}
               >
-                {(
-                  [
-                    { key: 'ALL' as DiscoverTabKey, label: 'Khám phá tất cả' },
-                    { key: 'PUBLISHED' as DiscoverTabKey, label: 'Game công khai / Đã xuất bản' },
-                    { key: 'DRAFT' as DiscoverTabKey, label: 'Game nháp' },
-                    ...(currentUser ? [{ key: 'MINE' as DiscoverTabKey, label: 'Game của tôi' }] : []),
-                  ]
-                ).map((tab) => {
-                  const isActive = discoverTab === tab.key;
-                  return (
-                    <button
-                      key={tab.key}
-                      role="tab"
-                      aria-selected={isActive}
-                      type="button"
-                      onClick={() => handleTabSelect(tab.key)}
-                      style={{
-                        height: '34px',
-                        padding: '0 12px',
-                        borderRadius: '6px',
-                        border: isActive ? '1px solid var(--primary)' : '1px solid transparent',
-                        backgroundColor: isActive ? 'var(--primary-subtle)' : 'transparent',
-                        color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
-                        fontWeight: isActive ? 700 : 500,
-                        fontSize: '0.82rem',
-                        cursor: 'pointer',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {tab.label}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Bộ lọc loại game, trạng thái, ngành nghề, sắp xếp & chuyển đổi Lưới/Bảng */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <select
-                  id="analytics-type-filter"
-                  aria-label="Lọc theo loại game"
-                  value={selectedTypeFilter}
-                  onChange={(e) => setSelectedTypeFilter(e.target.value)}
+                {/* Tabs phân loại dựa trên dữ liệu thực tế */}
+                <div
+                  role="tablist"
+                  aria-label="Phân loại thư viện bộ câu hỏi"
                   style={{
-                    padding: '0 10px',
-                    borderRadius: '6px',
-                    border: '1px solid var(--border-strong)',
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--text-primary)',
-                    fontWeight: 600,
-                    fontSize: '0.8rem',
-                    cursor: 'pointer',
-                    height: '34px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    flexWrap: 'wrap',
                   }}
                 >
-                  <option value="ALL">Tất cả thể loại</option>
-                  <option value="MULTIPLE_CHOICE">Trắc nghiệm ABCD</option>
-                  <option value="FILL_IN_THE_BLANK">Điền từ</option>
-                  <option value="QUICK_BUTTON">Đúng / Sai</option>
-                  <option value="CROSSWORD">Ô chữ</option>
-                  <option value="MIXED">Hỗn hợp</option>
-                  <option value="ADVENTURE">Đi cảnh theo ngành nghề</option>
-                </select>
+                  {(
+                    [
+                      { key: 'ALL' as DiscoverTabKey, label: 'Tất cả' },
+                      { key: 'PUBLISHED' as DiscoverTabKey, label: 'Đã xuất bản' },
+                      { key: 'DRAFT' as DiscoverTabKey, label: 'Bản nháp' },
+                      ...(currentUser?.userId ? [{ key: 'MINE' as DiscoverTabKey, label: 'Của tôi' }] : []),
+                    ]
+                  ).map((tab) => {
+                    const isActive = discoverTab === tab.key;
+                    return (
+                      <button
+                        key={tab.key}
+                        id={`library-tab-${tab.key.toLowerCase()}`}
+                        role="tab"
+                        aria-selected={isActive}
+                        type="button"
+                        onClick={() => handleTabSelect(tab.key)}
+                        style={{
+                          height: '34px',
+                          padding: '0 14px',
+                          borderRadius: '6px',
+                          border: isActive ? '1px solid var(--primary)' : '1px solid transparent',
+                          backgroundColor: isActive ? 'var(--primary-subtle)' : 'transparent',
+                          color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          fontWeight: isActive ? 700 : 500,
+                          fontSize: '0.82rem',
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {tab.label}
+                      </button>
+                    );
+                  })}
+                </div>
 
-                <select
-                  id="analytics-status-filter"
-                  aria-label="Lọc theo trạng thái xuất bản"
-                  value={statusFilter}
-                  onChange={(e) =>
-                    handleStatusSelectChange(e.target.value as 'ALL' | 'PUBLISHED' | 'DRAFT')
-                  }
-                  style={{
-                    padding: '0 10px',
-                    borderRadius: '6px',
-                    border: '1px solid var(--border-strong)',
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--text-primary)',
-                    fontWeight: 600,
-                    fontSize: '0.8rem',
-                    cursor: 'pointer',
-                    height: '34px',
-                  }}
-                >
-                  <option value="ALL">Tất cả trạng thái</option>
-                  <option value="PUBLISHED">Đã xuất bản</option>
-                  <option value="DRAFT">Bản nháp</option>
-                </select>
-
-                {availableIndustries.length > 0 && (
+                {/* Bộ lọc loại game, trạng thái, ngành nghề, sắp xếp & chuyển đổi Lưới/Bảng */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                   <select
-                    id="analytics-industry-filter"
-                    aria-label="Lọc theo chủ đề ngành nghề"
-                    value={selectedIndustryFilter}
-                    onChange={(e) => setSelectedIndustryFilter(e.target.value)}
+                    id="analytics-type-filter"
+                    aria-label="Lọc theo loại game"
+                    value={selectedTypeFilter}
+                    onChange={(e) => setSelectedTypeFilter(e.target.value)}
                     style={{
                       padding: '0 10px',
                       borderRadius: '6px',
@@ -2498,109 +2539,161 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       height: '34px',
                     }}
                   >
-                    <option value="ALL">Tất cả ngành nghề ({availableIndustries.length})</option>
-                    {availableIndustries.map((ind) => (
-                      <option key={ind.id} value={ind.id}>
-                        {ind.label} ({ind.count})
-                      </option>
-                    ))}
+                    <option value="ALL">Tất cả thể loại</option>
+                    <option value="MULTIPLE_CHOICE">Trắc nghiệm ABCD</option>
+                    <option value="FILL_IN_THE_BLANK">Điền từ</option>
+                    <option value="QUICK_BUTTON">Đúng / Sai</option>
+                    <option value="CROSSWORD">Ô chữ</option>
+                    <option value="MIXED">Hỗn hợp</option>
+                    <option value="ADVENTURE">Đi cảnh theo ngành nghề</option>
                   </select>
-                )}
 
-                <select
-                  id="analytics-sort-select"
-                  aria-label="Sắp xếp danh sách game"
-                  value={sortBy}
-                  onChange={(e) => setSortBy(e.target.value as SortOptionKey)}
-                  style={{
-                    padding: '0 10px',
-                    borderRadius: '6px',
-                    border: '1px solid var(--border-strong)',
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--text-primary)',
-                    fontWeight: 600,
-                    fontSize: '0.8rem',
-                    cursor: 'pointer',
-                    height: '34px',
-                  }}
-                >
-                  <option value="NEWEST">Sắp xếp: Mới nhất</option>
-                  <option value="UPDATED">Sắp xếp: Cập nhật gần đây</option>
-                  <option value="TITLE_ASC">Sắp xếp: Tên A–Z</option>
-                  <option value="QUESTIONS_DESC">Sắp xếp: Nhiều câu hỏi nhất</option>
-                </select>
-
-                {/* View Layout Toggle */}
-                <div
-                  style={{
-                    display: 'inline-flex',
-                    backgroundColor: 'var(--bg-input)',
-                    padding: '2px',
-                    borderRadius: '6px',
-                    border: '1px solid var(--border-subtle)',
-                    height: '34px',
-                    boxSizing: 'border-box',
-                  }}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setViewLayout('grid')}
+                  <select
+                    id="analytics-status-filter"
+                    aria-label="Lọc theo trạng thái xuất bản"
+                    value={statusFilter}
+                    onChange={(e) =>
+                      handleStatusSelectChange(e.target.value as 'ALL' | 'PUBLISHED' | 'DRAFT')
+                    }
                     style={{
                       padding: '0 10px',
-                      borderRadius: '4px',
-                      border: viewLayout === 'grid' ? '1px solid var(--border-strong)' : '1px solid transparent',
-                      backgroundColor: viewLayout === 'grid' ? 'var(--bg-elevated)' : 'transparent',
-                      color: viewLayout === 'grid' ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      fontWeight: 700,
-                      fontSize: '0.76rem',
-                      cursor: 'pointer',
-                      height: '100%',
-                    }}
-                  >
-                    Lưới
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setViewLayout('list')}
-                    style={{
-                      padding: '0 10px',
-                      borderRadius: '4px',
-                      border: viewLayout === 'list' ? '1px solid var(--border-strong)' : '1px solid transparent',
-                      backgroundColor: viewLayout === 'list' ? 'var(--bg-elevated)' : 'transparent',
-                      color: viewLayout === 'list' ? 'var(--text-primary)' : 'var(--text-secondary)',
-                      fontWeight: 700,
-                      fontSize: '0.76rem',
-                      cursor: 'pointer',
-                      height: '100%',
-                    }}
-                  >
-                    Bảng
-                  </button>
-                </div>
-
-                {hasActiveFilters && (
-                  <button
-                    id="analytics-reset-filters-btn"
-                    type="button"
-                    onClick={handleResetAllFilters}
-                    style={{
-                      backgroundColor: 'transparent',
-                      color: 'var(--accent-sky)',
-                      border: '1px solid rgba(56, 189, 248, 0.35)',
                       borderRadius: '6px',
-                      padding: '0 10px',
-                      height: '34px',
-                      fontWeight: 700,
-                      fontSize: '0.78rem',
+                      border: '1px solid var(--border-strong)',
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--text-primary)',
+                      fontWeight: 600,
+                      fontSize: '0.8rem',
                       cursor: 'pointer',
-                      whiteSpace: 'nowrap',
+                      height: '34px',
                     }}
                   >
-                    Xóa bộ lọc
-                  </button>
-                )}
+                    <option value="ALL">Tất cả trạng thái</option>
+                    <option value="PUBLISHED">Đã xuất bản</option>
+                    <option value="DRAFT">Bản nháp</option>
+                  </select>
+
+                  {availableIndustries.length > 0 && (
+                    <select
+                      id="analytics-industry-filter"
+                      aria-label="Lọc theo chủ đề ngành nghề"
+                      value={selectedIndustryFilter}
+                      onChange={(e) => setSelectedIndustryFilter(e.target.value)}
+                      style={{
+                        padding: '0 10px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-input)',
+                        color: 'var(--text-primary)',
+                        fontWeight: 600,
+                        fontSize: '0.8rem',
+                        cursor: 'pointer',
+                        height: '34px',
+                      }}
+                    >
+                      <option value="ALL">Tất cả ngành nghề ({availableIndustries.length})</option>
+                      {availableIndustries.map((ind) => (
+                        <option key={ind.id} value={ind.id}>
+                          {ind.label} ({ind.count})
+                        </option>
+                      ))}
+                    </select>
+                  )}
+
+                  <select
+                    id="analytics-sort-select"
+                    aria-label="Sắp xếp danh sách game"
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value as SortOptionKey)}
+                    style={{
+                      padding: '0 10px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-strong)',
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--text-primary)',
+                      fontWeight: 600,
+                      fontSize: '0.8rem',
+                      cursor: 'pointer',
+                      height: '34px',
+                    }}
+                  >
+                    <option value="NEWEST">Sắp xếp: Mới nhất</option>
+                    <option value="UPDATED">Sắp xếp: Cập nhật gần đây</option>
+                    <option value="TITLE_ASC">Sắp xếp: Tên A–Z</option>
+                    <option value="QUESTIONS_DESC">Sắp xếp: Nhiều câu hỏi nhất</option>
+                  </select>
+
+                  {/* View Layout Toggle */}
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      backgroundColor: 'var(--bg-input)',
+                      padding: '2px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-subtle)',
+                      height: '34px',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => setViewLayout('grid')}
+                      style={{
+                        padding: '0 10px',
+                        borderRadius: '4px',
+                        border: viewLayout === 'grid' ? '1px solid var(--border-strong)' : '1px solid transparent',
+                        backgroundColor: viewLayout === 'grid' ? 'var(--bg-elevated)' : 'transparent',
+                        color: viewLayout === 'grid' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        fontWeight: 700,
+                        fontSize: '0.76rem',
+                        cursor: 'pointer',
+                        height: '100%',
+                      }}
+                    >
+                      Lưới
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setViewLayout('list')}
+                      style={{
+                        padding: '0 10px',
+                        borderRadius: '4px',
+                        border: viewLayout === 'list' ? '1px solid var(--border-strong)' : '1px solid transparent',
+                        backgroundColor: viewLayout === 'list' ? 'var(--bg-elevated)' : 'transparent',
+                        color: viewLayout === 'list' ? 'var(--text-primary)' : 'var(--text-secondary)',
+                        fontWeight: 700,
+                        fontSize: '0.76rem',
+                        cursor: 'pointer',
+                        height: '100%',
+                      }}
+                    >
+                      Bảng
+                    </button>
+                  </div>
+
+                  {hasActiveFilters && (
+                    <button
+                      id="analytics-reset-filters-btn"
+                      type="button"
+                      onClick={handleResetAllFilters}
+                      style={{
+                        backgroundColor: 'transparent',
+                        color: 'var(--accent-sky)',
+                        border: '1px solid rgba(56, 189, 248, 0.35)',
+                        borderRadius: '6px',
+                        padding: '0 10px',
+                        height: '34px',
+                        fontWeight: 700,
+                        fontSize: '0.78rem',
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      Xóa bộ lọc
+                    </button>
+                  )}
+                </div>
               </div>
-            </div>
+            )}
           </section>
 
           {/* Error Alert */}
@@ -2644,220 +2737,194 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
             </div>
           )}
 
-          {/* C1. KHÁM PHÁ THEO CÁCH CHƠI (BỘ SƯU TẬP 5 ĐỊNH DẠNG BACKEND + ADVENTURE) */}
-          <section aria-label="Khám phá theo cách chơi" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                  Khám phá theo cách chơi
-                </h2>
-                <p style={{ margin: '2px 0 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-                  Chọn định dạng câu hỏi hoặc chế độ nhập vai để lọc kho game hoặc tạo trò chơi mới tương ứng
-                </p>
-              </div>
-              {selectedTypeFilter !== 'ALL' && (
-                <button
-                  type="button"
-                  onClick={() => setSelectedTypeFilter('ALL')}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--accent-sky)',
-                    fontSize: '0.8rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    padding: 0,
-                  }}
-                >
-                  Xem tất cả cách chơi
-                </button>
-              )}
-            </div>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-                gap: '12px',
-              }}
-            >
-              {DISCOVER_FORMAT_COLLECTIONS.map((fmt) => {
-                const isSelected = selectedTypeFilter === fmt.id;
-                return (
-                  <div
-                    key={fmt.id}
-                    style={{
-                      backgroundColor: isSelected ? 'var(--primary-subtle)' : 'var(--bg-surface)',
-                      border: isSelected ? '1.5px solid var(--primary)' : '1px solid var(--border-subtle)',
-                      borderRadius: '8px',
-                      padding: '14px',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      justifyContent: 'space-between',
-                      gap: '10px',
-                    }}
-                  >
-                    <div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                        <span
-                          style={{
-                            fontSize: '0.72rem',
-                            fontWeight: 700,
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            backgroundColor: fmt.badgeBg,
-                            color: fmt.accentColor,
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {fmt.mechanicTag}
-                        </span>
-                        {isSelected && (
-                          <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                            Đang lọc
-                          </span>
-                        )}
-                      </div>
-                      <h3 style={{ margin: '0 0 4px 0', fontSize: '0.92rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                        {fmt.label}
-                      </h3>
-                      <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                        {fmt.shortDesc}
-                      </p>
-                    </div>
-
-                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)' }}>
-                      <button
-                        type="button"
-                        onClick={() => setSelectedTypeFilter(isSelected ? 'ALL' : fmt.id)}
-                        style={{
-                          backgroundColor: isSelected ? 'var(--primary)' : 'var(--bg-input)',
-                          color: isSelected ? 'var(--primary-ink, #08090e)' : 'var(--text-primary)',
-                          border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border-strong)',
-                          borderRadius: '6px',
-                          padding: '0 10px',
-                          height: '28px',
-                          fontSize: '0.76rem',
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                        }}
-                      >
-                        {isSelected ? 'Bỏ lọc' : 'Lọc game'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleNavigateToCreator(fmt.id)}
-                        style={{
-                          background: 'none',
-                          border: 'none',
-                          color: 'var(--accent-sky)',
-                          fontSize: '0.76rem',
-                          fontWeight: 700,
-                          cursor: 'pointer',
-                          padding: '0 4px',
-                        }}
-                      >
-                        + Tạo mới
-                      </button>
-                    </div>
+          {!isLibraryMode ? (
+            <>
+              {/* C1. KHÁM PHÁ THEO CÁCH CHƠI (BỘ SƯU TẬP 5 ĐỊNH DẠNG BACKEND + ADVENTURE) */}
+              <section aria-label="Khám phá theo cách chơi" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
+                  <div>
+                    <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                      Khám phá theo cách chơi
+                    </h2>
+                    <p style={{ margin: '2px 0 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
+                      Chọn định dạng câu hỏi hoặc chế độ nhập vai để mở trong Thư viện hoặc tạo trò chơi mới tương ứng
+                    </p>
                   </div>
-                );
-              })}
-            </div>
-          </section>
+                </div>
 
-          {/* C2. KHÁM PHÁ THEO NGÀNH NGHỀ / CHỦ ĐỀ THỰC TẾ (KHI DỮ LIỆU KHO GAME CÓ NGÀNH NGHỀ) */}
-          {availableIndustries.length > 0 && (
-            <section aria-label="Khám phá theo ngành nghề" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
-                <h2 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                  Khám phá theo chủ đề & ngành hàng
-                </h2>
-                {selectedIndustryFilter !== 'ALL' && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedIndustryFilter('ALL')}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: 'var(--accent-sky)',
-                      fontSize: '0.8rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Hiển thị mọi ngành nghề
-                  </button>
-                )}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  onClick={() => setSelectedIndustryFilter('ALL')}
+                <div
                   style={{
-                    height: '32px',
-                    padding: '0 12px',
-                    borderRadius: '6px',
-                    border:
-                      selectedIndustryFilter === 'ALL'
-                        ? '1px solid var(--primary)'
-                        : '1px solid var(--border-subtle)',
-                    backgroundColor:
-                      selectedIndustryFilter === 'ALL' ? 'var(--accent-sky-subtle)' : 'var(--bg-surface)',
-                    color: selectedIndustryFilter === 'ALL' ? 'var(--accent-sky)' : 'var(--text-secondary)',
-                    fontWeight: 700,
-                    fontSize: '0.8rem',
-                    cursor: 'pointer',
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+                    gap: '12px',
                   }}
                 >
-                  Tất cả chủ đề
-                </button>
-                {availableIndustries.map((ind) => {
-                  const active = selectedIndustryFilter === ind.id;
-                  return (
+                  {DISCOVER_FORMAT_COLLECTIONS.map((fmt) => {
+                    const countInRepo = formatCounts[fmt.id] || 0;
+                    return (
+                      <div
+                        key={fmt.id}
+                        style={{
+                          backgroundColor: 'var(--bg-surface)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: '8px',
+                          padding: '14px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          gap: '10px',
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                            <span
+                              style={{
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                padding: '2px 8px',
+                                borderRadius: '4px',
+                                backgroundColor: fmt.badgeBg,
+                                color: fmt.accentColor,
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {fmt.mechanicTag}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                color: 'var(--text-secondary)',
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {countInRepo} bộ
+                            </span>
+                          </div>
+                          <h3 style={{ margin: '0 0 4px 0', fontSize: '0.92rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                            {fmt.label}
+                          </h3>
+                          <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                            {fmt.shortDesc}
+                          </p>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)' }}>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              onNavigateToLibrary
+                                ? onNavigateToLibrary({ gameType: fmt.id, nonce: Date.now() })
+                                : setSelectedTypeFilter(fmt.id)
+                            }
+                            style={{
+                              backgroundColor: 'var(--bg-input)',
+                              color: 'var(--text-primary)',
+                              border: '1px solid var(--border-strong)',
+                              borderRadius: '6px',
+                              padding: '0 10px',
+                              height: '28px',
+                              fontSize: '0.76rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Xem trong Thư viện
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleNavigateToCreator(fmt.id)}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--accent-sky)',
+                              fontSize: '0.76rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                              padding: '0 4px',
+                            }}
+                          >
+                            + Tạo mới
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </section>
+
+              {/* C2. KHÁM PHÁ THEO NGÀNH NGHỀ / CHỦ ĐỀ THỰC TẾ (KHI DỮ LIỆU KHO GAME CÓ NGÀNH NGHỀ) */}
+              {availableIndustries.length > 0 && (
+                <section aria-label="Khám phá theo ngành nghề" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                    <h2 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                      Khám phá theo chủ đề & ngành hàng
+                    </h2>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     <button
-                      key={ind.id}
                       type="button"
-                      onClick={() => setSelectedIndustryFilter(active ? 'ALL' : ind.id)}
+                      onClick={() =>
+                        onNavigateToLibrary
+                          ? onNavigateToLibrary({ industry: 'ALL', nonce: Date.now() })
+                          : setSelectedIndustryFilter('ALL')
+                      }
                       style={{
                         height: '32px',
                         padding: '0 12px',
                         borderRadius: '6px',
-                        border: active ? '1px solid var(--accent-amber)' : '1px solid var(--border-subtle)',
-                        backgroundColor: active ? 'var(--accent-amber-subtle)' : 'var(--bg-surface)',
-                        color: active ? 'var(--accent-amber)' : 'var(--text-primary)',
-                        fontWeight: 600,
+                        border: '1px solid var(--primary)',
+                        backgroundColor: 'var(--accent-sky-subtle)',
+                        color: 'var(--accent-sky)',
+                        fontWeight: 700,
                         fontSize: '0.8rem',
                         cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        whiteSpace: 'nowrap',
                       }}
                     >
-                      <span>{ind.label}</span>
-                      <span
+                      Tất cả chủ đề
+                    </button>
+                    {availableIndustries.map((ind) => (
+                      <button
+                        key={ind.id}
+                        type="button"
+                        onClick={() =>
+                          onNavigateToLibrary
+                            ? onNavigateToLibrary({ industry: ind.id, nonce: Date.now() })
+                            : setSelectedIndustryFilter(ind.id)
+                        }
                         style={{
-                          fontSize: '0.72rem',
-                          color: 'var(--text-secondary)',
-                          fontVariantNumeric: 'tabular-nums',
+                          height: '32px',
+                          padding: '0 12px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-subtle)',
+                          backgroundColor: 'var(--bg-surface)',
+                          color: 'var(--text-primary)',
+                          fontWeight: 600,
+                          fontSize: '0.8rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          whiteSpace: 'nowrap',
                         }}
                       >
-                        {ind.count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </section>
-          )}
+                        <span>{ind.label}</span>
+                        <span
+                          style={{
+                            fontSize: '0.72rem',
+                            color: 'var(--text-secondary)',
+                            fontVariantNumeric: 'tabular-nums',
+                          }}
+                        >
+                          {ind.count}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
 
-          {/* C3. KỆ GAME MỚI TẠO GẦN ĐÂY (HIỂN THỊ KHI Ở TRANG 1 & KHÔNG ĐANG LỌC HẸP) */}
-          {!isLoading &&
-            page === 1 &&
-            !hasActiveFilters &&
-            viewLayout === 'grid' &&
-            recentlyCreatedShelf.length >= 3 && (
+              {/* C3. KỆ GAME MỚI TẠO GẦN ĐÂY TRONG KHO GAME */}
               <section
                 aria-label="Game mới tạo gần đây"
                 style={{
@@ -2870,7 +2937,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   gap: '14px',
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                   <div>
                     <h2 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 800, color: 'var(--text-primary)' }}>
                       Mới tạo gần đây
@@ -2879,143 +2946,226 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       Các bộ câu hỏi vừa được khởi tạo mới nhất trong hệ thống
                     </p>
                   </div>
-                  <span style={{ fontSize: '0.76rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                    {recentlyCreatedShelf.length} game mới nhất
-                  </span>
-                </div>
-
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-                    gap: '12px',
-                  }}
-                >
-                  {recentlyCreatedShelf.map((item) => (
-                    <div
-                      key={`recent-${item.gameId}`}
+                  {onNavigateToLibrary && (
+                    <button
+                      type="button"
+                      onClick={() => onNavigateToLibrary({ tab: 'ALL', nonce: Date.now() })}
                       style={{
-                        backgroundColor: 'var(--bg-input)',
-                        border: '1px solid var(--border-subtle)',
-                        borderRadius: '8px',
-                        padding: '12px 14px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        justifyContent: 'space-between',
-                        gap: '10px',
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--accent-sky)',
+                        fontSize: '0.82rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        padding: 0,
                       }}
                     >
-                      <div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                          <span
+                      <span>Xem tất cả trong Thư viện</span>
+                      <ArrowRightIcon size={13} />
+                    </button>
+                  )}
+                </div>
+
+                {isLoading ? (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+                      gap: '12px',
+                    }}
+                  >
+                    {Array.from({ length: 4 }).map((_, idx) => (
+                      <div
+                        key={`overview-skeleton-${idx}`}
+                        style={{
+                          height: '96px',
+                          borderRadius: '8px',
+                          backgroundColor: 'var(--bg-input)',
+                          border: '1px solid var(--border-subtle)',
+                        }}
+                      />
+                    ))}
+                  </div>
+                ) : recentlyCreatedShelf.length === 0 ? (
+                  <div
+                    style={{
+                      padding: '24px 16px',
+                      borderRadius: '8px',
+                      backgroundColor: 'var(--bg-input)',
+                      border: '1px dashed var(--border-strong)',
+                      textAlign: 'center',
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.86rem',
+                    }}
+                  >
+                    Chưa có bộ câu hỏi nào trong kho. Hãy nhấn <strong style={{ color: 'var(--text-primary)' }}>Tạo game</strong> để biên soạn bộ câu hỏi đầu tiên.
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+                      gap: '12px',
+                    }}
+                  >
+                    {recentlyCreatedShelf.map((item) => (
+                      <div
+                        key={`recent-${item.gameId}`}
+                        style={{
+                          backgroundColor: 'var(--bg-input)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: '8px',
+                          padding: '12px 14px',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          justifyContent: 'space-between',
+                          gap: '10px',
+                        }}
+                      >
+                        <div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                            <span
+                              style={{
+                                fontSize: '0.7rem',
+                                fontWeight: 700,
+                                color: 'var(--accent-sky)',
+                                backgroundColor: 'var(--accent-sky-subtle)',
+                                padding: '2px 7px',
+                                borderRadius: '4px',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {formatGameTypeName(item.gameType)}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: '0.72rem',
+                                color: 'var(--text-secondary)',
+                                fontVariantNumeric: 'tabular-nums',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {item.questionCount} câu • {item.timePerQuestion || 15}s
+                            </span>
+                          </div>
+                          <div
                             style={{
-                              fontSize: '0.7rem',
                               fontWeight: 700,
-                              color: 'var(--accent-sky)',
-                              backgroundColor: 'var(--accent-sky-subtle)',
-                              padding: '2px 7px',
-                              borderRadius: '4px',
-                              whiteSpace: 'nowrap',
+                              fontSize: '0.9rem',
+                              color: 'var(--text-primary)',
+                              lineHeight: 1.35,
+                              display: '-webkit-box',
+                              WebkitLineClamp: 1,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
                             }}
+                            title={item.title}
                           >
-                            {formatGameTypeName(item.gameType)}
-                          </span>
+                            {item.title}
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
                           <span
                             style={{
                               fontSize: '0.72rem',
-                              color: 'var(--text-secondary)',
-                              fontVariantNumeric: 'tabular-nums',
-                              whiteSpace: 'nowrap',
+                              color: item.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+                              fontWeight: 600,
                             }}
                           >
-                            {item.questionCount} câu • {item.timePerQuestion || 15}s
+                            {item.isPublic ? 'Đã xuất bản' : 'Bản nháp'}
                           </span>
-                        </div>
-                        <div
-                          style={{
-                            fontWeight: 700,
-                            fontSize: '0.9rem',
-                            color: 'var(--text-primary)',
-                            lineHeight: 1.35,
-                            display: '-webkit-box',
-                            WebkitLineClamp: 1,
-                            WebkitBoxOrient: 'vertical',
-                            overflow: 'hidden',
-                          }}
-                          title={item.title}
-                        >
-                          {item.title}
-                        </div>
-                      </div>
-
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                        <span
-                          style={{
-                            fontSize: '0.72rem',
-                            color: item.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
-                            fontWeight: 600,
-                          }}
-                        >
-                          {item.isPublic ? 'Đã xuất bản' : 'Bản nháp'}
-                        </span>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button
-                            type="button"
-                            onClick={() => handleOpenModeModal(item.gameId)}
-                            style={{
-                              backgroundColor: 'var(--bg-elevated)',
-                              color: 'var(--text-primary)',
-                              border: '1px solid var(--border-strong)',
-                              borderRadius: '6px',
-                              padding: '0 10px',
-                              height: '28px',
-                              fontSize: '0.76rem',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            Mở nhanh
-                          </button>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button
+                              type="button"
+                              onClick={() => handleViewOrEditGame(item.gameId, false)}
+                              style={{
+                                backgroundColor: 'transparent',
+                                color: 'var(--text-secondary)',
+                                border: '1px solid var(--border-subtle)',
+                                borderRadius: '6px',
+                                padding: '0 8px',
+                                height: '28px',
+                                fontSize: '0.75rem',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Chi tiết
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenModeModal(item.gameId)}
+                              style={{
+                                backgroundColor: 'var(--bg-elevated)',
+                                color: 'var(--text-primary)',
+                                border: '1px solid var(--border-strong)',
+                                borderRadius: '6px',
+                                padding: '0 10px',
+                                height: '28px',
+                                fontSize: '0.76rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Mở nhanh
+                            </button>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </section>
-            )}
-
-          {/* D. DANH SÁCH KHÁM PHÁ CHÍNH (LƯỚI THẺ GAME HOẶC BẢNG) */}
-          <section aria-label="Danh sách bộ câu hỏi" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                flexWrap: 'wrap',
-                gap: '8px',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <h2 style={{ margin: 0, fontSize: '1.08rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                  {discoverTab === 'PUBLISHED'
-                    ? 'Game công khai & Đã xuất bản'
-                    : discoverTab === 'DRAFT'
-                      ? 'Danh sách Bản nháp'
-                      : discoverTab === 'MINE'
-                        ? 'Game của tôi'
-                        : 'Tất cả bộ câu hỏi trong kho'}
-                </h2>
-                <span
-                  style={{
-                    fontSize: '0.78rem',
-                    color: 'var(--text-secondary)',
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
-                  Hiển thị {displayedGames.length} / {totalCount} bộ
-                </span>
+            </>
+          ) : (
+            /* D. TRANG THƯ VIỆN: TẤT CẢ BỘ CÂU HỎI TRONG KHO (LƯỚI THẺ GAME HOẶC BẢNG) */
+            <section aria-label="Danh sách bộ câu hỏi" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '8px',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                  <h2 style={{ margin: 0, fontSize: '1.08rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                    Tất cả bộ câu hỏi trong kho
+                  </h2>
+                  {discoverTab !== 'ALL' && (
+                    <span
+                      style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 700,
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        backgroundColor: 'var(--primary-subtle)',
+                        color: 'var(--accent-sky)',
+                      }}
+                    >
+                      {discoverTab === 'PUBLISHED'
+                        ? 'Đã xuất bản'
+                        : discoverTab === 'DRAFT'
+                          ? 'Bản nháp'
+                          : 'Của tôi'}
+                    </span>
+                  )}
+                  <span
+                    style={{
+                      fontSize: '0.78rem',
+                      color: 'var(--text-secondary)',
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    Hiển thị {displayedGames.length} / {totalCount} bộ
+                  </span>
+                </div>
               </div>
-            </div>
 
             {isLoading ? (
               /* Skeleton Loading State theo Design Taste Skill §11: không dùng shimmer lòe loẹt, giữ đúng pitch của thẻ */
@@ -3956,6 +4106,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               </div>
             )}
           </section>
+          )}
         </>
       )}
 
@@ -4855,5 +5006,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     </div>
   );
 };
+
+export const LibraryPage: React.FC<AnalyticsPageProps> = (props) => (
+  <AnalyticsPage {...props} mode="library" />
+);
 
 export default AnalyticsPage;

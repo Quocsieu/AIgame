@@ -2,19 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { ToastProvider } from './components/ToastContext.js';
 import {
   AlertTriangleIcon,
+  BarChartIcon,
   BookOpenIcon,
-  GamepadIcon,
   HomeIcon,
   MoonIcon,
-  ShieldIcon,
   SparklesIcon,
   SpinnerIcon,
   SunIcon,
   UsersIcon,
-  XMarkIcon,
 } from './components/Icons.js';
 import { AdminPage } from './pages/AdminPage.js';
-import { AnalyticsPage } from './pages/AnalyticsPage.js';
+import { AnalyticsPage, LibraryPage, type LibraryFilterPreset } from './pages/AnalyticsPage.js';
 import { DemoPage } from './pages/DemoPage.js';
 import { HomePage } from './pages/HomePage.js';
 import { HostPage } from './pages/HostPage.js';
@@ -25,11 +23,12 @@ import { SoloPresentationPage } from './pages/SoloPresentationPage.js';
 import { fetchCurrentUser, fetchGameById } from './services/api.js';
 import type { AuthenticatedUser, GameSpecification, GameType } from './types/index.js';
 
-type Tab = 'home' | 'demo' | 'analytics' | 'host' | 'join' | 'play' | 'admin' | 'solo-present';
+type Tab = 'home' | 'demo' | 'analytics' | 'library' | 'host' | 'join' | 'play' | 'admin' | 'solo-present';
 
 export const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [selectedGameType, setSelectedGameType] = useState<GameType>('MULTIPLE_CHOICE');
+  const [libraryFilterPreset, setLibraryFilterPreset] = useState<LibraryFilterPreset | null>(null);
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
 
   const [roomCode, setRoomCode] = useState('');
@@ -65,7 +64,6 @@ export const AppContent: React.FC = () => {
   };
 
   useEffect(() => {
-    // Check current user session for admin or role display
     fetchCurrentUser()
       .then((res) => {
         if (res?.user) {
@@ -77,7 +75,7 @@ export const AppContent: React.FC = () => {
       });
   }, []);
 
-  useEffect(() => {
+  const syncStateFromLocation = () => {
     const params = new URLSearchParams(window.location.search);
     const playGameId = (params.get('play') || '').trim();
     let room = (params.get('room') || '').toUpperCase().trim();
@@ -115,7 +113,6 @@ export const AppContent: React.FC = () => {
       return;
     }
 
-    // F5 Session Recovery: Check sessionStorage if URL parameters are incomplete
     if (!token && (tab === 'host' || !tab)) {
       const storedToken = (sessionStorage.getItem('active_host_token') || '').trim();
       const storedRoom = (sessionStorage.getItem('active_host_room') || '').trim();
@@ -146,17 +143,48 @@ export const AppContent: React.FC = () => {
     } else if (room) {
       setRoomCode(room);
       setActiveTab('join');
-    } else if (tab && ['home', 'demo', 'analytics', 'join', 'play', 'admin'].includes(tab)) {
+    } else if (tab && ['home', 'demo', 'analytics', 'library', 'join', 'play', 'admin'].includes(tab)) {
       setActiveTab(tab);
     } else if (tab === 'host') {
-      // Direct ?tab=host without active room/token redirects to Kho Game
       setActiveTab('analytics');
     } else if (window.location.pathname.startsWith('/admin')) {
       setActiveTab('admin');
     } else {
       setActiveTab('home');
     }
+  };
+
+  useEffect(() => {
+    syncStateFromLocation();
+    const handlePopState = () => {
+      syncStateFromLocation();
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => {
+      window.removeEventListener('popstate', handlePopState);
+    };
   }, []);
+
+  const navigateWithHistory = (nextTab: Tab, targetUrl: string) => {
+    setSoloPlayError(null);
+    setAutoStartSoloPlay(false);
+    try {
+      const currentFull = `${window.location.pathname}${window.location.search}`;
+      if (currentFull !== targetUrl) {
+        window.history.pushState({ tab: nextTab }, '', targetUrl);
+      }
+    } catch {}
+    setActiveTab(nextTab);
+  };
+
+  const handleNavigateToLibrary = (preset?: LibraryFilterPreset) => {
+    if (preset) {
+      setLibraryFilterPreset({ ...preset, nonce: preset.nonce || Date.now() });
+    } else {
+      setLibraryFilterPreset(null);
+    }
+    navigateWithHistory('library', '/?tab=library');
+  };
 
   const handleLoadGameForSoloPlay = (gameId: string) => {
     setSoloPlayLoading(true);
@@ -184,7 +212,7 @@ export const AppContent: React.FC = () => {
     try {
       sessionStorage.setItem('active_host_room', code);
       sessionStorage.setItem('active_host_token', token);
-      window.history.replaceState(
+      window.history.pushState(
         {},
         '',
         `/?tab=host&room=${code}&token=${encodeURIComponent(token)}`
@@ -196,7 +224,7 @@ export const AppContent: React.FC = () => {
   const handleNavigateToSoloPresentation = (spec: GameSpecification) => {
     setSoloGameId(spec.gameId);
     setSoloGameSpec(spec);
-    window.history.replaceState({}, '', `/?tab=solo-present&gameId=${spec.gameId}`);
+    window.history.pushState({}, '', `/?tab=solo-present&gameId=${spec.gameId}`);
     setActiveTab('solo-present');
   };
 
@@ -212,7 +240,7 @@ export const AppContent: React.FC = () => {
       sessionStorage.setItem('active_player_room', code);
       sessionStorage.setItem('active_player_name', name);
       sessionStorage.setItem(`name_${code}`, name);
-      window.history.replaceState(
+      window.history.pushState(
         {},
         '',
         `/?tab=play&room=${code}&name=${encodeURIComponent(name)}`
@@ -231,7 +259,7 @@ export const AppContent: React.FC = () => {
       }
       sessionStorage.removeItem('active_player_room');
       sessionStorage.removeItem('active_player_name');
-      window.history.replaceState({}, '', '/?tab=join');
+      window.history.pushState({}, '', '/?tab=join');
     } catch {}
     setRoomCode('');
     setDisplayName('');
@@ -243,11 +271,11 @@ export const AppContent: React.FC = () => {
     if (startSolo) {
       setSoloGameId(spec.gameId);
       setSoloGameSpec(spec);
-      window.history.replaceState({}, '', `/?play=${spec.gameId}`);
+      window.history.pushState({}, '', `/?play=${spec.gameId}`);
       setActiveTab('play');
     } else {
       setSelectedSavedSpec(spec);
-      window.history.replaceState({}, '', '/?tab=demo');
+      window.history.pushState({}, '', '/?tab=demo');
       setActiveTab('demo');
     }
   };
@@ -263,24 +291,25 @@ export const AppContent: React.FC = () => {
     setSoloGameSpec(null);
     setRoomCode('');
     setDisplayName('');
-    window.history.replaceState({}, '', '/?tab=join');
+    window.history.pushState({}, '', '/?tab=join');
     setActiveTab('join');
   };
 
   const handleNavigateToCreate = (type?: GameType) => {
+    setSelectedSavedSpec(null);
     if (type) {
       setSelectedGameType(type);
-      window.history.replaceState({}, '', `/?tab=demo&type=${type}`);
+      navigateWithHistory('demo', `/?tab=demo&type=${type}`);
     } else {
-      window.history.replaceState({}, '', '/?tab=demo');
+      navigateWithHistory('demo', '/?tab=demo');
     }
-    setActiveTab('demo');
   };
 
+  // Navigation bên trái: Đã đổi "Khám Phá" -> "Trang Chủ", thêm "Thư viện", và ẩn "Tạo Game"
   const navItems = [
-    { id: 'home' as Tab, label: 'Khám Phá', icon: <HomeIcon size={17} /> },
-    { id: 'demo' as Tab, label: 'Tạo Game', icon: <SparklesIcon size={17} /> },
-    { id: 'analytics' as Tab, label: 'Kho Game', icon: <BookOpenIcon size={17} /> },
+    { id: 'home' as Tab, label: 'Trang Chủ', icon: <HomeIcon size={17} /> },
+    { id: 'analytics' as Tab, label: 'Kho Game', icon: <BarChartIcon size={17} /> },
+    { id: 'library' as Tab, label: 'Thư viện', icon: <BookOpenIcon size={17} /> },
     { id: 'join' as Tab, label: 'Nhập mã PIN', icon: <UsersIcon size={17} /> },
   ];
 
@@ -301,7 +330,7 @@ export const AppContent: React.FC = () => {
         flexDirection: 'column',
       }}
     >
-      {/* FIXED LEFT-SIDE NAVIGATION (the9bit Cyber Dock for Management Pages on Desktop >= 768px) */}
+      {/* FIXED LEFT-SIDE NAVIGATION (Desktop >= 768px) */}
       {!isPlayerMode && (
         <aside
           aria-label="Điều hướng hệ thống"
@@ -328,19 +357,11 @@ export const AppContent: React.FC = () => {
               role="button"
               tabIndex={0}
               aria-label="Về trang chủ"
-              onClick={() => {
-                setSoloPlayError(null);
-                setAutoStartSoloPlay(false);
-                window.history.replaceState({}, '', '/');
-                setActiveTab('home');
-              }}
+              onClick={() => navigateWithHistory('home', '/')}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault();
-                  setSoloPlayError(null);
-                  setAutoStartSoloPlay(false);
-                  window.history.replaceState({}, '', '/');
-                  setActiveTab('home');
+                  navigateWithHistory('home', '/');
                 }
               }}
               style={{
@@ -380,16 +401,6 @@ export const AppContent: React.FC = () => {
                 >
                   AI Tạo Game
                 </div>
-                <div
-                  style={{
-                    fontWeight: 700,
-                    fontSize: '0.82rem',
-                    color: 'var(--text-secondary)',
-                    letterSpacing: '0.04em',
-                    textTransform: 'uppercase',
-                  }}
-                >
-                </div>
               </div>
             </div>
 
@@ -403,12 +414,16 @@ export const AppContent: React.FC = () => {
                 return (
                   <button
                     key={item.id}
+                    id={`nav-item-${item.id}`}
                     type="button"
                     onClick={() => {
-                      setSoloPlayError(null);
-                      setAutoStartSoloPlay(false);
-                      window.history.replaceState({}, '', `/?tab=${item.id}`);
-                      setActiveTab(item.id);
+                      if (item.id === 'library') {
+                        setLibraryFilterPreset(null);
+                      }
+                      navigateWithHistory(
+                        item.id,
+                        item.id === 'home' ? '/' : `/?tab=${item.id}`
+                      );
                     }}
                     style={{
                       display: 'flex',
@@ -436,7 +451,7 @@ export const AppContent: React.FC = () => {
             </nav>
           </div>
 
-          {/* Bottom: Theme Toggle & Admin Settings */}
+          {/* Bottom: Theme Toggle */}
           <div
             style={{
               paddingTop: '1rem',
@@ -530,11 +545,7 @@ export const AppContent: React.FC = () => {
             </p>
             <button
               type="button"
-              onClick={() => {
-                setSoloPlayError(null);
-                window.history.replaceState({}, '', '/');
-                setActiveTab('home');
-              }}
+              onClick={() => navigateWithHistory('home', '/')}
               style={{
                 backgroundColor: 'var(--primary)',
                 color: '#ffffff',
@@ -557,22 +568,13 @@ export const AppContent: React.FC = () => {
             {activeTab === 'home' && (
               <HomePage
                 onNavigateToCreate={handleNavigateToCreate}
-                onNavigateToLibrary={() => {
-                  window.history.replaceState({}, '', '/?tab=analytics');
-                  setActiveTab('analytics');
-                }}
-                onNavigateToHost={() => {
-                  window.history.replaceState({}, '', '/?tab=host');
-                  setActiveTab('host');
-                }}
-                onNavigateToAdmin={() => {
-                  window.history.replaceState({}, '', '/?tab=admin');
-                  setActiveTab('admin');
-                }}
-                onNavigateToJoin={() => {
-                  window.history.replaceState({}, '', '/?tab=join');
-                  setActiveTab('join');
-                }}
+                onNavigateToLibrary={handleNavigateToLibrary}
+                onNavigateToAnalytics={() => navigateWithHistory('analytics', '/?tab=analytics')}
+                onNavigateToHost={handleNavigateToHost}
+                onNavigateToSoloPresentation={handleNavigateToSoloPresentation}
+                onSelectSavedGame={handleSelectSavedGame}
+                onNavigateToAdmin={() => navigateWithHistory('admin', '/?tab=admin')}
+                onNavigateToJoin={() => navigateWithHistory('join', '/?tab=join')}
               />
             )}
 
@@ -583,25 +585,31 @@ export const AppContent: React.FC = () => {
                 onNavigateToSoloPlay={(spec) => {
                   setSoloGameId(spec.gameId);
                   setSoloGameSpec(spec);
-                  window.history.replaceState({}, '', `/?play=${spec.gameId}`);
+                  window.history.pushState({}, '', `/?play=${spec.gameId}`);
                   setActiveTab('play');
                 }}
                 onNavigateToSoloPresentation={handleNavigateToSoloPresentation}
                 initialSpec={selectedSavedSpec}
                 initialGameType={selectedGameType}
-                onNavigateToLibrary={() => {
-                  window.history.replaceState({}, '', '/?tab=analytics');
-                  setActiveTab('analytics');
-                }}
-                onBackToHome={() => {
-                  window.history.replaceState({}, '', '/');
-                  setActiveTab('home');
-                }}
+                onNavigateToLibrary={() => handleNavigateToLibrary()}
+                onBackToHome={() => navigateWithHistory('home', '/')}
               />
             )}
 
             {activeTab === 'analytics' && (
               <AnalyticsPage
+                mode="overview"
+                onNavigateToLibrary={handleNavigateToLibrary}
+                onSelectSavedGame={handleSelectSavedGame}
+                onNavigateToCreate={handleNavigateToCreate}
+                onNavigateToHost={handleNavigateToHost}
+                onNavigateToSoloPresentation={handleNavigateToSoloPresentation}
+              />
+            )}
+
+            {activeTab === 'library' && (
+              <LibraryPage
+                initialFilterPreset={libraryFilterPreset}
                 onSelectSavedGame={handleSelectSavedGame}
                 onNavigateToCreate={handleNavigateToCreate}
                 onNavigateToHost={handleNavigateToHost}
@@ -620,8 +628,7 @@ export const AppContent: React.FC = () => {
                     sessionStorage.removeItem('active_host_room');
                     sessionStorage.removeItem('active_host_token');
                   } catch {}
-                  window.history.replaceState({}, '', '/?tab=analytics');
-                  setActiveTab('analytics');
+                  navigateWithHistory('library', '/?tab=library');
                 }}
               />
             )}
@@ -656,13 +663,10 @@ export const AppContent: React.FC = () => {
                 onStartPlay={(spec) => {
                   setSoloGameId(spec.gameId);
                   setSoloGameSpec(spec);
-                  window.history.replaceState({}, '', `/?play=${spec.gameId}`);
+                  window.history.pushState({}, '', `/?play=${spec.gameId}`);
                   setActiveTab('play');
                 }}
-                onBack={() => {
-                  window.history.replaceState({}, '', '/?tab=analytics');
-                  setActiveTab('analytics');
-                }}
+                onBack={() => navigateWithHistory('library', '/?tab=library')}
               />
             )}
 
@@ -670,17 +674,14 @@ export const AppContent: React.FC = () => {
               <AdminPage
                 currentUser={currentUser}
                 onOpenAuthModal={() => {}}
-                onNavigateHome={() => {
-                  window.history.replaceState({}, '', '/');
-                  setActiveTab('home');
-                }}
+                onNavigateHome={() => navigateWithHistory('home', '/')}
               />
             )}
           </>
         )}
       </main>
 
-      {/* 3. MOBILE BOTTOM NAVIGATION (the9bit Cyber Dock for screens < 768px) */}
+      {/* MOBILE BOTTOM NAVIGATION (screens < 768px) */}
       {!isPlayerMode && (
         <nav
           aria-label="Điều hướng di động"
@@ -705,10 +706,13 @@ export const AppContent: React.FC = () => {
                 key={item.id}
                 type="button"
                 onClick={() => {
-                  setSoloPlayError(null);
-                  setAutoStartSoloPlay(false);
-                  window.history.replaceState({}, '', `/?tab=${item.id}`);
-                  setActiveTab(item.id);
+                  if (item.id === 'library') {
+                    setLibraryFilterPreset(null);
+                  }
+                  navigateWithHistory(
+                    item.id,
+                    item.id === 'home' ? '/' : `/?tab=${item.id}`
+                  );
                 }}
                 style={{
                   flex: 1,
