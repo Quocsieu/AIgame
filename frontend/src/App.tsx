@@ -603,6 +603,7 @@ export const AppContent: React.FC = () => {
             {activeTab === 'analytics' && (
               <AnalyticsPage
                 onSelectSavedGame={handleSelectSavedGame}
+                onNavigateToCreate={handleNavigateToCreate}
                 onNavigateToHost={handleNavigateToHost}
                 onNavigateToSoloPresentation={handleNavigateToSoloPresentation}
               />

@@ -1115,7 +1115,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         c.fillStyle = '#FACC15';
         c.fillRect(4, -obs.height * 0.65, obs.width - 8, 8);
         c.fillStyle = '#0F172A';
-        c.font = 'bold 10px sans-serif';
+        c.font = 'bold 10px "Be Vietnam Pro", system-ui, sans-serif';
         c.textAlign = 'center';
         c.fillText('OIL', obs.width / 2, -obs.height * 0.3);
       } else if (obs.type === 'TIRE_STACK') {
@@ -1168,7 +1168,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
       if (!obs.cleared) {
         c.fillStyle = '#F8FAFC';
-        c.font = 'bold 10px sans-serif';
+        c.font = 'bold 10px "Be Vietnam Pro", system-ui, sans-serif';
         c.textAlign = 'center';
         c.fillText('NHẢY', obs.width / 2, -obs.height - 8);
       }
@@ -1373,7 +1373,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         ctx.fill();
         ctx.stroke();
         ctx.fillStyle = '#E2E8F0';
-        ctx.font = 'bold 10px sans-serif';
+        ctx.font = 'bold 10px "Be Vietnam Pro", system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText((dec.label || '').slice(0, 18), 0, -74);
         ctx.restore();
@@ -1415,7 +1415,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         ctx.stroke();
 
         ctx.fillStyle = isUnlocked ? '#3fc07a' : '#F8FAFC';
-        ctx.font = 'bold 11px sans-serif';
+        ctx.font = 'bold 11px "Be Vietnam Pro", system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText(
           isUnlocked ? `CHẶNG ${idx + 1} ĐÃ QUA` : `CHẶNG ${idx + 1}`,
@@ -1423,7 +1423,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           -150
         );
         ctx.fillStyle = '#94A3B8';
-        ctx.font = '10px sans-serif';
+        ctx.font = '10px "Be Vietnam Pro", system-ui, sans-serif';
         ctx.fillText((stageMeta?.checkpointTitle || '').slice(0, 22), 0, -135);
 
         if (!isUnlocked) {
@@ -1455,7 +1455,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         ctx.fill();
         ctx.stroke();
         ctx.fillStyle = '#FACC15';
-        ctx.font = 'bold 12px sans-serif';
+        ctx.font = 'bold 12px "Be Vietnam Pro", system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('ĐÍCH ĐẾN HÀNH TRÌNH', 0, -150);
         ctx.restore();
@@ -1476,7 +1476,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         ctx.fill();
         ctx.stroke();
         ctx.fillStyle = '#3fc07a';
-        ctx.font = 'bold 9px sans-serif';
+        ctx.font = 'bold 9px "Be Vietnam Pro", system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('+10', 0, 3);
         ctx.restore();
@@ -1518,7 +1518,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         const py = groundY + pt.y;
         if (pt.text) {
           ctx.fillStyle = pt.color;
-          ctx.font = 'bold 13px sans-serif';
+          ctx.font = 'bold 13px "Be Vietnam Pro", system-ui, sans-serif';
           ctx.textAlign = 'center';
           ctx.fillText(pt.text, px, py);
         } else {
@@ -1613,7 +1613,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         flexDirection: 'column',
         overflow: 'hidden',
         userSelect: 'none',
-        fontFamily: 'var(--font-sans, "Plus Jakarta Sans", system-ui, sans-serif)',
+        fontFamily: 'var(--font-sans, "Be Vietnam Pro", system-ui, sans-serif)',
       }}
     >
       {/* ================= INTEGRATED TOP HUD BAR ================= */}
