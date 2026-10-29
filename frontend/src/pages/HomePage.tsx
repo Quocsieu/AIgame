@@ -25,6 +25,7 @@ import {
 import {
   formatGameTypeName,
   GameCoverIllustration,
+  GameFormatIllustration,
   type LibraryFilterPreset,
 } from './AnalyticsPage.js';
 import type {
@@ -44,103 +45,11 @@ interface HomePageProps {
   onNavigateToJoin?: (roomCode?: string) => void;
 }
 
-const MultipleChoiceIllustration: React.FC = () => (
-  <svg viewBox="0 0 200 108" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: '100%', height: '100%', display: 'block' }}>
-    <rect width="200" height="108" rx="6" fill="var(--home-cover-bg, #12151c)" />
-    <rect x="18" y="12" width="164" height="26" rx="5" fill="var(--home-cover-panel, #191e28)" stroke="var(--border-subtle)" strokeWidth="1.2" />
-    <circle cx="31" cy="25" r="5" fill="#3578d4" />
-    <rect x="44" y="20" width="76" height="4" rx="2" fill="#94a3b8" />
-    <rect x="44" y="27" width="44" height="3" rx="1.5" fill="#64748b" />
-    <rect x="18" y="46" width="78" height="22" rx="4" fill="#e09b2d" fillOpacity="0.9" />
-    <path d="M30 53L26 60H34L30 53Z" fill="#ffffff" />
-    <rect x="40" y="55" width="42" height="4" rx="2" fill="#ffffff" fillOpacity="0.9" />
-    <rect x="104" y="46" width="78" height="22" rx="4" fill="#3578d4" fillOpacity="0.9" />
-    <path d="M116 53L120 57L116 61L112 57Z" fill="#ffffff" />
-    <rect x="126" y="55" width="42" height="4" rx="2" fill="#ffffff" fillOpacity="0.9" />
-    <rect x="18" y="74" width="78" height="22" rx="4" fill="var(--home-cover-panel, #191e28)" stroke="#64748b" strokeWidth="1.2" />
-    <circle cx="30" cy="85" r="4" fill="#64748b" />
-    <rect x="40" y="83" width="42" height="4" rx="2" fill="#64748b" />
-    <rect x="104" y="74" width="78" height="22" rx="4" fill="#2ea87e" fillOpacity="0.9" />
-    <rect x="112" y="81" width="8" height="8" rx="1.5" fill="#ffffff" />
-    <rect x="126" y="83" width="42" height="4" rx="2" fill="#ffffff" fillOpacity="0.9" />
-  </svg>
-);
-
-const QuickButtonIllustration: React.FC = () => (
-  <svg viewBox="0 0 200 108" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: '100%', height: '100%', display: 'block' }}>
-    <rect width="200" height="108" rx="6" fill="var(--home-cover-bg, #12151c)" />
-    <g transform="translate(20, 26)">
-      <rect width="74" height="56" rx="6" fill="#2ea87e" fillOpacity="0.9" />
-      <path d="M46 25L53 32L66 19" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" transform="translate(-18, 0)" />
-      <text x="37" y="46" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="800" letterSpacing="0.05em">ĐÚNG</text>
-    </g>
-    <g transform="translate(106, 26)">
-      <rect width="74" height="56" rx="6" fill="#e09b2d" fillOpacity="0.9" />
-      <path d="M31 19L43 31M43 19L31 31" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" />
-      <text x="37" y="46" textAnchor="middle" fill="#ffffff" fontSize="10" fontWeight="800" letterSpacing="0.05em">SAI</text>
-    </g>
-  </svg>
-);
-
-const FillInBlankIllustration: React.FC = () => (
-  <svg viewBox="0 0 200 108" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: '100%', height: '100%', display: 'block' }}>
-    <rect width="200" height="108" rx="6" fill="var(--home-cover-bg, #12151c)" />
-    <rect x="18" y="22" width="164" height="32" rx="6" fill="var(--home-cover-panel, #191e28)" stroke="#e09b2d" strokeWidth="1.2" />
-    <rect x="28" y="35" width="44" height="6" rx="3" fill="#64748b" />
-    <rect x="80" y="28" width="52" height="20" rx="4" fill="#e09b2d" fillOpacity="0.2" stroke="#e09b2d" strokeWidth="1.4" strokeDasharray="3 2" />
-    <rect x="140" y="35" width="30" height="6" rx="3" fill="#64748b" />
-    <g transform="translate(64, 66)">
-      <rect width="72" height="26" rx="5" fill="#e09b2d" />
-      <text x="36" y="17" textAnchor="middle" fill="#08090e" fontSize="10" fontWeight="800">ĐÁP ÁN</text>
-    </g>
-  </svg>
-);
-
-const CrosswordIllustration: React.FC = () => (
-  <svg viewBox="0 0 200 108" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: '100%', height: '100%', display: 'block' }}>
-    <rect width="200" height="108" rx="6" fill="var(--home-cover-bg, #12151c)" />
-    <g transform="translate(40, 16)">
-      <rect x="0" y="0" width="26" height="26" rx="4" fill="var(--home-cover-panel, #191e28)" stroke="#2ea87e" strokeWidth="1.2" />
-      <text x="13" y="18" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="800">Q</text>
-      <rect x="30" y="0" width="26" height="26" rx="4" fill="var(--home-cover-panel, #191e28)" stroke="#2ea87e" strokeWidth="1.2" />
-      <text x="43" y="18" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="800">U</text>
-      <rect x="60" y="0" width="26" height="26" rx="4" fill="#2ea87e" />
-      <text x="73" y="18" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="800">I</text>
-      <rect x="90" y="0" width="26" height="26" rx="4" fill="var(--home-cover-panel, #191e28)" stroke="#2ea87e" strokeWidth="1.2" />
-      <text x="103" y="18" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="800">Z</text>
-    </g>
-    <g transform="translate(100, 46)">
-      <rect x="0" y="0" width="26" height="24" rx="4" fill="var(--home-cover-panel, #191e28)" stroke="#2ea87e" strokeWidth="1.2" />
-      <text x="13" y="16" textAnchor="middle" fill="#64748b" fontSize="11" fontWeight="800">N</text>
-    </g>
-    <g transform="translate(100, 74)">
-      <rect x="0" y="0" width="26" height="22" rx="4" fill="#2ea87e" fillOpacity="0.85" />
-      <text x="13" y="15" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="800">O</text>
-    </g>
-  </svg>
-);
-
-const MixedIllustration: React.FC = () => (
-  <svg viewBox="0 0 200 108" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: '100%', height: '100%', display: 'block' }}>
-    <rect width="200" height="108" rx="6" fill="var(--home-cover-bg, #12151c)" />
-    <rect x="24" y="28" width="46" height="52" rx="5" fill="#3578d4" fillOpacity="0.32" stroke="#3578d4" strokeWidth="1.4" />
-    <rect x="77" y="28" width="46" height="52" rx="5" fill="#e09b2d" fillOpacity="0.4" stroke="#e09b2d" strokeWidth="1.4" />
-    <rect x="130" y="28" width="46" height="52" rx="5" fill="#2ea87e" fillOpacity="0.32" stroke="#2ea87e" strokeWidth="1.4" />
-  </svg>
-);
-
-const AdventureIllustration: React.FC = () => (
-  <svg viewBox="0 0 200 108" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ width: '100%', height: '100%', display: 'block' }}>
-    <rect width="200" height="108" rx="6" fill="var(--home-cover-bg, #12151c)" />
-    <rect x="0" y="76" width="200" height="32" fill="var(--home-cover-secondary, #1b202b)" />
-    <line x1="0" y1="76" x2="200" y2="76" stroke="#e09b2d" strokeWidth="1.5" strokeOpacity="0.5" />
-    <rect x="22" y="34" width="38" height="42" rx="3" fill="var(--home-cover-panel, #191e28)" stroke="#e09b2d" strokeWidth="1.2" />
-    <rect x="68" y="24" width="44" height="52" rx="3" fill="var(--home-cover-panel, #191e28)" stroke="#3578d4" strokeWidth="1.2" />
-    <circle cx="144" cy="54" r="11" fill="#e09b2d" fillOpacity="0.22" stroke="#e09b2d" strokeWidth="1.5" />
-    <circle cx="176" cy="46" r="9" fill="#2ea87e" />
-    <line x1="155" y1="52" x2="167" y2="48" stroke="#e09b2d" strokeWidth="1.8" strokeDasharray="3 2" />
-  </svg>
-);
+const MultipleChoiceIllustration: React.FC = () => <GameFormatIllustration type="MULTIPLE_CHOICE" />;
+const QuickButtonIllustration: React.FC = () => <GameFormatIllustration type="QUICK_BUTTON" />;
+const FillInBlankIllustration: React.FC = () => <GameFormatIllustration type="FILL_IN_THE_BLANK" />;
+const PuzzleIllustration: React.FC = () => <GameFormatIllustration type="PUZZLE" />;
+const AdventureIllustration: React.FC = () => <GameFormatIllustration type="ADVENTURE" />;
 
 interface FormatMeta {
   type: GameType;
@@ -155,56 +64,47 @@ interface FormatMeta {
 const GAME_FORMATS: FormatMeta[] = [
   {
     type: 'MULTIPLE_CHOICE',
-    title: 'Trắc nghiệm 4 màu',
+    title: 'Quiz — Trắc nghiệm 4 màu',
     shortDesc: 'Câu hỏi 4 đáp án A/B/C/D trực quan để thi đấu tốc độ hoặc ôn tập lớp học.',
-    badge: '4 Lựa chọn',
-    accent: 'var(--accent-sky)',
-    badgeBg: 'var(--accent-sky-subtle)',
+    badge: 'Ưu tiên #1 • Quiz',
+    accent: 'var(--accent-rose)',
+    badgeBg: 'var(--accent-rose-subtle)',
     illustration: <MultipleChoiceIllustration />,
   },
   {
     type: 'QUICK_BUTTON',
-    title: 'Đúng / Sai',
-    shortDesc: 'Phản xạ quyết định nhanh với các mệnh đề nhận định ngắn gọn.',
-    badge: 'Phản xạ nhanh',
-    accent: 'var(--accent-emerald)',
-    badgeBg: 'var(--accent-emerald-subtle)',
+    title: 'True/False — Đúng hoặc Sai',
+    shortDesc: 'Phản xạ quyết định nhanh Đúng hoặc Sai với các mệnh đề nhận định trọng tâm.',
+    badge: 'Ưu tiên #2 • True/False',
+    accent: 'var(--accent-sky)',
+    badgeBg: 'var(--accent-sky-subtle)',
     illustration: <QuickButtonIllustration />,
   },
   {
     type: 'FILL_IN_THE_BLANK',
-    title: 'Điền từ khuyết',
-    shortDesc: 'Ghi nhớ chính xác khái niệm, thuật ngữ và định nghĩa trọng tâm.',
-    badge: 'Ghi nhớ sâu',
+    title: 'Type Answer — Tự nhập đáp án',
+    shortDesc: 'Người chơi tự gõ câu trả lời ngắn gọn, ghi nhớ chính xác khái niệm và thuật ngữ.',
+    badge: 'Ưu tiên #3 • Type Answer',
     accent: 'var(--accent-amber)',
     badgeBg: 'var(--accent-amber-subtle)',
     illustration: <FillInBlankIllustration />,
   },
   {
-    type: 'CROSSWORD',
-    title: 'Giải ô chữ',
-    shortDesc: 'Mở khóa các hàng từ khóa kiến thức qua hệ thống gợi ý suy luận.',
-    badge: 'Tư duy logic',
+    type: 'PUZZLE',
+    title: 'Puzzle — Sắp xếp thứ tự',
+    shortDesc: 'Sắp xếp các bước quy trình, sự kiện hoặc cấp độ theo đúng trình tự logic.',
+    badge: 'Ưu tiên #4 • Puzzle',
     accent: 'var(--accent-emerald)',
     badgeBg: 'var(--accent-emerald-subtle)',
-    illustration: <CrosswordIllustration />,
-  },
-  {
-    type: 'MIXED',
-    title: 'Đấu trường hỗn hợp',
-    shortDesc: 'Kết hợp linh hoạt nhiều dạng câu hỏi trong cùng một kịch bản thi đấu.',
-    badge: 'Đa định dạng',
-    accent: 'var(--accent-sky)',
-    badgeBg: 'var(--accent-sky-subtle)',
-    illustration: <MixedIllustration />,
+    illustration: <PuzzleIllustration />,
   },
   {
     type: 'ADVENTURE',
     title: 'Đi cảnh theo ngành nghề',
     shortDesc: 'Nhập vai xử lý tình huống thực tế theo từng lĩnh vực và ngành nghề.',
     badge: 'Nhập vai 2D',
-    accent: 'var(--accent-amber)',
-    badgeBg: 'var(--accent-amber-subtle)',
+    accent: 'var(--accent-coral, var(--accent-amber))',
+    badgeBg: 'var(--accent-coral-subtle, var(--accent-amber-subtle))',
     illustration: <AdventureIllustration />,
   },
 ];
@@ -369,45 +269,79 @@ export const HomePage: React.FC<HomePageProps> = ({
     >
       <style>{`
         .home-dashboard-root {
-          --home-cover-bg: #12151c;
-          --home-cover-secondary: #1b202b;
-          --home-cover-panel: #191e28;
-          --discover-cover-bg: #12151c;
-          --discover-cover-secondary: #1b202b;
-          --discover-cover-panel: #191e28;
-          --discover-cover-badge-bg: rgba(8, 9, 14, 0.88);
-          --discover-cover-badge-text: #f2f4f8;
-          --discover-cover-badge-border: rgba(255, 255, 255, 0.16);
-          --discover-status-pub-bg: rgba(6, 78, 59, 0.92);
-          --discover-status-pub-text: #76d6ad;
-          --discover-status-pub-border: rgba(16, 185, 129, 0.42);
-          --discover-status-draft-bg: rgba(120, 53, 15, 0.92);
-          --discover-status-draft-text: #f3c75f;
-          --discover-status-draft-border: rgba(245, 158, 11, 0.42);
+          --home-cover-bg: #111628;
+          --home-cover-secondary: #182038;
+          --home-cover-panel: #1d2642;
+          --discover-cover-bg: #111628;
+          --discover-cover-secondary: #182038;
+          --discover-cover-panel: #1d2642;
+          --cover-mc-bg: #191224;
+          --cover-mc-secondary: #251936;
+          --cover-qb-bg: #0f192f;
+          --cover-qb-secondary: #172647;
+          --cover-fill-bg: #1d1612;
+          --cover-fill-secondary: #2b2018;
+          --cover-cross-bg: #0d1f1e;
+          --cover-cross-secondary: #142e2c;
+          --cover-mixed-bg: #16132b;
+          --cover-mixed-secondary: #211c40;
+          --cover-adv-bg: #12182b;
+          --cover-adv-secondary: #1b243f;
+          --cover-ink-strong: #f8fafc;
+          --cover-ink-muted: #94a3b8;
+          --discover-cover-badge-bg: rgba(9, 12, 21, 0.9);
+          --discover-cover-badge-text: #f8fafc;
+          --discover-cover-badge-border: rgba(255, 255, 255, 0.18);
+          --discover-status-pub-bg: rgba(6, 78, 59, 0.94);
+          --discover-status-pub-text: #6ee7b7;
+          --discover-status-pub-border: rgba(16, 185, 129, 0.45);
+          --discover-status-draft-bg: rgba(120, 53, 15, 0.94);
+          --discover-status-draft-text: #fcd34d;
+          --discover-status-draft-border: rgba(245, 158, 11, 0.45);
         }
         [data-theme="light"] .home-dashboard-root {
-          --primary: #0369a1;
-          --primary-hover: #075985;
-          --primary-active: #0c4a6e;
-          --primary-subtle: rgba(3, 105, 161, 0.1);
+          --primary: #0284c7;
+          --primary-hover: #0369a1;
+          --primary-active: #075985;
+          --primary-subtle: #e0f2fe;
           --primary-ink: #ffffff;
           --accent-sky: #0369a1;
-          --accent-sky-subtle: rgba(3, 105, 161, 0.1);
+          --accent-sky-subtle: #e0f2fe;
           --accent-emerald: #047857;
-          --accent-emerald-subtle: rgba(4, 120, 87, 0.1);
+          --accent-emerald-subtle: #d1fae5;
           --accent-amber: #b45309;
-          --accent-amber-subtle: rgba(180, 83, 9, 0.1);
+          --accent-amber-subtle: #fef3c7;
           --accent-rose: #be123c;
-          --accent-rose-subtle: rgba(190, 18, 60, 0.1);
-          --home-cover-bg: #eef2f6;
-          --home-cover-secondary: #e2e8f0;
+          --accent-rose-subtle: #ffe4e6;
+          --accent-violet: #862e9c;
+          --accent-violet-subtle: #f3d9fa;
+          --accent-teal: #0f766e;
+          --accent-teal-subtle: #ccfbf1;
+          --accent-coral: #c2410c;
+          --accent-coral-subtle: #ffedd5;
+          --home-cover-bg: #eaf1fb;
+          --home-cover-secondary: #dbe6f6;
           --home-cover-panel: #ffffff;
-          --discover-cover-bg: #eef2f6;
-          --discover-cover-secondary: #e2e8f0;
+          --discover-cover-bg: #eaf1fb;
+          --discover-cover-secondary: #dbe6f6;
           --discover-cover-panel: #ffffff;
-          --discover-cover-badge-bg: rgba(255, 255, 255, 0.95);
-          --discover-cover-badge-text: #090a0f;
-          --discover-cover-badge-border: #cbd5e1;
+          --cover-mc-bg: #fff1f3;
+          --cover-mc-secondary: #ffe0e6;
+          --cover-qb-bg: #eff6ff;
+          --cover-qb-secondary: #dbeafe;
+          --cover-fill-bg: #fffbeb;
+          --cover-fill-secondary: #fef3c7;
+          --cover-cross-bg: #ecfdf5;
+          --cover-cross-secondary: #d1fae5;
+          --cover-mixed-bg: #f5f3ff;
+          --cover-mixed-secondary: #ede9fe;
+          --cover-adv-bg: #f0f6ff;
+          --cover-adv-secondary: #e0ecff;
+          --cover-ink-strong: #0f172a;
+          --cover-ink-muted: #475569;
+          --discover-cover-badge-bg: rgba(255, 255, 255, 0.96);
+          --discover-cover-badge-text: #0b1120;
+          --discover-cover-badge-border: #bcc9e0;
           --discover-status-pub-bg: #ecfdf5;
           --discover-status-pub-text: #047857;
           --discover-status-pub-border: #6ee7b7;

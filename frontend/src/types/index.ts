@@ -1,4 +1,14 @@
-export type QuestionType = 'MULTIPLE_CHOICE' | 'FILL_IN_THE_BLANK' | 'QUICK_BUTTON' | 'CROSSWORD';
+export type QuestionType =
+  | 'QUIZ'
+  | 'TRUE_FALSE'
+  | 'TYPE_ANSWER'
+  | 'PUZZLE'
+  | 'SLIDER'
+  | 'PIN_ANSWER'
+  | 'MULTIPLE_CHOICE'
+  | 'FILL_IN_THE_BLANK'
+  | 'QUICK_BUTTON'
+  | 'CROSSWORD';
 export type GameType = QuestionType | 'MIXED' | 'ADVENTURE';
 
 export type IndustryId =
@@ -132,7 +142,12 @@ export function calculateMixedTypeCounts(
     CROSSWORD: 20,
   };
 
-  const types: QuestionType[] = ['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK', 'CROSSWORD'];
+  const types: (keyof MixedQuestionDistribution)[] = [
+    'MULTIPLE_CHOICE',
+    'QUICK_BUTTON',
+    'FILL_IN_THE_BLANK',
+    'CROSSWORD',
+  ];
 
   const rawCounts = types.map(type => {
     const ratio = (dist[type] ?? 0) / 100;
@@ -157,6 +172,12 @@ export function calculateMixedTypeCounts(
   }
 
   const result: Record<QuestionType, number> = {
+    QUIZ: 0,
+    TRUE_FALSE: 0,
+    TYPE_ANSWER: 0,
+    PUZZLE: 0,
+    SLIDER: 0,
+    PIN_ANSWER: 0,
     MULTIPLE_CHOICE: 0,
     QUICK_BUTTON: 0,
     FILL_IN_THE_BLANK: 0,

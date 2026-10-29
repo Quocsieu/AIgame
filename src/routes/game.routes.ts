@@ -369,10 +369,17 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
 
     const { title, description, questions, settings, isPublic } = parseResult.data;
 
-    // Ensure all edited questions match the game's type unless gameType is MIXED or ADVENTURE
+    // Ensure all edited questions match the game's type (including canonical/legacy aliases) unless gameType is MIXED or ADVENTURE
     if (existing.gameType !== 'MIXED' && existing.gameType !== 'ADVENTURE') {
+      const isEquivalentType = (gType: string, qType: string): boolean => {
+        if (gType === qType) return true;
+        if ((gType === 'QUIZ' || gType === 'MULTIPLE_CHOICE') && (qType === 'QUIZ' || qType === 'MULTIPLE_CHOICE')) return true;
+        if ((gType === 'TRUE_FALSE' || gType === 'QUICK_BUTTON') && (qType === 'TRUE_FALSE' || qType === 'QUICK_BUTTON')) return true;
+        if ((gType === 'TYPE_ANSWER' || gType === 'FILL_IN_THE_BLANK') && (qType === 'TYPE_ANSWER' || qType === 'FILL_IN_THE_BLANK')) return true;
+        return false;
+      };
       for (let i = 0; i < questions.length; i++) {
-        if (questions[i].type !== existing.gameType) {
+        if (!isEquivalentType(existing.gameType, questions[i].type)) {
           throw new AppError(
             'INVALID_REQUEST',
             `Question #${i + 1} type "${questions[i].type}" does not match gameType "${existing.gameType}".`,

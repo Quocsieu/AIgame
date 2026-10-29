@@ -1,33 +1,55 @@
-import { GameType } from '../../contracts/game.contract.js';
+import { GameType, QuestionType } from '../../contracts/game.contract.js';
 import { AppError } from '../../utils/errors.js';
 import { CrosswordHandler } from './crossword.handler.js';
 import { FillBlankHandler } from './fillBlank.handler.js';
 import { GameTypeHandler } from './handler.interface.js';
 import { MultipleChoiceHandler } from './multipleChoice.handler.js';
+import { PinAnswerHandler } from './pinAnswer.handler.js';
+import { PuzzleHandler } from './puzzle.handler.js';
 import { QuickButtonHandler } from './quickButton.handler.js';
+import { SliderHandler } from './slider.handler.js';
+import { TrueFalseHandler } from './trueFalse.handler.js';
 
 export * from './handler.interface.js';
 export * from './multipleChoice.handler.js';
 export * from './fillBlank.handler.js';
 export * from './quickButton.handler.js';
+export * from './trueFalse.handler.js';
+export * from './puzzle.handler.js';
+export * from './slider.handler.js';
+export * from './pinAnswer.handler.js';
 export * from './crossword.handler.js';
 
+const multipleChoiceHandler = new MultipleChoiceHandler();
+const fillBlankHandler = new FillBlankHandler();
+const quickButtonHandler = new QuickButtonHandler();
+const trueFalseHandler = new TrueFalseHandler();
+const puzzleHandler = new PuzzleHandler();
+const sliderHandler = new SliderHandler();
+const pinAnswerHandler = new PinAnswerHandler();
+const crosswordHandler = new CrosswordHandler();
+
 const handlerRegistry: Record<string, GameTypeHandler> = {
-  MULTIPLE_CHOICE: new MultipleChoiceHandler(),
-  FILL_IN_THE_BLANK: new FillBlankHandler(),
-  QUICK_BUTTON: new QuickButtonHandler(),
-  CROSSWORD: new CrosswordHandler(),
+  QUIZ: multipleChoiceHandler,
+  MULTIPLE_CHOICE: multipleChoiceHandler,
+  TRUE_FALSE: trueFalseHandler,
+  QUICK_BUTTON: quickButtonHandler,
+  TYPE_ANSWER: fillBlankHandler,
+  FILL_IN_THE_BLANK: fillBlankHandler,
+  PUZZLE: puzzleHandler,
+  SLIDER: sliderHandler,
+  PIN_ANSWER: pinAnswerHandler,
+  CROSSWORD: crosswordHandler,
 };
 
 /**
- * Returns the appropriate handler for the specified game type.
+ * Returns the appropriate handler for the specified game/question type.
  * Throws UNSUPPORTED_GAME_TYPE if not found.
  */
-export function getHandler(gameType: GameType): GameTypeHandler {
+export function getHandler(gameType: GameType | QuestionType): GameTypeHandler {
   const handler = handlerRegistry[gameType];
   if (!handler) {
     throw new AppError('UNSUPPORTED_GAME_TYPE', `Unsupported game type: ${gameType}`, 400);
   }
   return handler;
 }
-

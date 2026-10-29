@@ -13,7 +13,31 @@ import {
 
 export * from './adventure.contract.js';
 
+export const TargetTraditionalGameTypeEnum = z.enum([
+  'QUIZ',
+  'TRUE_FALSE',
+  'TYPE_ANSWER',
+  'PUZZLE',
+  'SLIDER',
+  'PIN_ANSWER',
+]);
+export type TargetTraditionalGameType = z.infer<typeof TargetTraditionalGameTypeEnum>;
+
+export const PriorityTraditionalGameTypeEnum = z.enum([
+  'QUIZ',
+  'TRUE_FALSE',
+  'TYPE_ANSWER',
+  'PUZZLE',
+]);
+export type PriorityTraditionalGameType = z.infer<typeof PriorityTraditionalGameTypeEnum>;
+
 export const QuestionTypeEnum = z.enum([
+  'QUIZ',
+  'TRUE_FALSE',
+  'TYPE_ANSWER',
+  'PUZZLE',
+  'SLIDER',
+  'PIN_ANSWER',
   'MULTIPLE_CHOICE',
   'FILL_IN_THE_BLANK',
   'QUICK_BUTTON',
@@ -22,6 +46,12 @@ export const QuestionTypeEnum = z.enum([
 export type QuestionType = z.infer<typeof QuestionTypeEnum>;
 
 export const GameTypeEnum = z.enum([
+  'QUIZ',
+  'TRUE_FALSE',
+  'TYPE_ANSWER',
+  'PUZZLE',
+  'SLIDER',
+  'PIN_ANSWER',
   'MULTIPLE_CHOICE',
   'FILL_IN_THE_BLANK',
   'QUICK_BUTTON',
@@ -31,6 +61,26 @@ export const GameTypeEnum = z.enum([
 ]);
 export type GameType = z.infer<typeof GameTypeEnum>;
 
+/**
+ * Danh sách loại game được phép tạo mới qua POST /api/games/generate:
+ * - 4 dạng truyền thống ưu tiên: QUIZ (MULTIPLE_CHOICE), TRUE_FALSE (QUICK_BUTTON),
+ *   TYPE_ANSWER (FILL_IN_THE_BLANK), PUZZLE
+ * - Dạng giả lập tương tác: ADVENTURE
+ * - Loại bỏ các dạng cũ không nằm trong danh sách tạo mới (CROSSWORD, MIXED)
+ *   và chưa mở tạo mới cho 2 dạng chuẩn bị kiến trúc (SLIDER, PIN_ANSWER).
+ */
+export const CreatableGameTypeEnum = z.enum([
+  'QUIZ',
+  'TRUE_FALSE',
+  'TYPE_ANSWER',
+  'PUZZLE',
+  'MULTIPLE_CHOICE',
+  'QUICK_BUTTON',
+  'FILL_IN_THE_BLANK',
+  'ADVENTURE',
+]);
+export type CreatableGameType = z.infer<typeof CreatableGameTypeEnum>;
+
 export const DifficultyEnum = z.enum(['EASY', 'MEDIUM', 'HARD']);
 export type Difficulty = z.infer<typeof DifficultyEnum>;
 
@@ -39,12 +89,177 @@ export type ScoringMode = z.infer<typeof ScoringModeEnum>;
 
 export const MAX_ANSWER_LENGTH = 500;
 
+export const SliderQuestionConfigSchema = z
+  .object({
+    min: z.number().finite(),
+    max: z.number().finite(),
+    step: z.number().positive(),
+    correctValue: z.number().finite(),
+    tolerance: z.number().nonnegative().default(0),
+    unit: z.string().trim().max(40).optional(),
+  })
+  .superRefine((cfg, ctx) => {
+    if (cfg.min >= cfg.max) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'SLIDER min must be strictly less than max.',
+        path: ['min'],
+      });
+    }
+    if (cfg.correctValue < cfg.min || cfg.correctValue > cfg.max) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'SLIDER correctValue must be within [min, max].',
+        path: ['correctValue'],
+      });
+    }
+    if (cfg.step > cfg.max - cfg.min) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'SLIDER step cannot exceed (max - min).',
+        path: ['step'],
+      });
+    }
+  });
+export type SliderQuestionConfig = z.infer<typeof SliderQuestionConfigSchema>;
+
+export const PinCoordinateSystemEnum = z.enum(['NORMALIZED_PERCENT_100']);
+export type PinCoordinateSystem = z.infer<typeof PinCoordinateSystemEnum>;
+
+export const PinAnswerQuestionConfigSchema = z
+  .object({
+    imageUrl: z
+      .string()
+      .trim()
+      .min(1)
+      .max(2048)
+      .refine(
+        val => /^https?:\/\/[^\s]+$/i.test(val) || /^\/[^\s]*$/.test(val),
+        'PIN_ANSWER imageUrl must be a safe http(s) URL or relative asset path.'
+      ),
+    coordinateSystem: PinCoordinateSystemEnum.default('NORMALIZED_PERCENT_100'),
+    targetX: z.number().min(0).max(100),
+    targetY: z.number().min(0).max(100),
+    radius: z.number().positive().max(50),
+  });
+export type PinAnswerQuestionConfig = z.infer<typeof PinAnswerQuestionConfigSchema>;
+
 function normalizeChoiceCompare(text: string): string {
   return text.trim().normalize('NFC').toLowerCase().replace(/\s+/g, ' ');
 }
 
 function stripOptionLetterPrefix(text: string): string {
   return normalizeChoiceCompare(text.replace(/^[A-Da-d][\.\)]\s*/, ''));
+}
+
+const TRUE_POLARITY_TOKENS = new Set(['đúng', 'dung', 'true', 'có', 'co', 'yes', 'chính xác']);
+const FALSE_POLARITY_TOKENS = new Set(['sai', 'false', 'không', 'khong', 'no', 'không đúng']);
+
+export function normalizeTrueFalsePolarity(text: string): 'TRUE' | 'FALSE' | null {
+  const norm = normalizeChoiceCompare(text);
+  if (TRUE_POLARITY_TOKENS.has(norm)) return 'TRUE';
+  if (FALSE_POLARITY_TOKENS.has(norm)) return 'FALSE';
+  return null;
+}
+
+export function isStrictTrueFalseChoicePair(choices: string[]): boolean {
+  if (!Array.isArray(choices) || choices.length !== 2) return false;
+  const p0 = normalizeTrueFalsePolarity(choices[0]);
+  const p1 = normalizeTrueFalsePolarity(choices[1]);
+  return (p0 === 'TRUE' && p1 === 'FALSE') || (p0 === 'FALSE' && p1 === 'TRUE');
+}
+
+export function parsePuzzleSequence(raw: string): string[] {
+  if (typeof raw !== 'string') return [];
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) {
+        return parsed
+          .filter((item): item is string => typeof item === 'string')
+          .map(item => item.trim())
+          .filter(Boolean);
+      }
+    } catch {
+      // Fall back to delimiter split
+    }
+  }
+
+  if (trimmed.includes('|')) {
+    return trimmed
+      .split('|')
+      .map(part => part.trim())
+      .filter(Boolean);
+  }
+
+  if (trimmed.includes('->')) {
+    return trimmed
+      .split('->')
+      .map(part => part.trim())
+      .filter(Boolean);
+  }
+
+  if (trimmed.includes('→')) {
+    return trimmed
+      .split('→')
+      .map(part => part.trim())
+      .filter(Boolean);
+  }
+
+  if (trimmed.includes('\n')) {
+    return trimmed
+      .split(/\r?\n/)
+      .map(part => part.trim())
+      .filter(Boolean);
+  }
+
+  return [trimmed];
+}
+
+export function formatCanonicalPuzzleAnswer(orderedItems: string[]): string {
+  return orderedItems.map(item => item.trim()).filter(Boolean).join(' | ');
+}
+
+export function shufflePuzzleChoicesForClient(
+  choices: string[],
+  correctAnswer: string,
+  seedInput: string
+): string[] {
+  if (!Array.isArray(choices) || choices.length <= 1) {
+    return Array.isArray(choices) ? [...choices] : [];
+  }
+
+  const items = [...choices];
+  let hash = 2166136261;
+  for (let i = 0; i < seedInput.length; i++) {
+    hash ^= seedInput.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+
+  for (let i = items.length - 1; i > 0; i--) {
+    hash ^= i + 1;
+    hash = Math.imul(hash, 16777619);
+    const j = Math.abs(hash) % (i + 1);
+    const tmp = items[i];
+    items[i] = items[j];
+    items[j] = tmp;
+  }
+
+  const canonical = parsePuzzleSequence(correctAnswer).map(c => normalizeChoiceCompare(c));
+  const shuffledNorm = items.map(c => normalizeChoiceCompare(c));
+  const isIdenticalToCanonical =
+    canonical.length === shuffledNorm.length &&
+    canonical.every((val, idx) => val === shuffledNorm[idx]);
+
+  if (isIdenticalToCanonical && items.length > 1) {
+    const first = items.shift()!;
+    items.push(first);
+  }
+
+  return items;
 }
 
 export const BaseQuestionSchema = z.object({
@@ -59,14 +274,16 @@ export const BaseQuestionSchema = z.object({
   sourceReference: ProvenanceReferenceSchema,
   crosswordClue: z.string().optional(),
   crosswordAnswer: z.string().optional(),
+  sliderConfig: SliderQuestionConfigSchema.optional(),
+  pinConfig: PinAnswerQuestionConfigSchema.optional(),
 });
 
 export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => {
-  if (data.type === 'MULTIPLE_CHOICE') {
+  if (data.type === 'MULTIPLE_CHOICE' || data.type === 'QUIZ') {
     if (!data.choices || data.choices.length !== 4) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'MULTIPLE_CHOICE question must have exactly 4 choices.',
+        message: `${data.type} question must have exactly 4 choices.`,
         path: ['choices'],
       });
       return;
@@ -77,7 +294,7 @@ export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => 
     if (uniqueChoices.size !== 4) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'MULTIPLE_CHOICE choices must be distinct (no duplicate choices).',
+        message: `${data.type} choices must be distinct (no duplicate choices).`,
         path: ['choices'],
       });
       return;
@@ -103,7 +320,28 @@ export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => 
     if (!answerMatchesChoice) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: `MULTIPLE_CHOICE correct answer "${data.correctAnswer}" does not match any of the provided choices.`,
+        message: `${data.type} correct answer "${data.correctAnswer}" does not match any of the provided choices.`,
+        path: ['correctAnswer'],
+      });
+    }
+  }
+
+  if (data.type === 'TRUE_FALSE') {
+    if (!data.choices || !isStrictTrueFalseChoicePair(data.choices)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'TRUE_FALSE question must have exactly 2 binary choices (e.g., ["Đúng", "Sai"] or ["True", "False"]).',
+        path: ['choices'],
+      });
+      return;
+    }
+
+    const answerPolarity = normalizeTrueFalsePolarity(data.correctAnswer);
+    const choicePolarities = data.choices.map(c => normalizeTrueFalsePolarity(c));
+    if (!answerPolarity || !choicePolarities.includes(answerPolarity)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `TRUE_FALSE correctAnswer "${data.correctAnswer}" must be a valid True/False value matching the choices.`,
         path: ['correctAnswer'],
       });
     }
@@ -139,11 +377,126 @@ export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => 
     }
 
     const normCorrect = normalizeChoiceCompare(data.correctAnswer);
-    if (!normalizedButtons.includes(normCorrect)) {
+    const answerPolarity = normalizeTrueFalsePolarity(data.correctAnswer);
+    const matchesChoiceDirectly = normalizedButtons.includes(normCorrect);
+    const matchesTrueFalsePolarity =
+      isStrictTrueFalseChoicePair(data.choices) &&
+      answerPolarity !== null &&
+      data.choices.some(c => normalizeTrueFalsePolarity(c) === answerPolarity);
+
+    if (!matchesChoiceDirectly && !matchesTrueFalsePolarity) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: `QUICK_BUTTON correctAnswer "${data.correctAnswer}" must match one of the provided choices.`,
         path: ['correctAnswer'],
+      });
+    }
+  }
+
+  if (data.type === 'TYPE_ANSWER' || data.type === 'FILL_IN_THE_BLANK') {
+    if (Array.isArray(data.choices) && data.choices.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${data.type} question must not include selectable choices.`,
+        path: ['choices'],
+      });
+      return;
+    }
+
+    if (!data.correctAnswer || data.correctAnswer.trim().length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `${data.type} question must have a non-empty correctAnswer.`,
+        path: ['correctAnswer'],
+      });
+    }
+  }
+
+  if (data.type === 'PUZZLE') {
+    if (!data.choices || data.choices.length < 3 || data.choices.length > 6) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'PUZZLE question must have between 3 and 6 items to order in choices.',
+        path: ['choices'],
+      });
+      return;
+    }
+
+    const normalizedItems = data.choices.map(c => normalizeChoiceCompare(c));
+    if (normalizedItems.some(c => c.length === 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'PUZZLE items cannot be empty.',
+        path: ['choices'],
+      });
+      return;
+    }
+
+    if (new Set(normalizedItems).size !== data.choices.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'PUZZLE items must be distinct (no duplicate items in sequence).',
+        path: ['choices'],
+      });
+      return;
+    }
+
+    const canonicalOrder = parsePuzzleSequence(data.correctAnswer);
+    if (canonicalOrder.length !== data.choices.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `PUZZLE correctAnswer must specify the ordered sequence of all ${data.choices.length} items.`,
+        path: ['correctAnswer'],
+      });
+      return;
+    }
+
+    const normalizedOrder = canonicalOrder.map(c => normalizeChoiceCompare(c));
+    if (new Set(normalizedOrder).size !== data.choices.length) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'PUZZLE correctAnswer sequence cannot contain duplicate items.',
+        path: ['correctAnswer'],
+      });
+      return;
+    }
+
+    const itemSet = new Set(normalizedItems);
+    const allMatch = normalizedOrder.every(item => itemSet.has(item));
+    if (!allMatch) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'PUZZLE correctAnswer sequence must contain the exact same items as choices.',
+        path: ['correctAnswer'],
+      });
+    }
+  }
+
+  if (data.type === 'SLIDER') {
+    if (!data.sliderConfig) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'SLIDER question requires a valid sliderConfig.',
+        path: ['sliderConfig'],
+      });
+      return;
+    }
+    const numericAnswer = Number(data.correctAnswer);
+    if (!Number.isFinite(numericAnswer) || Math.abs(numericAnswer - data.sliderConfig.correctValue) > 1e-6) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'SLIDER correctAnswer must match sliderConfig.correctValue.',
+        path: ['correctAnswer'],
+      });
+    }
+  }
+
+  if (data.type === 'PIN_ANSWER') {
+    if (!data.pinConfig) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'PIN_ANSWER question requires a valid pinConfig.',
+        path: ['pinConfig'],
       });
     }
   }
@@ -226,7 +579,7 @@ export const GenerateGameRequestSchema = z.object({
   sourceId: z.string().optional(),
   sourceIds: z.array(z.string()).optional(),
   sources: z.array(CanonicalDocumentSchema).optional(),
-  gameType: GameTypeEnum,
+  gameType: CreatableGameTypeEnum,
   difficulty: DifficultyEnum.optional(),
   scoringMode: ScoringModeEnum.optional(),
   questionCount: z.number().int().min(1).max(100).default(5).optional(),

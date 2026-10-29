@@ -139,8 +139,9 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
       },
       {
         id: 'q_persist_2',
-        type: 'CROSSWORD',
+        type: 'MULTIPLE_CHOICE',
         question: 'Bộ phận giúp giải nhiệt nước làm mát gọi là gì?',
+        choices: ['KÉT NƯỚC', 'BÌNH ẮC QUY', 'BUGI ĐÁNH LỬA', 'ỐNG XẢ'],
         correctAnswer: 'KÉT NƯỚC',
         explanation: 'Két nước (radiator) giải nhiệt cho dung dịch làm mát.',
         difficulty: 'MEDIUM',
@@ -151,7 +152,7 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
       .post('/api/games/generate')
       .send({
         sourceId,
-        gameType: 'MIXED',
+        gameType: 'MULTIPLE_CHOICE',
         scoringMode: 'SPEED_BONUS',
         questionCount: 2,
       });
@@ -185,7 +186,7 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
       gameId,
       answers: [
         { questionId: updatedQuestions[0].id, answer: 'Mỗi 10.000 km' },
-        { questionId: updatedQuestions[1].id, answer: 'ket nuoc' },
+        { questionId: updatedQuestions[1].id, answer: 'KÉT NƯỚC' },
       ],
     });
 
@@ -642,7 +643,7 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
     quotaService.resetOverrides();
   });
 
-  it('Batch 6: Mixed Game Modes (MIXED) supports all 4 question types across AI Generation, Editor, Single-Player & Multiplayer', async () => {
+  it('Batch 6: Legacy Mixed Game Modes (MIXED) rejected on new creation while existing saved MIXED games remain playable in Single-Player & Multiplayer', async () => {
     resetAllRateLimiters();
 
     // 1. Verify Largest Remainder Method rounding algorithm for question distribution
@@ -679,76 +680,101 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
       .attach('files', Buffer.from('Tài liệu tổng hợp về mạng máy tính: giao thức HTTP, cổng 443 HTTPS, địa chỉ IP và tường lửa.', 'utf-8'), 'networking.txt');
     const sourceId = ingestRes.body.data.sources[0].sourceId;
 
-    // 2. Verify invalid distribution (sum != 100%) is rejected with 400 VALIDATION_ERROR and friendly message
+    // 2. Verify legacy MIXED is rejected on new game creation (POST /api/games/generate)
     const invalidDistRes = await request(app)
       .post('/api/games/generate')
       .send({
         sourceId,
         gameType: 'MIXED',
         questionCount: 4,
-        mixedDistribution: {
-          MULTIPLE_CHOICE: 50,
-          QUICK_BUTTON: 20,
-          FILL_IN_THE_BLANK: 20,
-          CROSSWORD: 0, // Sum = 90%
-        },
       });
     assert.equal(invalidDistRes.status, 400);
     assert.equal(invalidDistRes.body.error.code, 'INVALID_REQUEST');
-    assert.match(invalidDistRes.body.error.message, /100%/);
 
-    mockProvider.mockTitle = 'Thử Thách Mạng Máy Tính Hỗn Hợp (MIXED)';
-    mockProvider.mockQuestions = [
-      {
-        id: 'q_mix_1',
-        type: 'MULTIPLE_CHOICE',
-        question: 'Cổng mặc định của giao thức HTTPS là gì?',
-        choices: ['80', '443', '22', '8080'],
-        correctAnswer: '443',
-        explanation: 'HTTPS hoạt động mặc định trên cổng 443.',
-        difficulty: 'EASY',
-      },
-      {
-        id: 'q_mix_2',
-        type: 'FILL_IN_THE_BLANK',
-        question: 'Giao thức truyền tải siêu văn bản không mã hóa viết tắt là ___?',
-        correctAnswer: 'HTTP',
-        explanation: 'HTTP là HyperText Transfer Protocol.',
-        difficulty: 'EASY',
-      },
-      {
-        id: 'q_mix_3',
-        type: 'QUICK_BUTTON',
-        question: 'Tường lửa (Firewall) giúp kiểm soát lưu lượng mạng ra vào đúng hay sai?',
-        choices: ['Đúng', 'Sai'],
-        correctAnswer: 'Đúng',
-        explanation: 'Tường lửa lọc các gói tin theo quy tắc bảo mật.',
-        difficulty: 'MEDIUM',
-      },
-      {
-        id: 'q_mix_4',
-        type: 'CROSSWORD',
-        question: 'Hệ thống phân giải tên miền sang địa chỉ IP viết tắt là gì?',
-        correctAnswer: 'DNS',
-        explanation: 'Domain Name System (DNS).',
-        difficulty: 'MEDIUM',
-      },
-    ];
-
-    const genRes = await request(app)
-      .post('/api/games/generate')
-      .send({
-        sourceId,
-        gameType: 'MIXED',
+    // 3. Existing saved MIXED game in store/SQLite remains playable in Solo & Multiplayer
+    const mixedGame = {
+      gameId: 'game_legacy_mixed_1',
+      title: 'Thử Thách Mạng Máy Tính Hỗn Hợp (MIXED)',
+      description: 'Legacy saved MIXED game for backward compatibility testing.',
+      isPublic: true,
+      gameType: 'MIXED' as const,
+      settings: {
         questionCount: 4,
-      });
-    assert.equal(genRes.status, 200);
-    const mixedGame = genRes.body.data;
-    assert.equal(mixedGame.gameType, 'MIXED');
-    assert.deepEqual(
-      mixedGame.questions.map((q: any) => q.type),
-      ['MULTIPLE_CHOICE', 'FILL_IN_THE_BLANK', 'QUICK_BUTTON', 'CROSSWORD']
-    );
+        timePerQuestion: 20,
+        scoringMode: 'STANDARD' as const,
+      },
+      questions: [
+        {
+          id: 'q_mix_1',
+          type: 'MULTIPLE_CHOICE' as const,
+          question: 'Cổng mặc định của giao thức HTTPS là gì?',
+          choices: ['80', '443', '22', '8080'],
+          correctAnswer: '443',
+          explanation: 'HTTPS hoạt động mặc định trên cổng 443.',
+          difficulty: 'EASY' as const,
+          sourceReference: {
+            sourceId,
+            sourceType: 'TXT' as const,
+            sourceLocation: 'networking.txt',
+          },
+        },
+        {
+          id: 'q_mix_2',
+          type: 'FILL_IN_THE_BLANK' as const,
+          question: 'Giao thức truyền tải siêu văn bản không mã hóa viết tắt là ___?',
+          correctAnswer: 'HTTP',
+          explanation: 'HTTP là HyperText Transfer Protocol.',
+          difficulty: 'EASY' as const,
+          sourceReference: {
+            sourceId,
+            sourceType: 'TXT' as const,
+            sourceLocation: 'networking.txt',
+          },
+        },
+        {
+          id: 'q_mix_3',
+          type: 'QUICK_BUTTON' as const,
+          question: 'Tường lửa (Firewall) giúp kiểm soát lưu lượng mạng ra vào đúng hay sai?',
+          choices: ['Đúng', 'Sai'],
+          correctAnswer: 'Đúng',
+          explanation: 'Tường lửa lọc các gói tin theo quy tắc bảo mật.',
+          difficulty: 'MEDIUM' as const,
+          sourceReference: {
+            sourceId,
+            sourceType: 'TXT' as const,
+            sourceLocation: 'networking.txt',
+          },
+        },
+        {
+          id: 'q_mix_4',
+          type: 'CROSSWORD' as const,
+          question: 'Hệ thống phân giải tên miền sang địa chỉ IP viết tắt là gì?',
+          crosswordClue: 'Hệ thống phân giải tên miền sang địa chỉ IP',
+          crosswordAnswer: 'DNS',
+          correctAnswer: 'DNS',
+          explanation: 'Domain Name System (DNS).',
+          difficulty: 'MEDIUM' as const,
+          sourceReference: {
+            sourceId,
+            sourceType: 'TXT' as const,
+            sourceLocation: 'networking.txt',
+          },
+        },
+      ],
+      sourceSummary: {
+        sourceCount: 1,
+        sources: [
+          {
+            sourceId,
+            sourceType: 'TXT' as const,
+            sourceName: 'networking.txt',
+            sourceLocation: 'networking.txt',
+          },
+        ],
+      },
+      generatedAt: new Date().toISOString(),
+    };
+    gameStore.save(mixedGame);
 
     // Play through all 4 question types in Single-Player Practice
     const answers = ['443', 'http', 'Đúng', 'dns'];
@@ -1055,6 +1081,3 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
     assert.equal(dbRow, undefined);
   });
 });
-
-
-

@@ -5,7 +5,6 @@ import {
   FlameIcon,
   GamepadIcon,
   LayersIcon,
-  SparklesIcon,
   StarIcon,
 } from './Icons.js';
 import type { GameType } from '../types/index.js';
@@ -24,65 +23,63 @@ export interface GameTypeOption {
 export const SUPPORTED_GAME_TYPES: GameTypeOption[] = [
   {
     id: 'MULTIPLE_CHOICE',
-    title: 'Trắc Nghiệm 4 Lựa Chọn',
-    subtitle: 'Định dạng kinh điển phong cách Kahoot! với 4 khối màu rực rỡ, tính điểm theo tốc độ và chuỗi đúng.',
-    badge: 'Phổ biến nhất',
+    title: 'Quiz — Trắc Nghiệm 4 Lựa Chọn',
+    subtitle: 'Chọn đáp án đúng trong 4 phương án A/B/C/D với khối màu trực quan, tính điểm theo tốc độ và chuỗi đúng.',
+    badge: 'Ưu tiên #1 • Quiz',
     badgeColor: 'var(--game-mc)',
     accentColor: 'var(--game-mc-hover)',
     icon: <GamepadIcon size={24} style={{ color: 'var(--game-mc)' }} />,
-    tags: ['4 đáp án màu', 'Thưởng tốc độ', 'Multiplayer'],
+    tags: ['Quiz 4 đáp án', 'Thưởng tốc độ', 'Multiplayer'],
   },
   {
     id: 'QUICK_BUTTON',
-    title: 'Đúng / Sai Thần Tốc',
-    subtitle: 'Hai nút bấm phản xạ cực nhanh. Kiểm tra kiến thức cốt lõi và khả năng ra quyết định dưới áp lực thời gian.',
-    badge: 'Phản xạ nhanh',
+    title: 'True/False — Đúng hoặc Sai',
+    subtitle: 'Chọn Đúng hoặc Sai trước các nhận định trọng tâm. Kiểm tra độ nhạy bén và khả năng phân định kiến thức.',
+    badge: 'Ưu tiên #2 • True/False',
     badgeColor: 'var(--game-qb)',
     accentColor: 'var(--game-qb-hover)',
     icon: <FlameIcon size={24} style={{ color: 'var(--game-qb)' }} />,
-    tags: ['Đúng/Sai', 'Blitz 5-10s', 'Kịch tính'],
+    tags: ['Đúng / Sai', 'Phản xạ nhanh', 'Kịch tính'],
   },
   {
     id: 'FILL_IN_THE_BLANK',
-    title: 'Điền Từ Vào Chỗ Trống',
-    subtitle: 'Thử thách trí nhớ chính xác với ô nhập từ khóa. Hỗ trợ nhiều đáp án chấp nhận tương đương.',
-    badge: 'Ghi nhớ sâu',
+    title: 'Type Answer — Tự Nhập Đáp Án',
+    subtitle: 'Người chơi tự gõ câu trả lời ngắn gọn mà không có gợi ý lựa chọn sẵn. Hỗ trợ nhiều biến thể đáp án hợp lệ.',
+    badge: 'Ưu tiên #3 • Type Answer',
     badgeColor: 'var(--game-fill)',
     accentColor: 'var(--game-fill-hover)',
     icon: <BookOpenIcon size={24} style={{ color: 'var(--game-fill)' }} />,
-    tags: ['Từ khóa', 'Chính tả', 'Học thuật'],
+    tags: ['Tự nhập đáp án', 'Ghi nhớ sâu', 'Độ chính xác'],
   },
   {
-    id: 'CROSSWORD',
-    title: 'Giải Đố Ô Chữ',
-    subtitle: 'Gợi ý giải mã theo hàng ngang và hàng dọc. Rèn luyện tư duy ngôn ngữ và liên tưởng logic.',
-    badge: 'Tư duy logic',
+    id: 'PUZZLE',
+    title: 'Puzzle — Sắp Xếp Thứ Tự',
+    subtitle: 'Sắp xếp các bước quy trình, sự kiện hoặc cấp độ theo đúng trình tự chuẩn từ tài liệu nguồn.',
+    badge: 'Ưu tiên #4 • Puzzle',
     badgeColor: 'var(--game-cross)',
     accentColor: 'var(--game-cross-hover)',
     icon: <LayersIcon size={24} style={{ color: 'var(--game-cross)' }} />,
-    tags: ['Ô chữ', 'Gợi ý từ', 'Khám phá'],
-  },
-  {
-    id: 'MIXED',
-    title: 'Bộ Đề Hỗn Hợp (Mixed)',
-    subtitle: 'Kết hợp linh hoạt cả 4 định dạng câu hỏi trong cùng một trận đấu, tạo trải nghiệm phong phú bất ngờ.',
-    badge: 'Toàn diện',
-    badgeColor: 'var(--game-mixed)',
-    accentColor: 'var(--game-mixed-hover)',
-    icon: <SparklesIcon size={24} style={{ color: 'var(--game-mixed)' }} />,
-    tags: ['Đa định dạng', 'Thử thách cao', 'Độc đáo'],
+    tags: ['Sắp xếp thứ tự', 'Tư duy quy trình', '3–6 mục'],
   },
   {
     id: 'ADVENTURE',
     title: 'Game đi cảnh theo ngành nghề',
     subtitle: 'Khám phá kiến thức qua hành trình tương tác với bối cảnh được tạo theo ngành nghề.',
     badge: 'Mới • Đi cảnh 2D',
-    badgeColor: '#F59E0B',
-    accentColor: '#D97706',
-    icon: <StarIcon size={24} style={{ color: '#F59E0B' }} />,
+    badgeColor: 'var(--game-adventure)',
+    accentColor: 'var(--game-adventure-hover)',
+    icon: <StarIcon size={24} style={{ color: 'var(--game-adventure)' }} />,
     tags: ['Đi cảnh 2D', 'Vượt vật cản', 'Theo ngành nghề'],
   },
 ];
+
+function isMatchingSelectorType(optionId: GameType, selectedType: GameType): boolean {
+  if (optionId === selectedType) return true;
+  if (optionId === 'MULTIPLE_CHOICE' && selectedType === 'QUIZ') return true;
+  if (optionId === 'QUICK_BUTTON' && selectedType === 'TRUE_FALSE') return true;
+  if (optionId === 'FILL_IN_THE_BLANK' && selectedType === 'TYPE_ANSWER') return true;
+  return false;
+}
 
 interface GameTypeSelectorProps {
   selectedType?: GameType;
@@ -112,7 +109,7 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
         }}
       >
         {SUPPORTED_GAME_TYPES.map((item) => {
-          const isSelected = selectedType === item.id;
+          const isSelected = isMatchingSelectorType(item.id, selectedType);
           return (
             <button
               key={item.id}
@@ -193,7 +190,7 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
       }}
     >
       {SUPPORTED_GAME_TYPES.map((item) => {
-        const isSelected = selectedType === item.id;
+        const isSelected = isMatchingSelectorType(item.id, selectedType);
         return (
           <button
             key={item.id}
@@ -291,4 +288,3 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
     </div>
   );
 };
-

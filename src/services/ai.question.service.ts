@@ -10,14 +10,19 @@ import {
 } from '../contracts/adventure.contract.js';
 import { CanonicalDocument } from '../contracts/canonical.contract.js';
 import {
+  CreatableGameTypeEnum,
   Difficulty,
+  formatCanonicalPuzzleAnswer,
   GameQuestion,
   GameQuestionSchema,
   GameSpecification,
   GameSpecificationSchema,
   GameType,
   GenerateGameRequest,
+  isStrictTrueFalseChoicePair,
   MixedQuestionDistribution,
+  normalizeTrueFalsePolarity,
+  parsePuzzleSequence,
   QuestionType,
 } from '../contracts/game.contract.js';
 import { normalizeCrosswordWord } from '../game/handlers/crossword.handler.js';
@@ -142,11 +147,8 @@ export class GeminiModelProvider implements AiModelProvider {
 
 export function isExplicitTrueFalseChoices(choices: any): boolean {
   if (!Array.isArray(choices) || choices.length !== 2) return false;
-  const first = typeof choices[0] === 'string' ? choices[0].trim().toLowerCase() : '';
-  const second = typeof choices[1] === 'string' ? choices[1].trim().toLowerCase() : '';
-  const isVietnameseTF = (first === 'đúng' || first === 'dung') && second === 'sai';
-  const isEnglishTF = first === 'true' && second === 'false';
-  return isVietnameseTF || isEnglishTF;
+  if (choices.some(c => typeof c !== 'string')) return false;
+  return isStrictTrueFalseChoicePair(choices);
 }
 
 export function normalizeQuickButtonAnswer(rawAnswer: any): string | undefined {
@@ -155,16 +157,9 @@ export function normalizeQuickButtonAnswer(rawAnswer: any): string | undefined {
 
   if (typeof rawAnswer !== 'string') return undefined;
 
-  const trimmed = rawAnswer.trim();
-  const lower = trimmed.toLowerCase();
-
-  // Direct Vietnamese matches
-  if (lower === 'đúng' || lower === 'dung') return 'Đúng';
-  if (lower === 'sai') return 'Sai';
-
-  // Boolean string matches
-  if (lower === 'true') return 'Đúng';
-  if (lower === 'false') return 'Sai';
+  const polarity = normalizeTrueFalsePolarity(rawAnswer);
+  if (polarity === 'TRUE') return 'Đúng';
+  if (polarity === 'FALSE') return 'Sai';
 
   return undefined;
 }
@@ -357,7 +352,7 @@ export function sampleDocumentForPrompt(
 export function calculateMixedTypeCounts(
   totalCount: number,
   distribution?: MixedQuestionDistribution
-): Record<QuestionType, number> {
+): Record<keyof MixedQuestionDistribution, number> {
   const dist = distribution || {
     MULTIPLE_CHOICE: 40,
     QUICK_BUTTON: 20,
@@ -365,7 +360,12 @@ export function calculateMixedTypeCounts(
     CROSSWORD: 20,
   };
 
-  const types: QuestionType[] = ['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK', 'CROSSWORD'];
+  const types: (keyof MixedQuestionDistribution)[] = [
+    'MULTIPLE_CHOICE',
+    'QUICK_BUTTON',
+    'FILL_IN_THE_BLANK',
+    'CROSSWORD',
+  ];
 
   const rawCounts = types.map(type => {
     const ratio = (dist[type] ?? 0) / 100;
@@ -390,7 +390,7 @@ export function calculateMixedTypeCounts(
     rawCounts[i % rawCounts.length].floor += 1;
   }
 
-  const result: Record<QuestionType, number> = {
+  const result: Record<keyof MixedQuestionDistribution, number> = {
     MULTIPLE_CHOICE: 0,
     QUICK_BUTTON: 0,
     FILL_IN_THE_BLANK: 0,
@@ -452,10 +452,10 @@ export class AiQuestionService {
       '4. Preserve accurate source provenance (sourceId, section/page/sheet/row).',
       '',
       'GAME TYPE SPECIFICATION RULES:',
-      '- MULTIPLE_CHOICE: Exactly 4 distinct choices (A, B, C, D) and exactly 1 correct answer that matches one of the choices.',
-      '- FILL_IN_THE_BLANK: Provide question text with "___" as the blank, correctAnswer, and optional acceptedAlternatives.',
-      '- QUICK_BUTTON: Dạng câu hỏi Đúng/Sai bằng tiếng Việt. Mỗi câu phải là một nhận định (statement) có thể xác định rõ là ĐÚNG hoặc SAI dựa trên nội dung nguồn. Trường choices PHẢI chứa chính xác 2 phần tử theo đúng thứ tự: ["Đúng", "Sai"]. Không sử dụng tiền tố A/B/C/D hay A., B. Không sử dụng True/False. correctAnswer PHẢI là chính xác một trong hai chuỗi: "Đúng" hoặc "Sai".',
-      '- CROSSWORD: Provide question/clue, and correctAnswer / crosswordAnswer as a clean single word (alphanumeric, no spaces).',
+      '- QUIZ / MULTIPLE_CHOICE: Exactly 4 distinct choices (A, B, C, D) and exactly 1 correct answer that matches one of the choices.',
+      '- TRUE_FALSE / QUICK_BUTTON: Dạng câu hỏi Đúng/Sai bằng tiếng Việt. Mỗi câu phải là một nhận định (statement) có thể xác định rõ là ĐÚNG hoặc SAI dựa trên nội dung nguồn. Trường choices PHẢI chứa chính xác 2 phần tử theo đúng thứ tự: ["Đúng", "Sai"]. Không sử dụng tiền tố A/B/C/D hay A., B. Không sử dụng lựa chọn thứ 3. correctAnswer PHẢI là chính xác một trong hai chuỗi: "Đúng" hoặc "Sai".',
+      '- TYPE_ANSWER / FILL_IN_THE_BLANK: Người chơi tự nhập câu trả lời ngắn gọn (TUYỆT ĐỐI KHÔNG trả về mảng choices). Cung cấp câu hỏi rõ ràng (có thể chứa "___" hoặc câu hỏi trả lời ngắn), correctAnswer chính xác theo nguồn và acceptedAlternatives (các cách viết tương đương hợp lệ).',
+      '- PUZZLE: Dạng câu hỏi sắp xếp thứ tự (sequence ordering). Trích xuất một quy trình, trình tự các bước, cấp độ hoặc thứ tự logic gồm từ 3 đến 5 mục khác nhau có thật trong nội dung nguồn. Trường choices chứa mảng từ 3 đến 5 mục theo đúng thứ tự chuẩn, và trường correctAnswer chứa đúng các mục đó nối với nhau bằng " | " theo thứ tự chuẩn (ví dụ: "Bước 1 | Bước 2 | Bước 3").',
     ].join('\n');
   }
 
@@ -526,7 +526,9 @@ export class AiQuestionService {
       ].join('\n');
     }).join('\n\n====================\n\n');
 
-    const isQuickButton = gameType === 'QUICK_BUTTON';
+    const isQuickButton = gameType === 'QUICK_BUTTON' || gameType === 'TRUE_FALSE';
+    const isTypeAnswer = gameType === 'TYPE_ANSWER' || gameType === 'FILL_IN_THE_BLANK';
+    const isPuzzle = gameType === 'PUZZLE';
     const isMixed = gameType === 'MIXED';
     const isAdventure = gameType === 'ADVENTURE';
     const presetIdsList = Object.keys(ADVENTURE_THEME_PRESETS).join('", "');
@@ -540,13 +542,16 @@ export class AiQuestionService {
       const count =
         Math.floor(questionCount / resolvedAdventureTypes.length) +
         (idx < questionCount % resolvedAdventureTypes.length ? 1 : 0);
-      if (t === 'MULTIPLE_CHOICE') {
-        return `  + MULTIPLE_CHOICE (Trắc nghiệm ABCD - đúng 4 lựa chọn): ${count} câu`;
+      if (t === 'MULTIPLE_CHOICE' || t === 'QUIZ') {
+        return `  + ${t} (Trắc nghiệm Quiz 4 lựa chọn): ${count} câu`;
       }
-      if (t === 'QUICK_BUTTON') {
-        return `  + QUICK_BUTTON (Đúng / Sai - choices đúng bằng ["Đúng", "Sai"], correctAnswer là "Đúng" hoặc "Sai"): ${count} câu`;
+      if (t === 'QUICK_BUTTON' || t === 'TRUE_FALSE') {
+        return `  + ${t} (Đúng / Sai - choices đúng bằng ["Đúng", "Sai"], correctAnswer là "Đúng" hoặc "Sai"): ${count} câu`;
       }
-      return `  + FILL_IN_THE_BLANK (Điền từ vào ô trống "___" - có correctAnswer và acceptedAlternatives): ${count} câu`;
+      if (t === 'PUZZLE') {
+        return `  + PUZZLE (Sắp xếp thứ tự 3-5 bước - choices là mảng các bước, correctAnswer nối bằng " | "): ${count} câu`;
+      }
+      return `  + ${t} (Nhập đáp án ngắn / Điền từ - KHÔNG có choices, có correctAnswer và acceptedAlternatives): ${count} câu`;
     });
     const adventureQuestionRuleText = [
       '- Phân bổ các loại câu hỏi trong "questions" CHÍNH XÁC theo lựa chọn của người tạo:',
@@ -555,38 +560,54 @@ export class AiQuestionService {
     ].join('\n');
     const quickButtonInstruction = isQuickButton
       ? [
-          'CRITICAL RULES FOR QUICK_BUTTON (ĐÚNG / SAI):',
+          `CRITICAL RULES FOR ${gameType} (ĐÚNG / SAI):`,
           '- Mỗi câu hỏi PHẢI là một nhận định (câu khẳng định) để người chơi phán đoán Đúng hoặc Sai dựa trên nội dung nguồn.',
           '- Trường "choices" PHẢI chứa chính xác 2 phần tử theo đúng thứ tự: ["Đúng", "Sai"]. Tuyệt đối KHÔNG thêm tiền tố A/B/C/D, KHÔNG dùng True/False, KHÔNG thêm lựa chọn thứ ba.',
           '- Trường "correctAnswer" PHẢI là chính xác một trong hai chuỗi: "Đúng" hoặc "Sai".',
           '',
         ].join('\n')
-      : isMixed && mixedCounts
+      : isTypeAnswer
         ? [
-            'CRITICAL RULES FOR MIXED GAME MODE (CHẾ ĐỘ HỖN HỢP CÓ PHÂN BỔ TỶ LỆ):',
-            `- Bạn PHẢI tạo chính xác tổng cộng ${questionCount} câu hỏi được phân chia cụ thể như sau:`,
-            `  + MULTIPLE_CHOICE (Trắc nghiệm ABCD - đúng 4 lựa chọn): ${mixedCounts.MULTIPLE_CHOICE} câu`,
-            `  + QUICK_BUTTON (Đúng / Sai - choices đúng bằng ["Đúng", "Sai"]): ${mixedCounts.QUICK_BUTTON} câu`,
-            `  + FILL_IN_THE_BLANK (Điền từ vào ô trống "___"): ${mixedCounts.FILL_IN_THE_BLANK} câu`,
-            `  + CROSSWORD (Ô chữ - kèm crosswordClue và crosswordAnswer viết hoa không dấu): ${mixedCounts.CROSSWORD} câu`,
-            '- Mỗi câu hỏi PHẢI khai báo trường "type" là một trong 4 giá trị cụ thể: "MULTIPLE_CHOICE", "QUICK_BUTTON", "FILL_IN_THE_BLANK", hoặc "CROSSWORD" (TUYỆT ĐỐI KHÔNG ghi type là "MIXED" trong từng câu hỏi).',
-            '- Đối với QUICK_BUTTON: choices PHẢI là ["Đúng", "Sai"], correctAnswer PHẢI là "Đúng" hoặc "Sai".',
-            '- Đối với MULTIPLE_CHOICE: choices PHẢI có đúng 4 phương án, correctAnswer PHẢI khớp với một trong các phương án.',
+            `CRITICAL RULES FOR ${gameType} (TỰ NHẬP ĐÁP ÁN):`,
+            '- Người chơi sẽ tự gõ câu trả lời từ bàn phím, vì vậy TUYỆT ĐỐI KHÔNG trả về trường "choices".',
+            '- Câu hỏi cần rõ ràng, hỏi về thuật ngữ, con số, tên gọi hoặc khái niệm trọng tâm trong nguồn (có thể dùng "___" hoặc câu hỏi ngắn).',
+            '- Trường "correctAnswer" PHẢI ngắn gọn, chính xác tuyệt đối theo tài liệu nguồn; bổ sung các cách viết tương đương hợp lệ vào "acceptedAlternatives".',
             '',
           ].join('\n')
-        : isAdventure
+        : isPuzzle
           ? [
-              'CRITICAL RULES FOR ADVENTURE GAME MODE (GAME ĐI CẢNH THEO NGÀNH NGHỀ):',
-              '- Phân tích nội dung nguồn để đề xuất cấu hình đi cảnh "adventureProposal" bám sát ngữ cảnh thực tế của tài liệu:',
-              `  + industryId: chọn 1 trong ["${industryIdsList}"]`,
-              `  + themePresetId: chọn 1 trong ["${presetIdsList}"] phù hợp nhất với bối cảnh cụ thể của tài liệu (Ví dụ: bảo dưỡng/phụ tùng xe máy -> "theme_moto_garage"; kỹ năng lái xe ngoài đường -> "theme_moto_circuit"; bán lẻ/tư vấn -> "theme_biz_retail"; nhà máy/an toàn lao động -> "theme_mfg_factory"; hạ tầng IT/cloud -> "theme_it_datacenter"; an ninh mạng -> "theme_it_cyberlab"; bệnh viện/lâm sàng -> "theme_med_hospital").`,
-              '  + gameplayArchetype: chọn 1 trong ["TRAFFIC_RUNNER_SIM", "DIAGNOSTIC_WORKBENCH_SIM", "CYBER_DEFENSE_CONSOLE_SIM", "SCENARIO_DECISION_SIM"] dựa trên sự kết hợp giữa ngành nghề VÀ nội dung nguồn (Ví dụ: Xe máy + luật giao thông -> "TRAFFIC_RUNNER_SIM"; Xe máy + bảo dưỡng động cơ/phụ tùng hoặc Nhà máy + QA/QC -> "DIAGNOSTIC_WORKBENCH_SIM"; CNTT + an ninh mạng/hạ tầng số -> "CYBER_DEFENSE_CONSOLE_SIM"; Kinh doanh/Y tế/Tài chính/F&B/Giáo dục -> "SCENARIO_DECISION_SIM").',
-              '  + environmentTitle, environmentSubtitle, learningObjective, winConditionSummary, interactiveObjects, aiReasoning: viết bằng tiếng Việt tự nhiên, phản ánh đúng nội dung nguồn.',
-              `- Danh sách "questions" gồm đúng ${questionCount} câu hỏi kiểm tra kiến thức thực chất từ tài liệu nguồn.`,
-              adventureQuestionRuleText,
+              'CRITICAL RULES FOR PUZZLE (SẮP XẾP THỨ TỰ):',
+              '- Mỗi câu hỏi yêu cầu người chơi sắp xếp từ 3 đến 5 mục/bước theo đúng thứ tự quy trình, trình tự thời gian, cấp độ hoặc thứ tự thực hiện được nêu trong tài liệu nguồn.',
+              '- Trường "choices" PHẢI là mảng gồm từ 3 đến 5 chuỗi khác nhau (không trùng lặp, không rỗng) biểu diễn các mục cần sắp xếp.',
+              '- Trường "correctAnswer" PHẢI là chuỗi nối toàn bộ các mục trong "choices" theo đúng thứ tự chuẩn, phân tách bằng " | " (ví dụ: "Bước 1: Tiếp nhận | Bước 2: Kiểm tra | Bước 3: Bàn giao").',
               '',
             ].join('\n')
-          : '';
+          : isMixed && mixedCounts
+            ? [
+                'CRITICAL RULES FOR MIXED GAME MODE (CHẾ ĐỘ HỖN HỢP CÓ PHÂN BỔ TỶ LỆ):',
+                `- Bạn PHẢI tạo chính xác tổng cộng ${questionCount} câu hỏi được phân chia cụ thể như sau:`,
+                `  + MULTIPLE_CHOICE (Trắc nghiệm ABCD - đúng 4 lựa chọn): ${mixedCounts.MULTIPLE_CHOICE} câu`,
+                `  + QUICK_BUTTON (Đúng / Sai - choices đúng bằng ["Đúng", "Sai"]): ${mixedCounts.QUICK_BUTTON} câu`,
+                `  + FILL_IN_THE_BLANK (Điền từ vào ô trống "___"): ${mixedCounts.FILL_IN_THE_BLANK} câu`,
+                `  + CROSSWORD (Ô chữ - kèm crosswordClue và crosswordAnswer viết hoa không dấu): ${mixedCounts.CROSSWORD} câu`,
+                '- Mỗi câu hỏi PHẢI khai báo trường "type" là một trong 4 giá trị cụ thể: "MULTIPLE_CHOICE", "QUICK_BUTTON", "FILL_IN_THE_BLANK", hoặc "CROSSWORD" (TUYỆT ĐỐI KHÔNG ghi type là "MIXED" trong từng câu hỏi).',
+                '- Đối với QUICK_BUTTON: choices PHẢI là ["Đúng", "Sai"], correctAnswer PHẢI là "Đúng" hoặc "Sai".',
+                '- Đối với MULTIPLE_CHOICE: choices PHẢI có đúng 4 phương án, correctAnswer PHẢI khớp với một trong các phương án.',
+                '',
+              ].join('\n')
+            : isAdventure
+              ? [
+                  'CRITICAL RULES FOR ADVENTURE GAME MODE (GAME ĐI CẢNH THEO NGÀNH NGHỀ):',
+                  '- Phân tích nội dung nguồn để đề xuất cấu hình đi cảnh "adventureProposal" bám sát ngữ cảnh thực tế của tài liệu:',
+                  `  + industryId: chọn 1 trong ["${industryIdsList}"]`,
+                  `  + themePresetId: chọn 1 trong ["${presetIdsList}"] phù hợp nhất với bối cảnh cụ thể của tài liệu (Ví dụ: bảo dưỡng/phụ tùng xe máy -> "theme_moto_garage"; kỹ năng lái xe ngoài đường -> "theme_moto_circuit"; bán lẻ/tư vấn -> "theme_biz_retail"; nhà máy/an toàn lao động -> "theme_mfg_factory"; hạ tầng IT/cloud -> "theme_it_datacenter"; an ninh mạng -> "theme_it_cyberlab"; bệnh viện/lâm sàng -> "theme_med_hospital").`,
+                  '  + gameplayArchetype: chọn 1 trong ["TRAFFIC_RUNNER_SIM", "DIAGNOSTIC_WORKBENCH_SIM", "CYBER_DEFENSE_CONSOLE_SIM", "SCENARIO_DECISION_SIM"] dựa trên sự kết hợp giữa ngành nghề VÀ nội dung nguồn (Ví dụ: Xe máy + luật giao thông -> "TRAFFIC_RUNNER_SIM"; Xe máy + bảo dưỡng động cơ/phụ tùng hoặc Nhà máy + QA/QC -> "DIAGNOSTIC_WORKBENCH_SIM"; CNTT + an ninh mạng/hạ tầng số -> "CYBER_DEFENSE_CONSOLE_SIM"; Kinh doanh/Y tế/Tài chính/F&B/Giáo dục -> "SCENARIO_DECISION_SIM").',
+                  '  + environmentTitle, environmentSubtitle, learningObjective, winConditionSummary, interactiveObjects, aiReasoning: viết bằng tiếng Việt tự nhiên, phản ánh đúng nội dung nguồn.',
+                  `- Danh sách "questions" gồm đúng ${questionCount} câu hỏi kiểm tra kiến thức thực chất từ tài liệu nguồn.`,
+                  adventureQuestionRuleText,
+                  '',
+                ].join('\n')
+              : '';
 
     const topicFocusInstruction =
       options?.topicFocus && options.topicFocus.trim().length > 0
@@ -612,7 +633,7 @@ export class AiQuestionService {
       ? `[
   {
     "id": "q_1",
-    "type": "QUICK_BUTTON",
+    "type": "${gameType}",
     "question": "Câu nhận định khẳng định sự thật dựa trên nội dung nguồn?",
     "choices": ["Đúng", "Sai"],
     "correctAnswer": "Đúng", // hoặc "Sai"
@@ -626,14 +647,50 @@ export class AiQuestionService {
     }
   }
 ]`
-      : `[
+      : isTypeAnswer
+        ? `[
+  {
+    "id": "q_1",
+    "type": "${gameType}",
+    "question": "Câu hỏi yêu cầu người chơi tự nhập đáp án ngắn gọn (có thể dùng ___)?",
+    "correctAnswer": "Đáp án chuẩn",
+    "acceptedAlternatives": ["Biến thể hợp lệ 1", "Biến thể hợp lệ 2"],
+    "explanation": "Giải thích ngắn gọn căn cứ vào nội dung nguồn bằng tiếng Việt",
+    "difficulty": "${difficulty}",
+    "sourceReference": {
+      "sourceId": "source_id_here",
+      "sourceType": "WEBSITE" | "DOCX" | "XLSX" | "PDF" | "TXT" | "MARKDOWN" | "CSV",
+      "sourceLocation": "location_here",
+      "section": "Section name if applicable"
+    }
+  }
+]`
+        : isPuzzle
+          ? `[
+  {
+    "id": "q_1",
+    "type": "PUZZLE",
+    "question": "Sắp xếp các bước/mục sau theo đúng trình tự trong tài liệu nguồn:",
+    "choices": ["Bước 1", "Bước 2", "Bước 3", "Bước 4"],
+    "correctAnswer": "Bước 1 | Bước 2 | Bước 3 | Bước 4",
+    "explanation": "Giải thích ngắn gọn trình tự căn cứ vào nội dung nguồn bằng tiếng Việt",
+    "difficulty": "${difficulty}",
+    "sourceReference": {
+      "sourceId": "source_id_here",
+      "sourceType": "WEBSITE" | "DOCX" | "XLSX" | "PDF" | "TXT" | "MARKDOWN" | "CSV",
+      "sourceLocation": "location_here",
+      "section": "Section name if applicable"
+    }
+  }
+]`
+          : `[
   {
     "id": "q_1",
     "type": "${isMixed || isAdventure ? 'MULTIPLE_CHOICE' : gameType}",
     "question": "Nội dung câu hỏi bằng tiếng Việt?",
-    "choices": ["A. Lựa chọn 1", "B. Lựa chọn 2", "C. Lựa chọn 3", "D. Lựa chọn 4"], // required for MULTIPLE_CHOICE (4 choices) or ["Đúng", "Sai"] for QUICK_BUTTON
-    "correctAnswer": "A. Lựa chọn 1", // must match one choice for MULTIPLE_CHOICE
-    "acceptedAlternatives": ["Lựa chọn 1"], // optional for FILL_IN_THE_BLANK
+    "choices": ["A. Lựa chọn 1", "B. Lựa chọn 2", "C. Lựa chọn 3", "D. Lựa chọn 4"], // required for QUIZ / MULTIPLE_CHOICE (4 choices) or ["Đúng", "Sai"] for TRUE_FALSE / QUICK_BUTTON
+    "correctAnswer": "A. Lựa chọn 1", // must match one choice for QUIZ / MULTIPLE_CHOICE
+    "acceptedAlternatives": ["Lựa chọn 1"], // optional for TYPE_ANSWER / FILL_IN_THE_BLANK
     "explanation": "Giải thích ngắn gọn căn cứ vào nội dung nguồn bằng tiếng Việt",
     "difficulty": "${difficulty}",
     "sourceReference": {
@@ -644,9 +701,7 @@ export class AiQuestionService {
       "page": 1, // number if PDF
       "sheet": "SheetName", // string if XLSX/CSV
       "row": 2 // number if XLSX/CSV
-    },
-    "crosswordClue": "Gợi ý từ khóa bằng tiếng Việt", // required for CROSSWORD
-    "crosswordAnswer": "ANSWERWORD" // required for CROSSWORD (alphanumeric uppercase word)
+    }
   }
 ]`;
 
@@ -687,15 +742,28 @@ export class AiQuestionService {
       throw new AppError('EMPTY_SOURCE_CONTENT', 'Source documents contain no text or questions to generate from.', 400);
     }
 
+    const creatableCheck = CreatableGameTypeEnum.safeParse(request.gameType);
+    if (!creatableCheck.success) {
+      throw new AppError(
+        'UNSUPPORTED_GAME_TYPE',
+        `Game type "${String(request.gameType)}" is not supported for new game creation. Allowed types: ${CreatableGameTypeEnum.options.join(', ')}.`,
+        400
+      );
+    }
+
     const effectiveDifficulty: Difficulty = request.difficulty || 'MEDIUM';
     const questionCount = request.questionCount || 5;
     const gameType = request.gameType;
     const gameId = `game_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
     const getGameTypeLabelVi = (type: GameType): string => {
       switch (type) {
+        case 'QUIZ': return 'Quiz (Trắc nghiệm)';
         case 'MULTIPLE_CHOICE': return 'Trắc nghiệm ABCD';
-        case 'FILL_IN_THE_BLANK': return 'Điền từ';
+        case 'TRUE_FALSE': return 'Đúng / Sai (True/False)';
         case 'QUICK_BUTTON': return 'Đúng / Sai';
+        case 'TYPE_ANSWER': return 'Nhập đáp án (Type Answer)';
+        case 'FILL_IN_THE_BLANK': return 'Điền từ';
+        case 'PUZZLE': return 'Sắp xếp thứ tự (Puzzle)';
         case 'CROSSWORD': return 'Ô chữ';
         case 'MIXED': return 'Hỗn hợp đa dạng';
         case 'ADVENTURE': return 'Game đi cảnh theo ngành nghề';
@@ -806,10 +874,13 @@ export class AiQuestionService {
         : ['MULTIPLE_CHOICE', 'QUICK_BUTTON'];
 
     const validQuestionTypes = new Set<QuestionType>([
+      'QUIZ',
+      'TRUE_FALSE',
+      'TYPE_ANSWER',
+      'PUZZLE',
       'MULTIPLE_CHOICE',
       'FILL_IN_THE_BLANK',
       'QUICK_BUTTON',
-      'CROSSWORD',
     ]);
 
     for (let i = 0; i < rawQuestions.length && validatedQuestions.length < questionCount; i++) {
@@ -823,26 +894,24 @@ export class AiQuestionService {
 
       // Resolve concrete question type for this item
       let itemQuestionType: QuestionType;
-      if (gameType === 'MIXED' || gameType === 'ADVENTURE') {
+      if (gameType === 'ADVENTURE') {
         const rawType = typeof q.type === 'string' ? (q.type.trim().toUpperCase() as QuestionType) : undefined;
         if (rawType && validQuestionTypes.has(rawType)) {
           itemQuestionType = rawType;
         } else if (isExplicitTrueFalseChoices(q.choices)) {
-          itemQuestionType = 'QUICK_BUTTON';
+          itemQuestionType = allowedAdventureTypes.includes('TRUE_FALSE') ? 'TRUE_FALSE' : 'QUICK_BUTTON';
         } else if (Array.isArray(q.choices) && q.choices.length === 4) {
-          itemQuestionType = 'MULTIPLE_CHOICE';
-        } else if (q.crosswordClue || q.crosswordAnswer) {
-          itemQuestionType = 'CROSSWORD';
+          itemQuestionType = allowedAdventureTypes.includes('QUIZ') ? 'QUIZ' : 'MULTIPLE_CHOICE';
         } else {
           itemQuestionType =
-            gameType === 'ADVENTURE'
-              ? allowedAdventureTypes.includes('FILL_IN_THE_BLANK')
+            allowedAdventureTypes.includes('TYPE_ANSWER')
+              ? 'TYPE_ANSWER'
+              : allowedAdventureTypes.includes('FILL_IN_THE_BLANK')
                 ? 'FILL_IN_THE_BLANK'
-                : allowedAdventureTypes[0] || 'MULTIPLE_CHOICE'
-              : 'FILL_IN_THE_BLANK';
+                : allowedAdventureTypes[0] || 'MULTIPLE_CHOICE';
         }
       } else {
-        itemQuestionType = gameType;
+        itemQuestionType = gameType as QuestionType;
       }
 
       // Ensure id and fallback provenance if omitted by model
@@ -852,7 +921,9 @@ export class AiQuestionService {
         request.adventureConfig.questionTypes.length > 0 &&
         !allowedAdventureTypes.includes(itemQuestionType as AdventureQuestionType)
       ) {
-        if (allowedAdventureTypes.includes('FILL_IN_THE_BLANK')) {
+        if (allowedAdventureTypes.includes('TYPE_ANSWER')) {
+          itemQuestionType = 'TYPE_ANSWER';
+        } else if (allowedAdventureTypes.includes('FILL_IN_THE_BLANK')) {
           itemQuestionType = 'FILL_IN_THE_BLANK';
         } else {
           const msg = `Generated question ${i + 1} rejected: type "${itemQuestionType}" is not in selected adventure question types [${allowedAdventureTypes.join(', ')}]`;
@@ -911,25 +982,77 @@ export class AiQuestionService {
       // Normalize correctAnswer field and choices
       let normalizedCorrectAnswer: string | undefined;
       let normalizedChoices: string[] | undefined =
-        itemQuestionType === 'FILL_IN_THE_BLANK'
+        itemQuestionType === 'FILL_IN_THE_BLANK' || itemQuestionType === 'TYPE_ANSWER'
           ? undefined
           : Array.isArray(q.choices)
             ? q.choices
             : undefined;
 
-      if (itemQuestionType === 'QUICK_BUTTON') {
+      if (itemQuestionType === 'QUICK_BUTTON' || itemQuestionType === 'TRUE_FALSE') {
         const rawAns = q.correctAnswer !== undefined
           ? q.correctAnswer
           : (q.correct_answer !== undefined ? q.correct_answer : q.answer);
 
         const qbAns = normalizeQuickButtonAnswer(rawAns);
-        if (qbAns) {
+        const hasValidTFChoices =
+          !Array.isArray(q.choices) ||
+          q.choices.length === 0 ||
+          isExplicitTrueFalseChoices(q.choices);
+
+        if (qbAns && hasValidTFChoices) {
           normalizedCorrectAnswer = qbAns;
-          if (!Array.isArray(q.choices) || q.choices.length === 0 || isExplicitTrueFalseChoices(q.choices)) {
-            normalizedChoices = ['Đúng', 'Sai'];
-          }
+          normalizedChoices = ['Đúng', 'Sai'];
+        } else {
+          const reason = `Generated question ${i + 1} failed True/False validation: choices must be a binary True/False pair and correctAnswer must be Đúng/Sai.`;
+          rejectedReasons.push(reason);
+          generationDiagnostics.push(reason);
+          continue;
+        }
+      } else if (itemQuestionType === 'PUZZLE') {
+        const rawSeqItems = Array.isArray(q.choices)
+          ? q.choices
+          : Array.isArray(q.items)
+            ? q.items
+            : Array.isArray(q.steps)
+              ? q.steps
+              : Array.isArray(q.sequence)
+                ? q.sequence
+                : undefined;
+
+        if (Array.isArray(rawSeqItems)) {
+          normalizedChoices = rawSeqItems
+            .filter((item: unknown): item is string => typeof item === 'string')
+            .map((item: string) => item.trim())
+            .filter(Boolean);
+        }
+
+        const rawAns =
+          q.correctAnswer !== undefined
+            ? q.correctAnswer
+            : q.correct_answer !== undefined
+              ? q.correct_answer
+              : q.correctOrder !== undefined
+                ? q.correctOrder
+                : q.answer;
+
+        if (Array.isArray(rawAns)) {
+          const cleaned = rawAns
+            .filter((item: unknown): item is string => typeof item === 'string')
+            .map((item: string) => item.trim())
+            .filter(Boolean);
+          normalizedCorrectAnswer = formatCanonicalPuzzleAnswer(cleaned);
         } else if (typeof rawAns === 'string' && rawAns.trim().length > 0) {
-          normalizedCorrectAnswer = rawAns.trim();
+          const parsedSeq = parsePuzzleSequence(rawAns);
+          if (parsedSeq.length >= 3) {
+            normalizedCorrectAnswer = formatCanonicalPuzzleAnswer(parsedSeq);
+            if (!normalizedChoices || normalizedChoices.length === 0) {
+              normalizedChoices = [...parsedSeq];
+            }
+          } else {
+            normalizedCorrectAnswer = rawAns.trim();
+          }
+        } else if (normalizedChoices && normalizedChoices.length >= 3 && normalizedChoices.length <= 6) {
+          normalizedCorrectAnswer = formatCanonicalPuzzleAnswer(normalizedChoices);
         }
       } else {
         if (typeof q.correctAnswer === 'string' && q.correctAnswer.trim().length > 0) {

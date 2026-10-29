@@ -93,16 +93,28 @@ const formatFileSize = (bytes: number): string => {
 
 const formatGameTypeLabel = (type: string): string => {
   switch (type) {
+    case 'QUIZ':
+      return 'Quiz (Trắc nghiệm)';
     case 'MULTIPLE_CHOICE':
-      return 'Trắc nghiệm ABCD';
-    case 'FILL_IN_THE_BLANK':
-      return 'Điền từ';
+      return 'Quiz — Trắc nghiệm 4 lựa chọn';
+    case 'TRUE_FALSE':
+      return 'True/False — Đúng hoặc Sai';
     case 'QUICK_BUTTON':
-      return 'Đúng / Sai';
+      return 'True/False — Đúng / Sai';
+    case 'TYPE_ANSWER':
+      return 'Type Answer — Tự nhập đáp án';
+    case 'FILL_IN_THE_BLANK':
+      return 'Type Answer — Điền từ';
+    case 'PUZZLE':
+      return 'Puzzle — Sắp xếp thứ tự';
+    case 'SLIDER':
+      return 'Slider — Thanh trượt giá trị';
+    case 'PIN_ANSWER':
+      return 'Pin Answer — Ghim vị trí';
     case 'CROSSWORD':
-      return 'Ô chữ';
+      return 'Ô chữ (Legacy)';
     case 'MIXED':
-      return 'Hỗn hợp (Mixed)';
+      return 'Hỗn hợp (Legacy)';
     case 'ADVENTURE':
       return 'Game đi cảnh theo ngành nghề';
     default:
@@ -171,9 +183,9 @@ const validateQuestionItem = (q: GameQuestion): string | null => {
     return 'Đáp án đúng không được để trống.';
   }
 
-  if (q.type === 'MULTIPLE_CHOICE') {
+  if (q.type === 'MULTIPLE_CHOICE' || q.type === 'QUIZ') {
     if (!q.choices || q.choices.length !== 4) {
-      return 'Câu hỏi Trắc nghiệm ABCD phải có đúng 4 lựa chọn.';
+      return 'Câu hỏi Quiz phải có đúng 4 lựa chọn.';
     }
     if (q.choices.some(c => !c || c.trim().length === 0)) {
       return 'Không được để trống bất kỳ lựa chọn A, B, C, D nào.';
@@ -200,20 +212,33 @@ const validateQuestionItem = (q: GameQuestion): string | null => {
     }
   }
 
-  if (q.type === 'QUICK_BUTTON') {
+  if (q.type === 'QUICK_BUTTON' || q.type === 'TRUE_FALSE') {
     if (!q.choices || q.choices.length < 2 || q.choices.length > 4) {
-      return 'Câu hỏi Nút bấm nhanh phải có từ 2 đến 4 lựa chọn.';
+      return 'Câu hỏi True/False phải có 2 lựa chọn (Đúng / Sai).';
     }
     const normButtons = q.choices.map(c => normalizeChoiceCompare(c));
     if (normButtons.some(c => c.length === 0)) {
-      return 'Các lựa chọn Nút bấm nhanh không được để trống.';
+      return 'Các lựa chọn không được để trống.';
     }
     if (new Set(normButtons).size !== q.choices.length) {
-      return 'Các lựa chọn Nút bấm nhanh phải khác nhau.';
+      return 'Các lựa chọn phải khác nhau.';
     }
     const normAns = normalizeChoiceCompare(q.correctAnswer);
     if (!normButtons.includes(normAns)) {
       return `Đáp án đúng "${q.correctAnswer}" phải khớp với một trong các nút lựa chọn.`;
+    }
+  }
+
+  if (q.type === 'PUZZLE') {
+    if (!q.choices || q.choices.length < 3 || q.choices.length > 6) {
+      return 'Câu hỏi Puzzle phải có từ 3 đến 6 mục cần sắp xếp.';
+    }
+    const normItems = q.choices.map(c => normalizeChoiceCompare(c));
+    if (normItems.some(c => c.length === 0)) {
+      return 'Không được để trống mục nào trong danh sách sắp xếp Puzzle.';
+    }
+    if (new Set(normItems).size !== q.choices.length) {
+      return 'Các mục trong câu hỏi Puzzle phải khác nhau (không trùng lặp).';
     }
   }
 
@@ -1016,23 +1041,29 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       id: `q_custom_${Date.now()}_${newIndex}`,
       type: gType,
       question:
-        gType === 'FILL_IN_THE_BLANK'
-          ? `Câu hỏi điền từ mới số ${newIndex}: Hãy điền từ thích hợp vào chỗ trống ___?`
-          : `Câu hỏi mới số ${newIndex}?`,
+        gType === 'FILL_IN_THE_BLANK' || gType === 'TYPE_ANSWER'
+          ? `Câu hỏi tự nhập đáp án mới số ${newIndex}: Hãy nhập câu trả lời cho ___?`
+          : gType === 'PUZZLE'
+            ? `Sắp xếp các bước sau theo đúng trình tự (câu số ${newIndex}):`
+            : `Câu hỏi mới số ${newIndex}?`,
       choices:
-        gType === 'MULTIPLE_CHOICE'
+        gType === 'MULTIPLE_CHOICE' || gType === 'QUIZ'
           ? ['A. Phương án 1', 'B. Phương án 2', 'C. Phương án 3', 'D. Phương án 4']
-          : gType === 'QUICK_BUTTON'
+          : gType === 'QUICK_BUTTON' || gType === 'TRUE_FALSE'
             ? ['Đúng', 'Sai']
-            : undefined,
+            : gType === 'PUZZLE'
+              ? ['Bước 1: Khởi tạo', 'Bước 2: Thực hiện', 'Bước 3: Hoàn tất']
+              : undefined,
       correctAnswer:
-        gType === 'MULTIPLE_CHOICE'
+        gType === 'MULTIPLE_CHOICE' || gType === 'QUIZ'
           ? 'A. Phương án 1'
-          : gType === 'QUICK_BUTTON'
+          : gType === 'QUICK_BUTTON' || gType === 'TRUE_FALSE'
             ? 'Đúng'
-            : gType === 'CROSSWORD'
-              ? 'TUKHOA'
-              : 'Đáp án',
+            : gType === 'PUZZLE'
+              ? 'Bước 1: Khởi tạo | Bước 2: Thực hiện | Bước 3: Hoàn tất'
+              : gType === 'CROSSWORD'
+                ? 'TUKHOA'
+                : 'Đáp án',
       explanation: 'Giải thích căn cứ theo nội dung tài liệu nguồn.',
       difficulty,
       crosswordClue: gType === 'CROSSWORD' ? `Gợi ý ô chữ câu số ${newIndex}` : undefined,
@@ -2492,7 +2523,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                             />
                           </div>
 
-                          {q.type === 'MULTIPLE_CHOICE' && q.choices && (
+                          {(q.type === 'MULTIPLE_CHOICE' || q.type === 'QUIZ') && q.choices && (
                             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.35rem' }}>
                               {q.choices.map((c, cIdx) => (
                                 <div key={cIdx} style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
@@ -2527,7 +2558,79 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                             </div>
                           )}
 
-                          {(q.type === 'FILL_IN_THE_BLANK' || q.type === 'CROSSWORD') && (
+                          {(q.type === 'QUICK_BUTTON' || q.type === 'TRUE_FALSE') && (
+                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                              {(['Đúng', 'Sai'] as const).map((tfVal) => {
+                                const isSel = normalizeChoiceCompare(q.correctAnswer) === normalizeChoiceCompare(tfVal);
+                                return (
+                                  <button
+                                    key={tfVal}
+                                    type="button"
+                                    onClick={() =>
+                                      handleUpdateQuestion(idx, (prev) => ({
+                                        ...prev,
+                                        choices: ['Đúng', 'Sai'],
+                                        correctAnswer: tfVal,
+                                      }))
+                                    }
+                                    style={{
+                                      flex: 1,
+                                      padding: '0.4rem 0.65rem',
+                                      borderRadius: '6px',
+                                      border: isSel ? '2px solid var(--accent-emerald)' : '1px solid var(--border-strong)',
+                                      backgroundColor: isSel ? 'rgba(16, 185, 129, 0.14)' : 'var(--bg-input)',
+                                      color: isSel ? 'var(--accent-emerald)' : 'var(--text-primary)',
+                                      fontWeight: 800,
+                                      fontSize: '0.82rem',
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {tfVal}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+
+                          {q.type === 'PUZZLE' && (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                                Thứ tự chuẩn của các mục (3 - 6 mục):
+                              </label>
+                              {(q.choices || []).map((item, itemIdx) => (
+                                <div key={itemIdx} style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                                  <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--accent-sky)', minWidth: '22px' }}>
+                                    #{itemIdx + 1}
+                                  </span>
+                                  <input
+                                    type="text"
+                                    value={item}
+                                    onChange={(e) => {
+                                      const nextItems = [...(q.choices || [])];
+                                      nextItems[itemIdx] = e.target.value;
+                                      handleUpdateQuestion(idx, (prev) => ({
+                                        ...prev,
+                                        choices: nextItems,
+                                        correctAnswer: nextItems.map(s => s.trim()).filter(Boolean).join(' | '),
+                                      }));
+                                    }}
+                                    style={{
+                                      flex: 1,
+                                      backgroundColor: 'var(--bg-input)',
+                                      border: '1px solid var(--border-strong)',
+                                      borderRadius: '6px',
+                                      padding: '0.35rem 0.5rem',
+                                      color: 'var(--text-primary)',
+                                      fontSize: '0.8rem',
+                                      boxSizing: 'border-box',
+                                    }}
+                                  />
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          {(q.type === 'FILL_IN_THE_BLANK' || q.type === 'TYPE_ANSWER' || q.type === 'CROSSWORD') && (
                             <div>
                               <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
                                 Đáp án đúng:

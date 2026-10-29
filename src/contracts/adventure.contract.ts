@@ -103,6 +103,10 @@ export const AdventureStageSchema = z.object({
 export type AdventureStage = z.infer<typeof AdventureStageSchema>;
 
 export const AdventureQuestionTypeEnum = z.enum([
+  'QUIZ',
+  'TRUE_FALSE',
+  'TYPE_ANSWER',
+  'PUZZLE',
   'MULTIPLE_CHOICE',
   'QUICK_BUTTON',
   'FILL_IN_THE_BLANK',
@@ -176,7 +180,7 @@ export const AdventureConfigSchema = z.object({
   questionTypes: z
     .array(AdventureQuestionTypeEnum)
     .min(1)
-    .max(3)
+    .max(4)
     .default(['MULTIPLE_CHOICE', 'QUICK_BUTTON']),
   gameplayArchetype: GameplayArchetypeEnum.default('SCENARIO_DECISION_SIM'),
   controlScheme: ControlSchemeEnum.default('SCENARIO_CASE_DECISION'),
@@ -240,7 +244,7 @@ export const GenerateAdventureConfigInputSchema = z.object({
   obstacleDensity: z.enum(['LOW', 'MEDIUM', 'HIGH']).optional(),
   speedMultiplier: z.number().min(0.6).max(1.6).optional(),
   reducedMotion: z.boolean().optional(),
-  questionTypes: z.array(AdventureQuestionTypeEnum).min(1).max(3).optional(),
+  questionTypes: z.array(AdventureQuestionTypeEnum).min(1).max(4).optional(),
   gameplayArchetype: GameplayArchetypeEnum.optional(),
   controlScheme: ControlSchemeEnum.optional(),
   questionTriggerMode: QuestionTriggerModeEnum.optional(),

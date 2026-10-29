@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import { LIMITS } from '../config/limits.js';
 import { CanonicalDocument } from '../contracts/canonical.contract.js';
-import { Difficulty, GameType } from '../contracts/game.contract.js';
+import { CreatableGameType, Difficulty, GameType } from '../contracts/game.contract.js';
 import { getDatabase } from '../storage/sqlite.db.js';
 import { AiQuestionService } from './ai.question.service.js';
 
@@ -444,13 +444,13 @@ export class AiObservabilityService {
     const cases: Array<{
       caseId: string;
       name: string;
-      gameType: GameType;
+      gameType: CreatableGameType;
       expectedValidCount: number;
       fixtureOutput: any[];
     }> = [
       {
         caseId: 'bench_mc_dedup_recovery',
-        name: 'Trắc nghiệm (MULTIPLE_CHOICE) + Lọc trùng + Phục hồi câu lỗi',
+        name: 'Quiz / Trắc nghiệm (MULTIPLE_CHOICE) + Lọc trùng + Phục hồi câu lỗi',
         gameType: 'MULTIPLE_CHOICE',
         expectedValidCount: 2,
         fixtureOutput: [
@@ -491,31 +491,35 @@ export class AiObservabilityService {
         ],
       },
       {
-        caseId: 'bench_crossword_vn',
-        name: 'Ô chữ (CROSSWORD) chuẩn hóa tiếng Việt có dấu sang ASCII in hoa',
-        gameType: 'CROSSWORD',
+        caseId: 'bench_puzzle_vn',
+        name: 'Sắp xếp thứ tự (PUZZLE) kiểm tra quy trình chuẩn hóa trình tự',
+        gameType: 'PUZZLE',
         expectedValidCount: 1,
         fixtureOutput: [
           {
-            id: 'q_cw',
-            type: 'CROSSWORD',
-            question: 'Vật dụng bắt buộc phải đội khi điều khiển xe mô tô (9 chữ cái)?',
-            crosswordClue: 'Đội trên đầu để bảo vệ an toàn khi đi xe máy',
-            crosswordAnswer: 'Mũ bảo hiểm',
-            correctAnswer: 'Mũ bảo hiểm',
-            explanation: 'Người điều khiển xe mô tô bắt buộc đội mũ bảo hiểm đạt chuẩn.',
+            id: 'q_pz',
+            type: 'PUZZLE',
+            question: 'Sắp xếp đúng quy trình chuẩn bị và kiểm tra an toàn xe mô tô trước khi vận hành:',
+            choices: [
+              'Đội mũ bảo hiểm đạt chuẩn và cài quai đúng quy cách',
+              'Kiểm tra áp suất lốp (trước 200 kPa, sau 225 kPa)',
+              'Vận hành xe tuân thủ tốc độ tối đa 50 km/h trong khu đông dân cư',
+            ],
+            correctAnswer:
+              'Đội mũ bảo hiểm đạt chuẩn và cài quai đúng quy cách | Kiểm tra áp suất lốp (trước 200 kPa, sau 225 kPa) | Vận hành xe tuân thủ tốc độ tối đa 50 km/h trong khu đông dân cư',
+            explanation: 'Trình tự chuẩn bị và vận hành an toàn theo tài liệu.',
             difficulty: 'EASY',
           },
         ],
       },
       {
-        caseId: 'bench_mixed_modes',
-        name: 'Chế độ Hỗn hợp (MIXED) kết hợp cả 4 dạng câu hỏi trong cùng một bộ đề',
-        gameType: 'MIXED',
+        caseId: 'bench_adventure_modes',
+        name: 'Chế độ Đi cảnh (ADVENTURE) kết hợp đa dạng câu hỏi truyền thống',
+        gameType: 'ADVENTURE',
         expectedValidCount: 4,
         fixtureOutput: [
           {
-            id: 'q_mix_1',
+            id: 'q_adv_1',
             type: 'MULTIPLE_CHOICE',
             question: 'Tốc độ tối đa của xe máy trên đường khu đông dân cư không có dải phân cách cứng là bao nhiêu?',
             choices: ['A. 40 km/h', 'B. 50 km/h', 'C. 60 km/h', 'D. 70 km/h'],
@@ -524,7 +528,7 @@ export class AiObservabilityService {
             difficulty: 'EASY',
           },
           {
-            id: 'q_mix_2',
+            id: 'q_adv_2',
             type: 'QUICK_BUTTON',
             question: 'Người điều khiển xe gắn máy bắt buộc phải đội mũ bảo hiểm và cài quai đúng quy cách.',
             choices: ['Đúng', 'Sai'],
@@ -533,7 +537,7 @@ export class AiObservabilityService {
             difficulty: 'EASY',
           },
           {
-            id: 'q_mix_3',
+            id: 'q_adv_3',
             type: 'FILL_IN_THE_BLANK',
             question: 'Áp suất lốp sau tiêu chuẩn khi chở hai người là _______ kPa.',
             correctAnswer: '225',
@@ -542,13 +546,17 @@ export class AiObservabilityService {
             difficulty: 'MEDIUM',
           },
           {
-            id: 'q_mix_4',
-            type: 'CROSSWORD',
-            question: 'Dung dịch bôi trơn động cơ cần thay sau mỗi 1.500 - 2.000 km (7 chữ cái)?',
-            crosswordClue: 'Dung dịch bôi trơn động cơ xe máy',
-            crosswordAnswer: 'Dầu nhớt',
-            correctAnswer: 'Dầu nhớt',
-            explanation: 'Dầu nhớt động cơ khoáng thay mỗi 1.500 - 2.000 km.',
+            id: 'q_adv_4',
+            type: 'PUZZLE',
+            question: 'Sắp xếp trình tự bảo dưỡng định kỳ động cơ và lốp xe máy:',
+            choices: [
+              'Kiểm tra áp suất lốp trước 200 kPa',
+              'Kiểm tra áp suất lốp sau 225 kPa',
+              'Thay dầu nhớt khoáng sau mỗi 1.500 - 2.000 km',
+            ],
+            correctAnswer:
+              'Kiểm tra áp suất lốp trước 200 kPa | Kiểm tra áp suất lốp sau 225 kPa | Thay dầu nhớt khoáng sau mỗi 1.500 - 2.000 km',
+            explanation: 'Trình tự kiểm tra bảo dưỡng định kỳ tại trang 2.',
             difficulty: 'MEDIUM',
           },
         ],
@@ -571,6 +579,13 @@ export class AiObservabilityService {
             gameType: benchCase.gameType,
             questionCount: benchCase.fixtureOutput.length,
             difficulty: 'MEDIUM',
+            ...(benchCase.gameType === 'ADVENTURE'
+              ? {
+                  adventureConfig: {
+                    questionTypes: ['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK', 'PUZZLE'],
+                  },
+                }
+              : {}),
           },
           { skipObservabilityLog: true }
         );

@@ -1,4 +1,8 @@
-import { GameQuestion, GameSpecification } from '../contracts/game.contract.js';
+import {
+  GameQuestion,
+  GameSpecification,
+  shufflePuzzleChoicesForClient,
+} from '../contracts/game.contract.js';
 import { persistenceRepo } from '../storage/persistence.repository.js';
 import { AppError } from '../utils/errors.js';
 import { calculateMaxPossibleScore, calculateScore } from './game.scoring.js';
@@ -92,11 +96,22 @@ export class GameSession {
       );
     }
 
+    const sanitizedChoices =
+      question.type === 'PUZZLE' && question.choices
+        ? shufflePuzzleChoicesForClient(
+            question.choices,
+            question.correctAnswer,
+            `${this.sessionId}_${question.id}`
+          )
+        : question.choices
+          ? [...question.choices]
+          : undefined;
+
     return {
       id: question.id,
       type: question.type,
       question: question.question,
-      choices: question.choices ? [...question.choices] : undefined,
+      choices: sanitizedChoices,
       difficulty: question.difficulty,
       crosswordClue: question.crosswordClue,
       questionIndex: this.currentQuestionIndex,

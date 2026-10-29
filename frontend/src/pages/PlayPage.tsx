@@ -48,6 +48,27 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   const [currentQuestion, setCurrentQuestion] = useState<SanitizedQuestion | null>(null);
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [textInputAnswer, setTextInputAnswer] = useState('');
+  const [puzzleOrder, setPuzzleOrder] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (currentQuestion?.type === 'PUZZLE' && Array.isArray(currentQuestion.choices)) {
+      setPuzzleOrder([...currentQuestion.choices]);
+    } else {
+      setPuzzleOrder([]);
+    }
+  }, [currentQuestion?.id, currentQuestion?.type]);
+
+  const handleMovePuzzleItem = (idx: number, direction: -1 | 1) => {
+    setPuzzleOrder(prev => {
+      const targetIdx = idx + direction;
+      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
+      const next = [...prev];
+      const tmp = next[idx];
+      next[idx] = next[targetIdx];
+      next[targetIdx] = tmp;
+      return next;
+    });
+  };
   const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
   const [isAnswerSubmitted, setIsAnswerSubmitted] = useState(false);
   const [answerError, setAnswerError] = useState<string | null>(null);
@@ -789,8 +810,11 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             </h3>
           </div>
 
-          {/* Kahoot-style 2x2 Choice Grid for Multiple Choice & Quick Button */}
-          {(currentQuestion.type === 'MULTIPLE_CHOICE' || currentQuestion.type === 'QUICK_BUTTON') && (
+          {/* Kahoot-style 2x2 Choice Grid for Quiz / Multiple Choice & True/False / Quick Button */}
+          {(currentQuestion.type === 'MULTIPLE_CHOICE' ||
+            currentQuestion.type === 'QUIZ' ||
+            currentQuestion.type === 'QUICK_BUTTON' ||
+            currentQuestion.type === 'TRUE_FALSE') && (
             <div>
               <div
                 style={{
@@ -920,8 +944,111 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             </div>
           )}
 
-          {/* Fill in the blank */}
-          {currentQuestion.type === 'FILL_IN_THE_BLANK' && (
+          {/* Puzzle sequence ordering */}
+          {currentQuestion.type === 'PUZZLE' && (
+            <div>
+              <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.75rem', textAlign: 'center' }}>
+                Sắp xếp các mục dưới đây theo đúng thứ tự từ trên xuống dưới:
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem', marginBottom: '1.1rem' }}>
+                {puzzleOrder.map((item, idx) => (
+                  <div
+                    key={`${idx}_${item}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.7rem',
+                      padding: '0.8rem 0.95rem',
+                      borderRadius: '12px',
+                      backgroundColor: 'var(--bg-input)',
+                      border: '1.5px solid var(--border-strong)',
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: '30px',
+                        height: '30px',
+                        borderRadius: '8px',
+                        backgroundColor: 'var(--primary)',
+                        color: '#ffffff',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontWeight: 900,
+                        fontSize: '0.85rem',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {idx + 1}
+                    </span>
+                    <span style={{ flex: 1, fontWeight: 800, fontSize: '0.96rem', color: 'var(--text-primary)' }}>
+                      {item}
+                    </span>
+                    <div style={{ display: 'flex', gap: '0.3rem' }}>
+                      <button
+                        type="button"
+                        disabled={isAnswerSubmitted || isSubmittingAnswer || idx === 0}
+                        onClick={() => handleMovePuzzleItem(idx, -1)}
+                        style={{
+                          width: '34px',
+                          height: '34px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-surface)',
+                          color: idx === 0 ? 'var(--text-muted)' : 'var(--text-primary)',
+                          fontWeight: 900,
+                          cursor: isAnswerSubmitted || isSubmittingAnswer || idx === 0 ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isAnswerSubmitted || isSubmittingAnswer || idx === puzzleOrder.length - 1}
+                        onClick={() => handleMovePuzzleItem(idx, 1)}
+                        style={{
+                          width: '34px',
+                          height: '34px',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-surface)',
+                          color: idx === puzzleOrder.length - 1 ? 'var(--text-muted)' : 'var(--text-primary)',
+                          fontWeight: 900,
+                          cursor: isAnswerSubmitted || isSubmittingAnswer || idx === puzzleOrder.length - 1 ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        ↓
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {!isAnswerSubmitted && (
+                <button
+                  type="button"
+                  disabled={isAnswerSubmitted || isSubmittingAnswer || puzzleOrder.length === 0}
+                  onClick={() => submitAnswer(puzzleOrder.join(' | '))}
+                  style={{
+                    width: '100%',
+                    padding: '0.95rem',
+                    minHeight: '48px',
+                    backgroundColor: 'var(--primary)',
+                    color: '#ffffff',
+                    border: 'none',
+                    borderRadius: '12px',
+                    fontSize: '1.05rem',
+                    fontWeight: 800,
+                    cursor: isAnswerSubmitted || isSubmittingAnswer || puzzleOrder.length === 0 ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {isSubmittingAnswer ? 'Đang gửi thứ tự...' : 'Xác nhận thứ tự →'}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Type Answer / Fill in the blank */}
+          {(currentQuestion.type === 'FILL_IN_THE_BLANK' || currentQuestion.type === 'TYPE_ANSWER') && (
             <div>
               <label htmlFor="play-blank-input" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
                 Nhập câu trả lời của bạn:

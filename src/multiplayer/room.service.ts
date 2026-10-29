@@ -1,5 +1,9 @@
 import crypto from 'node:crypto';
-import { GameSpecification, GameSpecificationSchema } from '../contracts/game.contract.js';
+import {
+  GameSpecification,
+  GameSpecificationSchema,
+  shufflePuzzleChoicesForClient,
+} from '../contracts/game.contract.js';
 import { calculateScore } from '../game/game.scoring.js';
 import { getHandler } from '../game/handlers/index.js';
 import { persistenceRepo } from '../storage/persistence.repository.js';
@@ -474,7 +478,16 @@ export class MultiplayerRoom {
       id: question.id,
       type: question.type,
       question: question.question,
-      choices: question.choices ? [...question.choices] : undefined,
+      choices:
+        question.type === 'PUZZLE' && question.choices
+          ? shufflePuzzleChoicesForClient(
+              question.choices,
+              question.correctAnswer,
+              `${this.roomId}_${question.id}`
+            )
+          : question.choices
+            ? [...question.choices]
+            : undefined,
       difficulty: question.difficulty,
       crosswordClue: question.crosswordClue,
       questionIndex: this.currentQuestionIndex,

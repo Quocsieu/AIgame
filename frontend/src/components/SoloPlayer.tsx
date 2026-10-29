@@ -49,6 +49,27 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const [currentQuestion, setCurrentQuestion] = useState<SanitizedQuestion | null>(null);
   const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
   const [textAnswerInput, setTextAnswerInput] = useState('');
+  const [puzzleOrder, setPuzzleOrder] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (currentQuestion?.type === 'PUZZLE' && Array.isArray(currentQuestion.choices)) {
+      setPuzzleOrder([...currentQuestion.choices]);
+    } else {
+      setPuzzleOrder([]);
+    }
+  }, [currentQuestion?.id, currentQuestion?.type]);
+
+  const handleMovePuzzleItem = (idx: number, direction: -1 | 1) => {
+    setPuzzleOrder(prev => {
+      const targetIdx = idx + direction;
+      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
+      const next = [...prev];
+      const tmp = next[idx];
+      next[idx] = next[targetIdx];
+      next[targetIdx] = tmp;
+      return next;
+    });
+  };
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [questionFeedback, setQuestionFeedback] = useState<PracticeQuestionResult | null>(null);
@@ -837,7 +858,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           /* ACTIVE ANSWER INPUT / OPTIONS */
           <div>
             {/* MULTIPLE CHOICE / CHOICES */}
-            {currentQuestion.type === 'MULTIPLE_CHOICE' && currentQuestion.choices && (
+            {(currentQuestion.type === 'MULTIPLE_CHOICE' || currentQuestion.type === 'QUIZ') && currentQuestion.choices && (
               <div
                 style={{
                   display: 'grid',
@@ -912,7 +933,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             )}
 
             {/* QUICK BUTTON (ĐÚNG / SAI) */}
-            {currentQuestion.type === 'QUICK_BUTTON' && (
+            {(currentQuestion.type === 'QUICK_BUTTON' || currentQuestion.type === 'TRUE_FALSE') && (
               <div
                 style={{
                   display: 'grid',
@@ -968,7 +989,109 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             )}
 
             {/* FILL IN THE BLANK / CROSSWORD / TEXT */}
+            {currentQuestion.type === 'PUZZLE' && (
+              <div style={{ maxWidth: '580px', margin: '0 auto', textAlign: 'left' }}>
+                <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.75rem', textAlign: 'center' }}>
+                  Sắp xếp các bước dưới đây theo đúng thứ tự từ trên xuống dưới:
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginBottom: '1.25rem' }}>
+                  {puzzleOrder.map((item, idx) => (
+                    <div
+                      key={`${idx}_${item}`}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.75rem',
+                        padding: '0.85rem 1rem',
+                        borderRadius: '14px',
+                        backgroundColor: 'var(--bg-input)',
+                        border: '1.5px solid var(--border-strong)',
+                      }}
+                    >
+                      <span
+                        style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '8px',
+                          backgroundColor: 'var(--primary)',
+                          color: '#ffffff',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          fontWeight: 900,
+                          fontSize: '0.9rem',
+                          flexShrink: 0,
+                        }}
+                      >
+                        {idx + 1}
+                      </span>
+                      <span style={{ flex: 1, fontWeight: 800, fontSize: '0.98rem', color: 'var(--text-primary)' }}>
+                        {item}
+                      </span>
+                      <div style={{ display: 'flex', gap: '0.35rem' }}>
+                        <button
+                          type="button"
+                          disabled={isSubmitting || idx === 0}
+                          onClick={() => handleMovePuzzleItem(idx, -1)}
+                          style={{
+                            width: '36px',
+                            height: '36px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-strong)',
+                            backgroundColor: 'var(--bg-surface)',
+                            color: idx === 0 ? 'var(--text-muted)' : 'var(--text-primary)',
+                            fontWeight: 900,
+                            cursor: isSubmitting || idx === 0 ? 'not-allowed' : 'pointer',
+                          }}
+                          title="Di chuyển lên"
+                        >
+                          ↑
+                        </button>
+                        <button
+                          type="button"
+                          disabled={isSubmitting || idx === puzzleOrder.length - 1}
+                          onClick={() => handleMovePuzzleItem(idx, 1)}
+                          style={{
+                            width: '36px',
+                            height: '36px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-strong)',
+                            backgroundColor: 'var(--bg-surface)',
+                            color: idx === puzzleOrder.length - 1 ? 'var(--text-muted)' : 'var(--text-primary)',
+                            fontWeight: 900,
+                            cursor: isSubmitting || idx === puzzleOrder.length - 1 ? 'not-allowed' : 'pointer',
+                          }}
+                          title="Di chuyển xuống"
+                        >
+                          ↓
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  disabled={isSubmitting || puzzleOrder.length === 0}
+                  onClick={() => handleSubmitAnswer(puzzleOrder.join(' | '))}
+                  style={{
+                    width: '100%',
+                    minHeight: '50px',
+                    padding: '0.85rem 1.5rem',
+                    borderRadius: '14px',
+                    border: 'none',
+                    backgroundColor: 'var(--primary)',
+                    color: '#ffffff',
+                    fontWeight: 900,
+                    fontSize: '1rem',
+                    cursor: isSubmitting || puzzleOrder.length === 0 ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  Xác Nhận Thứ Tự Đã Sắp Xếp →
+                </button>
+              </div>
+            )}
             {(currentQuestion.type === 'FILL_IN_THE_BLANK' ||
+              currentQuestion.type === 'TYPE_ANSWER' ||
               currentQuestion.type === 'CROSSWORD') && (
               <form
                 onSubmit={(e) => {

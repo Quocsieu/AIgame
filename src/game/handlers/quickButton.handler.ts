@@ -1,4 +1,9 @@
-import { GameQuestion, MAX_ANSWER_LENGTH } from '../../contracts/game.contract.js';
+import {
+  GameQuestion,
+  isStrictTrueFalseChoicePair,
+  MAX_ANSWER_LENGTH,
+  normalizeTrueFalsePolarity,
+} from '../../contracts/game.contract.js';
 import { AnswerValidationResult, GameTypeHandler } from './handler.interface.js';
 
 function normalizeButtonText(text: string): string {
@@ -46,7 +51,12 @@ export class QuickButtonHandler implements GameTypeHandler {
     }
 
     const cleanInput = normalizeButtonText(trimmedAnswer);
-    const matchedChoice = choices.find(c => normalizeButtonText(c) === cleanInput);
+    const isBinaryTrueFalse = isStrictTrueFalseChoicePair(choices);
+    const inputPolarity = isBinaryTrueFalse ? normalizeTrueFalsePolarity(trimmedAnswer) : null;
+
+    const matchedChoice =
+      choices.find(c => normalizeButtonText(c) === cleanInput) ||
+      (inputPolarity ? choices.find(c => normalizeTrueFalsePolarity(c) === inputPolarity) : undefined);
 
     if (!matchedChoice) {
       return {
@@ -58,7 +68,11 @@ export class QuickButtonHandler implements GameTypeHandler {
     }
 
     const cleanCorrect = normalizeButtonText(question.correctAnswer);
-    const isCorrect = normalizeButtonText(matchedChoice) === cleanCorrect;
+    const correctPolarity = isBinaryTrueFalse ? normalizeTrueFalsePolarity(question.correctAnswer) : null;
+    const matchedPolarity = isBinaryTrueFalse ? normalizeTrueFalsePolarity(matchedChoice) : null;
+    const isCorrect =
+      normalizeButtonText(matchedChoice) === cleanCorrect ||
+      (correctPolarity !== null && matchedPolarity !== null && correctPolarity === matchedPolarity);
 
     return {
       isValid: true,

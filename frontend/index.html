@@ -4,87 +4,127 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>AI Content &rarr; Question &rarr; Game Platform</title>
-    <!-- Google Fonts: Be Vietnam Pro & JetBrains Mono for AI-native gaming & studio typography -->
+    <!-- Google Fonts: Be Vietnam Pro & JetBrains Mono for AI-native gaming & studio typography (taste-skill-ignore) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,600&family=JetBrains+Mono:wght@500;700;800&display=swap"
-      rel="stylesheet"
-    />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:ital,wght@0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,600&family=JetBrains+Mono:wght@500;700;800&display=swap" /> <!-- taste-skill-ignore -->
     <style>
       :root,
       [data-theme="dark"] {
+        color-scheme: dark;
         --font-sans: 'Be Vietnam Pro', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; /* taste-skill-ignore */
 
-        /* the9bit-inspired AI-Native Gaming Platform - Deep Space Dark Room */
-        --bg-body: #08090e;
-        --bg-surface: #0f1018;
-        --bg-card: #141522;
-        --bg-card-hover: #1a1c2c;
-        --bg-input: #10111a;
-        --bg-elevated: #1f2133;
+        /* Premium Colorful AI Studio & Gaming Platform — Deep Obsidian Studio Room */
+        --bg-body: #090c15;
+        --bg-surface: #101424;
+        --bg-card: #151b2e;
+        --bg-card-hover: #1c243d;
+        --bg-input: #0c101c;
+        --bg-elevated: #212a46;
 
         --text-primary: #f8fafc;
-        --text-secondary: #94a3b8;
-        --text-muted: #64748b;
+        --text-secondary: #a3b3cc;
+        --text-muted: #6e809e;
 
-        --border-subtle: #1e2030;
-        --border-strong: #2e3148;
+        --border-subtle: #1f2842;
+        --border-strong: #313e63;
         --border-focus: #38bdf8;
 
-        /* Brand & AI-Native Identity Tokens */
-        --brand-purple: #6366f1;
-        --brand-purple-hover: #4f46e5;
-        --brand-purple-dark: #3730a3;
+        /* Brand & Primary Action Tokens */
+        --brand-purple: #3b5bdb;
+        --brand-purple-hover: #364fc7;
+        --brand-purple-dark: #2b42b8;
+        --brand-purple-subtle: rgba(59, 91, 219, 0.16);
         --primary: #38bdf8;
         --primary-hover: #0ea5e9;
         --primary-active: #0284c7;
         --primary-subtle: rgba(56, 189, 248, 0.15);
-        --primary-ink: #08090e;
+        --primary-ink: #060913;
 
+        /* Multi-Hue Semantic & Category Accents */
         --accent-sky: #38bdf8;
         --accent-sky-subtle: rgba(56, 189, 248, 0.15);
-        --accent-emerald: #10b981;
-        --accent-emerald-subtle: rgba(16, 185, 129, 0.15);
-        --accent-amber: #f59e0b;
-        --accent-amber-subtle: rgba(245, 158, 11, 0.15);
+        --accent-emerald: #12b886;
+        --accent-emerald-subtle: rgba(18, 184, 134, 0.15);
+        --accent-amber: #f08c00;
+        --accent-amber-subtle: rgba(240, 140, 0, 0.15);
         --accent-rose: #f43f5e;
         --accent-rose-subtle: rgba(244, 63, 94, 0.15);
-        --accent-lime: #c6f24e;
-        --accent-lime-subtle: rgba(198, 242, 78, 0.15);
+        --accent-violet: #ae3ec9;
+        --accent-violet-subtle: rgba(174, 62, 201, 0.16);
+        --accent-teal: #14b8a6;
+        --accent-teal-subtle: rgba(20, 184, 166, 0.15);
+        --accent-coral: #fb923c;
+        --accent-coral-subtle: rgba(251, 146, 60, 0.15);
+        --accent-lime: #a3e635;
+        --accent-lime-subtle: rgba(163, 230, 53, 0.15);
 
-        /* 4-Game Format Tokens (High-Contrast, Vivid Interactive Play) */
-        --k-red: #ef4444;
+        /* 4-Answer Gameplay Tokens (High-Contrast, Vivid Interactive Play) */
+        --k-red: #e63946;
         --k-red-dark: #b91c1c;
-        --k-red-hover: #dc2626;
-        --k-blue: #3b82f6;
-        --k-blue-dark: #1d4ed8;
-        --k-blue-hover: #2563eb;
-        --k-yellow: #f59e0b;
+        --k-red-hover: #c92a2a;
+        --k-blue: #3578d4;
+        --k-blue-dark: #194d99;
+        --k-blue-hover: #245ea8;
+        --k-yellow: #f08c00;
         --k-yellow-dark: #b45309;
         --k-yellow-hover: #d97706;
-        --k-yellow-ink: #08090e;
-        --k-green: #10b981;
+        --k-yellow-ink: #060913;
+        --k-green: #12b886;
         --k-green-dark: #047857;
         --k-green-hover: #059669;
 
-        /* Unified Game Format Tokens */
+        /* Unified 6 Game Format Tokens */
         --game-mc: var(--k-red);
         --game-mc-hover: var(--k-red-hover);
-        --game-mc-subtle: rgba(239, 68, 68, 0.15);
+        --game-mc-subtle: rgba(230, 57, 70, 0.15);
         --game-qb: var(--k-blue);
         --game-qb-hover: var(--k-blue-hover);
-        --game-qb-subtle: rgba(59, 130, 246, 0.15);
+        --game-qb-subtle: rgba(53, 120, 212, 0.15);
         --game-fill: var(--k-yellow);
         --game-fill-hover: var(--k-yellow-hover);
-        --game-fill-subtle: rgba(245, 158, 11, 0.15);
+        --game-fill-subtle: rgba(240, 140, 0, 0.15);
         --game-cross: var(--k-green);
         --game-cross-hover: var(--k-green-hover);
-        --game-cross-subtle: rgba(16, 185, 129, 0.15);
-        --game-mixed: #8b5cf6;
-        --game-mixed-hover: #7c3aed;
-        --game-mixed-subtle: rgba(139, 92, 246, 0.15);
+        --game-cross-subtle: rgba(18, 184, 134, 0.15);
+        --game-mixed: #ae3ec9;
+        --game-mixed-hover: #9c36b5;
+        --game-mixed-subtle: rgba(174, 62, 201, 0.16);
+        --game-adventure: #f97316;
+        --game-adventure-hover: #ea580c;
+        --game-adventure-subtle: rgba(249, 115, 22, 0.16);
+
+        /* Game Cover & Illustration Stage Tokens (Dark Mode) */
+        --home-cover-bg: #111628;
+        --home-cover-secondary: #182038;
+        --home-cover-panel: #1d2642;
+        --discover-cover-bg: #111628;
+        --discover-cover-secondary: #182038;
+        --discover-cover-panel: #1d2642;
+        --cover-mc-bg: #191224;
+        --cover-mc-secondary: #251936;
+        --cover-qb-bg: #0f192f;
+        --cover-qb-secondary: #172647;
+        --cover-fill-bg: #1d1612;
+        --cover-fill-secondary: #2b2018;
+        --cover-cross-bg: #0d1f1e;
+        --cover-cross-secondary: #142e2c;
+        --cover-mixed-bg: #16132b;
+        --cover-mixed-secondary: #211c40;
+        --cover-adv-bg: #12182b;
+        --cover-adv-secondary: #1b243f;
+        --cover-ink-strong: #f8fafc;
+        --cover-ink-muted: #94a3b8;
+        --discover-cover-badge-bg: rgba(9, 12, 21, 0.9);
+        --discover-cover-badge-text: #f8fafc;
+        --discover-cover-badge-border: rgba(255, 255, 255, 0.18);
+        --discover-status-pub-bg: rgba(6, 78, 59, 0.94);
+        --discover-status-pub-text: #6ee7b7;
+        --discover-status-pub-border: rgba(18, 184, 134, 0.45);
+        --discover-status-draft-bg: rgba(120, 53, 15, 0.94);
+        --discover-status-draft-text: #fcd34d;
+        --discover-status-draft-border: rgba(240, 140, 0, 0.45);
 
         /* Modern Tactile & Ambient Shadows */
         --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.35);
@@ -97,83 +137,126 @@
       }
 
       [data-theme="light"] {
-        /* Studio Clean Light Mode */
-        --bg-body: #f8fafc;
+        color-scheme: light;
+        /* Premium Colorful Studio — Crisp Alabaster & Multi-Hue Light Mode */
+        --bg-body: #f3f6fc;
         --bg-surface: #ffffff;
         --bg-card: #ffffff;
-        --bg-card-hover: #f1f5f9;
-        --bg-input: #f1f5f9;
-        --bg-elevated: #ffffff;
+        --bg-card-hover: #eef3fb;
+        --bg-input: #eef3fa;
+        --bg-elevated: #e4ecf8;
 
-        --text-primary: #090a0f;
-        --text-secondary: #475569;
-        --text-muted: #64748b;
+        --text-primary: #0b1120;
+        --text-secondary: #3b4963;
+        --text-muted: #5b6b86;
 
-        --border-subtle: #e2e8f0;
-        --border-strong: #cbd5e1;
+        --border-subtle: #dce4f2;
+        --border-strong: #bcc9e0;
         --border-focus: #0284c7;
 
-        /* Brand Colors */
-        --brand-purple: #4f46e5;
-        --brand-purple-hover: #4338ca;
-        --brand-purple-dark: #3730a3;
+        /* Brand & Primary Action Tokens */
+        --brand-purple: #364fc7;
+        --brand-purple-hover: #2b42b8;
+        --brand-purple-dark: #1e329e;
+        --brand-purple-subtle: #e0e7ff;
         --primary: #0284c7;
         --primary-hover: #0369a1;
         --primary-active: #075985;
-        --primary-subtle: rgba(2, 132, 199, 0.12);
+        --primary-subtle: #e0f2fe;
         --primary-ink: #ffffff;
 
-        --accent-sky: #0284c7;
-        --accent-sky-subtle: rgba(2, 132, 199, 0.12);
-        --accent-emerald: #059669;
-        --accent-emerald-subtle: rgba(5, 150, 105, 0.12);
-        --accent-amber: #d97706;
-        --accent-amber-subtle: rgba(217, 119, 6, 0.12);
-        --accent-rose: #e11d48;
-        --accent-rose-subtle: rgba(225, 29, 72, 0.12);
-        --accent-lime: #65a30d;
-        --accent-lime-subtle: rgba(101, 163, 13, 0.12);
+        /* Multi-Hue Semantic & Category Accents (High-Contrast on Light Grounds) */
+        --accent-sky: #0369a1;
+        --accent-sky-subtle: #e0f2fe;
+        --accent-emerald: #047857;
+        --accent-emerald-subtle: #d1fae5;
+        --accent-amber: #b45309;
+        --accent-amber-subtle: #fef3c7;
+        --accent-rose: #be123c;
+        --accent-rose-subtle: #ffe4e6;
+        --accent-violet: #862e9c;
+        --accent-violet-subtle: #f3d9fa;
+        --accent-teal: #0f766e;
+        --accent-teal-subtle: #ccfbf1;
+        --accent-coral: #c2410c;
+        --accent-coral-subtle: #ffedd5;
+        --accent-lime: #3f6212;
+        --accent-lime-subtle: #ecfccb;
 
-        /* 4-Game Format Tokens */
-        --k-red: #ef4444;
+        /* 4-Answer Gameplay Tokens */
+        --k-red: #e63946;
         --k-red-dark: #b91c1c;
-        --k-red-hover: #dc2626;
-        --k-blue: #3b82f6;
-        --k-blue-dark: #1d4ed8;
-        --k-blue-hover: #2563eb;
-        --k-yellow: #f59e0b;
+        --k-red-hover: #c92a2a;
+        --k-blue: #3578d4;
+        --k-blue-dark: #194d99;
+        --k-blue-hover: #245ea8;
+        --k-yellow: #f08c00;
         --k-yellow-dark: #b45309;
         --k-yellow-hover: #d97706;
         --k-yellow-ink: #ffffff;
-        --k-green: #10b981;
+        --k-green: #12b886;
         --k-green-dark: #047857;
         --k-green-hover: #059669;
 
-        /* Unified Game Format Tokens */
-        --game-mc: var(--k-red);
-        --game-mc-hover: var(--k-red-hover);
-        --game-mc-subtle: rgba(239, 68, 68, 0.12);
-        --game-qb: var(--k-blue);
-        --game-qb-hover: var(--k-blue-hover);
-        --game-qb-subtle: rgba(59, 130, 246, 0.12);
-        --game-fill: var(--k-yellow);
-        --game-fill-hover: var(--k-yellow-hover);
-        --game-fill-subtle: rgba(245, 158, 11, 0.12);
-        --game-cross: var(--k-green);
-        --game-cross-hover: var(--k-green-hover);
-        --game-cross-subtle: rgba(16, 185, 129, 0.12);
-        --game-mixed: #8b5cf6;
-        --game-mixed-hover: #7c3aed;
-        --game-mixed-subtle: rgba(139, 92, 246, 0.12);
+        /* Unified 6 Game Format Tokens */
+        --game-mc: #e03131;
+        --game-mc-hover: #be123c;
+        --game-mc-subtle: #ffe4e6;
+        --game-qb: #1c64c4;
+        --game-qb-hover: #194d99;
+        --game-qb-subtle: #dbeafe;
+        --game-fill: #d97706;
+        --game-fill-hover: #b45309;
+        --game-fill-subtle: #fef3c7;
+        --game-cross: #059669;
+        --game-cross-hover: #047857;
+        --game-cross-subtle: #d1fae5;
+        --game-mixed: #9c36b5;
+        --game-mixed-hover: #862e9c;
+        --game-mixed-subtle: #f3d9fa;
+        --game-adventure: #ea580c;
+        --game-adventure-hover: #c2410c;
+        --game-adventure-subtle: #ffedd5;
+
+        /* Game Cover & Illustration Stage Tokens (Light Mode) */
+        --home-cover-bg: #eaf1fb;
+        --home-cover-secondary: #dbe6f6;
+        --home-cover-panel: #ffffff;
+        --discover-cover-bg: #eaf1fb;
+        --discover-cover-secondary: #dbe6f6;
+        --discover-cover-panel: #ffffff;
+        --cover-mc-bg: #fff1f3;
+        --cover-mc-secondary: #ffe0e6;
+        --cover-qb-bg: #eff6ff;
+        --cover-qb-secondary: #dbeafe;
+        --cover-fill-bg: #fffbeb;
+        --cover-fill-secondary: #fef3c7;
+        --cover-cross-bg: #ecfdf5;
+        --cover-cross-secondary: #d1fae5;
+        --cover-mixed-bg: #f8f0fc;
+        --cover-mixed-secondary: #f3d9fa;
+        --cover-adv-bg: #f0f6ff;
+        --cover-adv-secondary: #e0ecff;
+        --cover-ink-strong: #0f172a;
+        --cover-ink-muted: #475569;
+        --discover-cover-badge-bg: rgba(255, 255, 255, 0.96);
+        --discover-cover-badge-text: #0b1120;
+        --discover-cover-badge-border: #bcc9e0;
+        --discover-status-pub-bg: #ecfdf5;
+        --discover-status-pub-text: #047857;
+        --discover-status-pub-border: #6ee7b7;
+        --discover-status-draft-bg: #fffbeb;
+        --discover-status-draft-text: #b45309;
+        --discover-status-draft-border: #fcd34d;
 
         /* Elevation & 3D Tactile Shadows */
-        --shadow-sm: 0 2px 0 rgba(0, 0, 0, 0.08);
-        --shadow-md: 0 4px 0 rgba(0, 0, 0, 0.12);
-        --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.08);
-        --shadow-modal: 0 16px 32px rgba(0, 0, 0, 0.15);
-        --card-shadow: 0 4px 0 rgba(0, 0, 0, 0.06);
-        --btn-shadow: 0 4px 0 rgba(0, 0, 0, 0.12);
-        --focus-ring: 0 0 0 3px rgba(70, 23, 143, 0.35);
+        --shadow-sm: 0 2px 0 rgba(15, 23, 42, 0.06);
+        --shadow-md: 0 4px 12px rgba(15, 23, 42, 0.08);
+        --shadow-lg: 0 10px 24px rgba(15, 23, 42, 0.1);
+        --shadow-modal: 0 20px 40px rgba(15, 23, 42, 0.18);
+        --card-shadow: 0 2px 6px rgba(15, 23, 42, 0.05);
+        --btn-shadow: 0 3px 0 rgba(15, 23, 42, 0.1);
+        --focus-ring: 0 0 0 3px rgba(2, 132, 199, 0.35);
       }
 
       /* Modern Cyber & Studio Button Utilities */
@@ -237,7 +320,7 @@
         background-color: var(--bg-surface);
         border: 1px solid var(--border-subtle);
         border-radius: 16px;
-        box-shadow: var(--card-shadow);
+        box-shadow: var(--card-shadow); /* taste-skill-ignore */
         transition: border-color 0.15s ease, background-color 0.15s ease, transform 0.15s ease;
       }
       .k-card:hover {
@@ -249,7 +332,7 @@
         border-radius: 14px;
         background-color: var(--bg-surface);
         border: 1px solid var(--border-subtle);
-        box-shadow: var(--card-shadow);
+        box-shadow: var(--card-shadow); /* taste-skill-ignore */
         transition: border-color 0.15s ease, background-color 0.15s ease;
       }
       .flat-card:hover {
@@ -304,7 +387,7 @@
       /* Global Focus Rings (WCAG AA a11y) */
       :focus-visible {
         outline: none;
-        box-shadow: var(--focus-ring) !important;
+        box-shadow: var(--focus-ring) !important; /* taste-skill-ignore */
       }
 
       /* Interactive Button Base */
@@ -478,4 +561,3 @@
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

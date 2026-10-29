@@ -72,16 +72,28 @@ const OVERVIEW_FETCH_LIMIT = 100;
 
 export const formatGameTypeName = (type: string): string => {
   switch (type) {
+    case 'QUIZ':
+      return 'Quiz (Trắc nghiệm)';
     case 'MULTIPLE_CHOICE':
-      return 'Trắc nghiệm ABCD';
-    case 'FILL_IN_THE_BLANK':
-      return 'Điền từ';
+      return 'Quiz — Trắc nghiệm ABCD';
+    case 'TRUE_FALSE':
+      return 'True/False — Đúng / Sai';
     case 'QUICK_BUTTON':
-      return 'Đúng / Sai';
+      return 'True/False — Đúng / Sai';
+    case 'TYPE_ANSWER':
+      return 'Type Answer — Tự nhập đáp án';
+    case 'FILL_IN_THE_BLANK':
+      return 'Type Answer — Điền từ';
+    case 'PUZZLE':
+      return 'Puzzle — Sắp xếp thứ tự';
+    case 'SLIDER':
+      return 'Slider — Thanh trượt giá trị';
+    case 'PIN_ANSWER':
+      return 'Pin Answer — Ghim vị trí';
     case 'CROSSWORD':
-      return 'Ô chữ';
+      return 'Ô chữ (Legacy)';
     case 'MIXED':
-      return 'Hỗn hợp (Mixed)';
+      return 'Hỗn hợp (Legacy)';
     case 'ADVENTURE':
       return 'Đi cảnh theo ngành nghề';
     default:
@@ -114,115 +126,145 @@ interface FormatCollectionItem {
 const DISCOVER_FORMAT_COLLECTIONS: FormatCollectionItem[] = [
   {
     id: 'MULTIPLE_CHOICE',
-    label: 'Trắc nghiệm ABCD',
+    label: 'Quiz — Trắc nghiệm ABCD',
     shortDesc: '4 phương án lựa chọn chuẩn Kahoot, kiểm tra kiến thức nhanh và trực quan.',
-    mechanicTag: '4 lựa chọn',
+    mechanicTag: 'Quiz • 4 lựa chọn',
     accentColor: 'var(--accent-rose)',
     badgeBg: 'var(--accent-rose-subtle)',
   },
   {
     id: 'QUICK_BUTTON',
-    label: 'Đúng / Sai phản xạ',
-    shortDesc: 'Quyết định 2 chiều tốc độ cao, phù hợp khởi động lớp học hoặc sự kiện.',
-    mechanicTag: 'Phản xạ 2 nút',
+    label: 'True/False — Đúng / Sai',
+    shortDesc: 'Quyết định Đúng hoặc Sai tốc độ cao, phù hợp khởi động lớp học hoặc sự kiện.',
+    mechanicTag: 'True/False • 2 nút',
     accentColor: 'var(--accent-sky)',
     badgeBg: 'var(--accent-sky-subtle)',
   },
   {
     id: 'FILL_IN_THE_BLANK',
-    label: 'Điền từ khuyết thiếu',
-    shortDesc: 'Gõ chính xác thuật ngữ hoặc khái niệm trọng tâm còn thiếu trong câu.',
-    mechanicTag: 'Tự luận ngắn',
+    label: 'Type Answer — Tự nhập đáp án',
+    shortDesc: 'Người chơi tự gõ chính xác thuật ngữ hoặc khái niệm trọng tâm.',
+    mechanicTag: 'Type Answer',
     accentColor: 'var(--accent-amber)',
     badgeBg: 'var(--accent-amber-subtle)',
   },
   {
-    id: 'CROSSWORD',
-    label: 'Giải đố Ô chữ',
-    shortDesc: 'Ma trận từ khóa ngang dọc giúp ghi nhớ sâu thuật ngữ chuyên ngành.',
-    mechanicTag: 'Ma trận từ khóa',
+    id: 'PUZZLE',
+    label: 'Puzzle — Sắp xếp thứ tự',
+    shortDesc: 'Sắp xếp các bước quy trình, sự kiện hoặc cấp độ theo đúng thứ tự chuẩn.',
+    mechanicTag: 'Puzzle • Thứ tự',
     accentColor: 'var(--accent-emerald)',
     badgeBg: 'var(--accent-emerald-subtle)',
-  },
-  {
-    id: 'MIXED',
-    label: 'Đấu trường Hỗn hợp',
-    shortDesc: 'Kết hợp linh hoạt nhiều dạng câu hỏi trong cùng một kịch bản thi đấu.',
-    mechanicTag: 'Đa định dạng',
-    accentColor: 'var(--accent-sky)',
-    badgeBg: 'var(--accent-sky-subtle)',
   },
   {
     id: 'ADVENTURE',
     label: 'Đi cảnh theo ngành',
     shortDesc: 'Nhập vai thực hành bối cảnh nghề nghiệp thực tế kết hợp vượt chướng ngại vật.',
     mechanicTag: 'Nhập vai 2D',
-    accentColor: 'var(--accent-amber)',
-    badgeBg: 'var(--accent-amber-subtle)',
+    accentColor: 'var(--accent-coral, var(--accent-amber))',
+    badgeBg: 'var(--accent-coral-subtle, var(--accent-amber-subtle))',
   },
 ];
 
-export const GameCoverIllustration: React.FC<{ game: PersistedGameSummary }> = ({ game }) => {
-  const isAdventure = game.gameType === 'ADVENTURE';
-  const industryId = (game.adventureConfig?.industryId || '').toLowerCase();
-  const palette = game.adventureConfig?.palette;
-
-  const typeAccentMap: Record<string, { bg: string; secondary: string; panel: string; accent: string }> = {
-    MULTIPLE_CHOICE: {
-      bg: 'var(--discover-cover-bg, #12151c)',
-      secondary: 'var(--discover-cover-secondary, #1b202b)',
-      panel: 'var(--discover-cover-panel, #191e28)',
-      accent: '#3578d4',
-    },
-    QUICK_BUTTON: {
-      bg: 'var(--discover-cover-bg, #12151c)',
-      secondary: 'var(--discover-cover-secondary, #1b202b)',
-      panel: 'var(--discover-cover-panel, #191e28)',
-      accent: '#2ea87e',
-    },
-    FILL_IN_THE_BLANK: {
-      bg: 'var(--discover-cover-bg, #12151c)',
-      secondary: 'var(--discover-cover-secondary, #1b202b)',
-      panel: 'var(--discover-cover-panel, #191e28)',
-      accent: '#e09b2d',
-    },
-    CROSSWORD: {
-      bg: 'var(--discover-cover-bg, #12151c)',
-      secondary: 'var(--discover-cover-secondary, #1b202b)',
-      panel: 'var(--discover-cover-panel, #191e28)',
-      accent: '#2ea87e',
-    },
-    MIXED: {
-      bg: 'var(--discover-cover-bg, #12151c)',
-      secondary: 'var(--discover-cover-secondary, #1b202b)',
-      panel: 'var(--discover-cover-panel, #191e28)',
-      accent: '#3578d4',
-    },
-    ADVENTURE: {
-      bg: 'var(--discover-cover-bg, #12151c)',
-      secondary: 'var(--discover-cover-secondary, #1b202b)',
-      panel: 'var(--discover-cover-panel, #191e28)',
-      accent: palette?.accentColor || '#e09b2d',
-    },
+export const GameFormatIllustration: React.FC<{ type: GameType }> = ({ type }) => {
+  const virtualSummary: PersistedGameSummary = {
+    gameId: `fmt-${type}`,
+    title: type,
+    description: '',
+    gameType: type,
+    scoringMode: 'SPEED_BONUS',
+    questionCount: 10,
+    timePerQuestion: 15,
+    isPublic: true,
+    ownerUserId: null,
+    sourceCount: 1,
+    generatedAt: '',
+    createdAt: '',
+    updatedAt: '',
   };
+  return <GameCoverIllustration game={virtualSummary} isFormatPreview />;
+};
 
-  const colors = typeAccentMap[game.gameType] || typeAccentMap.MULTIPLE_CHOICE;
+export const GameCoverIllustration: React.FC<{
+  game: PersistedGameSummary;
+  isFormatPreview?: boolean;
+}> = ({ game, isFormatPreview = false }) => {
+  const isAdventure = game.gameType === 'ADVENTURE';
+  const rawIndustry = [
+    game.adventureConfig?.industryId || '',
+    game.adventureConfig?.themePresetId || '',
+    game.adventureConfig?.decorStyle || '',
+    game.adventureConfig?.industryLabel || '',
+    game.adventureConfig?.subEnvironment || '',
+    game.title || '',
+  ]
+    .join(' ')
+    .toLowerCase();
+  const palette = game.adventureConfig?.palette;
+  const panelFill = 'var(--discover-cover-panel, #1d2642)';
+  const inkStrong = 'var(--cover-ink-strong, #f8fafc)';
+  const inkMuted = 'var(--cover-ink-muted, #94a3b8)';
 
   if (isAdventure) {
     const isRestaurant =
-      industryId.includes('restaurant') ||
-      industryId.includes('fnb') ||
-      industryId.includes('food') ||
-      industryId.includes('hotel');
+      rawIndustry.includes('fnb') ||
+      rawIndustry.includes('restaurant') ||
+      rawIndustry.includes('kitchen') ||
+      rawIndustry.includes('food') ||
+      rawIndustry.includes('hotel') ||
+      rawIndustry.includes('nhà hàng') ||
+      rawIndustry.includes('bếp') ||
+      rawIndustry.includes('ẩm thực') ||
+      rawIndustry.includes('thực phẩm');
     const isTechOrCyber =
-      industryId.includes('it') ||
-      industryId.includes('software') ||
-      industryId.includes('cyber') ||
-      industryId.includes('tech');
+      rawIndustry.includes('it_technology') ||
+      rawIndustry.includes('cyber') ||
+      rawIndustry.includes('coding') ||
+      rawIndustry.includes('datacenter') ||
+      rawIndustry.includes('software') ||
+      rawIndustry.includes('an ninh mạng') ||
+      rawIndustry.includes('lập trình') ||
+      rawIndustry.includes('công nghệ') ||
+      rawIndustry.includes('phần mềm');
     const isMedical =
-      industryId.includes('health') ||
-      industryId.includes('medical') ||
-      industryId.includes('pharma');
+      rawIndustry.includes('healthcare') ||
+      rawIndustry.includes('med_') ||
+      rawIndustry.includes('hospital') ||
+      rawIndustry.includes('medical') ||
+      rawIndustry.includes('pharma') ||
+      rawIndustry.includes('y tế') ||
+      rawIndustry.includes('bệnh viện') ||
+      rawIndustry.includes('dược') ||
+      rawIndustry.includes('lâm sàng');
+    const isFinanceOrBiz =
+      rawIndustry.includes('finance') ||
+      rawIndustry.includes('banking') ||
+      rawIndustry.includes('business') ||
+      rawIndustry.includes('sales') ||
+      rawIndustry.includes('retail') ||
+      rawIndustry.includes('showroom') ||
+      rawIndustry.includes('tài chính') ||
+      rawIndustry.includes('ngân hàng') ||
+      rawIndustry.includes('kinh doanh') ||
+      rawIndustry.includes('bán hàng');
+    const isManufacturing =
+      rawIndustry.includes('manufacturing') ||
+      rawIndustry.includes('factory') ||
+      rawIndustry.includes('warehouse') ||
+      rawIndustry.includes('nhà máy') ||
+      rawIndustry.includes('sản xuất') ||
+      rawIndustry.includes('kho vận') ||
+      rawIndustry.includes('5s');
+    const isMotoOrTraffic =
+      rawIndustry.includes('motorcycle') ||
+      rawIndustry.includes('moto_') ||
+      rawIndustry.includes('garage') ||
+      rawIndustry.includes('traffic') ||
+      rawIndustry.includes('xe máy') ||
+      rawIndustry.includes('giao thông') ||
+      rawIndustry.includes('bảo dưỡng');
+
+    const advAccent = palette?.accentColor || '#f97316';
 
     return (
       <svg
@@ -231,154 +273,454 @@ export const GameCoverIllustration: React.FC<{ game: PersistedGameSummary }> = (
         height="100%"
         preserveAspectRatio="xMidYMid slice"
         aria-hidden="true"
-        style={{ display: 'block', backgroundColor: colors.bg }}
+        style={{ display: 'block', backgroundColor: 'var(--cover-adv-bg, #12182b)' }}
       >
-        <rect width="320" height="136" fill={colors.bg} />
-        <rect x="0" y="98" width="320" height="38" fill={colors.secondary} />
-        <line x1="0" y1="98" x2="320" y2="98" stroke={colors.accent} strokeWidth="1.5" strokeOpacity="0.45" />
-        {isRestaurant ? (
+        <rect width="320" height="136" fill="var(--cover-adv-bg, #12182b)" />
+        {/* Architectural horizon & floor band */}
+        <circle cx="272" cy="28" r="46" fill={advAccent} fillOpacity="0.12" />
+        <circle cx="52" cy="18" r="32" fill="#38bdf8" fillOpacity="0.1" />
+        <rect x="0" y="98" width="320" height="38" fill="var(--cover-adv-secondary, #1b243f)" />
+        <line x1="0" y1="98" x2="320" y2="98" stroke={advAccent} strokeWidth="2" strokeOpacity="0.55" />
+        <line x1="20" y1="116" x2="300" y2="116" stroke={inkMuted} strokeWidth="1.5" strokeDasharray="8 6" strokeOpacity="0.35" />
+
+        {isFormatPreview ? (
+          /* General Multi-Industry Adventure Portal Preview */
           <g>
-            {/* Kitchen / Service Station */}
-            <rect x="34" y="46" width="110" height="52" rx="4" fill={colors.panel} stroke={colors.accent} strokeWidth="1.5" />
-            <rect x="44" y="56" width="38" height="18" rx="2" fill={colors.accent} fillOpacity="0.22" />
-            <rect x="92" y="56" width="42" height="18" rx="2" fill={colors.accent} fillOpacity="0.14" />
-            {/* Cloche / Dish */}
-            <path d="M188 86 A26 22 0 0 1 240 86 Z" fill={colors.accent} fillOpacity="0.85" />
-            <circle cx="214" cy="61" r="4" fill="#94a3b8" />
-            <rect x="180" y="86" width="68" height="6" rx="3" fill="#64748b" fillOpacity="0.7" />
-            {/* Order tickets */}
-            <rect x="262" y="38" width="28" height="36" rx="3" fill={colors.panel} stroke={colors.accent} strokeWidth="1.2" />
+            {/* Station 1: Cyber / Tech */}
+            <rect x="24" y="36" width="72" height="54" rx="6" fill={panelFill} stroke="#38bdf8" strokeWidth="1.6" />
+            <rect x="32" y="44" width="56" height="10" rx="3" fill="#38bdf8" fillOpacity="0.2" />
+            <circle cx="38" cy="49" r="2.2" fill="#e63946" />
+            <circle cx="45" cy="49" r="2.2" fill="#f08c00" />
+            <circle cx="52" cy="49" r="2.2" fill="#12b886" />
+            <text x="60" y="74" textAnchor="middle" fill="#38bdf8" fontSize="11" fontWeight="900">&lt;/&gt;</text>
+
+            {/* Station 2: Healthcare / Lab */}
+            <rect x="124" y="26" width="72" height="64" rx="6" fill={panelFill} stroke="#12b886" strokeWidth="1.6" />
+            <circle cx="160" cy="46" r="11" fill="#12b886" fillOpacity="0.18" />
+            <rect x="157" y="39" width="6" height="14" rx="1.5" fill="#12b886" />
+            <rect x="153" y="43" width="14" height="6" rx="1.5" fill="#12b886" />
+            <polyline points="134,74 148,74 154,64 162,82 168,70 174,74 186,74" fill="none" stroke="#12b886" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+
+            {/* Station 3: Business / F&B Service */}
+            <rect x="224" y="36" width="72" height="54" rx="6" fill={panelFill} stroke="#f08c00" strokeWidth="1.6" />
+            <path d="M242 72 A18 15 0 0 1 278 72 Z" fill="#f08c00" />
+            <circle cx="260" cy="54" r="3" fill="#f08c00" />
+            <rect x="236" y="72" width="48" height="4" rx="2" fill={inkMuted} />
+
+            {/* Waypoint Route Nodes */}
+            <line x1="60" y1="108" x2="260" y2="108" stroke="#f08c00" strokeWidth="2.2" strokeDasharray="5 4" />
+            <circle cx="60" cy="108" r="6" fill="#38bdf8" />
+            <circle cx="160" cy="108" r="6" fill="#12b886" />
+            <circle cx="260" cy="108" r="6" fill="#f08c00" />
+          </g>
+        ) : isRestaurant ? (
+          <g>
+            {/* Kitchen Pass & HACCP Station */}
+            <rect x="28" y="34" width="118" height="64" rx="6" fill={panelFill} stroke="#f08c00" strokeWidth="1.6" />
+            <rect x="38" y="44" width="44" height="22" rx="4" fill="#12b886" fillOpacity="0.18" stroke="#12b886" strokeWidth="1.2" />
+            <text x="60" y="59" textAnchor="middle" fill="#12b886" fontSize="9.5" fontWeight="800">HACCP</text>
+            <rect x="90" y="44" width="46" height="22" rx="4" fill="#f08c00" fillOpacity="0.18" />
+            <text x="113" y="59" textAnchor="middle" fill="#f08c00" fontSize="9.5" fontWeight="800">04°C</text>
+            <rect x="38" y="74" width="98" height="12" rx="3" fill="#f08c00" fillOpacity="0.22" />
+            {/* Main Serving Cloche Dome */}
+            <path d="M174 86 A34 28 0 0 1 242 86 Z" fill="#f08c00" />
+            <circle cx="208" cy="54" r="4.5" fill="#fb923c" />
+            <rect x="166" y="86" width="84" height="7" rx="3.5" fill={inkStrong} fillOpacity="0.85" />
+            {/* Order Check Ticket */}
+            <rect x="260" y="32" width="36" height="52" rx="4" fill={panelFill} stroke="#12b886" strokeWidth="1.5" />
+            <line x1="268" y1="44" x2="288" y2="44" stroke="#12b886" strokeWidth="2" />
+            <line x1="268" y1="54" x2="286" y2="54" stroke={inkMuted} strokeWidth="2" />
+            <line x1="268" y1="64" x2="282" y2="64" stroke={inkMuted} strokeWidth="2" />
           </g>
         ) : isTechOrCyber ? (
           <g>
-            {/* Server / Terminal nodes */}
-            <rect x="32" y="34" width="84" height="56" rx="4" fill={colors.panel} stroke={colors.accent} strokeWidth="1.5" />
-            <circle cx="44" cy="46" r="3" fill="#e09b2d" />
-            <circle cx="54" cy="46" r="3" fill="#2ea87e" />
-            <circle cx="64" cy="46" r="3" fill="#3578d4" />
-            <line x1="44" y1="62" x2="88" y2="62" stroke={colors.accent} strokeWidth="2" />
-            <line x1="44" y1="72" x2="100" y2="72" stroke="#64748b" strokeWidth="2" strokeOpacity="0.6" />
-            {/* Shield / Network graph */}
+            {/* IDE / Terminal Window */}
+            <rect x="26" y="28" width="124" height="66" rx="6" fill={panelFill} stroke="#38bdf8" strokeWidth="1.6" />
+            <rect x="26" y="28" width="124" height="14" rx="6" fill="#38bdf8" fillOpacity="0.18" />
+            <circle cx="36" cy="35" r="2.8" fill="#e63946" />
+            <circle cx="45" cy="35" r="2.8" fill="#f08c00" />
+            <circle cx="54" cy="35" r="2.8" fill="#12b886" />
+            <line x1="38" y1="52" x2="86" y2="52" stroke="#38bdf8" strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="46" y1="62" x2="118" y2="62" stroke="#12b886" strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="46" y1="72" x2="98" y2="72" stroke="#ae3ec9" strokeWidth="2.5" strokeLinecap="round" />
+            <line x1="38" y1="82" x2="72" y2="82" stroke={inkMuted} strokeWidth="2.5" strokeLinecap="round" />
+            {/* Cyber Shield & SOC Nodes */}
+            <line x1="150" y1="60" x2="192" y2="60" stroke="#38bdf8" strokeWidth="1.8" strokeDasharray="4 3" />
             <polygon
-              points="218,32 252,44 252,70 218,90 184,70 184,44"
-              fill={colors.accent}
+              points="224,26 260,39 260,68 224,90 188,68 188,39"
+              fill="#12b886"
               fillOpacity="0.18"
-              stroke={colors.accent}
-              strokeWidth="1.75"
+              stroke="#12b886"
+              strokeWidth="2"
             />
-            <line x1="116" y1="62" x2="184" y2="58" stroke={colors.accent} strokeWidth="1.5" strokeDasharray="4 4" />
+            <polyline points="212,58 221,67 238,49" fill="none" stroke="#12b886" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+            <circle cx="284" cy="44" r="8" fill="#38bdf8" fillOpacity="0.25" stroke="#38bdf8" strokeWidth="1.6" />
+            <circle cx="284" cy="76" r="8" fill="#ae3ec9" fillOpacity="0.25" stroke="#ae3ec9" strokeWidth="1.6" />
           </g>
         ) : isMedical ? (
           <g>
-            {/* Clinical monitor & cross */}
-            <rect x="36" y="36" width="106" height="54" rx="5" fill={colors.panel} stroke={colors.accent} strokeWidth="1.5" />
+            {/* Clinical Vital Signs Monitor */}
+            <rect x="28" y="30" width="132" height="64" rx="7" fill={panelFill} stroke="#14b8a6" strokeWidth="1.8" />
+            <rect x="38" y="40" width="112" height="44" rx="4" fill="#14b8a6" fillOpacity="0.12" />
             <polyline
-              points="46,66 68,66 76,48 86,80 96,56 104,66 130,66"
+              points="44,64 68,64 76,46 86,80 96,52 104,64 142,64"
               fill="none"
-              stroke={colors.accent}
-              strokeWidth="2.2"
+              stroke="#12b886"
+              strokeWidth="2.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
             />
-            <rect x="196" y="42" width="44" height="44" rx="8" fill={colors.accent} fillOpacity="0.18" stroke={colors.accent} strokeWidth="1.5" />
-            <rect x="214" y="51" width="8" height="26" rx="2" fill={colors.accent} />
-            <rect x="205" y="60" width="26" height="8" rx="2" fill={colors.accent} />
+            {/* Medical Cross & Ward Badge */}
+            <rect x="184" y="32" width="56" height="56" rx="12" fill={panelFill} stroke="#0ea5e9" strokeWidth="1.8" />
+            <rect x="206" y="44" width="12" height="32" rx="3" fill="#e63946" />
+            <rect x="196" y="54" width="32" height="12" rx="3" fill="#e63946" />
+            {/* Clinical Chart */}
+            <rect x="254" y="36" width="38" height="52" rx="5" fill={panelFill} stroke="#14b8a6" strokeWidth="1.5" />
+            <line x1="262" y1="50" x2="284" y2="50" stroke="#14b8a6" strokeWidth="2" />
+            <line x1="262" y1="60" x2="284" y2="60" stroke={inkMuted} strokeWidth="2" />
+            <line x1="262" y1="70" x2="278" y2="70" stroke={inkMuted} strokeWidth="2" />
+          </g>
+        ) : isFinanceOrBiz ? (
+          <g>
+            {/* Financial & Sales Analytics Board */}
+            <rect x="28" y="28" width="136" height="66" rx="6" fill={panelFill} stroke="#3b5bdb" strokeWidth="1.8" />
+            <rect x="44" y="66" width="16" height="18" rx="2" fill="#38bdf8" />
+            <rect x="68" y="54" width="16" height="30" rx="2" fill="#3b5bdb" />
+            <rect x="92" y="46" width="16" height="38" rx="2" fill="#12b886" />
+            <rect x="116" y="36" width="16" height="48" rx="2" fill="#f08c00" />
+            <polyline points="48,60 76,48 100,40 124,32" fill="none" stroke="#f08c00" strokeWidth="2.2" strokeLinecap="round" />
+            {/* Deal / Consultation Milestone */}
+            <rect x="184" y="34" width="108" height="58" rx="8" fill={panelFill} stroke="#f08c00" strokeWidth="1.6" />
+            <circle cx="212" cy="63" r="14" fill="#f08c00" fillOpacity="0.2" stroke="#f08c00" strokeWidth="1.8" />
+            <path d="M206 63L210 67L219 58" stroke="#f08c00" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+            <rect x="234" y="52" width="44" height="7" rx="3" fill={inkStrong} fillOpacity="0.85" />
+            <rect x="234" y="65" width="32" height="6" rx="3" fill="#12b886" />
+          </g>
+        ) : isManufacturing ? (
+          <g>
+            {/* Factory Plant & Conveyor Line */}
+            <rect x="26" y="34" width="134" height="60" rx="6" fill={panelFill} stroke="#f08c00" strokeWidth="1.6" />
+            <rect x="38" y="50" width="28" height="24" rx="3" fill="#f08c00" fillOpacity="0.85" />
+            <rect x="78" y="50" width="28" height="24" rx="3" fill="#38bdf8" fillOpacity="0.85" />
+            <rect x="118" y="50" width="28" height="24" rx="3" fill="#12b886" fillOpacity="0.85" />
+            <rect x="34" y="76" width="118" height="8" rx="4" fill={inkMuted} fillOpacity="0.45" />
+            {/* QA / 5S Safety Shield */}
+            <polygon
+              points="232,28 268,40 268,68 232,88 196,68 196,40"
+              fill="#f08c00"
+              fillOpacity="0.2"
+              stroke="#f08c00"
+              strokeWidth="2"
+            />
+            <text x="232" y="63" textAnchor="middle" fill="#f08c00" fontSize="13" fontWeight="900">5S•QA</text>
+          </g>
+        ) : isMotoOrTraffic ? (
+          <g>
+            {/* Garage Workbench & Speedometer Gauge */}
+            <rect x="28" y="32" width="124" height="62" rx="6" fill={panelFill} stroke="#f97316" strokeWidth="1.6" />
+            <circle cx="68" cy="63" r="20" fill="#f97316" fillOpacity="0.16" stroke="#f97316" strokeWidth="2" />
+            <line x1="68" y1="63" x2="80" y2="51" stroke="#e63946" strokeWidth="2.5" strokeLinecap="round" />
+            <rect x="98" y="46" width="42" height="8" rx="3" fill="#38bdf8" />
+            <rect x="98" y="60" width="34" height="8" rx="3" fill="#12b886" />
+            <rect x="98" y="74" width="26" height="6" rx="3" fill="#f08c00" />
+            {/* Safety Checkpoint Gate & Cone */}
+            <rect x="180" y="42" width="110" height="12" rx="4" fill="#e63946" />
+            <rect x="196" y="42" width="16" height="12" fill="#ffffff" />
+            <rect x="228" y="42" width="16" height="12" fill="#ffffff" />
+            <rect x="260" y="42" width="16" height="12" fill="#ffffff" />
+            <rect x="188" y="54" width="8" height="44" fill={inkMuted} />
+            <polygon points="246,98 258,64 270,98" fill="#f97316" />
+            <line x1="250" y1="84" x2="266" y2="84" stroke="#ffffff" strokeWidth="3" />
           </g>
         ) : (
           <g>
-            {/* Interactive checkpoint path & buildings */}
-            <rect x="32" y="42" width="42" height="56" fill={colors.panel} stroke={colors.accent} strokeWidth="1.2" strokeOpacity="0.5" />
-            <rect x="82" y="30" width="52" height="68" fill={colors.panel} stroke={colors.accent} strokeWidth="1.2" strokeOpacity="0.65" />
-            <circle cx="192" cy="70" r="14" fill={colors.accent} fillOpacity="0.22" stroke={colors.accent} strokeWidth="1.75" />
-            <circle cx="256" cy="58" r="14" fill={colors.accent} fillOpacity="0.85" />
-            <line x1="206" y1="68" x2="242" y2="60" stroke={colors.accent} strokeWidth="2" strokeDasharray="4 3" />
+            {/* Academy Campus & Interactive Knowledge Checkpoints */}
+            <rect x="28" y="34" width="116" height="64" rx="6" fill={panelFill} stroke="#ae3ec9" strokeWidth="1.6" />
+            <polygon points="86,20 148,38 24,38" fill="#ae3ec9" fillOpacity="0.3" stroke="#ae3ec9" strokeWidth="1.5" />
+            <rect x="44" y="48" width="20" height="34" rx="3" fill="#38bdf8" fillOpacity="0.25" />
+            <rect x="76" y="48" width="20" height="34" rx="3" fill="#f08c00" fillOpacity="0.25" />
+            <rect x="108" y="48" width="20" height="34" rx="3" fill="#12b886" fillOpacity="0.25" />
+            {/* Connected Stage Nodes */}
+            <line x1="168" y1="68" x2="274" y2="52" stroke={advAccent} strokeWidth="2.2" strokeDasharray="5 4" />
+            <circle cx="182" cy="66" r="15" fill={panelFill} stroke="#38bdf8" strokeWidth="2" />
+            <text x="182" y="70" textAnchor="middle" fill="#38bdf8" fontSize="11" fontWeight="900">C1</text>
+            <circle cx="230" cy="58" r="15" fill={panelFill} stroke="#f08c00" strokeWidth="2" />
+            <text x="230" y="62" textAnchor="middle" fill="#f08c00" fontSize="11" fontWeight="900">C2</text>
+            <circle cx="276" cy="50" r="15" fill="#12b886" />
+            <polyline points="270,50 275,55 283,45" fill="none" stroke="#ffffff" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
           </g>
         )}
       </svg>
     );
   }
 
-  if (game.gameType === 'MULTIPLE_CHOICE') {
+  if (game.gameType === 'MULTIPLE_CHOICE' || game.gameType === 'QUIZ') {
     return (
-      <svg viewBox="0 0 320 136" width="100%" height="100%" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ display: 'block', backgroundColor: colors.bg }}>
-        <rect width="320" height="136" fill={colors.bg} />
-        {/* 2x2 Kahoot-style answer blocks */}
-        <rect x="36" y="34" width="118" height="30" rx="5" fill="#e09b2d" fillOpacity="0.88" />
-        <polygon points="50,43 57,55 43,55" fill="#ffffff" />
-        <rect x="166" y="34" width="118" height="30" rx="5" fill="#3578d4" fillOpacity="0.88" />
-        <polygon points="180,42 188,49 180,56 172,49" fill="#ffffff" />
-        <rect x="36" y="72" width="118" height="30" rx="5" fill={colors.panel} stroke="#64748b" strokeWidth="1.2" />
-        <circle cx="50" cy="87" r="6.5" fill="#64748b" />
-        <rect x="166" y="72" width="118" height="30" rx="5" fill="#2ea87e" fillOpacity="0.88" />
-        <rect x="174" y="81" width="12" height="12" fill="#ffffff" />
+      <svg
+        viewBox="0 0 320 136"
+        width="100%"
+        height="100%"
+        preserveAspectRatio="xMidYMid slice"
+        aria-hidden="true"
+        style={{ display: 'block', backgroundColor: 'var(--cover-mc-bg, #191224)' }}
+      >
+        <rect width="320" height="136" fill="var(--cover-mc-bg, #191224)" />
+        <circle cx="286" cy="24" r="44" fill="#e63946" fillOpacity="0.1" />
+        <circle cx="34" cy="116" r="40" fill="#3578d4" fillOpacity="0.1" />
+        {/* Top Question Header Bar */}
+        <rect x="28" y="14" width="264" height="28" rx="6" fill={panelFill} stroke="#e63946" strokeWidth="1.2" strokeOpacity="0.55" />
+        <rect x="36" y="20" width="26" height="16" rx="4" fill="#e63946" />
+        <text x="49" y="31" textAnchor="middle" fill="#ffffff" fontSize="9.5" fontWeight="900">Q1</text>
+        <rect x="70" y="23" width="116" height="5" rx="2.5" fill={inkStrong} fillOpacity="0.8" />
+        <rect x="70" y="31" width="72" height="4" rx="2" fill={inkMuted} fillOpacity="0.6" />
+        <rect x="252" y="20" width="32" height="16" rx="8" fill="#3578d4" fillOpacity="0.2" />
+        <text x="268" y="31" textAnchor="middle" fill="#3578d4" fontSize="9" fontWeight="800">15s</text>
+
+        {/* 2x2 Vivid Kahoot Geometric Answer Tiles */}
+        {/* A: Red Triangle */}
+        <rect x="28" y="50" width="127" height="34" rx="6" fill="#e63946" />
+        <polygon points="46,60 54,74 38,74" fill="#ffffff" />
+        <rect x="64" y="64" width="66" height="6" rx="3" fill="#ffffff" fillOpacity="0.92" />
+
+        {/* B: Blue Diamond (Selected / Correct Highlight) */}
+        <rect x="165" y="50" width="127" height="34" rx="6" fill="#3578d4" stroke="#ffffff" strokeWidth="1.5" />
+        <polygon points="183,59 191,67 183,75 175,67" fill="#ffffff" />
+        <rect x="200" y="64" width="58" height="6" rx="3" fill="#ffffff" fillOpacity="0.95" />
+        <circle cx="276" cy="67" r="8" fill="#12b886" stroke="#ffffff" strokeWidth="1.5" />
+        <polyline points="272,67 275,70 280,64" fill="none" stroke="#ffffff" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+
+        {/* C: Amber Circle */}
+        <rect x="28" y="90" width="127" height="34" rx="6" fill="#f08c00" />
+        <circle cx="46" cy="107" r="7" fill="#ffffff" />
+        <rect x="64" y="104" width="58" height="6" rx="3" fill="#ffffff" fillOpacity="0.92" />
+
+        {/* D: Emerald Square */}
+        <rect x="165" y="90" width="127" height="34" rx="6" fill="#12b886" />
+        <rect x="176" y="100" width="14" height="14" rx="2.5" fill="#ffffff" />
+        <rect x="200" y="104" width="64" height="6" rx="3" fill="#ffffff" fillOpacity="0.92" />
       </svg>
     );
   }
 
-  if (game.gameType === 'QUICK_BUTTON') {
+  if (game.gameType === 'QUICK_BUTTON' || game.gameType === 'TRUE_FALSE') {
     return (
-      <svg viewBox="0 0 320 136" width="100%" height="100%" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ display: 'block', backgroundColor: colors.bg }}>
-        <rect width="320" height="136" fill={colors.bg} />
-        <rect x="38" y="38" width="112" height="60" rx="8" fill="#2ea87e" fillOpacity="0.88" />
-        <polyline points="82,69 91,78 108,58" fill="none" stroke="#ffffff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
-        <rect x="170" y="38" width="112" height="60" rx="8" fill="#e09b2d" fillOpacity="0.88" />
-        <line x1="216" y1="58" x2="236" y2="78" stroke="#ffffff" strokeWidth="3.5" strokeLinecap="round" />
-        <line x1="236" y1="58" x2="216" y2="78" stroke="#ffffff" strokeWidth="3.5" strokeLinecap="round" />
+      <svg
+        viewBox="0 0 320 136"
+        width="100%"
+        height="100%"
+        preserveAspectRatio="xMidYMid slice"
+        aria-hidden="true"
+        style={{ display: 'block', backgroundColor: 'var(--cover-qb-bg, #0f192f)' }}
+      >
+        <rect width="320" height="136" fill="var(--cover-qb-bg, #0f192f)" />
+        {/* Diagonal Split Stage */}
+        <polygon points="0,0 172,0 148,136 0,136" fill="var(--cover-qb-secondary, #172647)" />
+        {/* Left Reflex Button: ĐÚNG (Emerald) */}
+        <rect x="26" y="28" width="114" height="80" rx="10" fill="#059669" />
+        <rect x="26" y="24" width="114" height="76" rx="10" fill="#12b886" />
+        <circle cx="83" cy="54" r="16" fill="#ffffff" fillOpacity="0.2" />
+        <polyline
+          points="74,54 81,61 94,47"
+          fill="none"
+          stroke="#ffffff"
+          strokeWidth="3.5"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <text x="83" y="88" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="900" letterSpacing="0.06em">
+          ĐÚNG
+        </text>
+
+        {/* Right Reflex Button: SAI (Rose Red) */}
+        <rect x="180" y="28" width="114" height="80" rx="10" fill="#be123c" />
+        <rect x="180" y="24" width="114" height="76" rx="10" fill="#f43f5e" />
+        <circle cx="237" cy="54" r="16" fill="#ffffff" fillOpacity="0.2" />
+        <line x1="230" y1="47" x2="244" y2="61" stroke="#ffffff" strokeWidth="3.5" strokeLinecap="round" />
+        <line x1="244" y1="47" x2="230" y2="61" stroke="#ffffff" strokeWidth="3.5" strokeLinecap="round" />
+        <text x="237" y="88" textAnchor="middle" fill="#ffffff" fontSize="11" fontWeight="900" letterSpacing="0.06em">
+          SAI
+        </text>
+
+        {/* Central Reflex Lightning Medallion */}
+        <circle cx="160" cy="64" r="20" fill={panelFill} stroke="#f08c00" strokeWidth="2.5" />
+        <polygon points="163,49 152,65 160,65 157,79 169,62 161,62" fill="#f08c00" />
       </svg>
     );
   }
 
-  if (game.gameType === 'FILL_IN_THE_BLANK') {
+  if (game.gameType === 'FILL_IN_THE_BLANK' || game.gameType === 'TYPE_ANSWER') {
     return (
-      <svg viewBox="0 0 320 136" width="100%" height="100%" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ display: 'block', backgroundColor: colors.bg }}>
-        <rect width="320" height="136" fill={colors.bg} />
-        <rect x="36" y="42" width="248" height="52" rx="8" fill={colors.panel} stroke={colors.accent} strokeWidth="1.5" />
-        <rect x="52" y="61" width="54" height="10" rx="3" fill="#64748b" fillOpacity="0.55" />
-        <rect x="116" y="55" width="86" height="22" rx="4" fill={colors.accent} fillOpacity="0.25" stroke={colors.accent} strokeWidth="1.5" strokeDasharray="4 3" />
-        <rect x="212" y="61" width="52" height="10" rx="3" fill="#64748b" fillOpacity="0.55" />
+      <svg
+        viewBox="0 0 320 136"
+        width="100%"
+        height="100%"
+        preserveAspectRatio="xMidYMid slice"
+        aria-hidden="true"
+        style={{ display: 'block', backgroundColor: 'var(--cover-fill-bg, #1d1612)' }}
+      >
+        <rect width="320" height="136" fill="var(--cover-fill-bg, #1d1612)" />
+        <circle cx="280" cy="30" r="48" fill="#f08c00" fillOpacity="0.12" />
+        {/* Elevated Sentence Card */}
+        <rect x="26" y="20" width="268" height="58" rx="8" fill={panelFill} stroke="#f08c00" strokeWidth="1.6" />
+        <rect x="40" y="33" width="68" height="7" rx="3.5" fill={inkStrong} fillOpacity="0.8" />
+        <rect x="116" y="33" width="46" height="7" rx="3.5" fill={inkMuted} fillOpacity="0.55" />
+        {/* Context Line + Missing Token Slot */}
+        <rect x="40" y="51" width="48" height="8" rx="4" fill={inkMuted} fillOpacity="0.6" />
+        <rect
+          x="96"
+          y="44"
+          width="98"
+          height="22"
+          rx="5"
+          fill="#f08c00"
+          fillOpacity="0.2"
+          stroke="#f08c00"
+          strokeWidth="1.8"
+          strokeDasharray="4 3"
+        />
+        <line x1="108" y1="60" x2="182" y2="60" stroke="#f08c00" strokeWidth="2" />
+        <rect x="202" y="51" width="64" height="8" rx="4" fill={inkMuted} fillOpacity="0.6" />
+
+        {/* Floating Tactile Word Keycap Snapping into Slot */}
+        <rect x="100" y="92" width="120" height="32" rx="7" fill="#b45309" />
+        <rect x="100" y="87" width="120" height="32" rx="7" fill="#f08c00" />
+        <text x="160" y="107" textAnchor="middle" fill="#090c15" fontSize="11" fontWeight="900" letterSpacing="0.05em">
+          TỪ KHÓA
+        </text>
+        {/* Snap Arrow */}
+        <path d="M160 83 L160 69 M155 74 L160 68 L165 74" stroke="#f08c00" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     );
   }
 
-  if (game.gameType === 'CROSSWORD') {
+  if (game.gameType === 'CROSSWORD' || game.gameType === 'PUZZLE') {
+    const wordLetters = ['T', 'R', 'I', 'T', 'H', 'Ứ', 'C'];
     return (
-      <svg viewBox="0 0 320 136" width="100%" height="100%" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ display: 'block', backgroundColor: colors.bg }}>
-        <rect width="320" height="136" fill={colors.bg} />
-        {[0, 1, 2, 3, 4].map((col) => (
-          <rect
-            key={`h-${col}`}
-            x={82 + col * 32}
-            y={52}
-            width="28"
-            height="28"
-            rx="4"
-            fill={col === 2 ? colors.accent : colors.panel}
-            stroke={colors.accent}
-            strokeWidth="1.4"
-          />
-        ))}
+      <svg
+        viewBox="0 0 320 136"
+        width="100%"
+        height="100%"
+        preserveAspectRatio="xMidYMid slice"
+        aria-hidden="true"
+        style={{ display: 'block', backgroundColor: 'var(--cover-cross-bg, #0d1f1e)' }}
+      >
+        <rect width="320" height="136" fill="var(--cover-cross-bg, #0d1f1e)" />
+        <circle cx="46" cy="28" r="42" fill="#12b886" fillOpacity="0.1" />
+        {/* Clue Prompt Badge */}
+        <rect x="28" y="16" width="106" height="22" rx="5" fill={panelFill} stroke="#12b886" strokeWidth="1.3" />
+        <circle cx="40" cy="27" r="5" fill="#12b886" />
+        <text x="40" y="30" textAnchor="middle" fill="#ffffff" fontSize="7.5" fontWeight="900">1</text>
+        <rect x="52" y="24" width="70" height="6" rx="3" fill={inkStrong} fillOpacity="0.75" />
+
+        {/* Vertical Intersecting Column */}
         {[0, 1, 2].map((row) => (
-          <rect
-            key={`v-${row}`}
-            x={146}
-            y={20 + row * 32}
-            width="28"
-            height="28"
-            rx="4"
-            fill={row === 1 ? colors.accent : colors.panel}
-            stroke={colors.accent}
-            strokeWidth="1.4"
-          />
+          <g key={`v-${row}`}>
+            <rect
+              x={144}
+              y={16 + row * 34}
+              width="32"
+              height="30"
+              rx="5"
+              fill={row === 1 ? '#12b886' : panelFill}
+              stroke="#12b886"
+              strokeWidth="1.6"
+            />
+            <text
+              x={160}
+              y={36 + row * 34}
+              textAnchor="middle"
+              fill={row === 1 ? '#ffffff' : inkMuted}
+              fontSize="12"
+              fontWeight="900"
+            >
+              {row === 0 ? 'K' : row === 1 ? 'T' : 'O'}
+            </text>
+          </g>
         ))}
+
+        {/* Horizontal Solved Keyword Row */}
+        {wordLetters.map((char, col) => {
+          const isPivot = col === 3;
+          const xPos = 42 + col * 34;
+          return (
+            <g key={`h-${col}`}>
+              <rect
+                x={xPos}
+                y={50}
+                width="32"
+                height="30"
+                rx="5"
+                fill={isPivot ? '#059669' : '#12b886'}
+                stroke="#ffffff"
+                strokeWidth={isPivot ? '1.8' : '0.8'}
+                strokeOpacity={isPivot ? 0.95 : 0.35}
+              />
+              <text
+                x={xPos + 16}
+                y={70}
+                textAnchor="middle"
+                fill="#ffffff"
+                fontSize="12"
+                fontWeight="900"
+              >
+                {char}
+              </text>
+            </g>
+          );
+        })}
       </svg>
     );
   }
 
-  // MIXED default
+  // MIXED default — Multi-Format Prism Arena
   return (
-    <svg viewBox="0 0 320 136" width="100%" height="100%" preserveAspectRatio="xMidYMid slice" aria-hidden="true" style={{ display: 'block', backgroundColor: colors.bg }}>
-      <rect width="320" height="136" fill={colors.bg} />
-      <rect x="42" y="38" width="72" height="60" rx="6" fill="#3578d4" fillOpacity="0.35" stroke="#3578d4" strokeWidth="1.5" />
-      <rect x="124" y="38" width="72" height="60" rx="6" fill="#e09b2d" fillOpacity="0.45" stroke="#e09b2d" strokeWidth="1.5" />
-      <rect x="206" y="38" width="72" height="60" rx="6" fill="#2ea87e" fillOpacity="0.35" stroke="#2ea87e" strokeWidth="1.5" />
+    <svg
+      viewBox="0 0 320 136"
+      width="100%"
+      height="100%"
+      preserveAspectRatio="xMidYMid slice"
+      aria-hidden="true"
+      style={{ display: 'block', backgroundColor: 'var(--cover-mixed-bg, #16132b)' }}
+    >
+      <rect width="320" height="136" fill="var(--cover-mixed-bg, #16132b)" />
+      <circle cx="160" cy="68" r="56" fill="#ae3ec9" fillOpacity="0.12" />
+
+      {/* Card 1: Multiple Choice Mini Module */}
+      <g transform="translate(26, 28)">
+        <rect width="60" height="76" rx="7" fill={panelFill} stroke="#e63946" strokeWidth="1.6" />
+        <rect x="8" y="10" width="20" height="16" rx="3" fill="#e63946" />
+        <rect x="32" y="10" width="20" height="16" rx="3" fill="#3578d4" />
+        <rect x="8" y="30" width="20" height="16" rx="3" fill="#f08c00" />
+        <rect x="32" y="30" width="20" height="16" rx="3" fill="#12b886" />
+        <rect x="10" y="56" width="40" height="6" rx="3" fill={inkMuted} fillOpacity="0.6" />
+      </g>
+
+      {/* Card 2: Quick Button Reflex Module */}
+      <g transform="translate(96, 22)">
+        <rect width="60" height="82" rx="7" fill={panelFill} stroke="#38bdf8" strokeWidth="1.6" />
+        <rect x="8" y="12" width="44" height="22" rx="4" fill="#12b886" />
+        <polyline points="25,23 29,27 36,19" fill="none" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+        <rect x="8" y="40" width="44" height="22" rx="4" fill="#f43f5e" />
+        <line x1="26" y1="47" x2="34" y2="55" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" />
+        <line x1="34" y1="47" x2="26" y2="55" stroke="#ffffff" strokeWidth="2.2" strokeLinecap="round" />
+      </g>
+
+      {/* Card 3: Fill In Blank Module */}
+      <g transform="translate(166, 22)">
+        <rect width="60" height="82" rx="7" fill={panelFill} stroke="#f08c00" strokeWidth="1.6" />
+        <rect x="8" y="16" width="44" height="18" rx="4" fill="#f08c00" fillOpacity="0.2" stroke="#f08c00" strokeWidth="1.4" strokeDasharray="3 2" />
+        <rect x="10" y="44" width="40" height="18" rx="4" fill="#f08c00" />
+        <text x="30" y="56" textAnchor="middle" fill="#090c15" fontSize="8" fontWeight="900">A B C</text>
+      </g>
+
+      {/* Card 4: Crossword Module */}
+      <g transform="translate(236, 28)">
+        <rect width="58" height="76" rx="7" fill={panelFill} stroke="#12b886" strokeWidth="1.6" />
+        <rect x="8" y="14" width="18" height="18" rx="3" fill="#12b886" />
+        <rect x="30" y="14" width="18" height="18" rx="3" fill="#12b886" fillOpacity="0.3" stroke="#12b886" strokeWidth="1.2" />
+        <rect x="8" y="36" width="18" height="18" rx="3" fill="#12b886" fillOpacity="0.3" stroke="#12b886" strokeWidth="1.2" />
+        <rect x="30" y="36" width="18" height="18" rx="3" fill="#12b886" />
+      </g>
     </svg>
   );
 };
@@ -1080,41 +1422,75 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     >
       <style>{`
         .kho-game-discover-root {
-          --discover-cover-bg: #12151c;
-          --discover-cover-secondary: #1b202b;
-          --discover-cover-panel: #191e28;
-          --discover-cover-badge-bg: rgba(8, 9, 14, 0.88);
-          --discover-cover-badge-text: #f2f4f8;
-          --discover-cover-badge-border: rgba(255, 255, 255, 0.16);
-          --discover-status-pub-bg: rgba(6, 78, 59, 0.92);
-          --discover-status-pub-text: #76d6ad;
-          --discover-status-pub-border: rgba(16, 185, 129, 0.42);
-          --discover-status-draft-bg: rgba(120, 53, 15, 0.92);
-          --discover-status-draft-text: #f3c75f;
-          --discover-status-draft-border: rgba(245, 158, 11, 0.42);
+          --discover-cover-bg: #111628;
+          --discover-cover-secondary: #182038;
+          --discover-cover-panel: #1d2642;
+          --cover-mc-bg: #191224;
+          --cover-mc-secondary: #251936;
+          --cover-qb-bg: #0f192f;
+          --cover-qb-secondary: #172647;
+          --cover-fill-bg: #1d1612;
+          --cover-fill-secondary: #2b2018;
+          --cover-cross-bg: #0d1f1e;
+          --cover-cross-secondary: #142e2c;
+          --cover-mixed-bg: #16132b;
+          --cover-mixed-secondary: #211c40;
+          --cover-adv-bg: #12182b;
+          --cover-adv-secondary: #1b243f;
+          --cover-ink-strong: #f8fafc;
+          --cover-ink-muted: #94a3b8;
+          --discover-cover-badge-bg: rgba(9, 12, 21, 0.9);
+          --discover-cover-badge-text: #f8fafc;
+          --discover-cover-badge-border: rgba(255, 255, 255, 0.18);
+          --discover-status-pub-bg: rgba(6, 78, 59, 0.94);
+          --discover-status-pub-text: #6ee7b7;
+          --discover-status-pub-border: rgba(16, 185, 129, 0.45);
+          --discover-status-draft-bg: rgba(120, 53, 15, 0.94);
+          --discover-status-draft-text: #fcd34d;
+          --discover-status-draft-border: rgba(245, 158, 11, 0.45);
         }
         [data-theme="light"] .kho-game-discover-root {
-          --primary: #0369a1;
-          --primary-hover: #075985;
-          --primary-active: #0c4a6e;
-          --primary-subtle: rgba(3, 105, 161, 0.1);
+          --primary: #0284c7;
+          --primary-hover: #0369a1;
+          --primary-active: #075985;
+          --primary-subtle: #e0f2fe;
           --primary-ink: #ffffff;
           --accent-sky: #0369a1;
-          --accent-sky-subtle: rgba(3, 105, 161, 0.1);
+          --accent-sky-subtle: #e0f2fe;
           --accent-emerald: #047857;
-          --accent-emerald-subtle: rgba(4, 120, 87, 0.1);
+          --accent-emerald-subtle: #d1fae5;
           --accent-amber: #b45309;
-          --accent-amber-subtle: rgba(180, 83, 9, 0.1);
+          --accent-amber-subtle: #fef3c7;
           --accent-rose: #be123c;
-          --accent-rose-subtle: rgba(190, 18, 60, 0.1);
-          --accent-lime: #4d7c0f;
-          --accent-lime-subtle: rgba(77, 124, 15, 0.1);
-          --discover-cover-bg: #eef2f6;
-          --discover-cover-secondary: #e2e8f0;
+          --accent-rose-subtle: #ffe4e6;
+          --accent-violet: #862e9c;
+          --accent-violet-subtle: #f3d9fa;
+          --accent-teal: #0f766e;
+          --accent-teal-subtle: #ccfbf1;
+          --accent-coral: #c2410c;
+          --accent-coral-subtle: #ffedd5;
+          --accent-lime: #3f6212;
+          --accent-lime-subtle: #ecfccb;
+          --discover-cover-bg: #eaf1fb;
+          --discover-cover-secondary: #dbe6f6;
           --discover-cover-panel: #ffffff;
-          --discover-cover-badge-bg: rgba(255, 255, 255, 0.95);
-          --discover-cover-badge-text: #090a0f;
-          --discover-cover-badge-border: #cbd5e1;
+          --cover-mc-bg: #fff1f3;
+          --cover-mc-secondary: #ffe0e6;
+          --cover-qb-bg: #eff6ff;
+          --cover-qb-secondary: #dbeafe;
+          --cover-fill-bg: #fffbeb;
+          --cover-fill-secondary: #fef3c7;
+          --cover-cross-bg: #ecfdf5;
+          --cover-cross-secondary: #d1fae5;
+          --cover-mixed-bg: #f5f3ff;
+          --cover-mixed-secondary: #ede9fe;
+          --cover-adv-bg: #f0f6ff;
+          --cover-adv-secondary: #e0ecff;
+          --cover-ink-strong: #0f172a;
+          --cover-ink-muted: #475569;
+          --discover-cover-badge-bg: rgba(255, 255, 255, 0.96);
+          --discover-cover-badge-text: #0b1120;
+          --discover-cover-badge-border: #bcc9e0;
           --discover-status-pub-bg: #ecfdf5;
           --discover-status-pub-text: #047857;
           --discover-status-pub-border: #6ee7b7;
@@ -2767,85 +3143,110 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         style={{
                           backgroundColor: 'var(--bg-surface)',
                           border: '1px solid var(--border-subtle)',
-                          borderRadius: '8px',
-                          padding: '14px',
+                          borderRadius: '10px',
+                          overflow: 'hidden',
                           display: 'flex',
                           flexDirection: 'column',
                           justifyContent: 'space-between',
-                          gap: '10px',
                         }}
                       >
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                            <span
-                              style={{
-                                fontSize: '0.72rem',
-                                fontWeight: 700,
-                                padding: '2px 8px',
-                                borderRadius: '4px',
-                                backgroundColor: fmt.badgeBg,
-                                color: fmt.accentColor,
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {fmt.mechanicTag}
-                            </span>
-                            <span
-                              style={{
-                                fontSize: '0.72rem',
-                                fontWeight: 700,
-                                color: 'var(--text-secondary)',
-                                fontVariantNumeric: 'tabular-nums',
-                              }}
-                            >
-                              {countInRepo} bộ
-                            </span>
-                          </div>
-                          <h3 style={{ margin: '0 0 4px 0', fontSize: '0.92rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                            {fmt.label}
-                          </h3>
-                          <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                            {fmt.shortDesc}
-                          </p>
+                        {/* Ảnh bìa minh họa cho từng cách chơi */}
+                        <div
+                          style={{
+                            position: 'relative',
+                            height: '96px',
+                            width: '100%',
+                            overflow: 'hidden',
+                            borderBottom: '1px solid var(--border-subtle)',
+                          }}
+                        >
+                          <GameFormatIllustration type={fmt.id} />
+                          <span
+                            style={{
+                              position: 'absolute',
+                              top: '8px',
+                              left: '8px',
+                              fontSize: '0.7rem',
+                              fontWeight: 800,
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              backgroundColor: 'var(--discover-cover-badge-bg)',
+                              color: fmt.accentColor,
+                              border: '1px solid var(--discover-cover-badge-border)',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {fmt.mechanicTag}
+                          </span>
+                          <span
+                            style={{
+                              position: 'absolute',
+                              top: '8px',
+                              right: '8px',
+                              fontSize: '0.7rem',
+                              fontWeight: 800,
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              backgroundColor: 'var(--discover-cover-badge-bg)',
+                              color: 'var(--discover-cover-badge-text)',
+                              border: '1px solid var(--discover-cover-badge-border)',
+                              fontVariantNumeric: 'tabular-nums',
+                            }}
+                          >
+                            {countInRepo} bộ
+                          </span>
                         </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)' }}>
-                          <button
-                            type="button"
-                            onClick={() =>
-                              onNavigateToLibrary
-                                ? onNavigateToLibrary({ gameType: fmt.id, nonce: Date.now() })
-                                : setSelectedTypeFilter(fmt.id)
-                            }
-                            style={{
-                              backgroundColor: 'var(--bg-input)',
-                              color: 'var(--text-primary)',
-                              border: '1px solid var(--border-strong)',
-                              borderRadius: '6px',
-                              padding: '0 10px',
-                              height: '28px',
-                              fontSize: '0.76rem',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            Xem trong Thư viện
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleNavigateToCreator(fmt.id)}
-                            style={{
-                              background: 'none',
-                              border: 'none',
-                              color: 'var(--accent-sky)',
-                              fontSize: '0.76rem',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                              padding: '0 4px',
-                            }}
-                          >
-                            + Tạo mới
-                          </button>
+                        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, justifyContent: 'space-between' }}>
+                          <div>
+                            <h3 style={{ margin: '0 0 4px 0', fontSize: '0.94rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                              {fmt.label}
+                            </h3>
+                            <p style={{ margin: 0, fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.42 }}>
+                              {fmt.shortDesc}
+                            </p>
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)' }}>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                onNavigateToLibrary
+                                  ? onNavigateToLibrary({ gameType: fmt.id, nonce: Date.now() })
+                                  : setSelectedTypeFilter(fmt.id)
+                              }
+                              style={{
+                                backgroundColor: 'var(--bg-input)',
+                                color: 'var(--text-primary)',
+                                border: '1px solid var(--border-strong)',
+                                borderRadius: '6px',
+                                padding: '0 10px',
+                                height: '30px',
+                                fontSize: '0.76rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Xem trong Thư viện
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleNavigateToCreator(fmt.id)}
+                              style={{
+                                backgroundColor: fmt.badgeBg,
+                                border: '1px solid transparent',
+                                borderRadius: '6px',
+                                color: fmt.accentColor,
+                                fontSize: '0.76rem',
+                                fontWeight: 800,
+                                cursor: 'pointer',
+                                padding: '0 10px',
+                                height: '30px',
+                              }}
+                            >
+                              + Tạo mới
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
@@ -3018,39 +3419,60 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           backgroundColor: 'var(--bg-input)',
                           border: '1px solid var(--border-subtle)',
                           borderRadius: '8px',
-                          padding: '12px 14px',
+                          overflow: 'hidden',
                           display: 'flex',
                           flexDirection: 'column',
                           justifyContent: 'space-between',
-                          gap: '10px',
                         }}
                       >
-                        <div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                            <span
-                              style={{
-                                fontSize: '0.7rem',
-                                fontWeight: 700,
-                                color: 'var(--accent-sky)',
-                                backgroundColor: 'var(--accent-sky-subtle)',
-                                padding: '2px 7px',
-                                borderRadius: '4px',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {formatGameTypeName(item.gameType)}
-                            </span>
-                            <span
-                              style={{
-                                fontSize: '0.72rem',
-                                color: 'var(--text-secondary)',
-                                fontVariantNumeric: 'tabular-nums',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {item.questionCount} câu • {item.timePerQuestion || 15}s
-                            </span>
-                          </div>
+                        <div
+                          style={{
+                            position: 'relative',
+                            height: '96px',
+                            width: '100%',
+                            overflow: 'hidden',
+                            borderBottom: '1px solid var(--border-subtle)',
+                          }}
+                        >
+                          <GameCoverIllustration game={item} />
+                          <span
+                            style={{
+                              position: 'absolute',
+                              top: '8px',
+                              left: '8px',
+                              fontSize: '0.68rem',
+                              fontWeight: 700,
+                              color: 'var(--discover-cover-badge-text)',
+                              backgroundColor: 'var(--discover-cover-badge-bg)',
+                              border: '1px solid var(--discover-cover-badge-border)',
+                              padding: '2px 7px',
+                              borderRadius: '4px',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {formatGameTypeName(item.gameType)}
+                          </span>
+                          <span
+                            style={{
+                              position: 'absolute',
+                              bottom: '6px',
+                              right: '8px',
+                              fontSize: '0.68rem',
+                              fontWeight: 700,
+                              color: 'var(--discover-cover-badge-text)',
+                              backgroundColor: 'var(--discover-cover-badge-bg)',
+                              border: '1px solid var(--discover-cover-badge-border)',
+                              padding: '1px 6px',
+                              borderRadius: '4px',
+                              fontVariantNumeric: 'tabular-nums',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {item.questionCount} câu • {item.timePerQuestion || 15}s
+                          </span>
+                        </div>
+
+                        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, justifyContent: 'space-between' }}>
                           <div
                             style={{
                               fontWeight: 700,
@@ -3066,53 +3488,53 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           >
                             {item.title}
                           </div>
-                        </div>
 
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                          <span
-                            style={{
-                              fontSize: '0.72rem',
-                              color: item.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
-                              fontWeight: 600,
-                            }}
-                          >
-                            {item.isPublic ? 'Đã xuất bản' : 'Bản nháp'}
-                          </span>
-                          <div style={{ display: 'flex', gap: '6px' }}>
-                            <button
-                              type="button"
-                              onClick={() => handleViewOrEditGame(item.gameId, false)}
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                            <span
                               style={{
-                                backgroundColor: 'transparent',
-                                color: 'var(--text-secondary)',
-                                border: '1px solid var(--border-subtle)',
-                                borderRadius: '6px',
-                                padding: '0 8px',
-                                height: '28px',
-                                fontSize: '0.75rem',
-                                fontWeight: 600,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Chi tiết
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleOpenModeModal(item.gameId)}
-                              style={{
-                                backgroundColor: 'var(--bg-elevated)',
-                                color: 'var(--text-primary)',
-                                border: '1px solid var(--border-strong)',
-                                borderRadius: '6px',
-                                padding: '0 10px',
-                                height: '28px',
-                                fontSize: '0.76rem',
+                                fontSize: '0.72rem',
+                                color: item.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
                                 fontWeight: 700,
-                                cursor: 'pointer',
                               }}
                             >
-                              Mở nhanh
-                            </button>
+                              {item.isPublic ? 'Đã xuất bản' : 'Bản nháp'}
+                            </span>
+                            <div style={{ display: 'flex', gap: '6px' }}>
+                              <button
+                                type="button"
+                                onClick={() => handleViewOrEditGame(item.gameId, false)}
+                                style={{
+                                  backgroundColor: 'transparent',
+                                  color: 'var(--text-secondary)',
+                                  border: '1px solid var(--border-subtle)',
+                                  borderRadius: '6px',
+                                  padding: '0 8px',
+                                  height: '28px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 600,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Chi tiết
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleOpenModeModal(item.gameId)}
+                                style={{
+                                  backgroundColor: 'var(--primary)',
+                                  color: 'var(--primary-ink, #060913)',
+                                  border: '1px solid var(--primary)',
+                                  borderRadius: '6px',
+                                  padding: '0 10px',
+                                  height: '28px',
+                                  fontSize: '0.76rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Mở nhanh
+                              </button>
+                            </div>
                           </div>
                         </div>
                       </div>
