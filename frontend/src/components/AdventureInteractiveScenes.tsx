@@ -85,6 +85,41 @@ const InGameChallengePopup: React.FC<{
   stageInspected,
   accentHex,
 }) => {
+  const [puzzleOrder, setPuzzleOrder] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (activeQuestion?.type === 'PUZZLE' && Array.isArray(activeQuestion.choices)) {
+      const initialItems = [...activeQuestion.choices];
+      const maybeFullQ = activeQuestion as GameQuestion;
+      if (
+        initialItems.length > 1 &&
+        typeof maybeFullQ.correctAnswer === 'string' &&
+        initialItems.join(' | ').trim().toLowerCase() ===
+          maybeFullQ.correctAnswer.trim().toLowerCase()
+      ) {
+        const first = initialItems.shift()!;
+        initialItems.push(first);
+      }
+      setPuzzleOrder(initialItems);
+      onChangeTextAnswer(initialItems.join(' | '));
+    } else {
+      setPuzzleOrder([]);
+    }
+  }, [activeQuestion?.id, activeQuestion?.type, activeQuestion?.choices]);
+
+  const handleMovePuzzleItem = (idx: number, direction: -1 | 1) => {
+    setPuzzleOrder(prev => {
+      const targetIdx = idx + direction;
+      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
+      const next = [...prev];
+      const tmp = next[idx];
+      next[idx] = next[targetIdx];
+      next[targetIdx] = tmp;
+      onChangeTextAnswer(next.join(' | '));
+      return next;
+    });
+  };
+
   if (!activeQuestion || (!stageInspected && !activeFeedback)) return null;
 
   return (
@@ -206,7 +241,250 @@ const InGameChallengePopup: React.FC<{
           {activeQuestion.question}
         </div>
 
-        {Array.isArray(activeQuestion.choices) && activeQuestion.choices.length > 0 ? (
+        {activeQuestion.type === 'SLIDER' && activeQuestion.sliderConfig ? (
+          <div>
+            {(() => {
+              const cfg = activeQuestion.sliderConfig!;
+              const min = cfg.min;
+              const max = cfg.max;
+              const step = cfg.step > 0 ? cfg.step : 1;
+              const unit = cfg.unit ? ` ${cfg.unit}` : '';
+              const currentVal =
+                textAnswer.trim() !== '' && Number.isFinite(Number(textAnswer))
+                  ? Number(textAnswer)
+                  : min + Math.round(((max - min) / 2) / step) * step;
+              const clampVal = (v: number) => {
+                const snapped = min + Math.round((v - min) / step) * step;
+                return Math.max(min, Math.min(max, Number(snapped.toFixed(6))));
+              };
+              return (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div
+                    style={{
+                      textAlign: 'center',
+                      fontSize: '20px',
+                      fontWeight: 900,
+                      color: accentHex,
+                    }}
+                  >
+                    {currentVal}
+                    {unit}
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <button
+                      type="button"
+                      disabled={Boolean(activeFeedback) || submittingAnswer || currentVal <= min}
+                      onClick={() => onChangeTextAnswer(String(clampVal(currentVal - step)))}
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '6px',
+                        border: '1px solid #26334d',
+                        backgroundColor: '#161f30',
+                        color: '#f8fafc',
+                        fontWeight: 800,
+                        cursor:
+                          Boolean(activeFeedback) || submittingAnswer || currentVal <= min
+                            ? 'not-allowed'
+                            : 'pointer',
+                      }}
+                      aria-label="Giảm 1 bước"
+                    >
+                      −
+                    </button>
+                    <input
+                      type="range"
+                      min={min}
+                      max={max}
+                      step={step}
+                      value={currentVal}
+                      disabled={Boolean(activeFeedback) || submittingAnswer}
+                      onChange={e => onChangeTextAnswer(String(clampVal(Number(e.target.value))))}
+                      style={{ flex: 1, width: '100%', accentColor: accentHex }}
+                    />
+                    <button
+                      type="button"
+                      disabled={Boolean(activeFeedback) || submittingAnswer || currentVal >= max}
+                      onClick={() => onChangeTextAnswer(String(clampVal(currentVal + step)))}
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '6px',
+                        border: '1px solid #26334d',
+                        backgroundColor: '#161f30',
+                        color: '#f8fafc',
+                        fontWeight: 800,
+                        cursor:
+                          Boolean(activeFeedback) || submittingAnswer || currentVal >= max
+                            ? 'not-allowed'
+                            : 'pointer',
+                      }}
+                      aria-label="Tăng 1 bước"
+                    >
+                      +
+                    </button>
+                  </div>
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      fontSize: '12px',
+                      color: '#94a3b8',
+                      fontWeight: 700,
+                    }}
+                  >
+                    <span>
+                      Min: {min}
+                      {unit}
+                    </span>
+                    <span>
+                      Bước nhảy: {step}
+                      {unit}
+                    </span>
+                    <span>
+                      Max: {max}
+                      {unit}
+                    </span>
+                  </div>
+                  {!activeFeedback && (
+                    <button
+                      type="button"
+                      disabled={submittingAnswer}
+                      onClick={() => onSubmitAnswer(String(clampVal(currentVal)))}
+                      style={{
+                        height: '42px',
+                        padding: '0 20px',
+                        borderRadius: '8px',
+                        backgroundColor: accentHex,
+                        border: 'none',
+                        color: '#090d16',
+                        fontSize: '14px',
+                        fontWeight: 800,
+                        cursor: submittingAnswer ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      Xác nhận giá trị {currentVal}
+                      {unit}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        ) : activeQuestion.type === 'PUZZLE' &&
+          Array.isArray(activeQuestion.choices) &&
+          activeQuestion.choices.length > 0 ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8' }}>
+              Sắp xếp các bước theo đúng thứ tự từ trên xuống dưới:
+            </div>
+            {(puzzleOrder.length > 0 ? puzzleOrder : activeQuestion.choices).map((item, idx, arr) => (
+              <div
+                key={`${idx}_${item}`}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px',
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  backgroundColor: '#161f30',
+                  border: '1.5px solid #26334d',
+                  color: '#f8fafc',
+                }}
+              >
+                <span
+                  style={{
+                    width: '26px',
+                    height: '26px',
+                    borderRadius: '6px',
+                    backgroundColor: '#0b0f19',
+                    color: accentHex,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    flexShrink: 0,
+                  }}
+                >
+                  {idx + 1}
+                </span>
+                <span style={{ flex: 1, fontSize: '13.5px', fontWeight: 600, lineHeight: 1.35 }}>
+                  {item}
+                </span>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button
+                    type="button"
+                    disabled={Boolean(activeFeedback) || submittingAnswer || idx === 0}
+                    onClick={() => handleMovePuzzleItem(idx, -1)}
+                    title="Di chuyển lên"
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      border: '1px solid #26334d',
+                      backgroundColor: '#0b0f19',
+                      color: idx === 0 ? '#475569' : '#f8fafc',
+                      fontWeight: 800,
+                      cursor:
+                        Boolean(activeFeedback) || submittingAnswer || idx === 0
+                          ? 'not-allowed'
+                          : 'pointer',
+                    }}
+                  >
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    disabled={Boolean(activeFeedback) || submittingAnswer || idx === arr.length - 1}
+                    onClick={() => handleMovePuzzleItem(idx, 1)}
+                    title="Di chuyển xuống"
+                    style={{
+                      width: '32px',
+                      height: '32px',
+                      borderRadius: '6px',
+                      border: '1px solid #26334d',
+                      backgroundColor: '#0b0f19',
+                      color: idx === arr.length - 1 ? '#475569' : '#f8fafc',
+                      fontWeight: 800,
+                      cursor:
+                        Boolean(activeFeedback) || submittingAnswer || idx === arr.length - 1
+                          ? 'not-allowed'
+                          : 'pointer',
+                    }}
+                  >
+                    ↓
+                  </button>
+                </div>
+              </div>
+            ))}
+            {!activeFeedback && (
+              <button
+                type="button"
+                disabled={submittingAnswer}
+                onClick={() =>
+                  onSubmitAnswer(
+                    (puzzleOrder.length > 0 ? puzzleOrder : activeQuestion.choices || []).join(' | ')
+                  )
+                }
+                style={{
+                  marginTop: '4px',
+                  height: '42px',
+                  padding: '0 18px',
+                  borderRadius: '8px',
+                  backgroundColor: accentHex,
+                  border: 'none',
+                  color: '#090d16',
+                  fontSize: '14px',
+                  fontWeight: 800,
+                  cursor: submittingAnswer ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Xác nhận thứ tự đã sắp xếp
+              </button>
+            )}
+          </div>
+        ) : Array.isArray(activeQuestion.choices) && activeQuestion.choices.length > 0 ? (
           <div
             style={{
               display: 'grid',

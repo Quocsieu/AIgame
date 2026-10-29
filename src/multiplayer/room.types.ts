@@ -83,6 +83,12 @@ export interface SanitizedQuestion {
   type: GameType;
   question: string;
   choices?: string[];
+  sliderConfig?: {
+    min: number;
+    max: number;
+    step: number;
+    unit?: string;
+  };
   difficulty: Difficulty;
   crosswordClue?: string;
   questionIndex: number;

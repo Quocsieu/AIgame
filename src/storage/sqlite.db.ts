@@ -189,6 +189,16 @@ export const MIGRATIONS: MigrationDefinition[] = [
       ALTER TABLE games ADD COLUMN password_hash TEXT;
     `,
   },
+  {
+    version: 3,
+    name: '003_game_cover_images',
+    upSql: `
+      ALTER TABLE games ADD COLUMN cover_image_url TEXT;
+      ALTER TABLE games ADD COLUMN cover_image_prompt_hash TEXT;
+      ALTER TABLE games ADD COLUMN cover_image_updated_at TEXT;
+      ALTER TABLE game_questions ADD COLUMN slider_config_json TEXT;
+    `,
+  },
 ];
 
 let dbInstance: DatabaseSync | null = null;

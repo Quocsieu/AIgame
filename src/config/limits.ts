@@ -50,7 +50,8 @@ export const LIMITS = {
   // Per-Game Password Protection
   GAME_ACCESS_TOKEN_TTL_MS: parseInt(process.env.GAME_ACCESS_TOKEN_TTL_MS || String(2 * 60 * 60 * 1000), 10), // 2 hours
   RATE_LIMIT_GAME_PASSWORD_VERIFY_MAX: parseInt(process.env.RATE_LIMIT_GAME_PASSWORD_VERIFY_MAX || '5', 10),
+
+  // Gemini Cover Image Generation
+  AI_IMAGE_TIMEOUT_MS: parseInt(process.env.AI_IMAGE_TIMEOUT_MS || '25000', 10), // 25 seconds
+  MAX_COVER_IMAGE_BYTES: parseInt(process.env.MAX_COVER_IMAGE_BYTES || String(8 * 1024 * 1024), 10), // 8 MB
 };
-
-
-

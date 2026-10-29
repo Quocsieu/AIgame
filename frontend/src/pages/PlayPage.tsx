@@ -49,6 +49,19 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
   const [textInputAnswer, setTextInputAnswer] = useState('');
   const [puzzleOrder, setPuzzleOrder] = useState<string[]>([]);
+  const [sliderValue, setSliderValue] = useState<number>(0);
+  const [sliderTouched, setSliderTouched] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (currentQuestion?.type === 'SLIDER' && currentQuestion.sliderConfig) {
+      const { min, max, step } = currentQuestion.sliderConfig;
+      const safeStep = step > 0 ? step : 1;
+      const rawMid = min + Math.round(((max - min) / 2) / safeStep) * safeStep;
+      const clampedMid = Math.max(min, Math.min(max, Number(rawMid.toFixed(6))));
+      setSliderValue(clampedMid);
+      setSliderTouched(false);
+    }
+  }, [currentQuestion?.id, currentQuestion?.type]);
 
   useEffect(() => {
     if (currentQuestion?.type === 'PUZZLE' && Array.isArray(currentQuestion.choices)) {
@@ -1046,6 +1059,230 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               )}
             </div>
           )}
+
+          {/* Slider numeric range input */}
+          {currentQuestion.type === 'SLIDER' && (() => {
+            const cfg = currentQuestion.sliderConfig || { min: 0, max: 100, step: 1 };
+            const min = cfg.min;
+            const max = cfg.max;
+            const step = cfg.step > 0 ? cfg.step : 1;
+            const unit = cfg.unit ? ` ${cfg.unit}` : '';
+            const clampToSlider = (val: number) => {
+              if (!Number.isFinite(val)) return min;
+              const snapped = min + Math.round((val - min) / step) * step;
+              return Math.max(min, Math.min(max, Number(snapped.toFixed(6))));
+            };
+            const progressPct = max > min ? Math.max(0, Math.min(100, ((sliderValue - min) / (max - min)) * 100)) : 0;
+
+            return (
+              <div style={{ textAlign: 'center' }}>
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    padding: '0.8rem 1.65rem',
+                    borderRadius: '16px',
+                    backgroundColor: 'var(--bg-input)',
+                    border: `2px solid ${sliderTouched ? 'var(--primary)' : 'var(--border-strong)'}`,
+                    marginBottom: '1rem',
+                    minWidth: '175px',
+                  }}
+                >
+                  <span style={{ fontSize: '0.74rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                    {sliderTouched ? 'Giá trị bạn chọn' : 'Kéo thanh trượt để chọn giá trị'}
+                  </span>
+                  <span style={{ fontSize: '1.9rem', fontWeight: 900, color: 'var(--primary)', fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>
+                    {sliderValue}{unit}
+                  </span>
+                </div>
+
+                <div style={{ padding: '0.4rem 0.2rem 1rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.7rem' }}>
+                    <button
+                      type="button"
+                      disabled={isAnswerSubmitted || isSubmittingAnswer || sliderValue <= min}
+                      onClick={() => {
+                        setAnswerError(null);
+                        setSliderTouched(true);
+                        setSliderValue(prev => clampToSlider(prev - step));
+                      }}
+                      style={{
+                        width: '40px',
+                        height: '40px',
+                        borderRadius: '10px',
+                        border: '1.5px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-surface)',
+                        color: 'var(--text-primary)',
+                        fontWeight: 900,
+                        fontSize: '1.15rem',
+                        cursor: isAnswerSubmitted || isSubmittingAnswer || sliderValue <= min ? 'not-allowed' : 'pointer',
+                        flexShrink: 0,
+                      }}
+                      aria-label="Giảm 1 bước"
+                    >
+                      −
+                    </button>
+
+                    <div style={{ flex: 1 }}>
+                      <input
+                        type="range"
+                        min={min}
+                        max={max}
+                        step={step}
+                        value={sliderValue}
+                        disabled={isAnswerSubmitted || isSubmittingAnswer}
+                        onPointerDown={() => setSliderTouched(true)}
+                        onTouchStart={() => setSliderTouched(true)}
+                        onChange={(e) => {
+                          setAnswerError(null);
+                          setSliderTouched(true);
+                          setSliderValue(clampToSlider(Number(e.target.value)));
+                        }}
+                        aria-label="Thanh trượt chọn giá trị"
+                        style={{
+                          width: '100%',
+                          height: '12px',
+                          cursor: isAnswerSubmitted || isSubmittingAnswer ? 'not-allowed' : 'pointer',
+                          accentColor: 'var(--primary)',
+                        }}
+                      />
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.35rem', fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+                        <span>Min: {min}{unit}</span>
+                        <span>{Math.round(progressPct)}%</span>
+                        <span>Max: {max}{unit}</span>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      disabled={isAnswerSubmitted || isSubmittingAnswer || sliderValue >= max}
+                      onClick={() => {
+                        setAnswerError(null);
+                        setSliderTouched(true);
+                        setSliderValue(prev => clampToSlider(prev + step));
+                      }}
+                      style={{
+                        width: '40px',
+                        height: '40px',
+                        borderRadius: '10px',
+                        border: '1.5px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-surface)',
+                        color: 'var(--text-primary)',
+                        fontWeight: 900,
+                        fontSize: '1.15rem',
+                        cursor: isAnswerSubmitted || isSubmittingAnswer || sliderValue >= max ? 'not-allowed' : 'pointer',
+                        flexShrink: 0,
+                      }}
+                      aria-label="Tăng 1 bước"
+                    >
+                      +
+                    </button>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: '0.45rem', flexWrap: 'wrap', marginTop: '0.7rem' }}>
+                    <button
+                      type="button"
+                      disabled={isAnswerSubmitted || isSubmittingAnswer}
+                      onClick={() => {
+                        setAnswerError(null);
+                        setSliderTouched(true);
+                        setSliderValue(min);
+                      }}
+                      style={{
+                        padding: '0.35rem 0.7rem',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: sliderTouched && sliderValue === min ? 'var(--primary-subtle)' : 'var(--bg-surface)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                        cursor: isAnswerSubmitted || isSubmittingAnswer ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      Chọn Min ({min}{unit})
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isAnswerSubmitted || isSubmittingAnswer}
+                      onClick={() => {
+                        setAnswerError(null);
+                        setSliderTouched(true);
+                        setSliderValue(clampToSlider(sliderValue));
+                      }}
+                      style={{
+                        padding: '0.35rem 0.7rem',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: sliderTouched ? 'var(--primary-subtle)' : 'var(--bg-surface)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                        cursor: isAnswerSubmitted || isSubmittingAnswer ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      Giữ mức {sliderValue}{unit}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isAnswerSubmitted || isSubmittingAnswer}
+                      onClick={() => {
+                        setAnswerError(null);
+                        setSliderTouched(true);
+                        setSliderValue(max);
+                      }}
+                      style={{
+                        padding: '0.35rem 0.7rem',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: sliderTouched && sliderValue === max ? 'var(--primary-subtle)' : 'var(--bg-surface)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                        cursor: isAnswerSubmitted || isSubmittingAnswer ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      Chọn Max ({max}{unit})
+                    </button>
+                  </div>
+                </div>
+
+                {!isAnswerSubmitted && (
+                  <button
+                    type="button"
+                    disabled={isAnswerSubmitted || isSubmittingAnswer || !sliderTouched}
+                    onClick={() => {
+                      if (!sliderTouched) {
+                        setAnswerError('Vui lòng kéo thanh trượt hoặc chọn một mức giá trị trước khi xác nhận.');
+                        return;
+                      }
+                      const safeVal = clampToSlider(sliderValue);
+                      submitAnswer(String(safeVal));
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '0.95rem',
+                      minHeight: '48px',
+                      backgroundColor: 'var(--primary)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '12px',
+                      fontSize: '1.05rem',
+                      fontWeight: 800,
+                      cursor: isAnswerSubmitted || isSubmittingAnswer || !sliderTouched ? 'not-allowed' : 'pointer',
+                      opacity: isAnswerSubmitted || isSubmittingAnswer || !sliderTouched ? 0.6 : 1,
+                    }}
+                  >
+                    {isSubmittingAnswer
+                      ? 'Đang gửi giá trị...'
+                      : sliderTouched
+                        ? `Xác nhận giá trị ${sliderValue}${unit} →`
+                        : 'Hãy kéo thanh trượt để chọn giá trị'}
+                  </button>
+                )}
+              </div>
+            );
+          })()}
 
           {/* Type Answer / Fill in the blank */}
           {(currentQuestion.type === 'FILL_IN_THE_BLANK' || currentQuestion.type === 'TYPE_ANSWER') && (

@@ -107,6 +107,7 @@ export const AdventureQuestionTypeEnum = z.enum([
   'TRUE_FALSE',
   'TYPE_ANSWER',
   'PUZZLE',
+  'SLIDER',
   'MULTIPLE_CHOICE',
   'QUICK_BUTTON',
   'FILL_IN_THE_BLANK',

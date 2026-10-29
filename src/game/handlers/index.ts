@@ -4,7 +4,6 @@ import { CrosswordHandler } from './crossword.handler.js';
 import { FillBlankHandler } from './fillBlank.handler.js';
 import { GameTypeHandler } from './handler.interface.js';
 import { MultipleChoiceHandler } from './multipleChoice.handler.js';
-import { PinAnswerHandler } from './pinAnswer.handler.js';
 import { PuzzleHandler } from './puzzle.handler.js';
 import { QuickButtonHandler } from './quickButton.handler.js';
 import { SliderHandler } from './slider.handler.js';
@@ -17,7 +16,6 @@ export * from './quickButton.handler.js';
 export * from './trueFalse.handler.js';
 export * from './puzzle.handler.js';
 export * from './slider.handler.js';
-export * from './pinAnswer.handler.js';
 export * from './crossword.handler.js';
 
 const multipleChoiceHandler = new MultipleChoiceHandler();
@@ -26,7 +24,6 @@ const quickButtonHandler = new QuickButtonHandler();
 const trueFalseHandler = new TrueFalseHandler();
 const puzzleHandler = new PuzzleHandler();
 const sliderHandler = new SliderHandler();
-const pinAnswerHandler = new PinAnswerHandler();
 const crosswordHandler = new CrosswordHandler();
 
 const handlerRegistry: Record<string, GameTypeHandler> = {
@@ -38,7 +35,6 @@ const handlerRegistry: Record<string, GameTypeHandler> = {
   FILL_IN_THE_BLANK: fillBlankHandler,
   PUZZLE: puzzleHandler,
   SLIDER: sliderHandler,
-  PIN_ANSWER: pinAnswerHandler,
   CROSSWORD: crosswordHandler,
 };
 

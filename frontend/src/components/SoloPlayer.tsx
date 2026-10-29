@@ -50,6 +50,19 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const [selectedChoice, setSelectedChoice] = useState<string | null>(null);
   const [textAnswerInput, setTextAnswerInput] = useState('');
   const [puzzleOrder, setPuzzleOrder] = useState<string[]>([]);
+  const [sliderValue, setSliderValue] = useState<number>(0);
+  const [sliderTouched, setSliderTouched] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (currentQuestion?.type === 'SLIDER' && currentQuestion.sliderConfig) {
+      const { min, max, step } = currentQuestion.sliderConfig;
+      const safeStep = step > 0 ? step : 1;
+      const rawMid = min + Math.round(((max - min) / 2) / safeStep) * safeStep;
+      const clampedMid = Math.max(min, Math.min(max, Number(rawMid.toFixed(6))));
+      setSliderValue(clampedMid);
+      setSliderTouched(false);
+    }
+  }, [currentQuestion?.id, currentQuestion?.type]);
 
   useEffect(() => {
     if (currentQuestion?.type === 'PUZZLE' && Array.isArray(currentQuestion.choices)) {
@@ -73,6 +86,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const [questionFeedback, setQuestionFeedback] = useState<PracticeQuestionResult | null>(null);
+  const [isQuestionTimedOut, setIsQuestionTimedOut] = useState(false);
   const [finalResult, setFinalResult] = useState<PracticeFinalResult | null>(null);
 
   const [playerScore, setPlayerScore] = useState(0);
@@ -100,12 +114,19 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
   const startCountdown = (durationSec: number) => {
     stopTimer();
-    setTimeLeft(durationSec);
+    const safeSec = Math.max(0, Math.ceil(durationSec));
+    setTimeLeft(safeSec);
+    if (safeSec <= 0) {
+      setIsQuestionTimedOut(true);
+      return;
+    }
+    setIsQuestionTimedOut(false);
 
     timerRef.current = window.setInterval(() => {
       setTimeLeft((prev) => {
         if (prev <= 1) {
           stopTimer();
+          setIsQuestionTimedOut(true);
           return 0;
         }
         return prev - 1;
@@ -120,6 +141,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     setErrorMessage(null);
     setFinalResult(null);
     setQuestionFeedback(null);
+    setIsQuestionTimedOut(false);
     setSelectedChoice(null);
     setTextAnswerInput('');
     setPlayerScore(0);
@@ -205,7 +227,10 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               return;
             }
           }
-          const questionTime = q.timePerQuestion || 20;
+          const questionTime =
+            typeof q.remainingTimeSeconds === 'number'
+              ? q.remainingTimeSeconds
+              : q.timePerQuestion || 20;
           startCountdown(questionTime);
           setIsLoading(false);
           return;
@@ -261,7 +286,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   }, [gameId, initialSpec]);
 
   const handleSubmitAnswer = async (answerVal?: string) => {
-    if (!sessionId || !currentQuestion || questionFeedback || isSubmitting || submittingLockRef.current || answeredQuestionIdsRef.current.has(currentQuestion.id)) return;
+    if (!sessionId || !currentQuestion || questionFeedback || isQuestionTimedOut || isSubmitting || submittingLockRef.current || answeredQuestionIdsRef.current.has(currentQuestion.id)) return;
 
     const finalAnswer = (answerVal !== undefined ? answerVal : (selectedChoice || textAnswerInput)).trim();
     if (!finalAnswer) {
@@ -280,6 +305,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       });
       answeredQuestionIdsRef.current.add(currentQuestion.id);
       setQuestionFeedback(res);
+      setIsQuestionTimedOut(false);
       setPlayerScore((prev) => prev + res.pointsEarned);
       setPlayerStreak((prev) => (res.isCorrect ? prev + 1 : 0));
       setPlayerCorrectCount((prev) => prev + (res.isCorrect ? 1 : 0));
@@ -289,7 +315,17 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         toast.warning('Phiên luyện tập này đã được kết thúc bởi người tạo. Đang chuyển hướng...', 'Phiên đã đóng');
         setTimeout(() => handleLeave(), 1500);
       } else {
+      if (
+        err.code === 'ANSWER_TIMEOUT' ||
+        err.message?.includes('time limit expired') ||
+        err.message?.includes('ANSWER_TIMEOUT')
+      ) {
+        setTimeLeft(0);
+        setIsQuestionTimedOut(true);
+        toast.warning('Đã hết thời gian trả lời cho câu hỏi này (+0 điểm).', 'Hết giờ');
+      } else {
         toast.error(err.message || 'Không thể gửi câu trả lời.', 'Lỗi nộp bài');
+      }
       }
     } finally {
       submittingLockRef.current = false;
@@ -301,11 +337,17 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     if (!sessionId) return;
     setIsLoading(true);
     setQuestionFeedback(null);
+    setIsQuestionTimedOut(false);
     setSelectedChoice(null);
     setTextAnswerInput('');
 
     try {
+      const wasTimedOut = isQuestionTimedOut && !questionFeedback;
       const advanceRes = await advancePracticeSession(sessionId);
+      if (wasTimedOut) {
+        setPlayerStreak(0);
+        setPlayerWrongCount((prev) => prev + 1);
+      }
       if (advanceRes.finished && advanceRes.result) {
         setFinalResult(advanceRes.result);
         setCurrentQuestion(null);
@@ -854,6 +896,72 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               <ArrowRightIcon size={16} />
             </button>
           </div>
+        ) : isQuestionTimedOut ? (
+          <div
+            data-testid="solo-timeout-banner"
+            style={{
+              padding: '1.75rem',
+              borderRadius: '18px',
+              backgroundColor: 'rgba(239, 68, 68, 0.12)',
+              border: '2px solid var(--accent-rose)',
+              marginBottom: '1.5rem',
+              animation: 'popIn 0.2s ease',
+            }}
+          >
+            <div
+              style={{
+                fontSize: '1.4rem',
+                fontWeight: 900,
+                color: 'var(--accent-rose)',
+                marginBottom: '0.5rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+              }}
+            >
+              <ClockIcon size={26} />
+              <span>Hết Thời Gian Trả Lời! (+0 điểm)</span>
+            </div>
+            <p
+              style={{
+                margin: '0.35rem auto 0 auto',
+                fontSize: '0.92rem',
+                color: 'var(--text-secondary)',
+                lineHeight: 1.5,
+                maxWidth: '560px',
+              }}
+            >
+              Thời gian cho câu hỏi này đã kết thúc trước khi hệ thống nhận được đáp án của bạn.
+            </p>
+            <button
+              type="button"
+              onClick={handleNextQuestion}
+              style={{
+                marginTop: '1.25rem',
+                minHeight: '46px',
+                padding: '0.75rem 1.75rem',
+                borderRadius: '12px',
+                border: 'none',
+                backgroundColor: 'var(--primary)',
+                color: 'var(--primary-ink)',
+                fontWeight: 800,
+                fontSize: '0.95rem',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                boxShadow: '0 0 16px var(--primary-subtle)',
+              }}
+            >
+              <span>
+                {currentQuestion.questionIndex + 1 < currentQuestion.totalQuestions
+                  ? 'Tiếp Tục Câu Kế Tiếp'
+                  : 'Hoàn Tất & Xem Kết Quả'}
+              </span>
+              <ArrowRightIcon size={16} />
+            </button>
+          </div>
         ) : (
           /* ACTIVE ANSWER INPUT / OPTIONS */
           <div>
@@ -1090,6 +1198,218 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 </button>
               </div>
             )}
+            {currentQuestion.type === 'SLIDER' && (() => {
+              const cfg = currentQuestion.sliderConfig || { min: 0, max: 100, step: 1 };
+              const min = cfg.min;
+              const max = cfg.max;
+              const step = cfg.step > 0 ? cfg.step : 1;
+              const unit = cfg.unit ? ` ${cfg.unit}` : '';
+              const clampToSlider = (val: number) => {
+                if (!Number.isFinite(val)) return min;
+                const snapped = min + Math.round((val - min) / step) * step;
+                return Math.max(min, Math.min(max, Number(snapped.toFixed(6))));
+              };
+              const progressPct = max > min ? Math.max(0, Math.min(100, ((sliderValue - min) / (max - min)) * 100)) : 0;
+
+              return (
+                <div style={{ maxWidth: '580px', margin: '0 auto', textAlign: 'center' }}>
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      padding: '0.85rem 1.75rem',
+                      borderRadius: '16px',
+                      backgroundColor: 'var(--bg-input)',
+                      border: `2px solid ${sliderTouched ? 'var(--primary)' : 'var(--border-strong)'}`,
+                      marginBottom: '1rem',
+                      minWidth: '180px',
+                    }}
+                  >
+                    <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                      {sliderTouched ? 'Giá trị bạn chọn' : 'Kéo thanh trượt để chọn giá trị'}
+                    </span>
+                    <span style={{ fontSize: '2rem', fontWeight: 900, color: 'var(--primary)', fontVariantNumeric: 'tabular-nums', lineHeight: 1.2 }}>
+                      {sliderValue}{unit}
+                    </span>
+                  </div>
+
+                  <div style={{ padding: '0.5rem 0.25rem 1rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <button
+                        type="button"
+                        disabled={isSubmitting || sliderValue <= min}
+                        onClick={() => {
+                          setSliderTouched(true);
+                          setSliderValue(prev => clampToSlider(prev - step));
+                        }}
+                        style={{
+                          width: '42px',
+                          height: '42px',
+                          borderRadius: '10px',
+                          border: '1.5px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-surface)',
+                          color: 'var(--text-primary)',
+                          fontWeight: 900,
+                          fontSize: '1.2rem',
+                          cursor: isSubmitting || sliderValue <= min ? 'not-allowed' : 'pointer',
+                          flexShrink: 0,
+                        }}
+                        aria-label="Giảm 1 bước"
+                      >
+                        −
+                      </button>
+
+                      <div style={{ flex: 1, position: 'relative' }}>
+                        <input
+                          type="range"
+                          min={min}
+                          max={max}
+                          step={step}
+                          value={sliderValue}
+                          disabled={isSubmitting}
+                          onPointerDown={() => setSliderTouched(true)}
+                          onTouchStart={() => setSliderTouched(true)}
+                          onChange={(e) => {
+                            setSliderTouched(true);
+                            setSliderValue(clampToSlider(Number(e.target.value)));
+                          }}
+                          aria-label="Thanh trượt chọn giá trị"
+                          style={{
+                            width: '100%',
+                            height: '12px',
+                            cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                            accentColor: 'var(--primary)',
+                          }}
+                        />
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '0.35rem', fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+                          <span>Min: {min}{unit}</span>
+                          <span>{Math.round(progressPct)}%</span>
+                          <span>Max: {max}{unit}</span>
+                        </div>
+                      </div>
+
+                      <button
+                        type="button"
+                        disabled={isSubmitting || sliderValue >= max}
+                        onClick={() => {
+                          setSliderTouched(true);
+                          setSliderValue(prev => clampToSlider(prev + step));
+                        }}
+                        style={{
+                          width: '42px',
+                          height: '42px',
+                          borderRadius: '10px',
+                          border: '1.5px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-surface)',
+                          color: 'var(--text-primary)',
+                          fontWeight: 900,
+                          fontSize: '1.2rem',
+                          cursor: isSubmitting || sliderValue >= max ? 'not-allowed' : 'pointer',
+                          flexShrink: 0,
+                        }}
+                        aria-label="Tăng 1 bước"
+                      >
+                        +
+                      </button>
+                    </div>
+
+                    <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => {
+                          setSliderTouched(true);
+                          setSliderValue(min);
+                        }}
+                        style={{
+                          padding: '0.35rem 0.75rem',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: sliderTouched && sliderValue === min ? 'var(--primary-subtle)' : 'var(--bg-surface)',
+                          color: 'var(--text-primary)',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                          cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        Chọn Min ({min}{unit})
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => {
+                          setSliderTouched(true);
+                          setSliderValue(clampToSlider(sliderValue));
+                        }}
+                        style={{
+                          padding: '0.35rem 0.75rem',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: sliderTouched ? 'var(--primary-subtle)' : 'var(--bg-surface)',
+                          color: 'var(--text-primary)',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                          cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        Giữ mức {sliderValue}{unit}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={isSubmitting}
+                        onClick={() => {
+                          setSliderTouched(true);
+                          setSliderValue(max);
+                        }}
+                        style={{
+                          padding: '0.35rem 0.75rem',
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: sliderTouched && sliderValue === max ? 'var(--primary-subtle)' : 'var(--bg-surface)',
+                          color: 'var(--text-primary)',
+                          fontSize: '0.78rem',
+                          fontWeight: 700,
+                          cursor: isSubmitting ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        Chọn Max ({max}{unit})
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isSubmitting || !sliderTouched}
+                    onClick={() => {
+                      if (!sliderTouched) {
+                        toast.warning('Vui lòng kéo thanh trượt hoặc chọn một mức giá trị trước khi xác nhận.', 'Chưa chọn giá trị');
+                        return;
+                      }
+                      const safeVal = clampToSlider(sliderValue);
+                      handleSubmitAnswer(String(safeVal));
+                    }}
+                    style={{
+                      width: '100%',
+                      minHeight: '50px',
+                      padding: '0.85rem 1.5rem',
+                      borderRadius: '14px',
+                      border: 'none',
+                      backgroundColor: 'var(--primary)',
+                      color: '#ffffff',
+                      fontWeight: 900,
+                      fontSize: '1rem',
+                      cursor: isSubmitting || !sliderTouched ? 'not-allowed' : 'pointer',
+                      opacity: isSubmitting || !sliderTouched ? 0.6 : 1,
+                    }}
+                  >
+                    {sliderTouched
+                      ? `Xác Nhận Giá Trị ${sliderValue}${unit} →`
+                      : 'Hãy Kéo Thanh Trượt Để Chọn Giá Trị'}
+                  </button>
+                </div>
+              );
+            })()}
             {(currentQuestion.type === 'FILL_IN_THE_BLANK' ||
               currentQuestion.type === 'TYPE_ANSWER' ||
               currentQuestion.type === 'CROSSWORD') && (

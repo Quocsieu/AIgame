@@ -94,6 +94,7 @@ export class ExportService {
         difficulty: q.difficulty,
         question: q.question,
         choices: q.choices || [],
+        sliderConfig: q.sliderConfig || null,
         correctAnswer: q.correctAnswer,
         acceptedAlternatives: q.acceptedAlternatives || [],
         crosswordClue: q.crosswordClue || null,

@@ -14,7 +14,6 @@ import { aiQuestionService, AiModelProvider } from '../src/services/ai.question.
 import {
   GameQuestionSchema,
   SliderQuestionConfigSchema,
-  PinAnswerQuestionConfigSchema,
   formatCanonicalPuzzleAnswer,
 } from '../src/contracts/game.contract.js';
 import { getHandler } from '../src/game/handlers/index.js';
@@ -33,7 +32,7 @@ class RefactorMockAiProvider implements AiModelProvider {
   }
 }
 
-describe('TRADITIONAL GAME TYPES REFACTOR — Quiz, True/False, Type Answer, Puzzle + Slider & Pin Answer Architecture', () => {
+describe('TRADITIONAL GAME TYPES REFACTOR — 5 Canonical Formats (Quiz, True/False, Type Answer, Puzzle, Slider)', () => {
   let tempDir: string;
   let tempDbPath: string;
   let mockProvider: RefactorMockAiProvider;
@@ -336,10 +335,158 @@ describe('TRADITIONAL GAME TYPES REFACTOR — Quiz, True/False, Type Answer, Puz
     assert.equal(tooFewPuzzle.success, false);
   });
 
-  it('8. Rejects removed legacy formats (CROSSWORD, MIXED) and phase-2 formats (SLIDER, PIN_ANSWER) on POST /api/games/generate with 400', async () => {
+  it('8. Slider (SLIDER): creates valid Slider game, sanitizes client sliderConfig, rejects invalid/missing sliderConfig without fabricating defaults, and grades boundary/middle/tolerance/duplicate submissions', async () => {
     resetAllRateLimiters();
 
-    for (const disallowedType of ['CROSSWORD', 'MIXED', 'SLIDER', 'PIN_ANSWER', 'UNKNOWN_TYPE']) {
+    mockProvider.mockQuestions = [
+      {
+        id: 'q_sl_1',
+        type: 'SLIDER',
+        question: 'Cổng mặc định của giao thức HTTPS là bao nhiêu?',
+        sliderConfig: {
+          min: 0,
+          max: 1000,
+          step: 1,
+          correctValue: 443,
+          tolerance: 2,
+          unit: 'port',
+        },
+        correctAnswer: '443',
+        explanation: 'HTTPS sử dụng cổng chuẩn 443.',
+        difficulty: 'EASY',
+      },
+    ];
+
+    const res = await request(app).post('/api/games/generate').send({
+      sourceId,
+      gameType: 'SLIDER',
+      questionCount: 1,
+    });
+
+    assert.equal(res.status, 200);
+    const gameId = res.body.data.gameId;
+    const q = res.body.data.questions[0];
+    assert.equal(q.type, 'SLIDER');
+    assert.deepEqual(q.sliderConfig, {
+      min: 0,
+      max: 1000,
+      step: 1,
+      correctValue: 443,
+      tolerance: 2,
+      unit: 'port',
+    });
+    assert.equal(q.correctAnswer, '443');
+
+    // Verify client session question includes sanitized sliderConfig (min, max, step, unit) and EXCLUDES correctValue & tolerance
+    const sessCreate = await request(app).post('/api/games/sessions').send({ gameId });
+    assert.equal(sessCreate.status, 200);
+    const sessionId = sessCreate.body.data.sessionId;
+    const sessStart = await request(app).post(`/api/games/sessions/${sessionId}/start`);
+    assert.equal(sessStart.status, 200);
+    const clientQ = sessStart.body.data.question;
+    assert.deepEqual(clientQ.sliderConfig, {
+      min: 0,
+      max: 1000,
+      step: 1,
+      unit: 'port',
+    });
+    assert.equal('correctValue' in clientQ.sliderConfig, false);
+    assert.equal('tolerance' in clientQ.sliderConfig, false);
+
+    // Submit answer within tolerance in Solo session and verify duplicate submission is rejected
+    const ansRes = await request(app)
+      .post(`/api/games/sessions/${sessionId}/answer`)
+      .send({ questionId: 'q_sl_1', answer: '445' }); // |445 - 443| = 2 <= tolerance 2
+    assert.equal(ansRes.status, 200);
+    assert.equal(ansRes.body.data.isCorrect, true);
+
+    const dupAnsRes = await request(app)
+      .post(`/api/games/sessions/${sessionId}/answer`)
+      .send({ questionId: 'q_sl_1', answer: '443' });
+    assert.equal(dupAnsRes.status, 400, 'Duplicate submission on already answered question must be rejected');
+
+    // Handler tests: min boundary, max boundary, middle, exact, within tolerance, outside tolerance, out-of-range, empty
+    const sliderHandler = getHandler('SLIDER');
+    assert.equal(sliderHandler.validateAnswer(q, '443').isCorrect, true); // exact middle value
+    assert.equal(sliderHandler.validateAnswer(q, '441').isCorrect, true); // within tolerance (-2)
+    assert.equal(sliderHandler.validateAnswer(q, '445').isCorrect, true); // within tolerance (+2)
+    assert.equal(sliderHandler.validateAnswer(q, '440').isCorrect, false); // outside tolerance (-3)
+    assert.equal(sliderHandler.validateAnswer(q, '0').isCorrect, false); // min boundary (valid range, wrong value)
+    assert.equal(sliderHandler.validateAnswer(q, '1000').isCorrect, false); // max boundary (valid range, wrong value)
+    assert.equal(sliderHandler.validateAnswer(q, '-1').isCorrect, false); // out of range < min
+    assert.equal(sliderHandler.validateAnswer(q, '1001').isCorrect, false); // out of range > max
+    assert.equal(sliderHandler.validateAnswer(q, '').isCorrect, false); // unoperated / empty
+
+    // Test min & max as correctValue boundaries
+    const minBoundaryQ = GameQuestionSchema.parse({
+      ...q,
+      id: 'q_sl_min',
+      sliderConfig: { min: 0, max: 100, step: 5, correctValue: 0, tolerance: 0, unit: '%' },
+      correctAnswer: '0',
+    });
+    assert.equal(sliderHandler.validateAnswer(minBoundaryQ, '0').isCorrect, true);
+    assert.equal(sliderHandler.validateAnswer(minBoundaryQ, '5').isCorrect, false);
+
+    const maxBoundaryQ = GameQuestionSchema.parse({
+      ...q,
+      id: 'q_sl_max',
+      sliderConfig: { min: 0, max: 100, step: 5, correctValue: 100, tolerance: 0, unit: '%' },
+      correctAnswer: '100',
+    });
+    assert.equal(sliderHandler.validateAnswer(maxBoundaryQ, '100').isCorrect, true);
+    assert.equal(sliderHandler.validateAnswer(maxBoundaryQ, '95').isCorrect, false);
+
+    // Reject invalid sliderConfigs: min >= max, correctValue outside [min, max], step <= 0, step > max - min, unaligned step, tolerance >= max - min
+    assert.equal(
+      SliderQuestionConfigSchema.safeParse({ min: 100, max: 50, step: 1, correctValue: 75, tolerance: 0 }).success,
+      false
+    );
+    assert.equal(
+      SliderQuestionConfigSchema.safeParse({ min: 0, max: 100, step: 1, correctValue: 120, tolerance: 0 }).success,
+      false
+    );
+    assert.equal(
+      SliderQuestionConfigSchema.safeParse({ min: 0, max: 100, step: 0, correctValue: 50, tolerance: 0 }).success,
+      false
+    );
+    assert.equal(
+      SliderQuestionConfigSchema.safeParse({ min: 0, max: 10, step: 20, correctValue: 0, tolerance: 0 }).success,
+      false
+    );
+    assert.equal(
+      SliderQuestionConfigSchema.safeParse({ min: 0, max: 100, step: 10, correctValue: 25, tolerance: 0 }).success,
+      false,
+      'correctValue not aligned with min + k * step must be rejected'
+    );
+    assert.equal(
+      SliderQuestionConfigSchema.safeParse({ min: 0, max: 100, step: 1, correctValue: 50, tolerance: 100 }).success,
+      false,
+      'tolerance >= (max - min) must be rejected'
+    );
+
+    // AI generation must reject missing sliderConfig (never fabricate default min/max/step/correctValue)
+    mockProvider.mockQuestions = [
+      {
+        id: 'q_sl_missing_cfg',
+        type: 'SLIDER',
+        question: 'Câu hỏi thiếu sliderConfig?',
+        correctAnswer: '50',
+        difficulty: 'EASY',
+      },
+    ];
+    const badAiRes = await request(app).post('/api/games/generate').send({
+      sourceId,
+      gameType: 'SLIDER',
+      questionCount: 1,
+    });
+    assert.equal(badAiRes.status, 422);
+    assert.equal(badAiRes.body.error.code, 'AI_QUESTION_VALIDATION_FAILED');
+  });
+
+  it('9. Rejects removed legacy formats (CROSSWORD, MIXED) and out-of-scope formats (PIN_ANSWER) on POST /api/games/generate with 400', async () => {
+    resetAllRateLimiters();
+
+    for (const disallowedType of ['CROSSWORD', 'MIXED', 'PIN_ANSWER', 'UNKNOWN_TYPE']) {
       const res = await request(app).post('/api/games/generate').send({
         sourceId,
         gameType: disallowedType,
@@ -350,7 +497,7 @@ describe('TRADITIONAL GAME TYPES REFACTOR — Quiz, True/False, Type Answer, Puz
     }
   });
 
-  it('9 & 11. Supports editing (PATCH /api/games/:id/questions) and Solo + Multiplayer gameplay across all 4 priority formats (QUIZ, TRUE_FALSE, TYPE_ANSWER, PUZZLE)', async () => {
+  it('10 & 12. Supports editing (PATCH /api/games/:id/questions) and Solo + Multiplayer gameplay across all 5 canonical formats (QUIZ, TRUE_FALSE, TYPE_ANSWER, PUZZLE, SLIDER)', async () => {
     resetAllRateLimiters();
 
     mockProvider.mockQuestions = [
@@ -378,7 +525,7 @@ describe('TRADITIONAL GAME TYPES REFACTOR — Quiz, True/False, Type Answer, Puz
       sourceLocation: 'refactor_doc.txt',
     };
 
-    // Edit question set to include all 4 priority formats
+    // Edit question set to include all 5 traditional formats
     const editedQuestions = [
       {
         id: 'q_edit_quiz',
@@ -419,18 +566,35 @@ describe('TRADITIONAL GAME TYPES REFACTOR — Quiz, True/False, Type Answer, Puz
         difficulty: 'MEDIUM',
         sourceReference: defaultSourceRef,
       },
+      {
+        id: 'q_edit_sl',
+        type: 'SLIDER',
+        question: 'Số bước trong quy trình bắt tay TCP (3-way handshake) là bao nhiêu?',
+        sliderConfig: {
+          min: 1,
+          max: 10,
+          step: 1,
+          correctValue: 3,
+          tolerance: 0,
+          unit: 'bước',
+        },
+        correctAnswer: '3',
+        explanation: 'Quy trình bắt tay TCP gồm 3 bước.',
+        difficulty: 'EASY',
+        sourceReference: defaultSourceRef,
+      },
     ];
 
     const patchRes = await request(app)
       .patch(`/api/games/${gameId}/questions`)
       .send({
-        title: 'Bộ Câu Hỏi 4 Dạng Ưu Tiên',
+        title: 'Bộ Câu Hỏi 5 Dạng Truyền Thống',
         questions: editedQuestions,
       });
     assert.equal(patchRes.status, 200);
-    assert.equal(patchRes.body.data.questions.length, 4);
+    assert.equal(patchRes.body.data.questions.length, 5);
 
-    // Play Solo Session
+    // Play Solo Session across all 5 formats
     const sessRes = await request(app).post('/api/games/sessions').send({ gameId });
     const sessionId = sessRes.body.data.sessionId;
     await request(app).post(`/api/games/sessions/${sessionId}/start`);
@@ -440,6 +604,7 @@ describe('TRADITIONAL GAME TYPES REFACTOR — Quiz, True/False, Type Answer, Puz
       { questionId: 'q_edit_tf', answer: 'Đúng' },
       { questionId: 'q_edit_ta', answer: 'https' },
       { questionId: 'q_edit_pz', answer: 'Gửi SYN | Nhận SYN-ACK | Gửi ACK' },
+      { questionId: 'q_edit_sl', answer: '3' },
     ];
 
     for (const item of soloAnswers) {
@@ -453,27 +618,36 @@ describe('TRADITIONAL GAME TYPES REFACTOR — Quiz, True/False, Type Answer, Puz
 
     const soloResult = await request(app).get(`/api/games/sessions/${sessionId}/result`);
     assert.equal(soloResult.status, 200);
-    assert.equal(soloResult.body.data.correctCount, 4);
+    assert.equal(soloResult.body.data.correctCount, 5);
 
-    // Play Multiplayer Room
+    // Play Multiplayer Room across all 5 formats
     const roomRes = await request(app).post('/api/rooms').send({ gameId });
     assert.equal(roomRes.status, 200);
     const { roomCode, hostToken } = roomRes.body.data;
     const room = roomService.getRoomByCode(roomCode);
-    const { player } = room.addPlayer('Player 4 Modes');
+    const { player } = room.addPlayer('Player 5 Modes');
     room.start(hostToken);
 
     for (const item of soloAnswers) {
+      const sanitizedQ = room.getSanitizedCurrentQuestion();
+      if (sanitizedQ.type === 'SLIDER') {
+        assert.deepEqual(sanitizedQ.sliderConfig, { min: 1, max: 10, step: 1, unit: 'bước' });
+        assert.equal('correctValue' in (sanitizedQ.sliderConfig || {}), false);
+      }
       const sub = room.submitPlayerAnswer(player.playerToken, item.questionId, item.answer);
       assert.equal(sub.result.isCorrect, true);
+      // Verify duplicate answer in multiplayer room is rejected
+      assert.throws(() => {
+        room.submitPlayerAnswer(player.playerToken, item.questionId, item.answer);
+      });
       room.revealQuestion(hostToken);
       room.nextQuestion(hostToken);
     }
     assert.equal(room.state, 'FINISHED');
-    assert.equal(player.correctCount, 4);
+    assert.equal(player.correctCount, 5);
   });
 
-  it('10. Preserves SQLite backward compatibility for legacy saved games (CROSSWORD, MIXED, MULTIPLE_CHOICE, QUICK_BUTTON, FILL_IN_THE_BLANK)', async () => {
+  it('11. Preserves SQLite backward compatibility for legacy saved games (CROSSWORD, MIXED, MULTIPLE_CHOICE, QUICK_BUTTON, FILL_IN_THE_BLANK)', async () => {
     resetAllRateLimiters();
 
     const legacyCrosswordGame = {
@@ -541,89 +715,6 @@ describe('TRADITIONAL GAME TYPES REFACTOR — Quiz, True/False, Type Answer, Puz
       .send({ questionId: 'q_leg_cw_1', answer: 'dns' });
     assert.equal(ansRes.status, 200);
     assert.equal(ansRes.body.data.isCorrect, true);
-  });
-
-  it('Phase-2 Architecture: validates SliderQuestionConfigSchema + SliderHandler and PinAnswerQuestionConfigSchema + PinAnswerHandler', () => {
-    // 1. Slider contract & handler
-    const validSliderCfg = SliderQuestionConfigSchema.safeParse({
-      min: 0,
-      max: 100,
-      step: 1,
-      correctValue: 75,
-      tolerance: 2,
-      unit: '%',
-    });
-    assert.equal(validSliderCfg.success, true);
-
-    const invalidSliderCfg = SliderQuestionConfigSchema.safeParse({
-      min: 100,
-      max: 50, // min >= max
-      step: 1,
-      correctValue: 75,
-      tolerance: 0,
-    });
-    assert.equal(invalidSliderCfg.success, false);
-
-    const sliderQuestion = GameQuestionSchema.parse({
-      id: 'q_slider_1',
-      type: 'SLIDER',
-      question: 'Tỷ lệ phần trăm nitơ trong khí quyển Trái Đất là khoảng bao nhiêu?',
-      sliderConfig: {
-        min: 0,
-        max: 100,
-        step: 1,
-        correctValue: 78,
-        tolerance: 2,
-        unit: '%',
-      },
-      correctAnswer: '78',
-      difficulty: 'MEDIUM',
-      sourceReference: {
-        sourceId,
-        sourceType: 'TXT',
-        sourceLocation: 'refactor_doc.txt',
-      },
-    });
-
-    const sliderHandler = getHandler('SLIDER');
-    assert.equal(sliderHandler.validateAnswer(sliderQuestion, '78').isCorrect, true);
-    assert.equal(sliderHandler.validateAnswer(sliderQuestion, '76.5').isCorrect, true); // within tolerance 2
-    assert.equal(sliderHandler.validateAnswer(sliderQuestion, '70').isCorrect, false);
-    assert.equal(sliderHandler.validateAnswer(sliderQuestion, '150').isCorrect, false); // out of [min, max]
-
-    // 2. Pin Answer contract & handler
-    const validPinCfg = PinAnswerQuestionConfigSchema.safeParse({
-      imageUrl: 'https://example.com/map.png',
-      targetX: 50,
-      targetY: 50,
-      radius: 10,
-    });
-    assert.equal(validPinCfg.success, true);
-
-    const pinQuestion = GameQuestionSchema.parse({
-      id: 'q_pin_1',
-      type: 'PIN_ANSWER',
-      question: 'Chạm vào tâm điểm trên bản đồ:',
-      pinConfig: {
-        imageUrl: 'https://example.com/map.png',
-        coordinateSystem: 'NORMALIZED_PERCENT_100',
-        targetX: 50,
-        targetY: 50,
-        radius: 10,
-      },
-      correctAnswer: '50,50',
-      difficulty: 'HARD',
-      sourceReference: {
-        sourceId,
-        sourceType: 'TXT',
-        sourceLocation: 'refactor_doc.txt',
-      },
-    });
-
-    const pinHandler = getHandler('PIN_ANSWER');
-    assert.equal(pinHandler.validateAnswer(pinQuestion, '50,50').isCorrect, true);
-    assert.equal(pinHandler.validateAnswer(pinQuestion, JSON.stringify({ x: 56, y: 58 })).isCorrect, true); // distance = sqrt(6^2 + 8^2) = 10 <= 10
-    assert.equal(pinHandler.validateAnswer(pinQuestion, '70,70').isCorrect, false); // distance > 10
   });
 });
 

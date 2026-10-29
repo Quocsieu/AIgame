@@ -29,11 +29,19 @@ export interface ClientQuestion {
   type: GameType;
   question: string;
   choices?: string[];
+  sliderConfig?: {
+    min: number;
+    max: number;
+    step: number;
+    unit?: string;
+  };
   difficulty: Difficulty;
   crosswordClue?: string;
   questionIndex: number;
   totalQuestions: number;
   timePerQuestion: number;
+  remainingTimeSeconds?: number;
+  deadlineAt?: number;
 }
 
 /**
@@ -108,4 +116,3 @@ export const SubmitAnswerRequestSchema = z.object({
   clientTimestamp: z.number().optional(),
 });
 export type SubmitAnswerRequest = z.infer<typeof SubmitAnswerRequestSchema>;
-

@@ -202,6 +202,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   currentQuestion: liveCurrentQuestion,
   currentQuestionIndex: liveQuestionIndex = 0,
   totalQuestions: liveTotalQuestions,
+  timeRemaining: liveTimeRemaining,
   liveScore = 0,
   liveCorrectCount = 0,
   liveWrongCount = 0,
@@ -253,6 +254,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   const [activeModalOpen, setActiveModalOpen] = useState<boolean>(false);
   const [selectedChoice, setSelectedChoice] = useState<string>('');
   const [textAnswer, setTextAnswer] = useState<string>('');
+  const [puzzleOrder, setPuzzleOrder] = useState<string[]>([]);
   const [autoCruise, setAutoCruise] = useState<boolean>(true);
   const [skillBonusScore, setSkillBonusScore] = useState<number>(0);
   const [obstaclesClearedCount, setObstaclesClearedCount] = useState<number>(0);
@@ -536,9 +538,62 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   useEffect(() => {
     setSelectedChoice('');
     setTextAnswer('');
+    if (activeQuestion?.type === 'PUZZLE' && Array.isArray(activeQuestion.choices)) {
+      const initialItems = [...activeQuestion.choices];
+      const maybeFullQ = activeQuestion as GameQuestion;
+      if (
+        mode === 'CREATOR_PREVIEW' &&
+        initialItems.length > 1 &&
+        typeof maybeFullQ.correctAnswer === 'string' &&
+        initialItems.join(' | ').trim().toLowerCase() ===
+          maybeFullQ.correctAnswer.trim().toLowerCase()
+      ) {
+        const first = initialItems.shift()!;
+        initialItems.push(first);
+      }
+      setPuzzleOrder(initialItems);
+    } else {
+      setPuzzleOrder([]);
+    }
     setStageInspected(inspectedStagesRef.current.has(activeStageIndex));
-    setPreviewTimeRemaining(game.settings?.timePerQuestion || 20);
-  }, [activeStageIndex, activeQuestion?.id, game.settings?.timePerQuestion]);
+    const serverRemaining =
+      mode === 'LIVE_SESSION' &&
+      typeof (liveCurrentQuestion as SanitizedQuestion | null)?.remainingTimeSeconds === 'number'
+        ? (liveCurrentQuestion as SanitizedQuestion).remainingTimeSeconds!
+        : game.settings?.timePerQuestion || 20;
+    setPreviewTimeRemaining(Math.max(1, serverRemaining));
+  }, [
+    activeStageIndex,
+    activeQuestion?.id,
+    activeQuestion?.type,
+    activeQuestion?.choices,
+    mode,
+    liveCurrentQuestion,
+    game.settings?.timePerQuestion,
+  ]);
+
+  useEffect(() => {
+    if (
+      mode === 'LIVE_SESSION' &&
+      typeof liveTimeRemaining === 'number' &&
+      liveTimeRemaining > 0 &&
+      (activeModalOpen || stageInspected)
+    ) {
+      setPreviewTimeRemaining(prev => Math.min(prev, liveTimeRemaining));
+    }
+  }, [mode, liveTimeRemaining, activeModalOpen, stageInspected]);
+
+  const handleMovePuzzleItem = useCallback((idx: number, direction: -1 | 1) => {
+    setPuzzleOrder(prev => {
+      const targetIdx = idx + direction;
+      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
+      const next = [...prev];
+      const tmp = next[idx];
+      next[idx] = next[targetIdx];
+      next[targetIdx] = tmp;
+      return next;
+    });
+  }, []);
 
   // Preview countdown timer when checkpoint question modal or inline non-runner question is active
   useEffect(() => {
@@ -655,9 +710,26 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       const rawAns =
         explicitAnswer !== undefined
           ? explicitAnswer
-          : activeQuestion.type === 'MULTIPLE_CHOICE' || activeQuestion.type === 'QUICK_BUTTON'
-            ? selectedChoice
-            : textAnswer.trim();
+          : activeQuestion.type === 'PUZZLE'
+            ? puzzleOrder.join(' | ')
+            : activeQuestion.type === 'SLIDER' && activeQuestion.sliderConfig
+              ? textAnswer.trim() !== '' && Number.isFinite(Number(textAnswer))
+                ? textAnswer.trim()
+                : String(
+                    activeQuestion.sliderConfig.min +
+                      Math.round(
+                        (activeQuestion.sliderConfig.max - activeQuestion.sliderConfig.min) /
+                          2 /
+                          (activeQuestion.sliderConfig.step > 0 ? activeQuestion.sliderConfig.step : 1)
+                      ) *
+                        (activeQuestion.sliderConfig.step > 0 ? activeQuestion.sliderConfig.step : 1)
+                  )
+              : activeQuestion.type === 'MULTIPLE_CHOICE' ||
+                  activeQuestion.type === 'QUIZ' ||
+                  activeQuestion.type === 'QUICK_BUTTON' ||
+                  activeQuestion.type === 'TRUE_FALSE'
+                ? selectedChoice
+                : textAnswer.trim();
 
       if (!rawAns) return;
 
@@ -669,25 +741,34 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       // Creator Preview Mode evaluation
       const fullQ = game.questions?.[previewStageIdx];
       if (!fullQ) return;
-      const normalizeAns = (val: string) =>
-        val.trim().normalize('NFC').toLowerCase().replace(/\s+/g, ' ');
-      const normalizedUser = normalizeAns(rawAns);
-      const validAnswers = new Set<string>();
-      const addCandidate = (rawStr: string) => {
-        const full = normalizeAns(rawStr);
-        if (full) validAnswers.add(full);
-        if (rawStr.includes('|') || rawStr.includes(';')) {
-          for (const part of rawStr.split(/[|;]/)) {
-            const p = normalizeAns(part);
-            if (p) validAnswers.add(p);
-          }
+      let isCorrect = false;
+      if (fullQ.type === 'SLIDER' && fullQ.sliderConfig) {
+        const numericAns = Number(rawAns);
+        const { min, max, correctValue, tolerance = 0 } = fullQ.sliderConfig;
+        if (Number.isFinite(numericAns) && numericAns >= min && numericAns <= max) {
+          isCorrect = Math.abs(numericAns - correctValue) <= Math.max(0, tolerance) + 1e-9;
         }
-      };
-      addCandidate(fullQ.correctAnswer || '');
-      for (const alt of fullQ.acceptedAlternatives || []) {
-        if (typeof alt === 'string') addCandidate(alt);
+      } else {
+        const normalizeAns = (val: string) =>
+          val.trim().normalize('NFC').toLowerCase().replace(/\s+/g, ' ');
+        const normalizedUser = normalizeAns(rawAns);
+        const validAnswers = new Set<string>();
+        const addCandidate = (rawStr: string) => {
+          const full = normalizeAns(rawStr);
+          if (full) validAnswers.add(full);
+          if (fullQ.type !== 'PUZZLE' && (rawStr.includes('|') || rawStr.includes(';'))) {
+            for (const part of rawStr.split(/[|;]/)) {
+              const p = normalizeAns(part);
+              if (p) validAnswers.add(p);
+            }
+          }
+        };
+        addCandidate(fullQ.correctAnswer || '');
+        for (const alt of fullQ.acceptedAlternatives || []) {
+          if (typeof alt === 'string') addCandidate(alt);
+        }
+        isCorrect = normalizedUser.length > 0 && validAnswers.has(normalizedUser);
       }
-      const isCorrect = normalizedUser.length > 0 && validAnswers.has(normalizedUser);
       const earned = isCorrect ? 100 + previewStreak * 15 : 0;
       const newStreak = isCorrect ? previewStreak + 1 : 0;
 
@@ -726,6 +807,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       isPaused,
       selectedChoice,
       textAnswer,
+      puzzleOrder,
       mode,
       onSubmitAnswer,
       game.questions,
@@ -855,6 +937,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           stageInspected &&
           !activeFeedback &&
           activeQuestion &&
+          activeQuestion.type !== 'PUZZLE' &&
+          activeQuestion.type !== 'SLIDER' &&
           Array.isArray(activeQuestion.choices) &&
           ['1', '2', '3', '4'].includes(e.key)
         ) {
@@ -884,6 +968,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         if (
           !activeFeedback &&
           activeQuestion &&
+          activeQuestion.type !== 'PUZZLE' &&
+          activeQuestion.type !== 'SLIDER' &&
           Array.isArray(activeQuestion.choices) &&
           ['1', '2', '3', '4'].includes(e.key)
         ) {
@@ -2436,7 +2522,228 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   {activeQuestion.question}
                 </p>
 
-                {Array.isArray(activeQuestion.choices) && activeQuestion.choices.length > 0 ? (
+                {activeQuestion.type === 'SLIDER' && activeQuestion.sliderConfig ? (
+                  <div style={{ marginTop: '14px' }}>
+                    {(() => {
+                      const cfg = activeQuestion.sliderConfig!;
+                      const min = cfg.min;
+                      const max = cfg.max;
+                      const step = cfg.step > 0 ? cfg.step : 1;
+                      const unit = cfg.unit ? ` ${cfg.unit}` : '';
+                      const currentVal =
+                        textAnswer.trim() !== '' && Number.isFinite(Number(textAnswer))
+                          ? Number(textAnswer)
+                          : min + Math.round(((max - min) / 2) / step) * step;
+                      const clampVal = (v: number) => {
+                        const snapped = min + Math.round((v - min) / step) * step;
+                        return Math.max(min, Math.min(max, Number(snapped.toFixed(6))));
+                      };
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                          <div style={{ textAlign: 'center', fontSize: '20px', fontWeight: 900, color: accentHex }}>
+                            {currentVal}{unit}
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <button
+                              type="button"
+                              disabled={Boolean(activeFeedback) || submittingAnswer || currentVal <= min}
+                              onClick={() => setTextAnswer(String(clampVal(currentVal - step)))}
+                              style={{
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '6px',
+                                border: '1px solid #26334d',
+                                backgroundColor: '#161f30',
+                                color: '#f8fafc',
+                                fontWeight: 800,
+                                cursor:
+                                  Boolean(activeFeedback) || submittingAnswer || currentVal <= min
+                                    ? 'not-allowed'
+                                    : 'pointer',
+                              }}
+                              aria-label="Giảm 1 bước"
+                            >
+                              −
+                            </button>
+                            <input
+                              type="range"
+                              min={min}
+                              max={max}
+                              step={step}
+                              value={currentVal}
+                              disabled={Boolean(activeFeedback) || submittingAnswer}
+                              onChange={e => setTextAnswer(String(clampVal(Number(e.target.value))))}
+                              style={{ flex: 1, width: '100%', accentColor: accentHex }}
+                            />
+                            <button
+                              type="button"
+                              disabled={Boolean(activeFeedback) || submittingAnswer || currentVal >= max}
+                              onClick={() => setTextAnswer(String(clampVal(currentVal + step)))}
+                              style={{
+                                width: '36px',
+                                height: '36px',
+                                borderRadius: '6px',
+                                border: '1px solid #26334d',
+                                backgroundColor: '#161f30',
+                                color: '#f8fafc',
+                                fontWeight: 800,
+                                cursor:
+                                  Boolean(activeFeedback) || submittingAnswer || currentVal >= max
+                                    ? 'not-allowed'
+                                    : 'pointer',
+                              }}
+                              aria-label="Tăng 1 bước"
+                            >
+                              +
+                            </button>
+                          </div>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#94a3b8', fontWeight: 700 }}>
+                            <span>Min: {min}{unit}</span>
+                            <span>Bước nhảy: {step}{unit}</span>
+                            <span>Max: {max}{unit}</span>
+                          </div>
+                          {!activeFeedback && (
+                            <button
+                              type="button"
+                              disabled={submittingAnswer}
+                              onClick={() => handleAnswerSubmit(String(clampVal(currentVal)))}
+                              style={{
+                                height: '42px',
+                                padding: '0 20px',
+                                borderRadius: '8px',
+                                backgroundColor: accentHex,
+                                border: 'none',
+                                color: '#090d16',
+                                fontSize: '14px',
+                                fontWeight: 800,
+                                cursor: submittingAnswer ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              Xác nhận giá trị {currentVal}{unit}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                ) : activeQuestion.type === 'PUZZLE' &&
+                  Array.isArray(activeQuestion.choices) &&
+                  activeQuestion.choices.length > 0 ? (
+                  <div style={{ marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8' }}>
+                      Sắp xếp các bước theo đúng thứ tự từ trên xuống dưới:
+                    </div>
+                    {(puzzleOrder.length > 0 ? puzzleOrder : activeQuestion.choices).map((item, idx, arr) => (
+                      <div
+                        key={`${idx}_${item}`}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          backgroundColor: '#161f30',
+                          border: '1.5px solid #26334d',
+                          color: '#f8fafc',
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: '26px',
+                            height: '26px',
+                            borderRadius: '6px',
+                            backgroundColor: '#0b0f19',
+                            color: accentHex,
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            flexShrink: 0,
+                          }}
+                        >
+                          {idx + 1}
+                        </span>
+                        <span style={{ flex: 1, fontSize: '13.5px', fontWeight: 600, lineHeight: 1.35 }}>
+                          {item}
+                        </span>
+                        <div style={{ display: 'flex', gap: '4px' }}>
+                          <button
+                            type="button"
+                            disabled={Boolean(activeFeedback) || submittingAnswer || idx === 0}
+                            onClick={() => handleMovePuzzleItem(idx, -1)}
+                            title="Di chuyển lên"
+                            style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '6px',
+                              border: '1px solid #26334d',
+                              backgroundColor: '#0b0f19',
+                              color: idx === 0 ? '#475569' : '#f8fafc',
+                              fontWeight: 800,
+                              cursor:
+                                Boolean(activeFeedback) || submittingAnswer || idx === 0
+                                  ? 'not-allowed'
+                                  : 'pointer',
+                            }}
+                          >
+                            ↑
+                          </button>
+                          <button
+                            type="button"
+                            disabled={
+                              Boolean(activeFeedback) || submittingAnswer || idx === arr.length - 1
+                            }
+                            onClick={() => handleMovePuzzleItem(idx, 1)}
+                            title="Di chuyển xuống"
+                            style={{
+                              width: '32px',
+                              height: '32px',
+                              borderRadius: '6px',
+                              border: '1px solid #26334d',
+                              backgroundColor: '#0b0f19',
+                              color: idx === arr.length - 1 ? '#475569' : '#f8fafc',
+                              fontWeight: 800,
+                              cursor:
+                                Boolean(activeFeedback) || submittingAnswer || idx === arr.length - 1
+                                  ? 'not-allowed'
+                                  : 'pointer',
+                            }}
+                          >
+                            ↓
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {!activeFeedback && (
+                      <button
+                        type="button"
+                        disabled={submittingAnswer}
+                        onClick={() =>
+                          handleAnswerSubmit(
+                            (puzzleOrder.length > 0 ? puzzleOrder : activeQuestion.choices || []).join(
+                              ' | '
+                            )
+                          )
+                        }
+                        style={{
+                          marginTop: '4px',
+                          height: '42px',
+                          padding: '0 20px',
+                          borderRadius: '8px',
+                          backgroundColor: accentHex,
+                          border: 'none',
+                          color: '#090d16',
+                          fontSize: '14px',
+                          fontWeight: 800,
+                          cursor: submittingAnswer ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        Xác nhận thứ tự đã sắp xếp
+                      </button>
+                    )}
+                  </div>
+                ) : Array.isArray(activeQuestion.choices) && activeQuestion.choices.length > 0 ? (
                   <div
                     style={{
                       display: 'grid',
@@ -2688,7 +2995,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 }}
               >
                 <div style={{ padding: '14px 16px', borderRight: '1px solid #222d42' }}>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>Tổng điểm</div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>Tổng điểm màn chơi</div>
                   <div
                     data-testid="victory-total-score"
                     style={{
@@ -2701,6 +3008,23 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     {(mode === 'LIVE_SESSION'
                       ? (liveFinalResult?.totalScore ?? liveScore)
                       : previewScore) + skillBonusScore}
+                  </div>
+                  <div
+                    data-testid="victory-score-breakdown"
+                    style={{
+                      fontSize: '11px',
+                      color: '#94a3b8',
+                      marginTop: '4px',
+                      lineHeight: 1.35,
+                    }}
+                  >
+                    Điểm câu hỏi (lưu báo cáo):{' '}
+                    <strong style={{ color: '#f8fafc' }}>
+                      {mode === 'LIVE_SESSION'
+                        ? (liveFinalResult?.totalScore ?? liveScore)
+                        : previewScore}
+                    </strong>
+                    {skillBonusScore > 0 ? ` · Thưởng thao tác: +${skillBonusScore}` : ''}
                   </div>
                 </div>
 

@@ -107,16 +107,36 @@ export class GameSession {
           ? [...question.choices]
           : undefined;
 
+    const sanitizedSliderConfig =
+      question.type === 'SLIDER' && question.sliderConfig
+        ? {
+            min: question.sliderConfig.min,
+            max: question.sliderConfig.max,
+            step: question.sliderConfig.step,
+            ...(question.sliderConfig.unit ? { unit: question.sliderConfig.unit } : {}),
+          }
+        : undefined;
+
+    const deadlineAt = this.timer.getDeadline();
+    const rawRemainingSec = Math.max(0, Math.ceil(this.timer.getRemainingTimeMs() / 1000));
+    const remainingTimeSeconds =
+      this.specification.gameType === 'ADVENTURE'
+        ? Math.min(this.specification.settings.timePerQuestion, rawRemainingSec)
+        : rawRemainingSec;
+
     return {
       id: question.id,
       type: question.type,
       question: question.question,
       choices: sanitizedChoices,
+      ...(sanitizedSliderConfig ? { sliderConfig: sanitizedSliderConfig } : {}),
       difficulty: question.difficulty,
       crosswordClue: question.crosswordClue,
       questionIndex: this.currentQuestionIndex,
       totalQuestions: this.specification.questions.length,
       timePerQuestion: this.specification.settings.timePerQuestion,
+      remainingTimeSeconds,
+      ...(deadlineAt !== null ? { deadlineAt } : {}),
     };
   }
 
@@ -254,7 +274,7 @@ export class GameSession {
       throw new AppError('INVALID_GAME_STATE', 'Cannot advance an abandoned session.', 400);
     }
     if (this.state === 'QUESTION_ACTIVE') {
-      if (!this.timer.isExpired()) {
+      if (!this.timer.isExpired(-500)) {
         throw new AppError(
           'INVALID_GAME_STATE',
           'Cannot advance while the current question is still active. Please submit an answer first.',

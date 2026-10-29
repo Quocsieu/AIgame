@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { LIMITS } from '../config/limits.js';
 import { AdventureConfig } from '../contracts/adventure.contract.js';
 import { CanonicalDocument } from '../contracts/canonical.contract.js';
@@ -32,6 +33,7 @@ export interface PersistedGameSummary {
   gameId: string;
   ownerUserId: string | null;
   isPublic: boolean;
+  coverImageUrl?: string | null;
   title: string;
   description: string;
   gameType: GameType;
@@ -67,6 +69,7 @@ export interface PersistedPracticeSessionRecord {
   finishedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  isExternalPlayOnOwnedGame?: boolean;
 }
 
 export interface PersistedRoomHistoryRecord {
@@ -86,6 +89,7 @@ export interface PersistedRoomHistoryRecord {
   finishedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  isExternalPlayOnOwnedGame?: boolean;
 }
 
 export class PersistenceRepository {
@@ -231,7 +235,6 @@ export class PersistenceRepository {
     });
   }
 
-
   /**
    * Persists a GameSpecification and all its questions transactionally.
    */
@@ -244,9 +247,9 @@ export class PersistenceRepository {
 
     runInTransaction((db) => {
       const existing = db
-        .prepare('SELECT owner_user_id, is_public, created_at FROM games WHERE game_id = ?')
+        .prepare('SELECT owner_user_id, is_public, cover_image_url, created_at FROM games WHERE game_id = ?')
         .get(spec.gameId) as
-        | { owner_user_id: string | null; is_public: number; created_at: string }
+        | { owner_user_id: string | null; is_public: number; cover_image_url: string | null; created_at: string }
         | undefined;
 
       const resolvedOwner =
@@ -267,20 +270,26 @@ export class PersistenceRepository {
               ? Boolean(existing.is_public)
               : false;
 
+      const resolvedCoverUrl =
+        spec.coverImageUrl !== undefined
+          ? spec.coverImageUrl
+          : existing?.cover_image_url ?? null;
+
       const createdAt = existing ? existing.created_at : spec.generatedAt || nowIso;
 
       db.prepare(
         `INSERT INTO games (
           game_id, owner_user_id, is_public, is_password_protected, password_hash,
-          title, description, game_type,
+          cover_image_url, title, description, game_type,
           settings_json, source_summary_json, diagnostics_json, generated_at,
           created_at, updated_at
-        ) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(game_id) DO UPDATE SET
           owner_user_id = excluded.owner_user_id,
           is_public = excluded.is_public,
           is_password_protected = 0,
           password_hash = NULL,
+          cover_image_url = excluded.cover_image_url,
           title = excluded.title,
           description = excluded.description,
           game_type = excluded.game_type,
@@ -293,6 +302,7 @@ export class PersistenceRepository {
         spec.gameId,
         resolvedOwner ?? null,
         resolvedPublic ? 1 : 0,
+        resolvedCoverUrl,
         spec.title,
         spec.description ?? '',
         spec.gameType,
@@ -309,9 +319,9 @@ export class PersistenceRepository {
       const insertQ = db.prepare(
         `INSERT INTO game_questions (
           game_id, question_id, position, question_type, question_text,
-          choices_json, correct_answer, accepted_alternatives_json, explanation,
+          choices_json, slider_config_json, correct_answer, accepted_alternatives_json, explanation,
           difficulty, source_reference_json, crossword_clue, crossword_answer
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
 
       spec.questions.forEach((q, idx) => {
@@ -322,6 +332,7 @@ export class PersistenceRepository {
           q.type,
           q.question,
           q.choices ? JSON.stringify(q.choices) : null,
+          q.sliderConfig ? JSON.stringify(q.sliderConfig) : null,
           q.correctAnswer,
           q.acceptedAlternatives ? JSON.stringify(q.acceptedAlternatives) : null,
           q.explanation ?? null,
@@ -357,6 +368,74 @@ export class PersistenceRepository {
     };
   }
 
+  public getGameCoverMetadata(gameId: string): {
+    coverImageUrl: string | null;
+    coverImagePromptHash: string | null;
+    coverImageUpdatedAt: string | null;
+  } | undefined {
+    const db = getDatabase();
+    const row = db
+      .prepare('SELECT cover_image_url, cover_image_prompt_hash, cover_image_updated_at FROM games WHERE game_id = ?')
+      .get(gameId) as
+      | { cover_image_url: string | null; cover_image_prompt_hash: string | null; cover_image_updated_at: string | null }
+      | undefined;
+
+    if (!row) return undefined;
+    return {
+      coverImageUrl: row.cover_image_url ? String(row.cover_image_url) : null,
+      coverImagePromptHash: row.cover_image_prompt_hash ? String(row.cover_image_prompt_hash) : null,
+      coverImageUpdatedAt: row.cover_image_updated_at ? String(row.cover_image_updated_at) : null,
+    };
+  }
+
+  public updateGameCover(
+    gameId: string,
+    coverImageUrl: string | null,
+    promptHash: string | null
+  ): boolean {
+    const db = getDatabase();
+    const nowIso = new Date().toISOString();
+    const res = db
+      .prepare(
+        `UPDATE games
+         SET cover_image_url = ?, cover_image_prompt_hash = ?, cover_image_updated_at = ?, updated_at = ?
+         WHERE game_id = ?`
+      )
+      .run(coverImageUrl, promptHash, nowIso, nowIso, gameId);
+    return Number(res.changes || 0) > 0;
+  }
+
+  public duplicateGame(
+    sourceGameId: string,
+    newOwnerUserId: string | null,
+    customTitle?: string
+  ): GameSpecification | undefined {
+    const existing = this.getGameSpecificationById(sourceGameId);
+    if (!existing) return undefined;
+
+    const nowIso = new Date().toISOString();
+    const newGameId = `game_${crypto.randomUUID()}`;
+    const baseTitle = customTitle?.trim() || `${existing.title} (Bản sao)`;
+    const safeTitle = baseTitle.slice(0, 100);
+
+    const duplicatedSpec: GameSpecification = {
+      ...existing,
+      gameId: newGameId,
+      ownerUserId: newOwnerUserId,
+      isPublic: false,
+      coverImageUrl: existing.coverImageUrl ?? null,
+      title: safeTitle,
+      questions: existing.questions.map((q, idx) => ({
+        ...q,
+        id: `q_${idx + 1}_${crypto.randomUUID().slice(0, 8)}`,
+      })),
+      generatedAt: nowIso,
+    };
+
+    this.saveGameSpecification(duplicatedSpec, newOwnerUserId, false);
+    return duplicatedSpec;
+  }
+
   public getGameSpecificationById(gameId: string): GameSpecification | undefined {
     const db = getDatabase();
     const gameRow = db
@@ -382,6 +461,13 @@ export class PersistenceRepository {
       };
       if (row.choices_json) {
         q.choices = JSON.parse(String(row.choices_json));
+      }
+      if (row.slider_config_json) {
+        try {
+          q.sliderConfig = JSON.parse(String(row.slider_config_json));
+        } catch {
+          // ignore malformed sliderConfig
+        }
       }
       if (row.accepted_alternatives_json) {
         q.acceptedAlternatives = JSON.parse(String(row.accepted_alternatives_json));
@@ -415,6 +501,9 @@ export class PersistenceRepository {
     if (gameRow.is_public !== undefined && gameRow.is_public !== null) {
       spec.isPublic = Boolean(gameRow.is_public);
     }
+    if (gameRow.cover_image_url) {
+      spec.coverImageUrl = String(gameRow.cover_image_url);
+    }
     if (gameRow.diagnostics_json) {
       spec.diagnostics = JSON.parse(String(gameRow.diagnostics_json));
     }
@@ -437,39 +526,71 @@ export class PersistenceRepository {
     limit: number;
     offset: number;
     hasMore: boolean;
+    counts: {
+      totalAll: number;
+      publishedCount: number;
+      draftCount: number;
+      ownedCount: number;
+    };
+    scopeGameIds: string[];
   } {
     const db = getDatabase();
     const limit = Math.min(100, Math.max(1, options.limit ?? 25));
     const offset = Math.max(0, options.offset ?? 0);
 
-    const conditions: string[] = [];
-    const params: any[] = [];
+    const baseScopeConditions: string[] = [];
+    const baseScopeParams: any[] = [];
 
     if (options.scope === 'public') {
-      conditions.push('is_public = 1');
+      baseScopeConditions.push('is_public = 1');
     } else if (options.scope === 'mine') {
       if (options.userId) {
-        conditions.push('owner_user_id = ?');
-        params.push(options.userId);
+        baseScopeConditions.push('owner_user_id = ?');
+        baseScopeParams.push(options.userId);
       } else {
-        conditions.push('0 = 1');
-      }
-
-      if (options.status === 'PUBLISHED') {
-        conditions.push('is_public = 1');
-      } else if (options.status === 'DRAFT') {
-        conditions.push('is_public = 0');
+        baseScopeConditions.push('owner_user_id IS NULL');
       }
     } else {
       if (!options.isAdmin) {
         if (options.userId) {
-          conditions.push('(owner_user_id = ? OR is_public = 1)');
-          params.push(options.userId);
+          baseScopeConditions.push('(owner_user_id = ? OR is_public = 1)');
+          baseScopeParams.push(options.userId);
         } else {
-          conditions.push('(owner_user_id IS NULL OR is_public = 1)');
+          baseScopeConditions.push('(owner_user_id IS NULL OR is_public = 1)');
         }
       }
+    }
 
+    const baseScopeWhere =
+      baseScopeConditions.length > 0 ? `WHERE ${baseScopeConditions.join(' AND ')}` : '';
+    const ownedSqlCondition = options.userId ? 'owner_user_id = ?' : 'owner_user_id IS NULL';
+    const ownedParams = options.userId ? [options.userId] : [];
+
+    const aggregateRow = db
+      .prepare(
+        `SELECT
+          COUNT(*) as total_all,
+          COALESCE(SUM(CASE WHEN is_public = 1 THEN 1 ELSE 0 END), 0) as published_count,
+          COALESCE(SUM(CASE WHEN is_public = 0 THEN 1 ELSE 0 END), 0) as draft_count,
+          COALESCE(SUM(CASE WHEN ${ownedSqlCondition} THEN 1 ELSE 0 END), 0) as owned_count
+        FROM games ${baseScopeWhere}`
+      )
+      .get(...ownedParams, ...baseScopeParams) as {
+      total_all: number;
+      published_count: number;
+      draft_count: number;
+      owned_count: number;
+    };
+
+    const scopeIdRows = db
+      .prepare(`SELECT game_id FROM games ${baseScopeWhere}`)
+      .all(...baseScopeParams) as { game_id: string }[];
+    const scopeGameIds = scopeIdRows.map((r) => String(r.game_id));
+
+    const conditions: string[] = [...baseScopeConditions];
+    const params: any[] = [...baseScopeParams];
+
+    if (options.scope !== 'public') {
       if (options.status === 'PUBLISHED') {
         conditions.push('is_public = 1');
       } else if (options.status === 'DRAFT') {
@@ -507,6 +628,7 @@ export class PersistenceRepository {
         gameId: String(row.game_id),
         ownerUserId: row.owner_user_id ? String(row.owner_user_id) : null,
         isPublic: Boolean(row.is_public),
+        ...(row.cover_image_url ? { coverImageUrl: String(row.cover_image_url) } : {}),
         title: String(row.title),
         description: String(row.description),
         gameType: row.game_type as GameType,
@@ -528,7 +650,23 @@ export class PersistenceRepository {
       limit,
       offset,
       hasMore: offset + games.length < total,
+      counts: {
+        totalAll: Number(aggregateRow?.total_all || 0),
+        publishedCount: Number(aggregateRow?.published_count || 0),
+        draftCount: Number(aggregateRow?.draft_count || 0),
+        ownedCount: Number(aggregateRow?.owned_count || 0),
+      },
+      scopeGameIds,
     };
+  }
+
+  public countGamesByCoverUrl(coverImageUrl: string): number {
+    if (!coverImageUrl) return 0;
+    const db = getDatabase();
+    const row = db
+      .prepare('SELECT COUNT(*) as cnt FROM games WHERE cover_image_url = ?')
+      .get(coverImageUrl) as { cnt: number } | undefined;
+    return Number(row?.cnt || 0);
   }
 
   public deleteGame(gameId: string): boolean {
@@ -570,7 +708,7 @@ export class PersistenceRepository {
     gameTitle: string;
     gameType: GameType;
     scoringMode: ScoringMode;
-  adventureConfig?: AdventureConfig;
+    adventureConfig?: AdventureConfig;
     state: string;
     totalQuestions: number;
     answeredQuestions: number;
@@ -657,6 +795,7 @@ export class PersistenceRepository {
     userId?: string | null;
     gameId?: string;
     onlyFinished?: boolean;
+    includeOwnedGames?: boolean;
     limit?: number;
     offset?: number;
   } = {}): PersistedPracticeSessionRecord[] {
@@ -670,6 +809,11 @@ export class PersistenceRepository {
     if (options.userId !== undefined) {
       if (options.userId === null) {
         conditions.push('owner_user_id IS NULL');
+      } else if (options.includeOwnedGames !== false) {
+        conditions.push(
+          '(owner_user_id = ? OR game_id IN (SELECT game_id FROM games WHERE owner_user_id = ?))'
+        );
+        params.push(options.userId, options.userId);
       } else {
         conditions.push('owner_user_id = ?');
         params.push(options.userId);
@@ -692,7 +836,24 @@ export class PersistenceRepository {
       )
       .all(...params, limit, offset) as Record<string, any>[];
 
-    return rows.map(r => this.mapPracticeSessionRow(r));
+    return rows.map(r => {
+      const mapped = this.mapPracticeSessionRow(r);
+      if (options.userId && mapped.ownerUserId && mapped.ownerUserId !== options.userId) {
+        // Redact foreign player's userId when creator views plays on their owned game
+        return {
+          ...mapped,
+          ownerUserId: null,
+          isExternalPlayOnOwnedGame: true,
+        };
+      }
+      if (options.userId && !mapped.ownerUserId) {
+        return {
+          ...mapped,
+          isExternalPlayOnOwnedGame: true,
+        };
+      }
+      return mapped;
+    });
   }
 
   private mapPracticeSessionRow(row: Record<string, any>): PersistedPracticeSessionRecord {
@@ -731,7 +892,7 @@ export class PersistenceRepository {
     gameTitle: string;
     gameType: GameType;
     scoringMode: ScoringMode;
-  adventureConfig?: AdventureConfig;
+    adventureConfig?: AdventureConfig;
     state: string;
     playerCount: number;
     totalQuestions: number;
@@ -811,6 +972,7 @@ export class PersistenceRepository {
   public listRoomHistory(options: {
     userId?: string | null;
     gameId?: string;
+    includeOwnedGames?: boolean;
     limit?: number;
     offset?: number;
   } = {}): PersistedRoomHistoryRecord[] {
@@ -824,6 +986,11 @@ export class PersistenceRepository {
     if (options.userId !== undefined) {
       if (options.userId === null) {
         conditions.push('owner_user_id IS NULL');
+      } else if (options.includeOwnedGames !== false) {
+        conditions.push(
+          '(owner_user_id = ? OR game_id IN (SELECT game_id FROM games WHERE owner_user_id = ?))'
+        );
+        params.push(options.userId, options.userId);
       } else {
         conditions.push('owner_user_id = ?');
         params.push(options.userId);
@@ -842,7 +1009,16 @@ export class PersistenceRepository {
       )
       .all(...params, limit, offset) as Record<string, any>[];
 
-    return rows.map(r => this.mapRoomHistoryRow(r));
+    return rows.map(r => {
+      const mapped = this.mapRoomHistoryRow(r);
+      if (options.userId && mapped.ownerUserId && mapped.ownerUserId !== options.userId) {
+        return {
+          ...mapped,
+          ownerUserId: null,
+        };
+      }
+      return mapped;
+    });
   }
 
   public getAdminOverview(): {

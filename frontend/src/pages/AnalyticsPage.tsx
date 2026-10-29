@@ -15,6 +15,7 @@ import {
   QrCodeIcon,
   RefreshIcon,
   SearchIcon,
+  SparklesIcon,
   SpinnerIcon,
   TrashIcon,
   UsersIcon,
@@ -26,6 +27,7 @@ import {
   deleteAllSavedGames,
   deleteSavedGame,
   downloadGameExport,
+  duplicateGameApi,
   endPracticeSession,
   fetchCurrentUser,
   fetchGameById,
@@ -33,6 +35,7 @@ import {
   fetchRoomQr,
   fetchSavedGames,
   fetchWhoAmI,
+  generateGameCoverApi,
   publishGame,
   saveEditedQuestions,
 } from '../services/api.js';
@@ -88,8 +91,6 @@ export const formatGameTypeName = (type: string): string => {
       return 'Puzzle — Sắp xếp thứ tự';
     case 'SLIDER':
       return 'Slider — Thanh trượt giá trị';
-    case 'PIN_ANSWER':
-      return 'Pin Answer — Ghim vị trí';
     case 'CROSSWORD':
       return 'Ô chữ (Legacy)';
     case 'MIXED':
@@ -157,6 +158,14 @@ const DISCOVER_FORMAT_COLLECTIONS: FormatCollectionItem[] = [
     badgeBg: 'var(--accent-emerald-subtle)',
   },
   {
+    id: 'SLIDER',
+    label: 'Slider — Thanh trượt giá trị',
+    shortDesc: 'Kéo thanh trượt để chọn con số, tỷ lệ, mốc năm hoặc thông số chính xác.',
+    mechanicTag: 'Slider • Định lượng',
+    accentColor: 'var(--accent-violet)',
+    badgeBg: 'var(--accent-violet-subtle)',
+  },
+  {
     id: 'ADVENTURE',
     label: 'Đi cảnh theo ngành',
     shortDesc: 'Nhập vai thực hành bối cảnh nghề nghiệp thực tế kết hợp vượt chướng ngại vật.',
@@ -189,6 +198,30 @@ export const GameCoverIllustration: React.FC<{
   game: PersistedGameSummary;
   isFormatPreview?: boolean;
 }> = ({ game, isFormatPreview = false }) => {
+  const [hasImgError, setHasImgError] = useState(false);
+
+  useEffect(() => {
+    setHasImgError(false);
+  }, [game.coverImageUrl]);
+
+  if (!isFormatPreview && game.coverImageUrl && !hasImgError) {
+    return (
+      <img
+        src={game.coverImageUrl}
+        alt={game.title || 'Ảnh bìa trò chơi'}
+        loading="lazy"
+        onError={() => setHasImgError(true)}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'cover',
+          display: 'block',
+          backgroundColor: 'var(--discover-cover-bg, #111628)',
+        }}
+      />
+    );
+  }
+
   const isAdventure = game.gameType === 'ADVENTURE';
   const rawIndustry = [
     game.adventureConfig?.industryId || '',
@@ -672,6 +705,37 @@ export const GameCoverIllustration: React.FC<{
     );
   }
 
+  if (game.gameType === 'SLIDER') {
+    return (
+      <svg
+        viewBox="0 0 320 136"
+        width="100%"
+        height="100%"
+        preserveAspectRatio="xMidYMid slice"
+        aria-hidden="true"
+        style={{ display: 'block', backgroundColor: 'var(--cover-mixed-bg, #16132b)' }}
+      >
+        <rect width="320" height="136" fill="var(--cover-mixed-bg, #16132b)" />
+        <circle cx="272" cy="28" r="46" fill="#ae3ec9" fillOpacity="0.14" />
+        <circle cx="48" cy="108" r="38" fill="#38bdf8" fillOpacity="0.1" />
+        {/* Value Display Pill */}
+        <rect x="96" y="18" width="128" height="36" rx="10" fill={panelFill} stroke="#ae3ec9" strokeWidth="1.8" />
+        <text x="160" y="41" textAnchor="middle" fill="#ae3ec9" fontSize="16" fontWeight="900">
+          75 %
+        </text>
+        {/* Slider Track */}
+        <rect x="34" y="76" width="252" height="12" rx="6" fill={panelFill} stroke="#ae3ec9" strokeWidth="1.2" strokeOpacity="0.5" />
+        <rect x="34" y="76" width="189" height="12" rx="6" fill="#ae3ec9" />
+        {/* Slider Thumb */}
+        <circle cx="223" cy="82" r="13" fill="#ffffff" stroke="#ae3ec9" strokeWidth="4" />
+        {/* Min / Max ticks */}
+        <text x="34" y="108" fill={inkMuted} fontSize="10" fontWeight="800">0%</text>
+        <text x="160" y="108" textAnchor="middle" fill={inkMuted} fontSize="10" fontWeight="700">50%</text>
+        <text x="286" y="108" textAnchor="end" fill={inkMuted} fontSize="10" fontWeight="800">100%</text>
+      </svg>
+    );
+  }
+
   // MIXED default — Multi-Format Prism Arena
   return (
     <svg
@@ -742,6 +806,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
 
   const [savedGames, setSavedGames] = useState<PersistedGameSummary[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [repoCounts, setRepoCounts] = useState<{
+    totalAll: number;
+    publishedCount: number;
+    draftCount: number;
+    ownedCount: number;
+    activeCount?: number;
+  } | null>(null);
   const [page, setPage] = useState(1);
   const [, setHasMore] = useState(false);
 
@@ -812,6 +883,69 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     roomCode: string;
   } | null>(null);
   const [isClosingRoom, setIsClosingRoom] = useState(false);
+  const [generatingCoverGameId, setGeneratingCoverGameId] = useState<string | null>(null);
+  const [duplicatingGameId, setDuplicatingGameId] = useState<string | null>(null);
+
+  const handleGenerateAiCover = async (
+    game: Pick<PersistedGameSummary, 'gameId' | 'title' | 'coverImageUrl'>,
+    forceRegenerate?: boolean
+  ) => {
+    if (generatingCoverGameId) return;
+    setGeneratingCoverGameId(game.gameId);
+    try {
+      const res = await generateGameCoverApi(
+        game.gameId,
+        forceRegenerate ?? Boolean(game.coverImageUrl)
+      );
+      if (res.coverImageUrl) {
+        setSavedGames((prev) =>
+          prev.map((item) =>
+            item.gameId === game.gameId ? { ...item, coverImageUrl: res.coverImageUrl } : item
+          )
+        );
+        if (activeGameSpec?.gameId === game.gameId) {
+          setActiveGameSpec({ ...activeGameSpec, coverImageUrl: res.coverImageUrl });
+        }
+      }
+      if (res.generated || res.cached) {
+        toast.success(
+          `Đã cập nhật ảnh bìa AI cho "${game.title}"!`,
+          'Tạo ảnh bìa AI thành công'
+        );
+      } else {
+        toast.info(
+          res.reason ||
+            'Dịch vụ ảnh AI hiện chưa khả dụng. Hệ thống tiếp tục hiển thị ảnh bìa minh họa mặc định.',
+          'Sử dụng ảnh bìa mặc định'
+        );
+      }
+    } catch (err: any) {
+      toast.warning(
+        err?.message ||
+          'Không thể tạo ảnh bìa AI lúc này. Hệ thống giữ ảnh bìa minh họa mặc định.',
+        'Giữ ảnh bìa mặc định'
+      );
+    } finally {
+      setGeneratingCoverGameId(null);
+    }
+  };
+
+  const handleDuplicateGame = async (game: Pick<PersistedGameSummary, 'gameId' | 'title'>) => {
+    if (duplicatingGameId) return;
+    setDuplicatingGameId(game.gameId);
+    try {
+      const duplicated = await duplicateGameApi(game.gameId);
+      toast.success(
+        `Đã sao chép "${duplicated.title}" vào Thư viện của bạn!`,
+        'Sao chép thành công'
+      );
+      await loadSavedGames(1, searchQuery, selectedTypeFilter, statusFilter, discoverTab);
+    } catch (err: any) {
+      toast.error(err?.message || 'Không thể sao chép bộ câu hỏi.', 'Lỗi sao chép');
+    } finally {
+      setDuplicatingGameId(null);
+    }
+  };
 
   useEffect(() => {
     Promise.all([fetchWhoAmI().catch(() => null), fetchCurrentUser().catch(() => null)]).then(
@@ -850,12 +984,15 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       const data = await fetchSavedGames({
         limit: fetchLimit,
         offset,
-        gameType: isLibraryMode && gameType !== 'ALL' ? gameType : undefined,
-        search: isLibraryMode ? search.trim() || undefined : undefined,
+        gameType: gameType !== 'ALL' ? gameType : undefined,
+        search: search.trim() || undefined,
         status: isLibraryMode ? effectiveStatus : 'ALL',
         scope: isLibraryMode ? scopeParam : 'manage',
       });
       setSavedGames(data.games || []);
+      if (data.counts) {
+        setRepoCounts(data.counts);
+      }
       const total = data.total ?? (data.games ? data.games.length : 0);
       setTotalCount(total);
       setHasMore(Boolean(data.hasMore ?? offset + (data.games?.length || 0) < total));
@@ -920,10 +1057,6 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!isLibraryMode && onNavigateToLibrary) {
-      onNavigateToLibrary({ search: searchQuery.trim(), nonce: Date.now() });
-      return;
-    }
     setPage(1);
     loadSavedGames(1, searchQuery, selectedTypeFilter, statusFilter, discoverTab);
   };
@@ -994,8 +1127,18 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       spec.questions.map((q) => ({
         ...q,
         choices: q.choices ? [...q.choices] : undefined,
+        sliderConfig: q.sliderConfig ? { ...q.sliderConfig } : undefined,
       }))
     );
+  };
+
+  const canManageGame = (game: { ownerUserId?: string | null } | null | undefined): boolean => {
+    if (!game) return false;
+    if (currentUser?.role === 'ADMIN') return true;
+    if (currentUser?.userId) {
+      return game.ownerUserId === currentUser.userId;
+    }
+    return !game.ownerUserId;
   };
 
   const handleViewOrEditGame = async (gameId: string, startInEditMode: boolean = false) => {
@@ -1004,7 +1147,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       const spec = await fetchGameById(gameId, { mode: 'manage' });
       setActiveGameSpec(spec);
       syncEditorFromSpec(spec);
-      setIsEditMode(startInEditMode);
+      setIsEditMode(startInEditMode && canManageGame(spec));
     } catch (err: any) {
       toast.error(err.message || 'Không thể tải chi tiết bộ câu hỏi.', 'Lỗi');
     } finally {
@@ -1174,14 +1317,46 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         if (idx !== index) return q;
         const updated = { ...q, ...patch };
         if (patch.type) {
-          if (patch.type === 'MULTIPLE_CHOICE' && (!updated.choices || updated.choices.length !== 4)) {
+          if (
+            (patch.type === 'MULTIPLE_CHOICE' || patch.type === 'QUIZ') &&
+            (!updated.choices || updated.choices.length !== 4)
+          ) {
             updated.choices = ['Lựa chọn A', 'Lựa chọn B', 'Lựa chọn C', 'Lựa chọn D'];
             updated.correctAnswer = 'Lựa chọn A';
-          } else if (patch.type === 'QUICK_BUTTON' && (!updated.choices || updated.choices.length < 2)) {
+            updated.sliderConfig = undefined;
+          } else if (
+            (patch.type === 'QUICK_BUTTON' || patch.type === 'TRUE_FALSE') &&
+            (!updated.choices || updated.choices.length < 2)
+          ) {
             updated.choices = ['Đúng', 'Sai'];
             updated.correctAnswer = 'Đúng';
-          } else if (patch.type === 'FILL_IN_THE_BLANK' || patch.type === 'CROSSWORD') {
+            updated.sliderConfig = undefined;
+          } else if (
+            patch.type === 'PUZZLE' &&
+            (!updated.choices || updated.choices.length < 3)
+          ) {
+            updated.choices = ['Bước 1', 'Bước 2', 'Bước 3'];
+            updated.correctAnswer = 'Bước 1 | Bước 2 | Bước 3';
+            updated.sliderConfig = undefined;
+          } else if (patch.type === 'SLIDER') {
             updated.choices = undefined;
+            const cfg = updated.sliderConfig || {
+              min: 0,
+              max: 100,
+              step: 1,
+              correctValue: 50,
+              tolerance: 0,
+              unit: '',
+            };
+            updated.sliderConfig = cfg;
+            updated.correctAnswer = String(cfg.correctValue);
+          } else if (
+            patch.type === 'FILL_IN_THE_BLANK' ||
+            patch.type === 'TYPE_ANSWER' ||
+            patch.type === 'CROSSWORD'
+          ) {
+            updated.choices = undefined;
+            updated.sliderConfig = undefined;
           }
         }
         return updated;
@@ -1202,12 +1377,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   };
 
   const handleDuplicateEditQuestion = (index: number) => {
+    if (editQuestions.length >= 100) {
+      toast.warning('Bộ câu hỏi hỗ trợ tối đa 100 câu hỏi.', 'Đã đạt giới hạn');
+      return;
+    }
     const target = editQuestions[index];
     if (!target) return;
     const cloned: GameQuestion = {
       ...target,
       id: `q_dup_${Date.now()}_${editQuestions.length + 1}`,
       choices: target.choices ? [...target.choices] : undefined,
+      sliderConfig: target.sliderConfig ? { ...target.sliderConfig } : undefined,
     };
     setEditQuestions((prev) => {
       const next = [...prev];
@@ -1219,10 +1399,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
 
   const handleAddEditQuestion = () => {
     if (!activeGameSpec) return;
+    if (editQuestions.length >= 100) {
+      toast.warning('Bộ câu hỏi hỗ trợ tối đa 100 câu hỏi.', 'Đã đạt giới hạn');
+      return;
+    }
+    const configuredAdvType = activeGameSpec.settings?.adventureConfig?.questionTypes?.[0];
     const defaultType: QuestionType =
-      activeGameSpec.gameType === 'MIXED' || activeGameSpec.gameType === 'ADVENTURE'
-        ? 'MULTIPLE_CHOICE'
-        : activeGameSpec.gameType;
+      activeGameSpec.gameType === 'ADVENTURE'
+        ? (configuredAdvType as QuestionType) || 'MULTIPLE_CHOICE'
+        : activeGameSpec.gameType === 'MIXED'
+          ? 'MULTIPLE_CHOICE'
+          : activeGameSpec.gameType;
     const fallbackRef = activeGameSpec.questions[0]?.sourceReference || {
       sourceId: activeGameSpec.sourceSummary?.sources?.[0]?.sourceId || 'src_manual',
       sourceType: activeGameSpec.sourceSummary?.sources?.[0]?.sourceType || 'FILE',
@@ -1233,21 +1420,35 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       id: `q_custom_${Date.now()}_${editQuestions.length + 1}`,
       type: defaultType,
       question:
-        defaultType === 'FILL_IN_THE_BLANK'
-          ? 'Nhập nội dung câu hỏi có chỗ trống ___ tại đây?'
-          : 'Nhập nội dung câu hỏi mới tại đây?',
+        defaultType === 'FILL_IN_THE_BLANK' || defaultType === 'TYPE_ANSWER'
+          ? 'Nhập nội dung câu hỏi tự nhập đáp án tại đây?'
+          : defaultType === 'SLIDER'
+            ? 'Nhập câu hỏi định lượng để chọn giá trị trên thanh trượt?'
+            : defaultType === 'PUZZLE'
+              ? 'Sắp xếp các bước sau theo đúng trình tự:'
+              : 'Nhập nội dung câu hỏi mới tại đây?',
       choices:
-        defaultType === 'MULTIPLE_CHOICE'
+        defaultType === 'MULTIPLE_CHOICE' || defaultType === 'QUIZ'
           ? ['Lựa chọn A', 'Lựa chọn B', 'Lựa chọn C', 'Lựa chọn D']
-          : defaultType === 'QUICK_BUTTON'
+          : defaultType === 'QUICK_BUTTON' || defaultType === 'TRUE_FALSE'
             ? ['Đúng', 'Sai']
-            : undefined,
+            : defaultType === 'PUZZLE'
+              ? ['Bước 1', 'Bước 2', 'Bước 3']
+              : undefined,
+      sliderConfig:
+        defaultType === 'SLIDER'
+          ? { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0, unit: '%' }
+          : undefined,
       correctAnswer:
-        defaultType === 'MULTIPLE_CHOICE'
+        defaultType === 'MULTIPLE_CHOICE' || defaultType === 'QUIZ'
           ? 'Lựa chọn A'
-          : defaultType === 'QUICK_BUTTON'
+          : defaultType === 'QUICK_BUTTON' || defaultType === 'TRUE_FALSE'
             ? 'Đúng'
-            : 'ĐÁP ÁN',
+            : defaultType === 'PUZZLE'
+              ? 'Bước 1 | Bước 2 | Bước 3'
+              : defaultType === 'SLIDER'
+                ? '50'
+                : 'ĐÁP ÁN',
       explanation: 'Giải thích đáp án dựa trên tài liệu nguồn.',
       difficulty: 'MEDIUM',
       sourceReference: fallbackRef,
@@ -1362,19 +1563,25 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       .slice(0, 4);
   }, [savedGames]);
 
-  // Các chỉ số thực tế của trang hiện tại
+  // Các chỉ số thực tế của toàn bộ kho theo phạm vi hiện tại (không bị giới hạn ở 12/24 bản ghi trên trang)
   const summaryStats = useMemo(() => {
-    const publishedOnPage = savedGames.filter((g) => g.isPublic).length;
-    const draftOnPage = savedGames.filter((g) => !g.isPublic).length;
-    const activeLiveCount = savedGames.filter(
-      (g) => g.activeStatus?.hasActiveRoom || g.activeStatus?.hasActiveSession
-    ).length;
+    const publishedOnPage =
+      repoCounts?.publishedCount ?? savedGames.filter((g) => g.isPublic).length;
+    const draftOnPage =
+      repoCounts?.draftCount ?? savedGames.filter((g) => !g.isPublic).length;
+    const activeLiveCount =
+      repoCounts?.activeCount ??
+      savedGames.filter(
+        (g) => g.activeStatus?.hasActiveRoom || g.activeStatus?.hasActiveSession
+      ).length;
+    const totalAllCount = repoCounts?.totalAll ?? totalCount;
     return {
+      totalAllCount,
       publishedOnPage,
       draftOnPage,
       activeLiveCount,
     };
-  }, [savedGames]);
+  }, [repoCounts, savedGames, totalCount]);
 
   // Đếm số lượng bộ câu hỏi theo từng cách chơi thực tế trong kho
   const formatCounts = useMemo(() => {
@@ -2003,26 +2210,98 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         </button>
                       </>
                     )}
+                    {canManageGame(activeGameSpec) && (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => setIsEditMode(true)}
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--accent-amber)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '8px',
+                            padding: '0 14px',
+                            height: '38px',
+                            fontWeight: 700,
+                            fontSize: '0.84rem',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <PencilIcon size={14} />
+                          <span>Sửa game</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleGenerateAiCover(
+                              {
+                                gameId: activeGameSpec.gameId,
+                                title: activeGameSpec.title,
+                                coverImageUrl: activeGameSpec.coverImageUrl,
+                              },
+                              true
+                            )
+                          }
+                          disabled={generatingCoverGameId === activeGameSpec.gameId}
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--primary)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '8px',
+                            padding: '0 12px',
+                            height: '38px',
+                            fontWeight: 700,
+                            fontSize: '0.82rem',
+                            cursor: generatingCoverGameId === activeGameSpec.gameId ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                          title="Tạo hoặc làm mới ảnh bìa minh họa bằng Gemini AI"
+                        >
+                          {generatingCoverGameId === activeGameSpec.gameId ? (
+                            <SpinnerIcon size={14} />
+                          ) : (
+                            <SparklesIcon size={14} />
+                          )}
+                          <span>{activeGameSpec.coverImageUrl ? 'Tạo lại bìa AI' : 'Ảnh bìa AI'}</span>
+                        </button>
+                      </>
+                    )}
                     <button
                       type="button"
-                      onClick={() => setIsEditMode(true)}
+                      onClick={() =>
+                        handleDuplicateGame({
+                          gameId: activeGameSpec.gameId,
+                          title: activeGameSpec.title,
+                        })
+                      }
+                      disabled={duplicatingGameId === activeGameSpec.gameId}
                       style={{
                         backgroundColor: 'var(--bg-input)',
-                        color: 'var(--accent-amber)',
+                        color: 'var(--text-primary)',
                         border: '1px solid var(--border-strong)',
                         borderRadius: '8px',
-                        padding: '0 14px',
+                        padding: '0 12px',
                         height: '38px',
                         fontWeight: 700,
-                        fontSize: '0.84rem',
-                        cursor: 'pointer',
+                        fontSize: '0.82rem',
+                        cursor: duplicatingGameId === activeGameSpec.gameId ? 'not-allowed' : 'pointer',
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '6px',
                       }}
+                      title="Nhân bản bộ câu hỏi này sang bản nháp mới"
                     >
-                      <PencilIcon size={14} />
-                      <span>Sửa game</span>
+                      {duplicatingGameId === activeGameSpec.gameId ? (
+                        <SpinnerIcon size={14} />
+                      ) : (
+                        <PlusIcon size={14} />
+                      )}
+                      <span>Sao chép</span>
                     </button>
                     <button
                       type="button"
@@ -2265,7 +2544,12 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         />
                       </div>
 
-                      {(q.type === 'MULTIPLE_CHOICE' || q.type === 'QUICK_BUTTON') && q.choices && (
+                      {(q.type === 'MULTIPLE_CHOICE' ||
+                        q.type === 'QUIZ' ||
+                        q.type === 'QUICK_BUTTON' ||
+                        q.type === 'TRUE_FALSE' ||
+                        q.type === 'PUZZLE') &&
+                        q.choices && (
                         <div
                           style={{
                             display: 'grid',
@@ -2283,7 +2567,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                                   marginBottom: '4px',
                                 }}
                               >
-                                Lựa chọn {cIdx + 1}
+                                {q.type === 'PUZZLE' ? `Thứ tự #${cIdx + 1}` : `Lựa chọn ${cIdx + 1}`}
                               </label>
                               <input
                                 type="text"
@@ -2293,7 +2577,12 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                                   const oldVal = nextChoices[cIdx];
                                   nextChoices[cIdx] = e.target.value;
                                   const nextPatch: Partial<GameQuestion> = { choices: nextChoices };
-                                  if (q.correctAnswer === oldVal) {
+                                  if (q.type === 'PUZZLE') {
+                                    nextPatch.correctAnswer = nextChoices
+                                      .map((item) => item.trim())
+                                      .filter(Boolean)
+                                      .join(' | ');
+                                  } else if (q.correctAnswer === oldVal) {
                                     nextPatch.correctAnswer = e.target.value;
                                   }
                                   handleUpdateEditQuestion(idx, nextPatch);
@@ -2311,6 +2600,132 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                               />
                             </div>
                           ))}
+                        </div>
+                      )}
+
+                      {q.type === 'SLIDER' && (
+                        <div
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
+                            gap: '8px',
+                            padding: '10px',
+                            borderRadius: '8px',
+                            backgroundColor: 'var(--bg-surface)',
+                            border: '1px solid var(--border-subtle)',
+                          }}
+                        >
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                              Giá trị Min
+                            </label>
+                            <input
+                              type="number"
+                              step="any"
+                              value={q.sliderConfig?.min ?? 0}
+                              onChange={(e) => {
+                                const min = Number(e.target.value);
+                                const prevCfg = q.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                handleUpdateEditQuestion(idx, {
+                                  sliderConfig: { ...prevCfg, min: Number.isFinite(min) ? min : 0 },
+                                });
+                              }}
+                              style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border-strong)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: '0.84rem', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                              Giá trị Max
+                            </label>
+                            <input
+                              type="number"
+                              step="any"
+                              value={q.sliderConfig?.max ?? 100}
+                              onChange={(e) => {
+                                const max = Number(e.target.value);
+                                const prevCfg = q.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                handleUpdateEditQuestion(idx, {
+                                  sliderConfig: { ...prevCfg, max: Number.isFinite(max) ? max : 100 },
+                                });
+                              }}
+                              style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border-strong)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: '0.84rem', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                              Bước nhảy (Step)
+                            </label>
+                            <input
+                              type="number"
+                              step="any"
+                              min={0.0001}
+                              value={q.sliderConfig?.step ?? 1}
+                              onChange={(e) => {
+                                const step = Number(e.target.value);
+                                const prevCfg = q.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                handleUpdateEditQuestion(idx, {
+                                  sliderConfig: { ...prevCfg, step: Number.isFinite(step) && step > 0 ? step : 1 },
+                                });
+                              }}
+                              style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border-strong)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: '0.84rem', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--accent-emerald)', fontWeight: 700, marginBottom: '4px' }}>
+                              Giá trị đúng
+                            </label>
+                            <input
+                              type="number"
+                              step="any"
+                              value={q.sliderConfig?.correctValue ?? Number(q.correctAnswer || 0)}
+                              onChange={(e) => {
+                                const correctValue = Number(e.target.value);
+                                const safeVal = Number.isFinite(correctValue) ? correctValue : 0;
+                                const prevCfg = q.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                handleUpdateEditQuestion(idx, {
+                                  sliderConfig: { ...prevCfg, correctValue: safeVal },
+                                  correctAnswer: String(safeVal),
+                                });
+                              }}
+                              style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--accent-emerald)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', fontWeight: 700, fontSize: '0.84rem', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                              Sai số (± Tolerance)
+                            </label>
+                            <input
+                              type="number"
+                              step="any"
+                              min={0}
+                              value={q.sliderConfig?.tolerance ?? 0}
+                              onChange={(e) => {
+                                const tolerance = Number(e.target.value);
+                                const prevCfg = q.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                handleUpdateEditQuestion(idx, {
+                                  sliderConfig: { ...prevCfg, tolerance: Number.isFinite(tolerance) && tolerance >= 0 ? tolerance : 0 },
+                                });
+                              }}
+                              style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border-strong)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: '0.84rem', boxSizing: 'border-box' }}
+                            />
+                          </div>
+                          <div>
+                            <label style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-secondary)', marginBottom: '4px' }}>
+                              Đơn vị (Unit)
+                            </label>
+                            <input
+                              type="text"
+                              placeholder="%, năm, °C..."
+                              value={q.sliderConfig?.unit || ''}
+                              onChange={(e) => {
+                                const prevCfg = q.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                handleUpdateEditQuestion(idx, {
+                                  sliderConfig: { ...prevCfg, unit: e.target.value },
+                                });
+                              }}
+                              style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border-strong)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)', fontSize: '0.84rem', boxSizing: 'border-box' }}
+                            />
+                          </div>
                         </div>
                       )}
 
@@ -2516,7 +2931,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       lineHeight: 1.2,
                     }}
                   >
-                    {isLibraryMode ? 'Thư viện bộ câu hỏi' : 'Kho Game'}
+                    {isLibraryMode ? 'Thư viện bộ câu hỏi' : 'Khám phá Game & Học liệu'}
                   </h1>
                   <span
                     style={{
@@ -2557,8 +2972,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   }}
                 >
                   {isLibraryMode
-                    ? 'Quản lý toàn bộ các bộ câu hỏi trong kho: lọc theo trạng thái xuất bản, chỉnh sửa, lấy QR hoặc tổ chức phòng chơi trực tiếp.'
-                    : 'Tổng quan kho học liệu tương tác theo cách chơi, chủ đề ngành nghề và các bộ câu hỏi vừa được khởi tạo.'}
+                    ? 'Quản lý toàn bộ các bộ câu hỏi trong kho: lọc theo trạng thái xuất bản, tạo ảnh bìa AI, nhân bản, chỉnh sửa, lấy QR hoặc tổ chức phòng chơi trực tiếp.'
+                    : 'Tìm kiếm và khám phá các bộ câu hỏi tương tác công khai theo định dạng chơi, chủ đề ngành nghề và nội dung mới xuất bản.'}
                 </p>
               </div>
 
@@ -2707,7 +3122,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     placeholder={
                       isLibraryMode
                         ? 'Tìm bộ câu hỏi theo tên game, chủ đề, ngành nghề hoặc mô tả...'
-                        : 'Nhập từ khóa để tìm bộ câu hỏi trong Thư viện...'
+                        : 'Tìm kiếm bộ câu hỏi công khai theo tên, chủ đề hoặc mô tả...'
                     }
                     aria-label="Tìm kiếm kho game"
                     style={{
@@ -2729,10 +3144,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       aria-label="Xóa từ khóa tìm kiếm"
                       onClick={() => {
                         setSearchQuery('');
-                        if (isLibraryMode) {
-                          setPage(1);
-                          loadSavedGames(1, '', selectedTypeFilter, statusFilter, discoverTab);
-                        }
+                        setPage(1);
+                        loadSavedGames(1, '', selectedTypeFilter, statusFilter, discoverTab);
                       }}
                       style={{
                         position: 'absolute',
@@ -2766,7 +3179,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     flexShrink: 0,
                   }}
                 >
-                  {isLibraryMode ? 'Tìm kiếm' : 'Tìm trong Thư viện'}
+                  Tìm kiếm
                 </button>
               </form>
 
@@ -2791,7 +3204,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       fontVariantNumeric: 'tabular-nums',
                     }}
                   >
-                    {totalCount}
+                    {summaryStats.totalAllCount}
                   </div>
                 </div>
                 <div style={{ padding: '8px 12px', borderRight: '1px solid var(--border-subtle)' }}>
@@ -2836,20 +3249,20 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               </div>
             </div>
 
-            {/* B. ĐIỀU HƯỚNG TAB & THANH CÔNG CỤ LỌC / SẮP XẾP (TRONG THƯ VIỆN) */}
-            {isLibraryMode && (
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  flexWrap: 'wrap',
-                  gap: '12px',
-                  paddingTop: '12px',
-                  borderTop: '1px solid var(--border-subtle)',
-                }}
-              >
-                {/* Tabs phân loại dựa trên dữ liệu thực tế */}
+            {/* B. ĐIỀU HƯỚNG TAB & THANH CÔNG CỤ LỌC / SẮP XẾP (KHÁM PHÁ & THƯ VIỆN) */}
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '12px',
+                paddingTop: '12px',
+                borderTop: '1px solid var(--border-subtle)',
+              }}
+            >
+              {/* Tabs phân loại trong Thư viện hoặc nhãn lọc nhanh trong Khám phá */}
+              {isLibraryMode ? (
                 <div
                   role="tablist"
                   aria-label="Phân loại thư viện bộ câu hỏi"
@@ -2895,35 +3308,77 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     );
                   })}
                 </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  {(
+                    [
+                      { key: 'ALL', label: 'Tất cả định dạng' },
+                      { key: 'MULTIPLE_CHOICE', label: 'Quiz' },
+                      { key: 'QUICK_BUTTON', label: 'True/False' },
+                      { key: 'FILL_IN_THE_BLANK', label: 'Type Answer' },
+                      { key: 'PUZZLE', label: 'Puzzle' },
+                      { key: 'SLIDER', label: 'Slider' },
+                      { key: 'ADVENTURE', label: 'Đi cảnh' },
+                    ] as const
+                  ).map((chip) => {
+                    const isActive = selectedTypeFilter === chip.key;
+                    return (
+                      <button
+                        key={chip.key}
+                        id={`discover-format-chip-${chip.key.toLowerCase()}`}
+                        type="button"
+                        onClick={() => setSelectedTypeFilter(chip.key)}
+                        style={{
+                          height: '32px',
+                          padding: '0 12px',
+                          borderRadius: '6px',
+                          border: isActive ? '1px solid var(--primary)' : '1px solid var(--border-subtle)',
+                          backgroundColor: isActive ? 'var(--primary-subtle)' : 'var(--bg-input)',
+                          color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                          fontWeight: isActive ? 700 : 600,
+                          fontSize: '0.78rem',
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {chip.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
 
-                {/* Bộ lọc loại game, trạng thái, ngành nghề, sắp xếp & chuyển đổi Lưới/Bảng */}
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  <select
-                    id="analytics-type-filter"
-                    aria-label="Lọc theo loại game"
-                    value={selectedTypeFilter}
-                    onChange={(e) => setSelectedTypeFilter(e.target.value)}
-                    style={{
-                      padding: '0 10px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-strong)',
-                      backgroundColor: 'var(--bg-input)',
-                      color: 'var(--text-primary)',
-                      fontWeight: 600,
-                      fontSize: '0.8rem',
-                      cursor: 'pointer',
-                      height: '34px',
-                    }}
-                  >
-                    <option value="ALL">Tất cả thể loại</option>
-                    <option value="MULTIPLE_CHOICE">Trắc nghiệm ABCD</option>
-                    <option value="FILL_IN_THE_BLANK">Điền từ</option>
-                    <option value="QUICK_BUTTON">Đúng / Sai</option>
-                    <option value="CROSSWORD">Ô chữ</option>
-                    <option value="MIXED">Hỗn hợp</option>
-                    <option value="ADVENTURE">Đi cảnh theo ngành nghề</option>
-                  </select>
+              {/* Bộ lọc loại game, trạng thái, ngành nghề, sắp xếp & chuyển đổi Lưới/Bảng */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <select
+                  id="analytics-type-filter"
+                  aria-label="Lọc theo loại game"
+                  value={selectedTypeFilter}
+                  onChange={(e) => setSelectedTypeFilter(e.target.value)}
+                  style={{
+                    padding: '0 10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    fontWeight: 600,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    height: '34px',
+                  }}
+                >
+                  <option value="ALL">Tất cả thể loại</option>
+                  <option value="MULTIPLE_CHOICE">Quiz — Trắc nghiệm ABCD</option>
+                  <option value="QUICK_BUTTON">True/False — Đúng / Sai</option>
+                  <option value="FILL_IN_THE_BLANK">Type Answer — Tự nhập đáp án</option>
+                  <option value="PUZZLE">Puzzle — Sắp xếp thứ tự</option>
+                  <option value="SLIDER">Slider — Thanh trượt giá trị</option>
+                  <option value="CROSSWORD">Ô chữ (Legacy)</option>
+                  <option value="MIXED">Hỗn hợp (Legacy)</option>
+                  <option value="ADVENTURE">Đi cảnh theo ngành nghề</option>
+                </select>
 
+                {isLibraryMode && (
                   <select
                     id="analytics-status-filter"
                     aria-label="Lọc theo trạng thái xuất bản"
@@ -2947,39 +3402,14 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     <option value="PUBLISHED">Đã xuất bản</option>
                     <option value="DRAFT">Bản nháp</option>
                   </select>
+                )}
 
-                  {availableIndustries.length > 0 && (
-                    <select
-                      id="analytics-industry-filter"
-                      aria-label="Lọc theo chủ đề ngành nghề"
-                      value={selectedIndustryFilter}
-                      onChange={(e) => setSelectedIndustryFilter(e.target.value)}
-                      style={{
-                        padding: '0 10px',
-                        borderRadius: '6px',
-                        border: '1px solid var(--border-strong)',
-                        backgroundColor: 'var(--bg-input)',
-                        color: 'var(--text-primary)',
-                        fontWeight: 600,
-                        fontSize: '0.8rem',
-                        cursor: 'pointer',
-                        height: '34px',
-                      }}
-                    >
-                      <option value="ALL">Tất cả ngành nghề ({availableIndustries.length})</option>
-                      {availableIndustries.map((ind) => (
-                        <option key={ind.id} value={ind.id}>
-                          {ind.label} ({ind.count})
-                        </option>
-                      ))}
-                    </select>
-                  )}
-
+                {availableIndustries.length > 0 && (
                   <select
-                    id="analytics-sort-select"
-                    aria-label="Sắp xếp danh sách game"
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as SortOptionKey)}
+                    id="analytics-industry-filter"
+                    aria-label="Lọc theo chủ đề ngành nghề"
+                    value={selectedIndustryFilter}
+                    onChange={(e) => setSelectedIndustryFilter(e.target.value)}
                     style={{
                       padding: '0 10px',
                       borderRadius: '6px',
@@ -2992,13 +3422,40 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       height: '34px',
                     }}
                   >
-                    <option value="NEWEST">Sắp xếp: Mới nhất</option>
-                    <option value="UPDATED">Sắp xếp: Cập nhật gần đây</option>
-                    <option value="TITLE_ASC">Sắp xếp: Tên A–Z</option>
-                    <option value="QUESTIONS_DESC">Sắp xếp: Nhiều câu hỏi nhất</option>
+                    <option value="ALL">Tất cả ngành nghề ({availableIndustries.length})</option>
+                    {availableIndustries.map((ind) => (
+                      <option key={ind.id} value={ind.id}>
+                        {ind.label} ({ind.count})
+                      </option>
+                    ))}
                   </select>
+                )}
 
-                  {/* View Layout Toggle */}
+                <select
+                  id="analytics-sort-select"
+                  aria-label="Sắp xếp danh sách game"
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as SortOptionKey)}
+                  style={{
+                    padding: '0 10px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    fontWeight: 600,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                    height: '34px',
+                  }}
+                >
+                  <option value="NEWEST">Sắp xếp: Mới nhất</option>
+                  <option value="UPDATED">Sắp xếp: Cập nhật gần đây</option>
+                  <option value="TITLE_ASC">Sắp xếp: Tên A–Z</option>
+                  <option value="QUESTIONS_DESC">Sắp xếp: Nhiều câu hỏi nhất</option>
+                </select>
+
+                {/* View Layout Toggle (Library mode) */}
+                {isLibraryMode && (
                   <div
                     style={{
                       display: 'inline-flex',
@@ -3045,31 +3502,31 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       Bảng
                     </button>
                   </div>
+                )}
 
-                  {hasActiveFilters && (
-                    <button
-                      id="analytics-reset-filters-btn"
-                      type="button"
-                      onClick={handleResetAllFilters}
-                      style={{
-                        backgroundColor: 'transparent',
-                        color: 'var(--accent-sky)',
-                        border: '1px solid rgba(56, 189, 248, 0.35)',
-                        borderRadius: '6px',
-                        padding: '0 10px',
-                        height: '34px',
-                        fontWeight: 700,
-                        fontSize: '0.78rem',
-                        cursor: 'pointer',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      Xóa bộ lọc
-                    </button>
-                  )}
-                </div>
+                {hasActiveFilters && (
+                  <button
+                    id="analytics-reset-filters-btn"
+                    type="button"
+                    onClick={handleResetAllFilters}
+                    style={{
+                      backgroundColor: 'transparent',
+                      color: 'var(--accent-sky)',
+                      border: '1px solid rgba(56, 189, 248, 0.35)',
+                      borderRadius: '6px',
+                      padding: '0 10px',
+                      height: '34px',
+                      fontWeight: 700,
+                      fontSize: '0.78rem',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Xóa bộ lọc
+                  </button>
+                )}
               </div>
-            )}
+            </div>
           </section>
 
           {/* Error Alert */}
@@ -3265,18 +3722,23 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                     <button
                       type="button"
-                      onClick={() =>
-                        onNavigateToLibrary
-                          ? onNavigateToLibrary({ industry: 'ALL', nonce: Date.now() })
-                          : setSelectedIndustryFilter('ALL')
-                      }
+                      onClick={() => setSelectedIndustryFilter('ALL')}
                       style={{
                         height: '32px',
                         padding: '0 12px',
                         borderRadius: '6px',
-                        border: '1px solid var(--primary)',
-                        backgroundColor: 'var(--accent-sky-subtle)',
-                        color: 'var(--accent-sky)',
+                        border:
+                          selectedIndustryFilter === 'ALL'
+                            ? '1px solid var(--primary)'
+                            : '1px solid var(--border-subtle)',
+                        backgroundColor:
+                          selectedIndustryFilter === 'ALL'
+                            ? 'var(--primary-subtle)'
+                            : 'var(--bg-surface)',
+                        color:
+                          selectedIndustryFilter === 'ALL'
+                            ? 'var(--text-primary)'
+                            : 'var(--text-secondary)',
                         fontWeight: 700,
                         fontSize: '0.8rem',
                         cursor: 'pointer',
@@ -3284,54 +3746,57 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     >
                       Tất cả chủ đề
                     </button>
-                    {availableIndustries.map((ind) => (
-                      <button
-                        key={ind.id}
-                        type="button"
-                        onClick={() =>
-                          onNavigateToLibrary
-                            ? onNavigateToLibrary({ industry: ind.id, nonce: Date.now() })
-                            : setSelectedIndustryFilter(ind.id)
-                        }
-                        style={{
-                          height: '32px',
-                          padding: '0 12px',
-                          borderRadius: '6px',
-                          border: '1px solid var(--border-subtle)',
-                          backgroundColor: 'var(--bg-surface)',
-                          color: 'var(--text-primary)',
-                          fontWeight: 600,
-                          fontSize: '0.8rem',
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        <span>{ind.label}</span>
-                        <span
+                    {availableIndustries.map((ind) => {
+                      const isActiveInd = selectedIndustryFilter === ind.id;
+                      return (
+                        <button
+                          key={ind.id}
+                          type="button"
+                          onClick={() => setSelectedIndustryFilter(ind.id)}
                           style={{
-                            fontSize: '0.72rem',
-                            color: 'var(--text-secondary)',
-                            fontVariantNumeric: 'tabular-nums',
+                            height: '32px',
+                            padding: '0 12px',
+                            borderRadius: '6px',
+                            border: isActiveInd
+                              ? '1px solid var(--primary)'
+                              : '1px solid var(--border-subtle)',
+                            backgroundColor: isActiveInd
+                              ? 'var(--primary-subtle)'
+                              : 'var(--bg-surface)',
+                            color: 'var(--text-primary)',
+                            fontWeight: isActiveInd ? 700 : 600,
+                            fontSize: '0.8rem',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            whiteSpace: 'nowrap',
                           }}
                         >
-                          {ind.count}
-                        </span>
-                      </button>
-                    ))}
+                          <span>{ind.label}</span>
+                          <span
+                            style={{
+                              fontSize: '0.72rem',
+                              color: 'var(--text-secondary)',
+                              fontVariantNumeric: 'tabular-nums',
+                            }}
+                          >
+                            {ind.count}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
                 </section>
               )}
 
-              {/* C3. KỆ GAME MỚI TẠO GẦN ĐÂY TRONG KHO GAME */}
+              {/* C3. DANH SÁCH BỘ CÂU HỎI KHÁM PHÁ (KẾT QUẢ LỌC THỰC TẾ TRÊN TRANG KHÁM PHÁ) */}
               <section
-                aria-label="Game mới tạo gần đây"
+                aria-label="Danh sách bộ câu hỏi khám phá"
                 style={{
                   backgroundColor: 'var(--bg-surface)',
                   border: '1px solid var(--border-subtle)',
-                  borderRadius: '8px',
+                  borderRadius: '10px',
                   padding: '18px',
                   display: 'flex',
                   flexDirection: 'column',
@@ -3340,11 +3805,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               >
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
                   <div>
-                    <h2 style={{ margin: 0, fontSize: '1.02rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                      Mới tạo gần đây
+                    <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                      {hasActiveFilters ? 'Kết quả khám phá phù hợp' : 'Bộ câu hỏi khám phá & Mới xuất bản'}
                     </h2>
-                    <p style={{ margin: '2px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                      Các bộ câu hỏi vừa được khởi tạo mới nhất trong hệ thống
+                    <p style={{ margin: '2px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+                      Hiển thị {displayedGames.length} / {totalCount} bộ câu hỏi khả dụng để xem chi tiết, lấy QR hoặc chơi ngay
                     </p>
                   </div>
                   {onNavigateToLibrary && (
@@ -3364,7 +3829,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         padding: 0,
                       }}
                     >
-                      <span>Xem tất cả trong Thư viện</span>
+                      <span>Quản lý toàn bộ trong Thư viện</span>
                       <ArrowRightIcon size={13} />
                     </button>
                   )}
@@ -3374,51 +3839,77 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   <div
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-                      gap: '12px',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                      gap: '14px',
                     }}
                   >
-                    {Array.from({ length: 4 }).map((_, idx) => (
+                    {Array.from({ length: 6 }).map((_, idx) => (
                       <div
                         key={`overview-skeleton-${idx}`}
                         style={{
-                          height: '96px',
-                          borderRadius: '8px',
+                          height: '240px',
+                          borderRadius: '10px',
                           backgroundColor: 'var(--bg-input)',
                           border: '1px solid var(--border-subtle)',
                         }}
                       />
                     ))}
                   </div>
-                ) : recentlyCreatedShelf.length === 0 ? (
+                ) : displayedGames.length === 0 ? (
                   <div
                     style={{
-                      padding: '24px 16px',
+                      padding: '28px 16px',
                       borderRadius: '8px',
                       backgroundColor: 'var(--bg-input)',
                       border: '1px dashed var(--border-strong)',
                       textAlign: 'center',
                       color: 'var(--text-secondary)',
-                      fontSize: '0.86rem',
+                      fontSize: '0.88rem',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '10px',
                     }}
                   >
-                    Chưa có bộ câu hỏi nào trong kho. Hãy nhấn <strong style={{ color: 'var(--text-primary)' }}>Tạo game</strong> để biên soạn bộ câu hỏi đầu tiên.
+                    <div>
+                      {hasActiveFilters
+                        ? 'Không tìm thấy bộ câu hỏi nào khớp với từ khóa hoặc bộ lọc hiện tại.'
+                        : 'Chưa có bộ câu hỏi nào trong kho. Hãy nhấn Tạo game để biên soạn bộ câu hỏi đầu tiên.'}
+                    </div>
+                    {hasActiveFilters && (
+                      <button
+                        type="button"
+                        onClick={handleResetAllFilters}
+                        style={{
+                          backgroundColor: 'var(--bg-surface)',
+                          color: 'var(--accent-sky)',
+                          border: '1px solid var(--border-strong)',
+                          borderRadius: '6px',
+                          padding: '6px 12px',
+                          fontSize: '0.8rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Xóa bộ lọc
+                      </button>
+                    )}
                   </div>
                 ) : (
                   <div
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-                      gap: '12px',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                      gap: '14px',
                     }}
                   >
-                    {recentlyCreatedShelf.map((item) => (
-                      <div
-                        key={`recent-${item.gameId}`}
+                    {displayedGames.map((item) => (
+                      <article
+                        key={`discover-${item.gameId}`}
                         style={{
                           backgroundColor: 'var(--bg-input)',
                           border: '1px solid var(--border-subtle)',
-                          borderRadius: '8px',
+                          borderRadius: '10px',
                           overflow: 'hidden',
                           display: 'flex',
                           flexDirection: 'column',
@@ -3428,7 +3919,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         <div
                           style={{
                             position: 'relative',
-                            height: '96px',
+                            height: '116px',
                             width: '100%',
                             overflow: 'hidden',
                             borderBottom: '1px solid var(--border-subtle)',
@@ -3472,15 +3963,15 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           </span>
                         </div>
 
-                        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: '10px', flex: 1, justifyContent: 'space-between' }}>
+                        <div style={{ padding: '14px', display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
                           <div
                             style={{
-                              fontWeight: 700,
-                              fontSize: '0.9rem',
+                              fontWeight: 800,
+                              fontSize: '0.95rem',
                               color: 'var(--text-primary)',
                               lineHeight: 1.35,
                               display: '-webkit-box',
-                              WebkitLineClamp: 1,
+                              WebkitLineClamp: 2,
                               WebkitBoxOrient: 'vertical',
                               overflow: 'hidden',
                             }}
@@ -3489,56 +3980,188 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             {item.title}
                           </div>
 
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+                          <p
+                            style={{
+                              margin: 0,
+                              fontSize: '0.8rem',
+                              color: 'var(--text-secondary)',
+                              lineHeight: 1.45,
+                              display: '-webkit-box',
+                              WebkitLineClamp: 2,
+                              WebkitBoxOrient: 'vertical',
+                              overflow: 'hidden',
+                            }}
+                            title={item.description}
+                          >
+                            {item.description || 'Bộ câu hỏi học tập tương tác trên AI Game Platform.'}
+                          </p>
+
+                          <div
+                            style={{
+                              marginTop: 'auto',
+                              paddingTop: '6px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '8px',
+                              fontSize: '0.73rem',
+                              color: 'var(--text-muted)',
+                              fontVariantNumeric: 'tabular-nums',
+                            }}
+                          >
+                            <span>{getOwnerBadgeLabel(item)}</span>
                             <span
                               style={{
-                                fontSize: '0.72rem',
                                 color: item.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
                                 fontWeight: 700,
                               }}
                             >
-                              {item.isPublic ? 'Đã xuất bản' : 'Bản nháp'}
+                              {item.isPublic ? 'Công khai' : 'Bản nháp'}
                             </span>
-                            <div style={{ display: 'flex', gap: '6px' }}>
+                          </div>
+
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '6px',
+                              paddingTop: '8px',
+                              borderTop: '1px solid var(--border-subtle)',
+                            }}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => handleViewOrEditGame(item.gameId, false)}
+                              style={{
+                                backgroundColor: 'var(--bg-surface)',
+                                color: 'var(--text-primary)',
+                                border: '1px solid var(--border-strong)',
+                                borderRadius: '6px',
+                                padding: '0 10px',
+                                height: '32px',
+                                fontSize: '0.76rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Chi tiết
+                            </button>
+                            {item.isPublic && (
                               <button
                                 type="button"
-                                onClick={() => handleViewOrEditGame(item.gameId, false)}
+                                onClick={() =>
+                                  handleOpenSoloShareModal({
+                                    gameId: item.gameId,
+                                    title: item.title,
+                                    isPublic: item.isPublic,
+                                  })
+                                }
+                                title="Chia sẻ Link & Mã QR"
                                 style={{
-                                  backgroundColor: 'transparent',
-                                  color: 'var(--text-secondary)',
-                                  border: '1px solid var(--border-subtle)',
+                                  backgroundColor: 'var(--bg-surface)',
+                                  color: 'var(--text-primary)',
+                                  border: '1px solid var(--border-strong)',
                                   borderRadius: '6px',
-                                  padding: '0 8px',
-                                  height: '28px',
+                                  padding: '0 9px',
+                                  height: '32px',
                                   fontSize: '0.75rem',
-                                  fontWeight: 600,
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                Chi tiết
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleOpenModeModal(item.gameId)}
-                                style={{
-                                  backgroundColor: 'var(--primary)',
-                                  color: 'var(--primary-ink, #060913)',
-                                  border: '1px solid var(--primary)',
-                                  borderRadius: '6px',
-                                  padding: '0 10px',
-                                  height: '28px',
-                                  fontSize: '0.76rem',
                                   fontWeight: 700,
                                   cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
                                 }}
                               >
-                                Mở nhanh
+                                <QrCodeIcon size={13} />
+                                <span>QR</span>
                               </button>
-                            </div>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleOpenModeModal(item.gameId)}
+                              style={{
+                                flex: 1,
+                                backgroundColor: 'var(--primary)',
+                                color: 'var(--primary-ink, #060913)',
+                                border: '1px solid var(--primary)',
+                                borderRadius: '6px',
+                                padding: '0 10px',
+                                height: '32px',
+                                fontSize: '0.78rem',
+                                fontWeight: 800,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '5px',
+                              }}
+                            >
+                              <GamepadIcon size={13} />
+                              <span>Mở Game</span>
+                            </button>
                           </div>
                         </div>
-                      </div>
+                      </article>
                     ))}
+                  </div>
+                )}
+
+                {totalPages > 1 && (
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      paddingTop: '12px',
+                      borderTop: '1px solid var(--border-subtle)',
+                      flexWrap: 'wrap',
+                      gap: '10px',
+                    }}
+                  >
+                    <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+                      Trang {page} / {totalPages}
+                    </span>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button
+                        type="button"
+                        disabled={page <= 1 || isLoading}
+                        onClick={() => setPage((prev) => Math.max(1, prev - 1))}
+                        style={{
+                          padding: '0 12px',
+                          height: '32px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-primary)',
+                          fontWeight: 600,
+                          fontSize: '0.78rem',
+                          cursor: page <= 1 || isLoading ? 'not-allowed' : 'pointer',
+                          opacity: page <= 1 || isLoading ? 0.5 : 1,
+                        }}
+                      >
+                        Trang trước
+                      </button>
+                      <button
+                        type="button"
+                        disabled={page >= totalPages || isLoading}
+                        onClick={() => setPage((prev) => Math.min(totalPages, prev + 1))}
+                        style={{
+                          padding: '0 12px',
+                          height: '32px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-primary)',
+                          fontWeight: 600,
+                          fontSize: '0.78rem',
+                          cursor: page >= totalPages || isLoading ? 'not-allowed' : 'pointer',
+                          opacity: page >= totalPages || isLoading ? 0.5 : 1,
+                        }}
+                      >
+                        Trang tiếp
+                      </button>
+                    </div>
                   </div>
                 )}
               </section>
@@ -3910,7 +4533,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                                 }}
                               >
                                 <span>Đang chơi đơn ({g.activeStatus.activeSessionCount})</span>
-                                {g.activeStatus.activeSessions?.[0] && (
+                                {canManageGame(g) && g.activeStatus.activeSessions?.[0] && (
                                   <button
                                     type="button"
                                     onClick={() =>
@@ -3953,7 +4576,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                                 <span>
                                   Phòng PIN: {g.activeStatus.activeRooms?.[0]?.roomCode}
                                 </span>
-                                {g.activeStatus.activeRooms?.[0] && (
+                                {canManageGame(g) && g.activeStatus.activeRooms?.[0] && (
                                   <button
                                     type="button"
                                     onClick={() =>
@@ -4066,6 +4689,64 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             </button>
                           )}
 
+                          {canManageGame(g) && (
+                            <button
+                              type="button"
+                              onClick={() => handleGenerateAiCover(g, Boolean(g.coverImageUrl))}
+                              disabled={generatingCoverGameId === g.gameId}
+                              style={{
+                                backgroundColor: 'var(--bg-input)',
+                                color: 'var(--primary)',
+                                border: '1px solid var(--border-strong)',
+                                borderRadius: '6px',
+                                padding: '0 8px',
+                                height: '34px',
+                                fontWeight: 700,
+                                fontSize: '0.75rem',
+                                cursor: generatingCoverGameId === g.gameId ? 'not-allowed' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}
+                              title="Tạo hoặc làm mới ảnh bìa minh họa bằng Gemini AI"
+                            >
+                              {generatingCoverGameId === g.gameId ? (
+                                <SpinnerIcon size={12} />
+                              ) : (
+                                <SparklesIcon size={13} />
+                              )}
+                              <span>Bìa AI</span>
+                            </button>
+                          )}
+
+                          <button
+                            type="button"
+                            onClick={() => handleDuplicateGame(g)}
+                            disabled={duplicatingGameId === g.gameId}
+                            style={{
+                              backgroundColor: 'var(--bg-input)',
+                              color: 'var(--text-primary)',
+                              border: '1px solid var(--border-strong)',
+                              borderRadius: '6px',
+                              padding: '0 8px',
+                              height: '34px',
+                              fontWeight: 700,
+                              fontSize: '0.75rem',
+                              cursor: duplicatingGameId === g.gameId ? 'not-allowed' : 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                            title="Nhân bản (sao chép) bộ câu hỏi"
+                          >
+                            {duplicatingGameId === g.gameId ? (
+                              <SpinnerIcon size={12} />
+                            ) : (
+                              <PlusIcon size={12} />
+                            )}
+                            <span>Sao chép</span>
+                          </button>
+
                           <button
                             type="button"
                             onClick={() => handleViewOrEditGame(g.gameId, false)}
@@ -4083,40 +4764,46 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                               alignItems: 'center',
                               gap: '4px',
                             }}
-                            title="Xem chi tiết & Chỉnh sửa câu hỏi"
-                          >
-                            <PencilIcon size={13} />
-                            <span>Sửa</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleOpenDeleteModal(g)}
-                            style={{
-                              backgroundColor: 'var(--bg-input)',
-                              color: isLockedByActive ? 'var(--text-muted)' : 'var(--accent-rose)',
-                              border: `1px solid ${
-                                isLockedByActive ? 'var(--border-subtle)' : 'rgba(239, 68, 68, 0.28)'
-                              }`,
-                              borderRadius: '6px',
-                              padding: '0 9px',
-                              height: '34px',
-                              fontWeight: 700,
-                              fontSize: '0.76rem',
-                              cursor: 'pointer',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '4px',
-                            }}
                             title={
-                              isLockedByActive
-                                ? 'Bộ câu hỏi đang có phiên/phòng hoạt động. Bấm để xem chi tiết mở khóa.'
-                                : 'Xóa bộ câu hỏi'
+                              canManageGame(g)
+                                ? 'Xem chi tiết & Chỉnh sửa câu hỏi'
+                                : 'Xem chi tiết bộ câu hỏi'
                             }
                           >
-                            {isLockedByActive ? <LockIcon size={12} /> : <TrashIcon size={13} />}
-                            <span>Xóa</span>
+                            <PencilIcon size={13} />
+                            <span>{canManageGame(g) ? 'Sửa' : 'Chi tiết'}</span>
                           </button>
+
+                          {canManageGame(g) && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenDeleteModal(g)}
+                              style={{
+                                backgroundColor: 'var(--bg-input)',
+                                color: isLockedByActive ? 'var(--text-muted)' : 'var(--accent-rose)',
+                                border: `1px solid ${
+                                  isLockedByActive ? 'var(--border-subtle)' : 'rgba(239, 68, 68, 0.28)'
+                                }`,
+                                borderRadius: '6px',
+                                padding: '0 9px',
+                                height: '34px',
+                                fontWeight: 700,
+                                fontSize: '0.76rem',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}
+                              title={
+                                isLockedByActive
+                                  ? 'Bộ câu hỏi đang có phiên/phòng hoạt động. Bấm để xem chi tiết mở khóa.'
+                                  : 'Xóa bộ câu hỏi'
+                              }
+                            >
+                              {isLockedByActive ? <LockIcon size={12} /> : <TrashIcon size={13} />}
+                              <span>Xóa</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                     </article>
@@ -4225,7 +4912,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             >
                               Chơi đơn ({g.activeStatus.activeSessionCount})
                             </span>
-                            {g.activeStatus.activeSessions?.[0] && (
+                            {canManageGame(g) && g.activeStatus.activeSessions?.[0] && (
                               <button
                                 type="button"
                                 onClick={() =>
@@ -4266,7 +4953,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             >
                               Phòng PIN: {g.activeStatus.activeRooms?.[0]?.roomCode}
                             </span>
-                            {g.activeStatus.activeRooms?.[0] && (
+                            {canManageGame(g) && g.activeStatus.activeRooms?.[0] && (
                               <button
                                 type="button"
                                 onClick={() =>
@@ -4315,6 +5002,62 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           <GamepadIcon size={14} />
                           <span>Mở Game</span>
                         </button>
+                        {canManageGame(g) && (
+                          <button
+                            type="button"
+                            onClick={() => handleGenerateAiCover(g, Boolean(g.coverImageUrl))}
+                            disabled={generatingCoverGameId === g.gameId}
+                            style={{
+                              backgroundColor: 'var(--bg-input)',
+                              color: 'var(--primary)',
+                              border: '1px solid var(--border-strong)',
+                              borderRadius: '6px',
+                              padding: '0 8px',
+                              height: '32px',
+                              fontWeight: 700,
+                              fontSize: '0.75rem',
+                              cursor: generatingCoverGameId === g.gameId ? 'not-allowed' : 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                            title="Tạo hoặc làm mới ảnh bìa minh họa bằng Gemini AI"
+                          >
+                            {generatingCoverGameId === g.gameId ? (
+                              <SpinnerIcon size={12} />
+                            ) : (
+                              <SparklesIcon size={13} />
+                            )}
+                            <span>Bìa AI</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDuplicateGame(g)}
+                          disabled={duplicatingGameId === g.gameId}
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            padding: '0 8px',
+                            height: '32px',
+                            fontWeight: 700,
+                            fontSize: '0.75rem',
+                            cursor: duplicatingGameId === g.gameId ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                          }}
+                          title="Nhân bản (sao chép) bộ câu hỏi"
+                        >
+                          {duplicatingGameId === g.gameId ? (
+                            <SpinnerIcon size={12} />
+                          ) : (
+                            <PlusIcon size={12} />
+                          )}
+                          <span>Sao chép</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => handleViewOrEditGame(g.gameId, false)}
@@ -4332,48 +5075,52 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         >
                           Chi tiết
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => handleViewOrEditGame(g.gameId, true)}
-                          style={{
-                            backgroundColor: 'var(--bg-input)',
-                            color: 'var(--accent-amber)',
-                            border: '1px solid var(--border-strong)',
-                            borderRadius: '6px',
-                            padding: '0 10px',
-                            height: '32px',
-                            fontWeight: 600,
-                            fontSize: '0.78rem',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Sửa
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleOpenDeleteModal(g)}
-                          style={{
-                            backgroundColor: isLockedByActive
-                              ? 'rgba(100, 116, 139, 0.12)'
-                              : 'rgba(244, 63, 94, 0.12)',
-                            color: isLockedByActive ? 'var(--text-muted)' : 'var(--accent-rose)',
-                            border: `1px solid ${
-                              isLockedByActive ? 'var(--border-subtle)' : 'var(--accent-rose)'
-                            }`,
-                            borderRadius: '6px',
-                            padding: '0 10px',
-                            height: '32px',
-                            fontWeight: 700,
-                            fontSize: '0.78rem',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '4px',
-                          }}
-                        >
-                          {isLockedByActive ? <LockIcon size={12} /> : null}
-                          <span>Xóa</span>
-                        </button>
+                        {canManageGame(g) && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => handleViewOrEditGame(g.gameId, true)}
+                              style={{
+                                backgroundColor: 'var(--bg-input)',
+                                color: 'var(--accent-amber)',
+                                border: '1px solid var(--border-strong)',
+                                borderRadius: '6px',
+                                padding: '0 10px',
+                                height: '32px',
+                                fontWeight: 600,
+                                fontSize: '0.78rem',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Sửa
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleOpenDeleteModal(g)}
+                              style={{
+                                backgroundColor: isLockedByActive
+                                  ? 'rgba(100, 116, 139, 0.12)'
+                                  : 'rgba(244, 63, 94, 0.12)',
+                                color: isLockedByActive ? 'var(--text-muted)' : 'var(--accent-rose)',
+                                border: `1px solid ${
+                                  isLockedByActive ? 'var(--border-subtle)' : 'var(--accent-rose)'
+                                }`,
+                                borderRadius: '6px',
+                                padding: '0 10px',
+                                height: '32px',
+                                fontWeight: 700,
+                                fontSize: '0.78rem',
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                              }}
+                            >
+                              {isLockedByActive ? <LockIcon size={12} /> : null}
+                              <span>Xóa</span>
+                            </button>
+                          </>
+                        )}
                         <button
                           type="button"
                           onClick={() => handleExportGame(g.gameId, 'csv')}
@@ -5423,7 +6170,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           }
         }}
         onNavigateToHost={onNavigateToHost}
-        isOwner={true}
+        isOwner={canManageGame(modeModalSpec)}
       />
     </div>
   );

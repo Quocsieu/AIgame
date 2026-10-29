@@ -6,6 +6,8 @@ import {
   BookOpenIcon,
   HomeIcon,
   MoonIcon,
+  PlusIcon,
+  SearchIcon,
   SparklesIcon,
   SpinnerIcon,
   SunIcon,
@@ -18,16 +20,30 @@ import { HomePage } from './pages/HomePage.js';
 import { HostPage } from './pages/HostPage.js';
 import { JoinPage } from './pages/JoinPage.js';
 import { PlayPage } from './pages/PlayPage.js';
+import { ReportsPage } from './pages/ReportsPage.js';
 import { SoloPlayer } from './components/SoloPlayer.js';
 import { SoloPresentationPage } from './pages/SoloPresentationPage.js';
 import { fetchCurrentUser, fetchGameById } from './services/api.js';
 import type { AuthenticatedUser, GameSpecification, GameType } from './types/index.js';
 
-type Tab = 'home' | 'demo' | 'analytics' | 'library' | 'host' | 'join' | 'play' | 'admin' | 'solo-present';
+type Tab =
+  | 'home'
+  | 'demo'
+  | 'analytics'
+  | 'library'
+  | 'reports'
+  | 'host'
+  | 'join'
+  | 'play'
+  | 'admin'
+  | 'solo-present';
 
 export const AppContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<Tab>('home');
   const [selectedGameType, setSelectedGameType] = useState<GameType>('MULTIPLE_CHOICE');
+  const [selectedSourceTab, setSelectedSourceTab] = useState<'URL' | 'FILE' | 'TOPIC' | undefined>(
+    undefined
+  );
   const [libraryFilterPreset, setLibraryFilterPreset] = useState<LibraryFilterPreset | null>(null);
   const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
 
@@ -81,14 +97,22 @@ export const AppContent: React.FC = () => {
     let room = (params.get('room') || '').toUpperCase().trim();
     let token = (params.get('token') || '').trim();
     let name = (params.get('name') || '').trim();
-    const tab = params.get('tab') as Tab;
+    const rawTab = params.get('tab') || '';
+    const tab = (rawTab === 'discover' ? 'analytics' : rawTab) as Tab;
     const typeParam = params.get('type') as GameType;
 
     if (
       typeParam &&
-      ['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK', 'CROSSWORD', 'MIXED', 'ADVENTURE'].includes(
-        typeParam
-      )
+      [
+        'MULTIPLE_CHOICE',
+        'QUICK_BUTTON',
+        'FILL_IN_THE_BLANK',
+        'PUZZLE',
+        'SLIDER',
+        'CROSSWORD',
+        'MIXED',
+        'ADVENTURE',
+      ].includes(typeParam)
     ) {
       setSelectedGameType(typeParam);
     }
@@ -143,7 +167,10 @@ export const AppContent: React.FC = () => {
     } else if (room) {
       setRoomCode(room);
       setActiveTab('join');
-    } else if (tab && ['home', 'demo', 'analytics', 'library', 'join', 'play', 'admin'].includes(tab)) {
+    } else if (
+      tab &&
+      ['home', 'demo', 'analytics', 'library', 'reports', 'join', 'play', 'admin'].includes(tab)
+    ) {
       setActiveTab(tab);
     } else if (tab === 'host') {
       setActiveTab('analytics');
@@ -295,8 +322,9 @@ export const AppContent: React.FC = () => {
     setActiveTab('join');
   };
 
-  const handleNavigateToCreate = (type?: GameType) => {
+  const handleNavigateToCreate = (type?: GameType, sourceTab?: 'URL' | 'FILE' | 'TOPIC') => {
     setSelectedSavedSpec(null);
+    setSelectedSourceTab(sourceTab);
     if (type) {
       setSelectedGameType(type);
       navigateWithHistory('demo', `/?tab=demo&type=${type}`);
@@ -305,11 +333,12 @@ export const AppContent: React.FC = () => {
     }
   };
 
-  // Navigation bên trái: Đã đổi "Khám Phá" -> "Trang Chủ", thêm "Thư viện", và ẩn "Tạo Game"
+  // Navigation bên trái chuẩn hóa theo mô hình Kahoot: Trang Chủ, Khám phá, Thư viện, Báo cáo, Nhập mã PIN
   const navItems = [
     { id: 'home' as Tab, label: 'Trang Chủ', icon: <HomeIcon size={17} /> },
-    { id: 'analytics' as Tab, label: 'Kho Game', icon: <BarChartIcon size={17} /> },
+    { id: 'analytics' as Tab, label: 'Khám phá', icon: <SearchIcon size={17} /> },
     { id: 'library' as Tab, label: 'Thư viện', icon: <BookOpenIcon size={17} /> },
+    { id: 'reports' as Tab, label: 'Báo cáo', icon: <BarChartIcon size={17} /> },
     { id: 'join' as Tab, label: 'Nhập mã PIN', icon: <UsersIcon size={17} /> },
   ];
 
@@ -403,6 +432,34 @@ export const AppContent: React.FC = () => {
                 </div>
               </div>
             </div>
+
+            {/* Prominent CTA: Tạo game bằng AI */}
+            <button
+              id="nav-cta-create-game"
+              type="button"
+              onClick={() => handleNavigateToCreate()}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                padding: '0.6rem 0.85rem',
+                borderRadius: '10px',
+                border: '1px solid var(--primary)',
+                backgroundColor: 'var(--primary)',
+                color: 'var(--primary-ink, #060913)',
+                fontWeight: 800,
+                fontSize: '0.86rem',
+                cursor: 'pointer',
+                width: '100%',
+                marginBottom: '1rem',
+                minHeight: '40px',
+                boxShadow: 'var(--shadow-sm)',
+              }}
+            >
+              <PlusIcon size={15} />
+              <span>Tạo game bằng AI</span>
+            </button>
 
             {/* Vertical Tab Navigation */}
             <nav
@@ -567,6 +624,7 @@ export const AppContent: React.FC = () => {
           <>
             {activeTab === 'home' && (
               <HomePage
+                currentUser={currentUser}
                 onNavigateToCreate={handleNavigateToCreate}
                 onNavigateToLibrary={handleNavigateToLibrary}
                 onNavigateToAnalytics={() => navigateWithHistory('analytics', '/?tab=analytics')}
@@ -591,6 +649,7 @@ export const AppContent: React.FC = () => {
                 onNavigateToSoloPresentation={handleNavigateToSoloPresentation}
                 initialSpec={selectedSavedSpec}
                 initialGameType={selectedGameType}
+                initialSourceTab={selectedSourceTab}
                 onNavigateToLibrary={() => handleNavigateToLibrary()}
                 onBackToHome={() => navigateWithHistory('home', '/')}
               />
@@ -614,6 +673,16 @@ export const AppContent: React.FC = () => {
                 onNavigateToCreate={handleNavigateToCreate}
                 onNavigateToHost={handleNavigateToHost}
                 onNavigateToSoloPresentation={handleNavigateToSoloPresentation}
+              />
+            )}
+
+            {activeTab === 'reports' && (
+              <ReportsPage
+                currentUser={currentUser}
+                onNavigateToLibrary={() => handleNavigateToLibrary()}
+                onNavigateToDiscover={() => navigateWithHistory('analytics', '/?tab=analytics')}
+                onNavigateToCreate={() => handleNavigateToCreate()}
+                onNavigateToSoloPlay={(spec) => handleSelectSavedGame(spec, true)}
               />
             )}
 

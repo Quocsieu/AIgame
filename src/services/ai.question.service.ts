@@ -37,6 +37,21 @@ export interface AiModelProvider {
   getLastUsageMetadata?(): AiProviderUsageMetadata | null;
 }
 
+export function sanitizeAiErrorMessage(rawMessage: string, apiKey?: string): string {
+  if (!rawMessage) return '';
+  let sanitized = String(rawMessage);
+  if (apiKey && apiKey.trim().length > 0) {
+    sanitized = sanitized.split(apiKey).join('[REDACTED_API_KEY]');
+    const encodedKey = encodeURIComponent(apiKey);
+    if (encodedKey !== apiKey) {
+      sanitized = sanitized.split(encodedKey).join('[REDACTED_API_KEY]');
+    }
+  }
+  sanitized = sanitized.replace(/([?&]key=)[^&\s"']+/gi, '$1[REDACTED_API_KEY]');
+  sanitized = sanitized.replace(/AIza[0-9A-Za-z\-_]{10,}/g, '[REDACTED_API_KEY]');
+  return sanitized;
+}
+
 export class GeminiModelProvider implements AiModelProvider {
   private apiKey: string;
   private model: string;
@@ -69,7 +84,7 @@ export class GeminiModelProvider implements AiModelProvider {
       );
     }
 
-    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${this.apiKey}`;
+    const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), LIMITS.AI_GENERATION_TIMEOUT_MS);
@@ -77,7 +92,10 @@ export class GeminiModelProvider implements AiModelProvider {
     try {
       const response = await fetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': this.apiKey,
+        },
         signal: controller.signal,
         body: JSON.stringify({
           system_instruction: {
@@ -97,7 +115,12 @@ export class GeminiModelProvider implements AiModelProvider {
 
       if (!response.ok) {
         const errorBody = await response.text();
-        throw new AppError('AI_PROVIDER_ERROR', `Gemini API returned status ${response.status}: ${errorBody}`, 502);
+        const safeErrorBody = sanitizeAiErrorMessage(errorBody, this.apiKey);
+        throw new AppError(
+          'AI_PROVIDER_ERROR',
+          `Gemini API returned status ${response.status}: ${safeErrorBody}`,
+          502
+        );
       }
 
       const data = await response.json();
@@ -131,14 +154,25 @@ export class GeminiModelProvider implements AiModelProvider {
       try {
         return JSON.parse(rawText);
       } catch (parseErr) {
-        throw new AppError('AI_MALFORMED_JSON', `Failed to parse AI JSON output: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`, 502);
+        const safeParseMsg = sanitizeAiErrorMessage(
+          parseErr instanceof Error ? parseErr.message : String(parseErr),
+          this.apiKey
+        );
+        throw new AppError('AI_MALFORMED_JSON', `Failed to parse AI JSON output: ${safeParseMsg}`, 502);
       }
     } catch (err: unknown) {
-      if (err instanceof AppError) throw err;
+      if (err instanceof AppError) {
+        err.message = sanitizeAiErrorMessage(err.message, this.apiKey);
+        throw err;
+      }
       if (err instanceof Error && err.name === 'AbortError') {
         throw new AppError('AI_TIMEOUT', `AI generation timed out after ${LIMITS.AI_GENERATION_TIMEOUT_MS}ms`, 504);
       }
-      throw new AppError('AI_GENERATION_FAILED', `AI generation call failed: ${err instanceof Error ? err.message : String(err)}`, 502);
+      const safeErrMsg = sanitizeAiErrorMessage(
+        err instanceof Error ? err.message : String(err),
+        this.apiKey
+      );
+      throw new AppError('AI_GENERATION_FAILED', `AI generation call failed: ${safeErrMsg}`, 502);
     } finally {
       clearTimeout(timeoutId);
     }
@@ -456,6 +490,7 @@ export class AiQuestionService {
       '- TRUE_FALSE / QUICK_BUTTON: Dạng câu hỏi Đúng/Sai bằng tiếng Việt. Mỗi câu phải là một nhận định (statement) có thể xác định rõ là ĐÚNG hoặc SAI dựa trên nội dung nguồn. Trường choices PHẢI chứa chính xác 2 phần tử theo đúng thứ tự: ["Đúng", "Sai"]. Không sử dụng tiền tố A/B/C/D hay A., B. Không sử dụng lựa chọn thứ 3. correctAnswer PHẢI là chính xác một trong hai chuỗi: "Đúng" hoặc "Sai".',
       '- TYPE_ANSWER / FILL_IN_THE_BLANK: Người chơi tự nhập câu trả lời ngắn gọn (TUYỆT ĐỐI KHÔNG trả về mảng choices). Cung cấp câu hỏi rõ ràng (có thể chứa "___" hoặc câu hỏi trả lời ngắn), correctAnswer chính xác theo nguồn và acceptedAlternatives (các cách viết tương đương hợp lệ).',
       '- PUZZLE: Dạng câu hỏi sắp xếp thứ tự (sequence ordering). Trích xuất một quy trình, trình tự các bước, cấp độ hoặc thứ tự logic gồm từ 3 đến 5 mục khác nhau có thật trong nội dung nguồn. Trường choices chứa mảng từ 3 đến 5 mục theo đúng thứ tự chuẩn, và trường correctAnswer chứa đúng các mục đó nối với nhau bằng " | " theo thứ tự chuẩn (ví dụ: "Bước 1 | Bước 2 | Bước 3").',
+      '- SLIDER: Dạng câu hỏi kéo thanh chọn giá trị số (numeric slider). Dựa trên các con số, tỷ lệ, mốc năm, nhiệt độ, thời lượng hoặc thông số định lượng có thật trong tài liệu nguồn. TUYỆT ĐỐI KHÔNG trả về mảng choices. Bắt buộc cung cấp đối tượng sliderConfig gồm: min (min < max), max (max > min), step (bước nhảy > 0 và <= max - min), correctValue (giá trị đúng nằm trong [min, max] và khớp với min + k * step), tolerance (sai số cho phép >= 0 và < max - min), và unit (đơn vị tùy chọn như "%", "năm", "°C", "giây"). Trường correctAnswer phải là chuỗi số khớp chính xác với sliderConfig.correctValue.',
     ].join('\n');
   }
 
@@ -529,6 +564,7 @@ export class AiQuestionService {
     const isQuickButton = gameType === 'QUICK_BUTTON' || gameType === 'TRUE_FALSE';
     const isTypeAnswer = gameType === 'TYPE_ANSWER' || gameType === 'FILL_IN_THE_BLANK';
     const isPuzzle = gameType === 'PUZZLE';
+    const isSlider = gameType === 'SLIDER';
     const isMixed = gameType === 'MIXED';
     const isAdventure = gameType === 'ADVENTURE';
     const presetIdsList = Object.keys(ADVENTURE_THEME_PRESETS).join('", "');
@@ -550,6 +586,9 @@ export class AiQuestionService {
       }
       if (t === 'PUZZLE') {
         return `  + PUZZLE (Sắp xếp thứ tự 3-5 bước - choices là mảng các bước, correctAnswer nối bằng " | "): ${count} câu`;
+      }
+      if (t === 'SLIDER') {
+        return `  + SLIDER (Thanh trượt chọn giá trị số - KHÔNG có choices, có sliderConfig { min, max, step, correctValue, tolerance, unit } và correctAnswer bằng chuỗi của correctValue): ${count} câu`;
       }
       return `  + ${t} (Nhập đáp án ngắn / Điền từ - KHÔNG có choices, có correctAnswer và acceptedAlternatives): ${count} câu`;
     });
@@ -582,7 +621,16 @@ export class AiQuestionService {
               '- Trường "correctAnswer" PHẢI là chuỗi nối toàn bộ các mục trong "choices" theo đúng thứ tự chuẩn, phân tách bằng " | " (ví dụ: "Bước 1: Tiếp nhận | Bước 2: Kiểm tra | Bước 3: Bàn giao").',
               '',
             ].join('\n')
-          : isMixed && mixedCounts
+          : isSlider
+            ? [
+                'CRITICAL RULES FOR SLIDER (KÉO THANH CHỌN GIÁ TRỊ SỐ):',
+                '- Mỗi câu hỏi PHẢI hỏi về một con số, tỷ lệ, mốc năm, thời lượng, kích thước hoặc thông số định lượng có căn cứ trực tiếp trong tài liệu nguồn.',
+                '- TUYỆT ĐỐI KHÔNG trả về trường "choices".',
+                '- BẮT BUỘC trả về đối tượng "sliderConfig" gồm: "min" (min < max), "max", "step" (step > 0 và <= max - min), "correctValue" (min <= correctValue <= max và khớp với min + k * step), "tolerance" (0 <= tolerance < max - min), và "unit" (đơn vị tùy chọn như "%", "năm", "giây", "°C").',
+                '- Trường "correctAnswer" PHẢI là chuỗi số khớp chính xác với "sliderConfig.correctValue" (ví dụ: nếu correctValue là 443 thì correctAnswer là "443").',
+                '',
+              ].join('\n')
+            : isMixed && mixedCounts
             ? [
                 'CRITICAL RULES FOR MIXED GAME MODE (CHẾ ĐỘ HỖN HỢP CÓ PHÂN BỔ TỶ LỆ):',
                 `- Bạn PHẢI tạo chính xác tổng cộng ${questionCount} câu hỏi được phân chia cụ thể như sau:`,
@@ -615,19 +663,7 @@ export class AiQuestionService {
             `TOPIC FOCUS REQUIREMENT: Prioritize generating questions focused on "${options.topicFocus.trim()}" as long as facts are directly supported by the reference sources.`,
             '',
           ].join('\n')
-        : isAdventure
-          ? [
-              'CRITICAL RULES FOR ADVENTURE GAME MODE (GAME ĐI CẢNH THEO NGÀNH NGHỀ):',
-              '- Phân tích nội dung nguồn để đề xuất cấu hình đi cảnh "adventureProposal" bám sát ngữ cảnh thực tế của tài liệu:',
-              `  + industryId: chọn 1 trong ["${industryIdsList}"]`,
-              `  + themePresetId: chọn 1 trong ["${presetIdsList}"] phù hợp nhất với bối cảnh cụ thể của tài liệu (Ví dụ: bảo dưỡng/phụ tùng xe máy -> "theme_moto_garage"; kỹ năng lái xe ngoài đường -> "theme_moto_circuit"; bán lẻ/tư vấn -> "theme_biz_retail"; nhà máy/an toàn lao động -> "theme_mfg_factory"; hạ tầng IT/cloud -> "theme_it_datacenter"; an ninh mạng -> "theme_it_cyberlab"; bệnh viện/lâm sàng -> "theme_med_hospital").`,
-              '  + gameplayArchetype: chọn 1 trong ["TRAFFIC_RUNNER_SIM", "DIAGNOSTIC_WORKBENCH_SIM", "CYBER_DEFENSE_CONSOLE_SIM", "SCENARIO_DECISION_SIM"] dựa trên sự kết hợp giữa ngành nghề VÀ nội dung nguồn (Ví dụ: Xe máy + luật giao thông -> "TRAFFIC_RUNNER_SIM"; Xe máy + bảo dưỡng động cơ/phụ tùng hoặc Nhà máy + QA/QC -> "DIAGNOSTIC_WORKBENCH_SIM"; CNTT + an ninh mạng/hạ tầng số -> "CYBER_DEFENSE_CONSOLE_SIM"; Kinh doanh/Y tế/Tài chính/F&B/Giáo dục -> "SCENARIO_DECISION_SIM").',
-              '  + environmentTitle, environmentSubtitle, learningObjective, winConditionSummary, interactiveObjects, aiReasoning: viết bằng tiếng Việt tự nhiên, phản ánh đúng nội dung nguồn.',
-              `- Danh sách "questions" gồm đúng ${questionCount} câu hỏi kiểm tra kiến thức thực chất từ tài liệu nguồn.`,
-              adventureQuestionRuleText,
-              '',
-            ].join('\n')
-          : '';
+        : '';
 
     const schemaExample = isQuickButton
       ? `[
@@ -683,7 +719,32 @@ export class AiQuestionService {
     }
   }
 ]`
-          : `[
+          : isSlider
+            ? `[
+  {
+    "id": "q_1",
+    "type": "SLIDER",
+    "question": "Câu hỏi định lượng yêu cầu chọn giá trị số từ tài liệu nguồn?",
+    "sliderConfig": {
+      "min": 0,
+      "max": 100,
+      "step": 1,
+      "correctValue": 75,
+      "tolerance": 2,
+      "unit": "%"
+    },
+    "correctAnswer": "75",
+    "explanation": "Giải thích ngắn gọn số liệu căn cứ vào nội dung nguồn bằng tiếng Việt",
+    "difficulty": "${difficulty}",
+    "sourceReference": {
+      "sourceId": "source_id_here",
+      "sourceType": "WEBSITE" | "DOCX" | "XLSX" | "PDF" | "TXT" | "MARKDOWN" | "CSV",
+      "sourceLocation": "location_here",
+      "section": "Section name if applicable"
+    }
+  }
+]`
+            : `[
   {
     "id": "q_1",
     "type": "${isMixed || isAdventure ? 'MULTIPLE_CHOICE' : gameType}",
@@ -764,6 +825,7 @@ export class AiQuestionService {
         case 'TYPE_ANSWER': return 'Nhập đáp án (Type Answer)';
         case 'FILL_IN_THE_BLANK': return 'Điền từ';
         case 'PUZZLE': return 'Sắp xếp thứ tự (Puzzle)';
+        case 'SLIDER': return 'Thanh trượt giá trị (Slider)';
         case 'CROSSWORD': return 'Ô chữ';
         case 'MIXED': return 'Hỗn hợp đa dạng';
         case 'ADVENTURE': return 'Game đi cảnh theo ngành nghề';
@@ -878,10 +940,19 @@ export class AiQuestionService {
       'TRUE_FALSE',
       'TYPE_ANSWER',
       'PUZZLE',
+      'SLIDER',
       'MULTIPLE_CHOICE',
       'FILL_IN_THE_BLANK',
       'QUICK_BUTTON',
     ]);
+
+    const areCompatibleTypes = (a: string, b: string): boolean => {
+      if (a === b) return true;
+      if ((a === 'QUIZ' && b === 'MULTIPLE_CHOICE') || (a === 'MULTIPLE_CHOICE' && b === 'QUIZ')) return true;
+      if ((a === 'TRUE_FALSE' && b === 'QUICK_BUTTON') || (a === 'QUICK_BUTTON' && b === 'TRUE_FALSE')) return true;
+      if ((a === 'TYPE_ANSWER' && b === 'FILL_IN_THE_BLANK') || (a === 'FILL_IN_THE_BLANK' && b === 'TYPE_ANSWER')) return true;
+      return false;
+    };
 
     for (let i = 0; i < rawQuestions.length && validatedQuestions.length < questionCount; i++) {
       const q = rawQuestions[i];
@@ -892,12 +963,15 @@ export class AiQuestionService {
         continue;
       }
 
-      // Resolve concrete question type for this item
+      const rawType = typeof q.type === 'string' ? (q.type.trim().toUpperCase() as QuestionType) : undefined;
+
+      // Resolve concrete question type for this item without silently mutating incompatible types
       let itemQuestionType: QuestionType;
       if (gameType === 'ADVENTURE') {
-        const rawType = typeof q.type === 'string' ? (q.type.trim().toUpperCase() as QuestionType) : undefined;
         if (rawType && validQuestionTypes.has(rawType)) {
           itemQuestionType = rawType;
+        } else if (q.sliderConfig && typeof q.sliderConfig === 'object') {
+          itemQuestionType = 'SLIDER';
         } else if (isExplicitTrueFalseChoices(q.choices)) {
           itemQuestionType = allowedAdventureTypes.includes('TRUE_FALSE') ? 'TRUE_FALSE' : 'QUICK_BUTTON';
         } else if (Array.isArray(q.choices) && q.choices.length === 4) {
@@ -911,26 +985,26 @@ export class AiQuestionService {
                 : allowedAdventureTypes[0] || 'MULTIPLE_CHOICE';
         }
       } else {
-        itemQuestionType = gameType as QuestionType;
-      }
-
-      // Ensure id and fallback provenance if omitted by model
-      if (
-        gameType === 'ADVENTURE' &&
-        Array.isArray(request.adventureConfig?.questionTypes) &&
-        request.adventureConfig.questionTypes.length > 0 &&
-        !allowedAdventureTypes.includes(itemQuestionType as AdventureQuestionType)
-      ) {
-        if (allowedAdventureTypes.includes('TYPE_ANSWER')) {
-          itemQuestionType = 'TYPE_ANSWER';
-        } else if (allowedAdventureTypes.includes('FILL_IN_THE_BLANK')) {
-          itemQuestionType = 'FILL_IN_THE_BLANK';
-        } else {
-          const msg = `Generated question ${i + 1} rejected: type "${itemQuestionType}" is not in selected adventure question types [${allowedAdventureTypes.join(', ')}]`;
+        if (rawType && !areCompatibleTypes(rawType, gameType)) {
+          const msg = `Generated question ${i + 1} rejected: AI returned type "${rawType}" instead of requested gameType "${gameType}".`;
           rejectedReasons.push(msg);
           generationDiagnostics.push(msg);
           continue;
         }
+        itemQuestionType = gameType as QuestionType;
+      }
+
+      // In ADVENTURE mode with explicit questionTypes filter, reject disallowed types rather than mutating them
+      if (
+        gameType === 'ADVENTURE' &&
+        Array.isArray(request.adventureConfig?.questionTypes) &&
+        request.adventureConfig.questionTypes.length > 0 &&
+        !allowedAdventureTypes.some(allowed => areCompatibleTypes(allowed, itemQuestionType))
+      ) {
+        const msg = `Generated question ${i + 1} rejected: type "${itemQuestionType}" is not in selected adventure question types [${allowedAdventureTypes.join(', ')}]`;
+        rejectedReasons.push(msg);
+        generationDiagnostics.push(msg);
+        continue;
       }
       const fallbackDoc = documents[0];
       const rawRef = q.sourceReference;
@@ -984,11 +1058,34 @@ export class AiQuestionService {
       let normalizedChoices: string[] | undefined =
         itemQuestionType === 'FILL_IN_THE_BLANK' || itemQuestionType === 'TYPE_ANSWER'
           ? undefined
-          : Array.isArray(q.choices)
-            ? q.choices
-            : undefined;
+          : itemQuestionType === 'SLIDER'
+            ? Array.isArray(q.choices) && q.choices.length > 0
+              ? q.choices
+              : undefined
+            : Array.isArray(q.choices)
+              ? q.choices
+              : undefined;
 
-      if (itemQuestionType === 'QUICK_BUTTON' || itemQuestionType === 'TRUE_FALSE') {
+      if (itemQuestionType === 'SLIDER') {
+        const rawAns =
+          q.correctAnswer !== undefined
+            ? q.correctAnswer
+            : q.correct_answer !== undefined
+              ? q.correct_answer
+              : q.answer;
+        if (typeof rawAns === 'string' && rawAns.trim().length > 0) {
+          normalizedCorrectAnswer = rawAns.trim();
+        } else if (typeof rawAns === 'number' && Number.isFinite(rawAns)) {
+          normalizedCorrectAnswer = String(rawAns);
+        } else if (
+          q.sliderConfig &&
+          typeof q.sliderConfig === 'object' &&
+          typeof q.sliderConfig.correctValue === 'number' &&
+          Number.isFinite(q.sliderConfig.correctValue)
+        ) {
+          normalizedCorrectAnswer = String(q.sliderConfig.correctValue);
+        }
+      } else if (itemQuestionType === 'QUICK_BUTTON' || itemQuestionType === 'TRUE_FALSE') {
         const rawAns = q.correctAnswer !== undefined
           ? q.correctAnswer
           : (q.correct_answer !== undefined ? q.correct_answer : q.answer);

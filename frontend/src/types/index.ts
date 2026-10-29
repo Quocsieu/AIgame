@@ -4,7 +4,6 @@ export type QuestionType =
   | 'TYPE_ANSWER'
   | 'PUZZLE'
   | 'SLIDER'
-  | 'PIN_ANSWER'
   | 'MULTIPLE_CHOICE'
   | 'FILL_IN_THE_BLANK'
   | 'QUICK_BUTTON'
@@ -177,7 +176,6 @@ export function calculateMixedTypeCounts(
     TYPE_ANSWER: 0,
     PUZZLE: 0,
     SLIDER: 0,
-    PIN_ANSWER: 0,
     MULTIPLE_CHOICE: 0,
     QUICK_BUTTON: 0,
     FILL_IN_THE_BLANK: 0,
@@ -203,11 +201,28 @@ export interface ProvenanceReference {
   paragraphIndex?: number;
 }
 
+export interface SliderQuestionConfig {
+  min: number;
+  max: number;
+  step: number;
+  correctValue: number;
+  tolerance: number;
+  unit?: string;
+}
+
+export interface ClientSliderConfig {
+  min: number;
+  max: number;
+  step: number;
+  unit?: string;
+}
+
 export interface GameQuestion {
   id: string;
   type: QuestionType;
   question: string;
   choices?: string[];
+  sliderConfig?: SliderQuestionConfig;
   correctAnswer: string;
   acceptedAlternatives?: string[];
   explanation?: string;
@@ -221,6 +236,7 @@ export interface GameSpecification {
   gameId: string;
   ownerUserId?: string | null;
   isPublic?: boolean;
+  coverImageUrl?: string | null;
   title: string;
   description: string;
   gameType: GameType;
@@ -251,11 +267,13 @@ export interface SanitizedQuestion {
   type: QuestionType;
   question: string;
   choices?: string[];
+  sliderConfig?: ClientSliderConfig;
   difficulty: Difficulty;
   crosswordClue?: string;
   questionIndex: number;
   totalQuestions: number;
   timePerQuestion: number;
+  remainingTimeSeconds?: number;
   deadlineAt?: number;
 }
 
@@ -421,6 +439,7 @@ export interface PersistedGameSummary {
   gameId: string;
   ownerUserId: string | null;
   isPublic: boolean;
+  coverImageUrl?: string | null;
   title: string;
   description: string;
   gameType: GameType;
@@ -454,6 +473,32 @@ export interface PersistedPracticeSessionRecord {
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
+  isExternalPlayOnOwnedGame?: boolean;
+}
+
+export interface MultiplayerRoomAnalyticsItem {
+  roomId: string;
+  roomCode: string;
+  gameId: string;
+  gameTitle: string;
+  gameType: string;
+  scoringMode: string;
+  playerCount: number;
+  totalQuestions: number;
+  topScore: number;
+  totalScoreEarned: number;
+  totalCorrectAnswers: number;
+  bestStreak: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  leaderboard: Array<{
+    rank: number;
+    displayName: string;
+    score: number;
+    correctCount: number;
+    streak: number;
+  }>;
 }
 
 export interface LearningAnalyticsSummary {
@@ -467,12 +512,19 @@ export interface LearningAnalyticsSummary {
   overview: {
     totalGamesCreated: number;
     completedPracticeSessions: number;
+    personalPracticeSessions?: number;
+    creatorGamePracticeSessions?: number;
     completedMultiplayerRooms: number;
+    multiplayerPlayersCount?: number;
+    multiplayerTotalCorrectAnswers?: number;
+    multiplayerTotalScoreEarned?: number;
+    multiplayerBestStreak?: number;
     totalQuestionsAnswered: number;
     totalCorrectAnswers: number;
     totalWrongAnswers: number;
     overallAccuracyPercent: number | null;
     totalScoreEarned: number;
+    soloTotalScoreEarned?: number;
     averageScorePerSession: number | null;
     bestStreak: number;
     totalPracticeDurationMs: number;
@@ -489,6 +541,7 @@ export interface LearningAnalyticsSummary {
   byGameType: Array<{
     gameType: string;
     sessionsCount: number;
+    multiplayerRoomsCount?: number;
     questionsAnswered: number;
     correctAnswers: number;
     accuracyPercent: number | null;
@@ -499,12 +552,17 @@ export interface LearningAnalyticsSummary {
     gameTitle: string;
     gameType: string;
     sessionsCount: number;
+    personalSessionsCount?: number;
+    publicSessionsCount?: number;
+    multiplayerRoomsCount?: number;
+    multiplayerPlayersCount?: number;
     questionsAnswered: number;
     correctAnswers: number;
     accuracyPercent: number | null;
     bestScore: number;
     lastPlayedAt: string;
   }>;
+  recentMultiplayerRooms?: MultiplayerRoomAnalyticsItem[];
 }
 
 export interface AiObservabilitySummary {

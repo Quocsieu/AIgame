@@ -16,6 +16,7 @@ import { gameStore, sessionStore } from '../game/game.store.js';
 import { gameDeleteRateLimiter, generateRateLimiter } from '../middleware/rateLimiter.js';
 import { rejectGuestOrPlayerWrite } from '../middleware/auth.middleware.js';
 import { roomStore } from '../multiplayer/room.store.js';
+import { aiImageService } from '../services/ai.image.service.js';
 import { aiQuestionService } from '../services/ai.question.service.js';
 import { authService } from '../services/auth.service.js';
 import { exportService, ExportFormat } from '../services/export.service.js';
@@ -134,10 +135,22 @@ gameRouter.get(
         activeStatus: computeGameActiveStatus(game.gameId),
       }));
 
+      const activeCount = (result.scopeGameIds || []).filter(
+        (gid) =>
+          sessionStore.hasActiveSessionForGame(gid) || roomStore.hasActiveRoomForGame(gid)
+      ).length;
+
       res.status(200).json(
         createSuccessResponse({
-          ...result,
           games: enrichedGames,
+          total: result.total,
+          limit: result.limit,
+          offset: result.offset,
+          hasMore: result.hasMore,
+          counts: {
+            ...result.counts,
+            activeCount,
+          },
         })
       );
     } catch (err) {
@@ -310,6 +323,8 @@ gameRouter.get(
       const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
       const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
       const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
+      const coverMeta = persistenceRepo.getGameCoverMetadata(gameId);
+      const coverImageUrl = spec.coverImageUrl ?? coverMeta?.coverImageUrl ?? null;
 
       if (String(req.query.mode || '').toLowerCase() === 'public' && !isPublic) {
         throw new AppError(
@@ -332,6 +347,7 @@ gameRouter.get(
           ...spec,
           ownerUserId,
           isPublic,
+          ...(coverImageUrl ? { coverImageUrl } : {}),
         })
       );
     } catch (err) {
@@ -340,7 +356,7 @@ gameRouter.get(
   }
 );
 
-function handleUpdateGameSpecification(req: Request, res: Response, next: NextFunction): void {
+async function handleUpdateGameSpecification(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
     rejectGuestOrPlayerWrite(req, 'chỉnh sửa hoặc xuất bản game');
 
@@ -367,7 +383,7 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
       throw new AppError('INVALID_REQUEST', `Question validation failed: ${issues}`, 400);
     }
 
-    const { title, description, questions, settings, isPublic } = parseResult.data;
+    const { title, description, questions, settings, isPublic, coverImageUrl, generateCover } = parseResult.data;
 
     // Ensure all edited questions match the game's type (including canonical/legacy aliases) unless gameType is MIXED or ADVENTURE
     if (existing.gameType !== 'MIXED' && existing.gameType !== 'ADVENTURE') {
@@ -390,11 +406,17 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
     }
 
     const resolvedIsPublic = isPublic !== undefined ? isPublic : existingIsPublic;
+    const coverMeta = persistenceRepo.getGameCoverMetadata(gameId);
+    const resolvedCoverUrl =
+      coverImageUrl !== undefined
+        ? coverImageUrl
+        : existing.coverImageUrl ?? coverMeta?.coverImageUrl ?? null;
 
     const updatedSpec = GameSpecificationSchema.parse({
       ...existing,
       ownerUserId,
       isPublic: resolvedIsPublic,
+      ...(resolvedCoverUrl ? { coverImageUrl: resolvedCoverUrl } : {}),
       title: title !== undefined ? title : existing.title,
       description:
         description !== undefined
@@ -434,6 +456,23 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
     });
 
     gameStore.save(updatedSpec, Date.now(), ownerUserId, resolvedIsPublic);
+
+    // If generateCover is requested, attempt cover generation gracefully without ever failing the save/publish flow
+    if (generateCover) {
+      try {
+        const coverResult = await aiImageService.generateCoverForGame(updatedSpec, {
+          userId: req.user?.userId ?? null,
+          forceRegenerate: false,
+          throwOnError: false,
+        });
+        if (coverResult.coverImageUrl) {
+          updatedSpec.coverImageUrl = coverResult.coverImageUrl;
+        }
+      } catch {
+        // Never block game save/publish if cover generation fails or hits quota
+      }
+    }
+
     res.status(200).json(
       createSuccessResponse(updatedSpec)
     );
@@ -444,6 +483,99 @@ function handleUpdateGameSpecification(req: Request, res: Response, next: NextFu
 
 gameRouter.patch('/:gameId/questions', handleUpdateGameSpecification);
 gameRouter.patch('/:gameId', handleUpdateGameSpecification);
+
+/**
+ * POST /api/games/:gameId/cover
+ * Generate or regenerate a Gemini cover image for a specific game.
+ * Gracefully falls back to SVG illustration if Gemini image service is unavailable.
+ */
+gameRouter.post(
+  '/:gameId/cover',
+  generateRateLimiter.middleware,
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      rejectGuestOrPlayerWrite(req, 'tạo ảnh bìa game bằng AI');
+
+      const gameId = String(req.params.gameId || '');
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+
+      authService.assertResourceAccess({
+        resourceType: 'bộ câu hỏi',
+        ownerUserId,
+        currentUser: req.user,
+        mode: 'write',
+      });
+
+      const forceRegenerate = Boolean(req.body?.forceRegenerate);
+      const result = await aiImageService.generateCoverForGame(spec, {
+        userId: req.user?.userId ?? null,
+        forceRegenerate,
+        throwOnError: false,
+      });
+
+      res.status(200).json(createSuccessResponse(result));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * POST /api/games/:gameId/duplicate
+ * Duplicate an existing game into the current user's library as a Draft.
+ */
+gameRouter.post(
+  '/:gameId/duplicate',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      rejectGuestOrPlayerWrite(req, 'sao chép bộ câu hỏi');
+
+      const gameId = String(req.params.gameId || '');
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+      const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
+
+      authService.assertResourceAccess({
+        resourceType: 'bộ câu hỏi',
+        ownerUserId,
+        currentUser: req.user,
+        mode: 'read',
+        isPublic,
+      });
+
+      const customTitle =
+        typeof req.body?.title === 'string' && req.body.title.trim().length > 0
+          ? req.body.title.trim()
+          : undefined;
+
+      const duplicated = persistenceRepo.duplicateGame(
+        gameId,
+        req.user?.userId ?? null,
+        customTitle
+      );
+
+      if (!duplicated) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      gameStore.save(duplicated, Date.now(), req.user?.userId ?? null, false);
+      res.status(201).json(createSuccessResponse(duplicated));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 /**
  * DELETE /api/games
@@ -491,7 +623,13 @@ gameRouter.delete(
         }
 
         try {
+          const spec = gameStore.get(gameId);
+          const coverUrl =
+            spec?.coverImageUrl ?? persistenceRepo.getGameCoverMetadata(gameId)?.coverImageUrl ?? null;
           gameStore.delete(gameId);
+          if (coverUrl) {
+            aiImageService.cleanupOrphanedCoverImage(coverUrl);
+          }
           deletedCount++;
         } catch (err: any) {
           // Continue deleting other games if a single game deletion encounters an unexpected error
@@ -547,7 +685,12 @@ gameRouter.delete(
         );
       }
 
+      const coverUrl =
+        existing.coverImageUrl ?? persistenceRepo.getGameCoverMetadata(gameId)?.coverImageUrl ?? null;
       gameStore.delete(gameId);
+      if (coverUrl) {
+        aiImageService.cleanupOrphanedCoverImage(coverUrl);
+      }
       res.status(200).json(
         createSuccessResponse({
           deleted: true,

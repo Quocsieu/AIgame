@@ -77,6 +77,7 @@ interface DemoPageProps {
   onExitSoloPlay?: () => void;
   onNavigateToLibrary?: () => void;
   initialGameType?: GameType;
+  initialSourceTab?: 'URL' | 'FILE' | 'TOPIC';
   onBackToHome?: () => void;
 }
 
@@ -109,8 +110,6 @@ const formatGameTypeLabel = (type: string): string => {
       return 'Puzzle — Sắp xếp thứ tự';
     case 'SLIDER':
       return 'Slider — Thanh trượt giá trị';
-    case 'PIN_ANSWER':
-      return 'Pin Answer — Ghim vị trí';
     case 'CROSSWORD':
       return 'Ô chữ (Legacy)';
     case 'MIXED':
@@ -242,6 +241,30 @@ const validateQuestionItem = (q: GameQuestion): string | null => {
     }
   }
 
+  if (q.type === 'SLIDER') {
+    const cfg = q.sliderConfig;
+    if (!cfg) {
+      return 'Câu hỏi Slider bắt buộc phải có cấu hình thanh trượt (sliderConfig).';
+    }
+    if (!Number.isFinite(cfg.min) || !Number.isFinite(cfg.max) || cfg.min >= cfg.max) {
+      return 'Giá trị Min phải nhỏ hơn giá trị Max trên thanh trượt.';
+    }
+    const range = cfg.max - cfg.min;
+    if (!Number.isFinite(cfg.step) || cfg.step <= 0 || cfg.step > range) {
+      return 'Bước nhảy (Step) phải lớn hơn 0 và không vượt quá khoảng (Max - Min).';
+    }
+    if (!Number.isFinite(cfg.correctValue) || cfg.correctValue < cfg.min || cfg.correctValue > cfg.max) {
+      return `Giá trị đúng (${cfg.correctValue}) phải nằm trong khoảng [${cfg.min}, ${cfg.max}].`;
+    }
+    const stepsFromMin = (cfg.correctValue - cfg.min) / cfg.step;
+    if (Math.abs(stepsFromMin - Math.round(stepsFromMin)) > 1e-4) {
+      return 'Giá trị đúng phải khớp với bước nhảy từ Min (Min + k × Step).';
+    }
+    if (!Number.isFinite(cfg.tolerance) || cfg.tolerance < 0 || cfg.tolerance >= range) {
+      return 'Sai số cho phép (Tolerance) phải >= 0 và nhỏ hơn khoảng (Max - Min).';
+    }
+  }
+
   if (q.type === 'CROSSWORD') {
     const rawWord = q.crosswordAnswer || q.correctAnswer;
     const parts = rawWord
@@ -266,6 +289,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   onExitSoloPlay,
   onNavigateToLibrary,
   initialGameType,
+  initialSourceTab,
   onBackToHome,
 }) => {
   const toast = useToast();
@@ -273,7 +297,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   // Multi-source state (Batch 4 & Batch 8)
   const [urls, setUrls] = useState<string[]>(['']);
   const [files, setFiles] = useState<File[]>([]);
-  const [sourceTab, setSourceTab] = useState<'URL' | 'FILE' | 'TOPIC'>('URL');
+  const [sourceTab, setSourceTab] = useState<'URL' | 'FILE' | 'TOPIC'>(initialSourceTab || 'URL');
+
+  useEffect(() => {
+    if (initialSourceTab) {
+      setSourceTab(initialSourceTab);
+    }
+  }, [initialSourceTab]);
 
   // Tên game bắt buộc
   const [customGameTitle, setCustomGameTitle] = useState('');
@@ -986,8 +1016,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
   const handleDuplicateQuestion = (index: number) => {
     if (!generatedSpec) return;
-    if (generatedSpec.questions.length >= 20) {
-      toast.warning('Bộ câu hỏi hỗ trợ tối đa 20 câu hỏi.', 'Đã đạt giới hạn');
+    if (generatedSpec.questions.length >= 100) {
+      toast.warning('Bộ câu hỏi hỗ trợ tối đa 100 câu hỏi.', 'Đã đạt giới hạn');
       return;
     }
 
@@ -998,6 +1028,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       id: copyId,
       question: `${sourceQ.question} (Bản sao)`,
       choices: sourceQ.choices ? [...sourceQ.choices] : undefined,
+      sliderConfig: sourceQ.sliderConfig ? { ...sourceQ.sliderConfig } : undefined,
       acceptedAlternatives: sourceQ.acceptedAlternatives ? [...sourceQ.acceptedAlternatives] : undefined,
       sourceReference: { ...sourceQ.sourceReference },
     };
@@ -1021,8 +1052,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
   const handleAddQuestion = () => {
     if (!generatedSpec) return;
-    if (generatedSpec.questions.length >= 20) {
-      toast.warning('Bộ câu hỏi hỗ trợ tối đa 20 câu hỏi.', 'Đã đạt giới hạn');
+    if (generatedSpec.questions.length >= 100) {
+      toast.warning('Bộ câu hỏi hỗ trợ tối đa 100 câu hỏi.', 'Đã đạt giới hạn');
       return;
     }
 
@@ -1032,10 +1063,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       sourceLocation: generatedSpec.sourceSummary?.sources?.[0]?.sourceLocation || 'Biên tập thủ công',
     };
 
+    const configuredAdvType =
+      generatedSpec.settings?.adventureConfig?.questionTypes?.[0] ||
+      adventureQuestionTypes?.[0];
     const gType: QuestionType =
-      generatedSpec.gameType === 'MIXED' || generatedSpec.gameType === 'ADVENTURE'
-        ? 'MULTIPLE_CHOICE'
-        : generatedSpec.gameType;
+      generatedSpec.gameType === 'ADVENTURE'
+        ? (configuredAdvType as QuestionType) || 'MULTIPLE_CHOICE'
+        : generatedSpec.gameType === 'MIXED'
+          ? 'MULTIPLE_CHOICE'
+          : generatedSpec.gameType;
     const newIndex = generatedSpec.questions.length + 1;
     const newQuestion: GameQuestion = {
       id: `q_custom_${Date.now()}_${newIndex}`,
@@ -1045,7 +1081,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           ? `Câu hỏi tự nhập đáp án mới số ${newIndex}: Hãy nhập câu trả lời cho ___?`
           : gType === 'PUZZLE'
             ? `Sắp xếp các bước sau theo đúng trình tự (câu số ${newIndex}):`
-            : `Câu hỏi mới số ${newIndex}?`,
+            : gType === 'SLIDER'
+              ? `Câu hỏi định lượng số ${newIndex}: Chọn giá trị đúng trên thanh trượt?`
+              : `Câu hỏi mới số ${newIndex}?`,
       choices:
         gType === 'MULTIPLE_CHOICE' || gType === 'QUIZ'
           ? ['A. Phương án 1', 'B. Phương án 2', 'C. Phương án 3', 'D. Phương án 4']
@@ -1054,6 +1092,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             : gType === 'PUZZLE'
               ? ['Bước 1: Khởi tạo', 'Bước 2: Thực hiện', 'Bước 3: Hoàn tất']
               : undefined,
+      sliderConfig:
+        gType === 'SLIDER'
+          ? { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 2, unit: '%' }
+          : undefined,
       correctAnswer:
         gType === 'MULTIPLE_CHOICE' || gType === 'QUIZ'
           ? 'A. Phương án 1'
@@ -1061,9 +1103,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             ? 'Đúng'
             : gType === 'PUZZLE'
               ? 'Bước 1: Khởi tạo | Bước 2: Thực hiện | Bước 3: Hoàn tất'
-              : gType === 'CROSSWORD'
-                ? 'TUKHOA'
-                : 'Đáp án',
+              : gType === 'SLIDER'
+                ? '50'
+                : gType === 'CROSSWORD'
+                  ? 'TUKHOA'
+                  : 'Đáp án',
       explanation: 'Giải thích căn cứ theo nội dung tài liệu nguồn.',
       difficulty,
       crosswordClue: gType === 'CROSSWORD' ? `Gợi ý ô chữ câu số ${newIndex}` : undefined,
@@ -1116,6 +1160,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           scoringMode,
         },
         isPublic: nextIsPublic,
+        ...(publishFlag === true && !generatedSpec.coverImageUrl ? { generateCover: true } : {}),
       });
       setGeneratedSpec(saved);
       setEditingQuestionIdx(null);
@@ -2493,8 +2538,31 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                               })}
                             </div>
                           )}
+                          {q.type === 'SLIDER' && q.sliderConfig && (
+                            <div
+                              style={{
+                                display: 'flex',
+                                flexWrap: 'wrap',
+                                gap: '0.4rem',
+                                marginBottom: '0.35rem',
+                                fontSize: '0.75rem',
+                                color: 'var(--text-secondary)',
+                              }}
+                            >
+                              <span style={{ padding: '0.15rem 0.5rem', borderRadius: '4px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', fontWeight: 700 }}>
+                                Khoảng: {q.sliderConfig.min} → {q.sliderConfig.max} {q.sliderConfig.unit || ''}
+                              </span>
+                              <span style={{ padding: '0.15rem 0.5rem', borderRadius: '4px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', fontWeight: 700 }}>
+                                Bước nhảy: {q.sliderConfig.step}
+                              </span>
+                              <span style={{ padding: '0.15rem 0.5rem', borderRadius: '4px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', fontWeight: 700 }}>
+                                Sai số: ±{q.sliderConfig.tolerance} {q.sliderConfig.unit || ''}
+                              </span>
+                            </div>
+                          )}
                           <div style={{ fontSize: '0.76rem', color: 'var(--accent-emerald)', fontWeight: 700 }}>
                             Đáp án: {q.correctAnswer}
+                            {q.type === 'SLIDER' && q.sliderConfig?.unit ? ` ${q.sliderConfig.unit}` : ''}
                           </div>
                         </div>
                       )}
@@ -2627,6 +2695,151 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                   />
                                 </div>
                               ))}
+                            </div>
+                          )}
+
+                          {q.type === 'SLIDER' && (
+                            <div
+                              style={{
+                                display: 'grid',
+                                gridTemplateColumns: 'repeat(auto-fit, minmax(115px, 1fr))',
+                                gap: '0.45rem',
+                                padding: '0.55rem',
+                                borderRadius: '8px',
+                                backgroundColor: 'var(--bg-surface)',
+                                border: '1px solid var(--border-subtle)',
+                              }}
+                            >
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                  Min:
+                                </label>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={q.sliderConfig?.min ?? 0}
+                                  onChange={(e) => {
+                                    const minVal = Number(e.target.value);
+                                    handleUpdateQuestion(idx, (prev) => {
+                                      const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                      return {
+                                        ...prev,
+                                        sliderConfig: { ...cfg, min: Number.isFinite(minVal) ? minVal : 0 },
+                                      };
+                                    });
+                                  }}
+                                  style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                                />
+                              </div>
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                  Max:
+                                </label>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={q.sliderConfig?.max ?? 100}
+                                  onChange={(e) => {
+                                    const maxVal = Number(e.target.value);
+                                    handleUpdateQuestion(idx, (prev) => {
+                                      const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                      return {
+                                        ...prev,
+                                        sliderConfig: { ...cfg, max: Number.isFinite(maxVal) ? maxVal : 100 },
+                                      };
+                                    });
+                                  }}
+                                  style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                                />
+                              </div>
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                  Bước nhảy (Step):
+                                </label>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min={0.0001}
+                                  value={q.sliderConfig?.step ?? 1}
+                                  onChange={(e) => {
+                                    const stepVal = Number(e.target.value);
+                                    handleUpdateQuestion(idx, (prev) => {
+                                      const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                      return {
+                                        ...prev,
+                                        sliderConfig: { ...cfg, step: Number.isFinite(stepVal) && stepVal > 0 ? stepVal : 1 },
+                                      };
+                                    });
+                                  }}
+                                  style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                                />
+                              </div>
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: 'var(--accent-emerald)', marginBottom: '0.2rem' }}>
+                                  Giá trị đúng:
+                                </label>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  value={q.sliderConfig?.correctValue ?? Number(q.correctAnswer || 0)}
+                                  onChange={(e) => {
+                                    const cv = Number(e.target.value);
+                                    const safeCv = Number.isFinite(cv) ? cv : 0;
+                                    handleUpdateQuestion(idx, (prev) => {
+                                      const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                      return {
+                                        ...prev,
+                                        sliderConfig: { ...cfg, correctValue: safeCv },
+                                        correctAnswer: String(safeCv),
+                                      };
+                                    });
+                                  }}
+                                  style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--accent-emerald)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.8rem', boxSizing: 'border-box' }}
+                                />
+                              </div>
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                  Sai số (±):
+                                </label>
+                                <input
+                                  type="number"
+                                  step="any"
+                                  min={0}
+                                  value={q.sliderConfig?.tolerance ?? 0}
+                                  onChange={(e) => {
+                                    const tolVal = Number(e.target.value);
+                                    handleUpdateQuestion(idx, (prev) => {
+                                      const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                      return {
+                                        ...prev,
+                                        sliderConfig: { ...cfg, tolerance: Number.isFinite(tolVal) && tolVal >= 0 ? tolVal : 0 },
+                                      };
+                                    });
+                                  }}
+                                  style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                                />
+                              </div>
+                              <div>
+                                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                  Đơn vị (Unit):
+                                </label>
+                                <input
+                                  type="text"
+                                  placeholder="%, năm, °C..."
+                                  value={q.sliderConfig?.unit || ''}
+                                  onChange={(e) => {
+                                    const unitVal = e.target.value;
+                                    handleUpdateQuestion(idx, (prev) => {
+                                      const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                      return {
+                                        ...prev,
+                                        sliderConfig: { ...cfg, unit: unitVal },
+                                      };
+                                    });
+                                  }}
+                                  style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                                />
+                              </div>
                             </div>
                           )}
 

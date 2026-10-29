@@ -7,12 +7,16 @@ import {
   BarChartIcon,
   BookOpenIcon,
   CheckIcon,
+  FileTextIcon,
   GamepadIcon,
+  GlobeIcon,
   PencilIcon,
   PlusIcon,
   RefreshIcon,
   SearchIcon,
+  SparklesIcon,
   SpinnerIcon,
+  UploadIcon,
   UsersIcon,
   XMarkIcon,
 } from '../components/Icons.js';
@@ -29,15 +33,18 @@ import {
   type LibraryFilterPreset,
 } from './AnalyticsPage.js';
 import type {
+  AuthenticatedUser,
   GameSpecification,
   GameType,
   PersistedGameSummary,
 } from '../types/index.js';
 
 interface HomePageProps {
-  onNavigateToCreate: (gameType?: GameType) => void;
+  currentUser?: AuthenticatedUser | null;
+  onNavigateToCreate: (gameType?: GameType, sourceTab?: 'URL' | 'FILE' | 'TOPIC') => void;
   onNavigateToLibrary?: (preset?: LibraryFilterPreset) => void;
   onNavigateToAnalytics?: () => void;
+  onNavigateToReports?: () => void;
   onNavigateToHost?: (roomCode: string, hostToken: string) => void;
   onNavigateToSoloPresentation?: (spec: GameSpecification) => void;
   onSelectSavedGame?: (spec: GameSpecification, autoStartSolo?: boolean) => void;
@@ -49,6 +56,7 @@ const MultipleChoiceIllustration: React.FC = () => <GameFormatIllustration type=
 const QuickButtonIllustration: React.FC = () => <GameFormatIllustration type="QUICK_BUTTON" />;
 const FillInBlankIllustration: React.FC = () => <GameFormatIllustration type="FILL_IN_THE_BLANK" />;
 const PuzzleIllustration: React.FC = () => <GameFormatIllustration type="PUZZLE" />;
+const SliderIllustration: React.FC = () => <GameFormatIllustration type="SLIDER" />;
 const AdventureIllustration: React.FC = () => <GameFormatIllustration type="ADVENTURE" />;
 
 interface FormatMeta {
@@ -99,6 +107,15 @@ const GAME_FORMATS: FormatMeta[] = [
     illustration: <PuzzleIllustration />,
   },
   {
+    type: 'SLIDER',
+    title: 'Slider — Thanh trượt giá trị',
+    shortDesc: 'Kéo thanh trượt để chọn con số, mốc năm, tỷ lệ hoặc thông số định lượng chính xác.',
+    badge: 'Ưu tiên #5 • Slider',
+    accent: 'var(--accent-violet)',
+    badgeBg: 'var(--accent-violet-subtle)',
+    illustration: <SliderIllustration />,
+  },
+  {
     type: 'ADVENTURE',
     title: 'Đi cảnh theo ngành nghề',
     shortDesc: 'Nhập vai xử lý tình huống thực tế theo từng lĩnh vực và ngành nghề.',
@@ -110,6 +127,7 @@ const GAME_FORMATS: FormatMeta[] = [
 ];
 
 export const HomePage: React.FC<HomePageProps> = ({
+  currentUser,
   onNavigateToCreate,
   onNavigateToLibrary,
   onNavigateToAnalytics,
@@ -121,29 +139,63 @@ export const HomePage: React.FC<HomePageProps> = ({
   const toast = useToast();
 
   const [savedGames, setSavedGames] = useState<PersistedGameSummary[]>([]);
+  const [myOwnedGames, setMyOwnedGames] = useState<PersistedGameSummary[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [repoCounts, setRepoCounts] = useState<{
+    totalAll: number;
+    publishedCount: number;
+    draftCount: number;
+    ownedCount: number;
+    activeCount?: number;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
+  const [remoteSearchGames, setRemoteSearchGames] = useState<PersistedGameSummary[] | null>(null);
 
   // Modal chọn chế độ chơi (Chơi đơn / Mở phòng Multiplayer)
   const [isModeModalOpen, setIsModeModalOpen] = useState(false);
   const [modeModalSpec, setModeModalSpec] = useState<GameSpecification | null>(null);
   const [loadingGameId, setLoadingGameId] = useState<string | null>(null);
 
+  const canManageGame = (game: { ownerUserId?: string | null } | null | undefined): boolean => {
+    if (!game) return false;
+    if (currentUser?.role === 'ADMIN') return true;
+    if (currentUser?.userId) {
+      return game.ownerUserId === currentUser.userId;
+    }
+    return !game.ownerUserId;
+  };
+
   const loadDashboardGames = async () => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
-      const res = await fetchSavedGames({
-        limit: 40,
-        offset: 0,
-        scope: 'manage',
-        status: 'ALL',
-      });
-      setSavedGames(res.games || []);
-      setTotalCount(res.total ?? (res.games ? res.games.length : 0));
+      const [manageRes, mineRes] = await Promise.all([
+        fetchSavedGames({
+          limit: 40,
+          offset: 0,
+          scope: 'manage',
+          status: 'ALL',
+        }),
+        fetchSavedGames({
+          limit: 12,
+          offset: 0,
+          scope: 'mine',
+          status: 'ALL',
+        }).catch(() => null),
+      ]);
+      setSavedGames(manageRes.games || []);
+      setMyOwnedGames(mineRes?.games || []);
+      if (manageRes.counts) {
+        setRepoCounts(manageRes.counts);
+      }
+      setTotalCount(
+        manageRes.counts?.totalAll ??
+          manageRes.total ??
+          (manageRes.games ? manageRes.games.length : 0)
+      );
     } catch (err: any) {
       setErrorMessage(err.message || 'Không thể tải dữ liệu bảng điều khiển.');
     } finally {
@@ -153,7 +205,38 @@ export const HomePage: React.FC<HomePageProps> = ({
 
   useEffect(() => {
     loadDashboardGames();
-  }, []);
+  }, [currentUser?.userId]);
+
+  useEffect(() => {
+    const q = searchQuery.trim();
+    if (!q) {
+      setRemoteSearchGames(null);
+      return;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      fetchSavedGames({
+        search: q,
+        limit: 24,
+        offset: 0,
+        scope: 'manage',
+      })
+        .then((res) => {
+          if (!cancelled) {
+            setRemoteSearchGames(res.games || []);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setRemoteSearchGames(null);
+          }
+        });
+    }, 200);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [searchQuery]);
 
   const handleOpenGameModal = async (gameId: string) => {
     setLoadingGameId(gameId);
@@ -172,7 +255,7 @@ export const HomePage: React.FC<HomePageProps> = ({
     setLoadingGameId(gameId);
     try {
       const spec = await fetchGameById(gameId, { mode: 'manage' });
-      if (onSelectSavedGame) {
+      if (onSelectSavedGame && canManageGame(spec)) {
         onSelectSavedGame(spec, false);
       } else {
         onNavigateToLibrary?.({ search: spec.title, nonce: Date.now() });
@@ -184,39 +267,64 @@ export const HomePage: React.FC<HomePageProps> = ({
     }
   };
 
-  // Thống kê thực tế từ dữ liệu hệ thống
+  // Thống kê thực tế từ toàn bộ kho dữ liệu hệ thống (không bị giới hạn ở 40 bản ghi trang đầu)
   const stats = useMemo(() => {
-    const published = savedGames.filter((g) => g.isPublic).length;
-    const draft = savedGames.filter((g) => !g.isPublic).length;
-    const active = savedGames.filter(
-      (g) => g.activeStatus?.hasActiveRoom || g.activeStatus?.hasActiveSession
-    ).length;
+    const published =
+      repoCounts?.publishedCount ?? savedGames.filter((g) => g.isPublic).length;
+    const draft =
+      repoCounts?.draftCount ?? savedGames.filter((g) => !g.isPublic).length;
+    const active =
+      repoCounts?.activeCount ??
+      savedGames.filter(
+        (g) => g.activeStatus?.hasActiveRoom || g.activeStatus?.hasActiveSession
+      ).length;
     return { published, draft, active };
-  }, [savedGames]);
+  }, [repoCounts, savedGames]);
 
-  // Tìm kiếm trực tiếp trên dữ liệu thật
+  // Tìm kiếm trực tiếp trên dữ liệu thật (kết hợp backend search và local filter)
   const trimmedSearch = searchQuery.trim().toLowerCase();
   const searchResults = useMemo(() => {
     if (!trimmedSearch) return [];
-    return savedGames.filter((g) => {
+    const localMatches = savedGames.filter((g) => {
       const inTitle = g.title.toLowerCase().includes(trimmedSearch);
       const inDesc = (g.description || '').toLowerCase().includes(trimmedSearch);
       const inIndustry = (g.adventureConfig?.industryLabel || '').toLowerCase().includes(trimmedSearch);
       const inType = formatGameTypeName(g.gameType).toLowerCase().includes(trimmedSearch);
       return inTitle || inDesc || inIndustry || inType;
     });
-  }, [savedGames, trimmedSearch]);
+    if (!remoteSearchGames || remoteSearchGames.length === 0) {
+      return localMatches;
+    }
+    const mergedMap = new Map<string, PersistedGameSummary>();
+    for (const g of remoteSearchGames) {
+      mergedMap.set(g.gameId, g);
+    }
+    for (const g of localMatches) {
+      if (!mergedMap.has(g.gameId)) {
+        mergedMap.set(g.gameId, g);
+      }
+    }
+    return Array.from(mergedMap.values());
+  }, [savedGames, remoteSearchGames, trimmedSearch]);
 
-  // Game gần đây (sắp xếp theo updatedAt hoặc createdAt mới nhất)
+  // Kệ "Thư viện của bạn / Game gần đây": chỉ lấy game thuộc quyền sở hữu của người dùng (hoặc kho demo khi chưa đăng nhập), tuyệt đối không trộn game công khai của người khác
   const recentGames = useMemo(() => {
-    return [...savedGames]
+    const sourcePool =
+      myOwnedGames.length > 0
+        ? myOwnedGames
+        : savedGames.filter((g) =>
+            currentUser?.userId
+              ? g.ownerUserId === currentUser.userId
+              : !g.ownerUserId
+          );
+    return [...sourcePool]
       .sort(
         (a, b) =>
           new Date(b.updatedAt || b.createdAt || 0).getTime() -
           new Date(a.updatedAt || a.createdAt || 0).getTime()
       )
       .slice(0, 4);
-  }, [savedGames]);
+  }, [myOwnedGames, savedGames, currentUser?.userId]);
 
   // Nội dung nổi bật / Đã xuất bản sẵn sàng chơi ngay (isPublic === true)
   const publishedReadyGames = useMemo(() => {
@@ -420,43 +528,18 @@ export const HomePage: React.FC<HomePageProps> = ({
                 border: '1px solid var(--primary)',
                 borderRadius: '8px',
                 padding: '0 16px',
-                height: '38px',
+                height: '40px',
                 fontWeight: 800,
-                fontSize: '0.85rem',
+                fontSize: '0.86rem',
                 cursor: 'pointer',
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '6px',
               }}
             >
-              <PlusIcon size={15} />
-              <span>Tạo game</span>
+              <SparklesIcon size={15} />
+              <span>Tạo game bằng AI</span>
             </button>
-
-            {onNavigateToLibrary && (
-              <button
-                id="home-hero-library-btn"
-                type="button"
-                onClick={() => onNavigateToLibrary({ tab: 'ALL', nonce: Date.now() })}
-                style={{
-                  backgroundColor: 'var(--bg-input)',
-                  color: 'var(--text-primary)',
-                  border: '1px solid var(--border-strong)',
-                  borderRadius: '8px',
-                  padding: '0 14px',
-                  height: '38px',
-                  fontWeight: 700,
-                  fontSize: '0.84rem',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                }}
-              >
-                <BookOpenIcon size={15} />
-                <span>Mở Thư viện</span>
-              </button>
-            )}
 
             {onNavigateToAnalytics && (
               <button
@@ -469,7 +552,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   border: '1px solid var(--border-strong)',
                   borderRadius: '8px',
                   padding: '0 14px',
-                  height: '38px',
+                  height: '40px',
                   fontWeight: 700,
                   fontSize: '0.84rem',
                   cursor: 'pointer',
@@ -478,8 +561,33 @@ export const HomePage: React.FC<HomePageProps> = ({
                   gap: '6px',
                 }}
               >
-                <BarChartIcon size={15} />
-                <span>Kho Game</span>
+                <GamepadIcon size={15} />
+                <span>Khám phá</span>
+              </button>
+            )}
+
+            {onNavigateToLibrary && (
+              <button
+                id="home-hero-library-btn"
+                type="button"
+                onClick={() => onNavigateToLibrary({ tab: 'ALL', nonce: Date.now() })}
+                style={{
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '8px',
+                  padding: '0 14px',
+                  height: '40px',
+                  fontWeight: 700,
+                  fontSize: '0.84rem',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <BookOpenIcon size={15} />
+                <span>Thư viện</span>
               </button>
             )}
 
@@ -494,7 +602,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   border: '1px solid var(--border-subtle)',
                   borderRadius: '8px',
                   padding: '0 12px',
-                  height: '38px',
+                  height: '40px',
                   fontWeight: 600,
                   fontSize: '0.82rem',
                   cursor: 'pointer',
@@ -508,6 +616,151 @@ export const HomePage: React.FC<HomePageProps> = ({
               </button>
             )}
           </div>
+        </div>
+
+        {/* 3 Lối tắt khởi tạo nhanh từ Nguồn dữ liệu: URL, File, Chủ đề */}
+        <div
+          aria-label="Lối tắt tạo game theo nguồn học liệu"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+            gap: '10px',
+          }}
+        >
+          <button
+            id="home-shortcut-url"
+            type="button"
+            onClick={() => onNavigateToCreate(undefined, 'URL')}
+            style={{
+              backgroundColor: 'var(--bg-input)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '10px',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+              <span
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '7px',
+                  backgroundColor: 'var(--accent-sky-subtle)',
+                  color: 'var(--accent-sky)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <GlobeIcon size={16} />
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '0.83rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                  Tạo từ đường dẫn URL
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                  Trích xuất bài viết, tài liệu web
+                </div>
+              </div>
+            </div>
+            <ArrowRightIcon size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+          </button>
+
+          <button
+            id="home-shortcut-file"
+            type="button"
+            onClick={() => onNavigateToCreate(undefined, 'FILE')}
+            style={{
+              backgroundColor: 'var(--bg-input)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '10px',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+              <span
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '7px',
+                  backgroundColor: 'var(--accent-emerald-subtle)',
+                  color: 'var(--accent-emerald)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <UploadIcon size={16} />
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '0.83rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                  Tạo từ File tài liệu
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                  Hỗ trợ PDF, DOCX, XLSX, CSV, TXT
+                </div>
+              </div>
+            </div>
+            <ArrowRightIcon size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+          </button>
+
+          <button
+            id="home-shortcut-topic"
+            type="button"
+            onClick={() => onNavigateToCreate(undefined, 'TOPIC')}
+            style={{
+              backgroundColor: 'var(--bg-input)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '8px',
+              padding: '10px 14px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '10px',
+              cursor: 'pointer',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+              <span
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '7px',
+                  backgroundColor: 'var(--accent-amber-subtle)',
+                  color: 'var(--accent-amber)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <FileTextIcon size={16} />
+              </span>
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontSize: '0.83rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                  Tạo theo Chủ đề học tập
+                </div>
+                <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                  AI tự biên soạn từ chủ đề yêu cầu
+                </div>
+              </div>
+            </div>
+            <ArrowRightIcon size={14} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+          </button>
         </div>
 
         {/* Hàng tìm kiếm trực tiếp + Divided KPI Strip */}
@@ -805,7 +1058,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                             cursor: 'pointer',
                           }}
                         >
-                          Sửa
+                          {canManageGame(item) ? 'Sửa' : 'Chi tiết'}
                         </button>
                         <button
                           type="button"
@@ -1041,10 +1294,12 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
           <div>
             <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-              Game gần đây
+              {currentUser?.userId ? 'Thư viện của bạn • Game gần đây' : 'Game gần đây (Kho học liệu chung)'}
             </h2>
             <p style={{ margin: '2px 0 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-              Tiếp tục chỉnh sửa hoặc tổ chức chơi từ các bộ câu hỏi vừa được cập nhật
+              {currentUser?.userId
+                ? 'Tiếp tục chỉnh sửa hoặc tổ chức chơi từ các bộ câu hỏi do bạn biên soạn'
+                : 'Tiếp tục chỉnh sửa hoặc tổ chức chơi từ các bộ câu hỏi vừa được cập nhật'}
             </p>
           </div>
 
@@ -1074,7 +1329,12 @@ export const HomePage: React.FC<HomePageProps> = ({
             {onNavigateToLibrary && (
               <button
                 type="button"
-                onClick={() => onNavigateToLibrary({ tab: 'ALL', nonce: Date.now() })}
+                onClick={() =>
+                  onNavigateToLibrary({
+                    tab: currentUser?.userId ? 'MINE' : 'ALL',
+                    nonce: Date.now(),
+                  })
+                }
                 style={{
                   background: 'none',
                   border: 'none',
@@ -1125,9 +1385,38 @@ export const HomePage: React.FC<HomePageProps> = ({
               textAlign: 'center',
               color: 'var(--text-secondary)',
               fontSize: '0.86rem',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '12px',
             }}
           >
-            Chưa có bộ câu hỏi nào được lưu trong hệ thống. Hãy chọn một thể loại phía trên để tạo game đầu tiên.
+            <div>
+              {currentUser?.userId
+                ? 'Bạn chưa tạo bộ câu hỏi nào trong thư viện cá nhân. Hãy bắt đầu biên soạn game đầu tiên hoặc khám phá các học liệu công khai bên dưới.'
+                : 'Chưa có bộ câu hỏi nào được lưu trong hệ thống. Hãy chọn một thể loại phía trên để tạo game đầu tiên.'}
+            </div>
+            <button
+              type="button"
+              onClick={() => onNavigateToCreate()}
+              style={{
+                backgroundColor: 'var(--primary)',
+                color: 'var(--primary-ink, #08090e)',
+                border: 'none',
+                borderRadius: '6px',
+                padding: '0 14px',
+                height: '34px',
+                fontSize: '0.8rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+              }}
+            >
+              <PlusIcon size={14} />
+              <span>Tạo game mới</span>
+            </button>
           </div>
         ) : (
           <div
@@ -1301,7 +1590,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                     }}
                   >
                     <PencilIcon size={12} />
-                    <span>Sửa</span>
+                    <span>{canManageGame(game) ? 'Sửa' : 'Chi tiết'}</span>
                   </button>
                 </div>
               </article>
@@ -1333,27 +1622,50 @@ export const HomePage: React.FC<HomePageProps> = ({
             </p>
           </div>
 
-          {onNavigateToLibrary && (
-            <button
-              type="button"
-              onClick={() => onNavigateToLibrary({ tab: 'PUBLISHED', nonce: Date.now() })}
-              style={{
-                background: 'none',
-                border: 'none',
-                color: 'var(--accent-sky)',
-                fontSize: '0.82rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '4px',
-                padding: 0,
-              }}
-            >
-              <span>Xem tất cả game đã xuất bản</span>
-              <ArrowRightIcon size={13} />
-            </button>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            {onNavigateToAnalytics && (
+              <button
+                type="button"
+                onClick={onNavigateToAnalytics}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--primary)',
+                  fontSize: '0.82rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: 0,
+                }}
+              >
+                <span>Mở trang Khám phá</span>
+                <ArrowRightIcon size={13} />
+              </button>
+            )}
+            {onNavigateToLibrary && (
+              <button
+                type="button"
+                onClick={() => onNavigateToLibrary({ tab: 'PUBLISHED', nonce: Date.now() })}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--accent-sky)',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  padding: 0,
+                }}
+              >
+                <span>Xem trong Thư viện</span>
+                <ArrowRightIcon size={13} />
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Các chủ đề ngành nghề thực tế nếu có */}
@@ -1420,21 +1732,42 @@ export const HomePage: React.FC<HomePageProps> = ({
                   backgroundColor: 'var(--bg-input)',
                   border: '1px solid var(--border-subtle)',
                   borderRadius: '8px',
-                  padding: '12px 14px',
+                  overflow: 'hidden',
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
-                  gap: '10px',
                 }}
               >
                 <div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
+                  <div
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => handleOpenGameModal(item.gameId)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        handleOpenGameModal(item.gameId);
+                      }
+                    }}
+                    style={{
+                      position: 'relative',
+                      height: '104px',
+                      width: '100%',
+                      cursor: 'pointer',
+                      borderBottom: '1px solid var(--border-subtle)',
+                    }}
+                  >
+                    <GameCoverIllustration game={item} />
                     <span
                       style={{
-                        fontSize: '0.7rem',
+                        position: 'absolute',
+                        top: '8px',
+                        left: '8px',
+                        fontSize: '0.68rem',
                         fontWeight: 700,
-                        color: 'var(--accent-emerald)',
-                        backgroundColor: 'var(--accent-emerald-subtle)',
+                        color: 'var(--discover-status-pub-text, #76d6ad)',
+                        backgroundColor: 'var(--discover-status-pub-bg, rgba(6, 78, 59, 0.92))',
+                        border: '1px solid var(--discover-status-pub-border, rgba(16, 185, 129, 0.42))',
                         padding: '2px 7px',
                         borderRadius: '4px',
                         display: 'inline-flex',
@@ -1442,44 +1775,54 @@ export const HomePage: React.FC<HomePageProps> = ({
                         gap: '4px',
                       }}
                     >
-                      <CheckIcon size={11} />
+                      <CheckIcon size={10} />
                       <span>Sẵn sàng chơi</span>
                     </span>
                     <span
                       style={{
-                        fontSize: '0.72rem',
-                        color: 'var(--text-secondary)',
+                        position: 'absolute',
+                        bottom: '6px',
+                        right: '8px',
+                        fontSize: '0.68rem',
+                        fontWeight: 700,
+                        color: 'var(--discover-cover-badge-text, #f2f4f8)',
+                        backgroundColor: 'var(--discover-cover-badge-bg, rgba(8, 9, 14, 0.88))',
+                        border: '1px solid var(--discover-cover-badge-border, rgba(255, 255, 255, 0.16))',
+                        padding: '1px 6px',
+                        borderRadius: '4px',
                         fontVariantNumeric: 'tabular-nums',
                       }}
                     >
                       {item.questionCount} câu • {formatGameTypeName(item.gameType)}
                     </span>
                   </div>
-                  <div
-                    style={{
-                      fontWeight: 700,
-                      fontSize: '0.9rem',
-                      color: 'var(--text-primary)',
-                      lineHeight: 1.35,
-                      display: '-webkit-box',
-                      WebkitLineClamp: 1,
-                      WebkitBoxOrient: 'vertical',
-                      overflow: 'hidden',
-                    }}
-                    title={item.title}
-                  >
-                    {item.title}
+                  <div style={{ padding: '12px 14px 6px' }}>
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: '0.9rem',
+                        color: 'var(--text-primary)',
+                        lineHeight: 1.35,
+                        display: '-webkit-box',
+                        WebkitLineClamp: 1,
+                        WebkitBoxOrient: 'vertical',
+                        overflow: 'hidden',
+                      }}
+                      title={item.title}
+                    >
+                      {item.title}
+                    </div>
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
+                <div style={{ padding: '6px 14px 12px', display: 'flex', justifyContent: 'flex-end', gap: '6px' }}>
                   <button
                     type="button"
                     onClick={() => handleOpenGameModal(item.gameId)}
                     style={{
-                      backgroundColor: 'var(--bg-elevated)',
-                      color: 'var(--text-primary)',
-                      border: '1px solid var(--border-strong)',
+                      backgroundColor: 'var(--primary)',
+                      color: 'var(--primary-ink, #060913)',
+                      border: '1px solid var(--primary)',
                       borderRadius: '6px',
                       padding: '0 10px',
                       height: '28px',
@@ -1539,7 +1882,7 @@ export const HomePage: React.FC<HomePageProps> = ({
           }
         }}
         onNavigateToHost={onNavigateToHost}
-        isOwner={true}
+        isOwner={canManageGame(modeModalSpec)}
       />
     </div>
   );

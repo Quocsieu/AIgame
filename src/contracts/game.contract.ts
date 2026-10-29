@@ -19,7 +19,6 @@ export const TargetTraditionalGameTypeEnum = z.enum([
   'TYPE_ANSWER',
   'PUZZLE',
   'SLIDER',
-  'PIN_ANSWER',
 ]);
 export type TargetTraditionalGameType = z.infer<typeof TargetTraditionalGameTypeEnum>;
 
@@ -28,6 +27,7 @@ export const PriorityTraditionalGameTypeEnum = z.enum([
   'TRUE_FALSE',
   'TYPE_ANSWER',
   'PUZZLE',
+  'SLIDER',
 ]);
 export type PriorityTraditionalGameType = z.infer<typeof PriorityTraditionalGameTypeEnum>;
 
@@ -37,7 +37,6 @@ export const QuestionTypeEnum = z.enum([
   'TYPE_ANSWER',
   'PUZZLE',
   'SLIDER',
-  'PIN_ANSWER',
   'MULTIPLE_CHOICE',
   'FILL_IN_THE_BLANK',
   'QUICK_BUTTON',
@@ -51,7 +50,6 @@ export const GameTypeEnum = z.enum([
   'TYPE_ANSWER',
   'PUZZLE',
   'SLIDER',
-  'PIN_ANSWER',
   'MULTIPLE_CHOICE',
   'FILL_IN_THE_BLANK',
   'QUICK_BUTTON',
@@ -63,17 +61,17 @@ export type GameType = z.infer<typeof GameTypeEnum>;
 
 /**
  * Danh sách loại game được phép tạo mới qua POST /api/games/generate:
- * - 4 dạng truyền thống ưu tiên: QUIZ (MULTIPLE_CHOICE), TRUE_FALSE (QUICK_BUTTON),
- *   TYPE_ANSWER (FILL_IN_THE_BLANK), PUZZLE
+ * - 5 dạng truyền thống: QUIZ (MULTIPLE_CHOICE), TRUE_FALSE (QUICK_BUTTON),
+ *   TYPE_ANSWER (FILL_IN_THE_BLANK), PUZZLE, SLIDER
  * - Dạng giả lập tương tác: ADVENTURE
- * - Loại bỏ các dạng cũ không nằm trong danh sách tạo mới (CROSSWORD, MIXED)
- *   và chưa mở tạo mới cho 2 dạng chuẩn bị kiến trúc (SLIDER, PIN_ANSWER).
+ * - Loại bỏ các dạng cũ không nằm trong danh sách tạo mới (CROSSWORD, MIXED).
  */
 export const CreatableGameTypeEnum = z.enum([
   'QUIZ',
   'TRUE_FALSE',
   'TYPE_ANSWER',
   'PUZZLE',
+  'SLIDER',
   'MULTIPLE_CHOICE',
   'QUICK_BUTTON',
   'FILL_IN_THE_BLANK',
@@ -105,6 +103,15 @@ export const SliderQuestionConfigSchema = z
         message: 'SLIDER min must be strictly less than max.',
         path: ['min'],
       });
+      return;
+    }
+    const range = cfg.max - cfg.min;
+    if (cfg.step <= 0 || cfg.step > range) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'SLIDER step must be > 0 and cannot exceed (max - min).',
+        path: ['step'],
+      });
     }
     if (cfg.correctValue < cfg.min || cfg.correctValue > cfg.max) {
       ctx.addIssue({
@@ -112,37 +119,25 @@ export const SliderQuestionConfigSchema = z
         message: 'SLIDER correctValue must be within [min, max].',
         path: ['correctValue'],
       });
+    } else if (cfg.step > 0 && cfg.step <= range) {
+      const stepsFromMin = (cfg.correctValue - cfg.min) / cfg.step;
+      if (Math.abs(stepsFromMin - Math.round(stepsFromMin)) > 1e-4) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'SLIDER correctValue must align with min + k * step.',
+          path: ['correctValue'],
+        });
+      }
     }
-    if (cfg.step > cfg.max - cfg.min) {
+    if (cfg.tolerance < 0 || cfg.tolerance >= range) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: 'SLIDER step cannot exceed (max - min).',
-        path: ['step'],
+        message: 'SLIDER tolerance must be >= 0 and strictly less than (max - min).',
+        path: ['tolerance'],
       });
     }
   });
 export type SliderQuestionConfig = z.infer<typeof SliderQuestionConfigSchema>;
-
-export const PinCoordinateSystemEnum = z.enum(['NORMALIZED_PERCENT_100']);
-export type PinCoordinateSystem = z.infer<typeof PinCoordinateSystemEnum>;
-
-export const PinAnswerQuestionConfigSchema = z
-  .object({
-    imageUrl: z
-      .string()
-      .trim()
-      .min(1)
-      .max(2048)
-      .refine(
-        val => /^https?:\/\/[^\s]+$/i.test(val) || /^\/[^\s]*$/.test(val),
-        'PIN_ANSWER imageUrl must be a safe http(s) URL or relative asset path.'
-      ),
-    coordinateSystem: PinCoordinateSystemEnum.default('NORMALIZED_PERCENT_100'),
-    targetX: z.number().min(0).max(100),
-    targetY: z.number().min(0).max(100),
-    radius: z.number().positive().max(50),
-  });
-export type PinAnswerQuestionConfig = z.infer<typeof PinAnswerQuestionConfigSchema>;
 
 function normalizeChoiceCompare(text: string): string {
   return text.trim().normalize('NFC').toLowerCase().replace(/\s+/g, ' ');
@@ -275,7 +270,6 @@ export const BaseQuestionSchema = z.object({
   crosswordClue: z.string().optional(),
   crosswordAnswer: z.string().optional(),
   sliderConfig: SliderQuestionConfigSchema.optional(),
-  pinConfig: PinAnswerQuestionConfigSchema.optional(),
 });
 
 export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => {
@@ -473,6 +467,14 @@ export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => 
   }
 
   if (data.type === 'SLIDER') {
+    if (Array.isArray(data.choices) && data.choices.length > 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'SLIDER question must not include selectable choices.',
+        path: ['choices'],
+      });
+      return;
+    }
     if (!data.sliderConfig) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -487,16 +489,6 @@ export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => 
         code: z.ZodIssueCode.custom,
         message: 'SLIDER correctAnswer must match sliderConfig.correctValue.',
         path: ['correctAnswer'],
-      });
-    }
-  }
-
-  if (data.type === 'PIN_ANSWER') {
-    if (!data.pinConfig) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: 'PIN_ANSWER question requires a valid pinConfig.',
-        path: ['pinConfig'],
       });
     }
   }
@@ -561,6 +553,7 @@ export const GameSpecificationSchema = z.object({
   gameId: z.string(),
   ownerUserId: z.string().nullable().optional(),
   isPublic: z.boolean().optional(),
+  coverImageUrl: z.string().nullable().optional(),
   title: z.string().trim().min(1, 'Tên game không được để trống').max(100, 'Tên game không được vượt quá 100 ký tự'),
   description: z.string(),
   gameType: GameTypeEnum,
@@ -627,5 +620,7 @@ export const UpdateGameQuestionsRequestSchema = z.object({
     })
     .optional(),
   isPublic: z.boolean().optional(),
+  coverImageUrl: z.string().nullable().optional(),
+  generateCover: z.boolean().optional(),
 });
 export type UpdateGameQuestionsRequest = z.infer<typeof UpdateGameQuestionsRequestSchema>;

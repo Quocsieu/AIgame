@@ -13,6 +13,7 @@ import {
   FlameIcon,
   GamepadIcon,
   InfoIcon,
+  LockIcon,
   PlayIcon,
   QrCodeIcon,
   RefreshIcon,
@@ -170,7 +171,9 @@ export const HostPage: React.FC<HostPageProps> = ({
       setViewState('question');
       const remainingSec = msg.question.deadlineAt
         ? Math.max(0, Math.ceil((msg.question.deadlineAt - Date.now()) / 1000))
-        : (msg.question.timePerQuestion || 20);
+        : typeof msg.question.remainingTimeSeconds === 'number'
+          ? Math.max(0, Math.ceil(msg.question.remainingTimeSeconds))
+          : (msg.question.timePerQuestion || 20);
       startTimer(remainingSec || 20);
       toast.info(`Bắt đầu câu hỏi số ${(msg.question.questionIndex || 0) + 1}!`, 'Câu hỏi mới');
     });
@@ -446,6 +449,34 @@ export const HostPage: React.FC<HostPageProps> = ({
             </button>
 
             <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                data-testid="host-toggle-lock-btn"
+                onClick={handleToggleLock}
+                style={{
+                  backgroundColor: isLocked ? 'rgba(245, 158, 11, 0.16)' : 'var(--bg-card)',
+                  color: isLocked ? 'var(--accent-amber)' : 'var(--text-primary)',
+                  border: `1px solid ${isLocked ? 'var(--accent-amber)' : 'var(--border-strong)'}`,
+                  borderRadius: '10px',
+                  padding: '0.65rem 1.15rem',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  minHeight: '44px',
+                }}
+                title={
+                  isLocked
+                    ? 'Mở khóa để cho phép người chơi mới tham gia phòng'
+                    : 'Khóa phòng để chặn người chơi mới tham gia'
+                }
+              >
+                <LockIcon size={15} />
+                <span>{isLocked ? 'Mở khóa phòng' : 'Khóa phòng'}</span>
+              </button>
+
               <button
                 type="button"
                 onClick={handleToggleFullscreen}
@@ -850,6 +881,79 @@ export const HostPage: React.FC<HostPageProps> = ({
                 </div>
               );
             })}
+
+              {currentQuestion.type === 'SLIDER' && currentQuestion.sliderConfig && (
+                <div
+                  data-testid="host-slider-projection"
+                  style={{
+                    gridColumn: '1 / -1',
+                    backgroundColor: 'var(--bg-card)',
+                    border: '2px solid var(--accent-sky)',
+                    borderRadius: '18px',
+                    padding: '1.75rem 2rem',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '1.1rem',
+                    textAlign: 'center',
+                  }}
+                >
+                  <div style={{ fontSize: '0.95rem', fontWeight: 800, color: 'var(--accent-sky)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                    Thử thách Thanh trượt định lượng (Slider)
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
+                    <div style={{ backgroundColor: 'var(--bg-input)', padding: '0.85rem 1.4rem', borderRadius: '12px', border: '1px solid var(--border-strong)' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Giá trị tối thiểu (Min)</div>
+                      <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>
+                        {currentQuestion.sliderConfig.min}{currentQuestion.sliderConfig.unit ? ` ${currentQuestion.sliderConfig.unit}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '1.6rem', fontWeight: 900, color: 'var(--accent-sky)' }}>⟷</div>
+                    <div style={{ backgroundColor: 'var(--bg-input)', padding: '0.85rem 1.4rem', borderRadius: '12px', border: '1px solid var(--border-strong)' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Giá trị tối đa (Max)</div>
+                      <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--text-primary)', fontVariantNumeric: 'tabular-nums' }}>
+                        {currentQuestion.sliderConfig.max}{currentQuestion.sliderConfig.unit ? ` ${currentQuestion.sliderConfig.unit}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ backgroundColor: 'var(--bg-input)', padding: '0.85rem 1.4rem', borderRadius: '12px', border: '1px solid var(--border-strong)' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Bước nhảy (Step)</div>
+                      <div style={{ fontSize: '1.8rem', fontWeight: 900, color: 'var(--accent-amber)', fontVariantNumeric: 'tabular-nums' }}>
+                        {currentQuestion.sliderConfig.step}{currentQuestion.sliderConfig.unit ? ` ${currentQuestion.sliderConfig.unit}` : ''}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ fontSize: '1.05rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                    Người chơi kéo thanh trượt để chọn giá trị chính xác trên thiết bị cá nhân.
+                  </div>
+                </div>
+              )}
+
+              {(currentQuestion.type === 'TYPE_ANSWER' ||
+                currentQuestion.type === 'FILL_IN_THE_BLANK' ||
+                (!currentQuestion.choices?.length &&
+                  currentQuestion.type !== 'SLIDER' &&
+                  !currentQuestion.crosswordClue)) && (
+                <div
+                  data-testid="host-type-answer-projection"
+                  style={{
+                    gridColumn: '1 / -1',
+                    backgroundColor: 'var(--bg-card)',
+                    border: '2px dashed var(--accent-amber)',
+                    borderRadius: '18px',
+                    padding: '1.75rem 2rem',
+                    textAlign: 'center',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.6rem',
+                  }}
+                >
+                  <div style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--accent-amber)' }}>
+                    Câu hỏi tự nhập đáp án (Type Answer)
+                  </div>
+                  <div style={{ fontSize: '1.05rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                    Người chơi tự gõ câu trả lời ngắn gọn trực tiếp trên thiết bị của mình.
+                  </div>
+                </div>
+              )}
 
             {currentQuestion.crosswordClue && (
               <div

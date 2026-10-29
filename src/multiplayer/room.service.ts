@@ -490,6 +490,16 @@ export class MultiplayerRoom {
             : undefined,
       difficulty: question.difficulty,
       crosswordClue: question.crosswordClue,
+      ...(question.type === 'SLIDER' && question.sliderConfig
+        ? {
+            sliderConfig: {
+              min: question.sliderConfig.min,
+              max: question.sliderConfig.max,
+              step: question.sliderConfig.step,
+              ...(question.sliderConfig.unit ? { unit: question.sliderConfig.unit } : {}),
+            },
+          }
+        : {}),
       questionIndex: this.currentQuestionIndex,
       totalQuestions: this.gameSpecification.questions.length,
       timePerQuestion: this.gameSpecification.settings.timePerQuestion,

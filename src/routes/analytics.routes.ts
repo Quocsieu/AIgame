@@ -130,6 +130,31 @@ historyRouter.get(
 );
 
 /**
+ * GET /api/history/rooms
+ * List completed multiplayer rooms scoped to the caller (including rooms on owned games).
+ */
+historyRouter.get(
+  '/rooms',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+      const gameId =
+        typeof req.query.gameId === 'string' && req.query.gameId.trim()
+          ? req.query.gameId.trim()
+          : undefined;
+      const rooms = persistenceRepo.listRoomHistory({
+        userId: req.user?.userId ?? null,
+        gameId,
+        limit,
+      });
+      res.status(200).json(createSuccessResponse(rooms));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
  * GET /api/history/sources
  * List ingested source metadata scoped to the caller.
  */

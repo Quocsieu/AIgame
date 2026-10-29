@@ -62,6 +62,16 @@ export const SUPPORTED_GAME_TYPES: GameTypeOption[] = [
     tags: ['Sắp xếp thứ tự', 'Tư duy quy trình', '3–6 mục'],
   },
   {
+    id: 'SLIDER',
+    title: 'Slider — Thanh Trượt Giá Trị',
+    subtitle: 'Kéo thanh trượt để chọn con số, tỷ lệ, mốc năm hoặc thông số định lượng với ngưỡng sai số linh hoạt.',
+    badge: 'Ưu tiên #5 • Slider',
+    badgeColor: 'var(--game-mixed)',
+    accentColor: 'var(--game-mixed-hover)',
+    icon: <CheckIcon size={24} style={{ color: 'var(--game-mixed)' }} />,
+    tags: ['Kéo thanh trượt', 'Số liệu định lượng', 'Sai số ±'],
+  },
+  {
     id: 'ADVENTURE',
     title: 'Game đi cảnh theo ngành nghề',
     subtitle: 'Khám phá kiến thức qua hành trình tương tác với bối cảnh được tạo theo ngành nghề.',

@@ -306,6 +306,13 @@ export async function fetchSavedGames(
   limit?: number;
   offset?: number;
   hasMore?: boolean;
+  counts?: {
+    totalAll: number;
+    publishedCount: number;
+    draftCount: number;
+    ownedCount: number;
+    activeCount?: number;
+  };
 }> {
   const opts = typeof options === 'number' ? { limit: options } : options;
   const query = new URLSearchParams();
@@ -458,6 +465,8 @@ export async function saveEditedQuestions(
       adventureConfig?: Partial<AdventureConfig>;
     };
     isPublic?: boolean;
+    coverImageUrl?: string | null;
+    generateCover?: boolean;
   }
 ): Promise<GameSpecification> {
   const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/questions`, {
@@ -468,6 +477,48 @@ export async function saveEditedQuestions(
   const data = await res.json();
   if (!data.success) {
     throw new Error(data.error?.message || 'Không thể lưu chỉnh sửa bộ câu hỏi.');
+  }
+  return data.data;
+}
+
+export interface GenerateGameCoverApiResult {
+  gameId: string;
+  coverImageUrl: string | null;
+  generated: boolean;
+  cached: boolean;
+  fallbackUsed: boolean;
+  promptHash: string;
+  reason?: string;
+}
+
+export async function generateGameCoverApi(
+  gameId: string,
+  forceRegenerate: boolean = false
+): Promise<GenerateGameCoverApiResult> {
+  const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/cover`, {
+    method: 'POST',
+    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify({ forceRegenerate }),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể tạo ảnh bìa bằng AI.');
+  }
+  return data.data;
+}
+
+export async function duplicateGameApi(
+  gameId: string,
+  title?: string
+): Promise<GameSpecification> {
+  const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/duplicate`, {
+    method: 'POST',
+    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(title ? { title } : {}),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể sao chép bộ câu hỏi.');
   }
   return data.data;
 }
@@ -852,6 +903,13 @@ export async function fetchAdminGames(options?: {
   games: PersistedGameSummary[];
   total: number;
   hasMore?: boolean;
+  counts?: {
+    totalAll: number;
+    publishedCount: number;
+    draftCount: number;
+    ownedCount: number;
+    activeCount?: number;
+  };
 }> {
   const query = new URLSearchParams();
   if (options?.limit) query.set('limit', String(options.limit));
