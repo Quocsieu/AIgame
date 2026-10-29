@@ -811,14 +811,25 @@ export async function fetchPracticeHistory(limit: number = 30): Promise<Persiste
   return data.data;
 }
 
-export async function fetchLearningAnalytics(): Promise<LearningAnalyticsSummary> {
+export async function fetchLearningAnalytics(options?: {
+  from?: string;
+  to?: string;
+}): Promise<LearningAnalyticsSummary> {
   const tzOffsetMinutes = -new Date().getTimezoneOffset();
-  const res = await fetch(`${API_BASE_URL}/analytics/learning?tzOffsetMinutes=${tzOffsetMinutes}`, {
+  const query = new URLSearchParams();
+  query.set('tzOffsetMinutes', String(tzOffsetMinutes));
+  if (options?.from) {
+    query.set('from', options.from);
+  }
+  if (options?.to) {
+    query.set('to', options.to);
+  }
+  const res = await fetch(`${API_BASE_URL}/analytics/learning?${query.toString()}`, {
     headers: buildAuthHeaders(),
   });
   const data = await res.json();
   if (!data.success) {
-    throw new Error(data.error?.message || 'Không thể tải thống kê học tập.');
+    throw new Error(data.error?.message || 'Không thể tải dữ liệu thống kê.');
   }
   return data.data;
 }

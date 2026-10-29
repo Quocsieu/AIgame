@@ -1,3 +1,4 @@
+import { roomStore } from '../multiplayer/room.store.js';
 import { getDatabase } from '../storage/sqlite.db.js';
 
 export interface MultiplayerRoomAnalyticsItem {
@@ -7,9 +8,11 @@ export interface MultiplayerRoomAnalyticsItem {
   gameTitle: string;
   gameType: string;
   scoringMode: string;
+  state?: string;
   playerCount: number;
   totalQuestions: number;
   topScore: number;
+  averageScore: number | null;
   totalScoreEarned: number;
   totalCorrectAnswers: number;
   bestStreak: number;
@@ -25,6 +28,30 @@ export interface MultiplayerRoomAnalyticsItem {
   }>;
 }
 
+export interface OwnedGameAnalyticsItem {
+  gameId: string;
+  gameTitle: string;
+  gameType: string;
+  isPublic: boolean;
+  questionCount: number;
+  createdAt: string;
+  totalPlaysCount: number;
+  completedPlaysCount: number;
+  inProgressPlaysCount: number;
+  abandonedPlaysCount: number;
+  sessionsCount: number;
+  personalSessionsCount: number;
+  publicSessionsCount: number;
+  multiplayerRoomsCount: number;
+  multiplayerPlayersCount: number;
+  questionsAnswered: number;
+  correctAnswers: number;
+  accuracyPercent: number | null;
+  averageScore: number | null;
+  bestScore: number;
+  lastPlayedAt: string;
+}
+
 export interface LearningAnalyticsSummary {
   scope: {
     userId: string | null;
@@ -33,12 +60,28 @@ export interface LearningAnalyticsSummary {
     tzOffsetMinutes: number;
   };
   hasData: boolean;
+  hasPlayData: boolean;
   overview: {
     totalGamesCreated: number;
+    totalPlaysCount: number;
+    completedPlaysCount: number;
+    inProgressPlaysCount: number;
+    abandonedPlaysCount: number;
+    completionRatePercent: number | null;
+    soloCompletionRatePercent: number | null;
+    multiplayerCompletionRatePercent: number | null;
+    soloAverageScore: number | null;
+    multiplayerAverageScore: number | null;
+    totalPracticeSessions: number;
     completedPracticeSessions: number;
+    inProgressPracticeSessions: number;
+    abandonedPracticeSessions: number;
     personalPracticeSessions: number;
     creatorGamePracticeSessions: number;
+    totalMultiplayerRooms: number;
     completedMultiplayerRooms: number;
+    inProgressMultiplayerRooms: number;
+    abandonedMultiplayerRooms: number;
     multiplayerPlayersCount: number;
     multiplayerTotalCorrectAnswers: number;
     multiplayerTotalScoreEarned: number;
@@ -55,46 +98,41 @@ export interface LearningAnalyticsSummary {
   };
   progressOverTime: Array<{
     date: string;
+    totalPlaysCount: number;
+    completedPlaysCount: number;
+    inProgressPlaysCount: number;
+    abandonedPlaysCount: number;
     sessionsCount: number;
+    soloSessionsCount: number;
+    multiplayerRoomsCount: number;
     questionsAnswered: number;
     correctAnswers: number;
     accuracyPercent: number | null;
-    averageScore: number;
+    averageScore: number | null;
     totalDurationMs: number;
   }>;
   byGameType: Array<{
     gameType: string;
+    totalPlaysCount: number;
+    completedPlaysCount: number;
     sessionsCount: number;
     multiplayerRoomsCount?: number;
     questionsAnswered: number;
     correctAnswers: number;
     accuracyPercent: number | null;
-    averageScore: number;
+    averageScore: number | null;
   }>;
-  byGameTopic: Array<{
-    gameId: string;
-    gameTitle: string;
-    gameType: string;
-    sessionsCount: number;
-    personalSessionsCount?: number;
-    publicSessionsCount?: number;
-    multiplayerRoomsCount?: number;
-    multiplayerPlayersCount?: number;
-    questionsAnswered: number;
-    correctAnswers: number;
-    accuracyPercent: number | null;
-    bestScore: number;
-    lastPlayedAt: string;
-  }>;
+  byGameTopic: OwnedGameAnalyticsItem[];
+  ownedGames: OwnedGameAnalyticsItem[];
   recentMultiplayerRooms: MultiplayerRoomAnalyticsItem[];
 }
 
 export class AnalyticsService {
   /**
-   * Computes factual learning & game usage analytics scoped to the user's personal records
-   * and games owned by the user (or anonymous demo records when unauthenticated).
-   * Explicitly separates hasData=false / null percentages from 0% accuracy,
-   * avoids fabricating unrecorded per-question multiplayer counts, and prevents duplicate counting.
+   * Computes factual creator & game usage statistics scoped strictly to the account's owned games
+   * (or anonymous demo records when unauthenticated).
+   * Explicitly separates hasData=false / null averages from 0 score/accuracy,
+   * distinguishes FINISHED vs IN_PROGRESS vs ABANDONED sessions, and prevents duplicate counting.
    */
   public getLearningAnalytics(options: {
     userId?: string | null;
@@ -112,60 +150,75 @@ export class AnalyticsService {
         ? Math.trunc(options.tzOffsetMinutes)
         : 0;
 
-    const sessionWhere: string[] = ["state = 'FINISHED'"];
-    const sessionParams: any[] = [];
+    // 1. Owned games scope (always scoped strictly to current account's owned games)
+    const ownedGamesWhereSql = userId ? 'WHERE owner_user_id = ?' : 'WHERE owner_user_id IS NULL';
+    const ownedGamesParams: any[] = userId ? [userId] : [];
 
-    const gameWhere: string[] = [];
-    const gameParams: any[] = [];
+    const ownedGameRows = db
+      .prepare(
+        `SELECT
+          g.game_id,
+          g.title,
+          g.game_type,
+          g.is_public,
+          g.settings_json,
+          g.created_at,
+          g.updated_at,
+          (SELECT COUNT(*) FROM game_questions gq WHERE gq.game_id = g.game_id) as question_count
+        FROM games g
+        ${ownedGamesWhereSql}
+        ORDER BY g.created_at DESC`
+      )
+      .all(...ownedGamesParams) as Record<string, any>[];
 
-    const roomWhere: string[] = ["state = 'FINISHED'"];
-    const roomParams: any[] = [];
+    const totalGamesCreated = ownedGameRows.length;
+    const ownedGameIdSet = new Set<string>(ownedGameRows.map(r => String(r.game_id)));
 
-    if (userId) {
-      // Include personal sessions OR sessions played on games owned by this creator (deduplicated by SQL OR)
-      sessionWhere.push(
-        '(owner_user_id = ? OR game_id IN (SELECT game_id FROM games WHERE owner_user_id = ?))'
-      );
-      sessionParams.push(userId, userId);
-      gameWhere.push('owner_user_id = ?');
-      gameParams.push(userId);
-      roomWhere.push(
-        '(owner_user_id = ? OR game_id IN (SELECT game_id FROM games WHERE owner_user_id = ?))'
-      );
-      roomParams.push(userId, userId);
-    } else {
-      sessionWhere.push('owner_user_id IS NULL');
-      gameWhere.push('owner_user_id IS NULL');
-      roomWhere.push('owner_user_id IS NULL');
-    }
+    // 2. Scope for sessions and multiplayer rooms belonging to this account's games
+    // Strictly excludes any game owned by another user so two accounts never mix statistics.
+    const activityScopeCondition = userId
+      ? `(game_id IN (SELECT game_id FROM games WHERE owner_user_id = ?) OR (owner_user_id = ? AND game_id NOT IN (SELECT game_id FROM games WHERE owner_user_id IS NOT NULL AND owner_user_id != ?)))`
+      : `(owner_user_id IS NULL AND game_id NOT IN (SELECT game_id FROM games WHERE owner_user_id IS NOT NULL))`;
+    const activityScopeParams: any[] = userId ? [userId, userId, userId] : [];
+
+    const allSessionsWhere: string[] = [activityScopeCondition];
+    const allSessionsParams: any[] = [...activityScopeParams];
+
+    const roomWhere: string[] = [activityScopeCondition];
+    const roomParams: any[] = [...activityScopeParams];
 
     if (options.from) {
-      sessionWhere.push('created_at >= ?');
-      sessionParams.push(options.from);
-      gameWhere.push('created_at >= ?');
-      gameParams.push(options.from);
-      roomWhere.push('created_at >= ?');
+      allSessionsWhere.push('COALESCE(finished_at, started_at, created_at) >= ?');
+      allSessionsParams.push(options.from);
+      roomWhere.push('COALESCE(finished_at, started_at, created_at) >= ?');
       roomParams.push(options.from);
     }
 
     if (options.to) {
-      sessionWhere.push('created_at <= ?');
-      sessionParams.push(options.to);
-      gameWhere.push('created_at <= ?');
-      gameParams.push(options.to);
-      roomWhere.push('created_at <= ?');
+      allSessionsWhere.push('COALESCE(finished_at, started_at, created_at) <= ?');
+      allSessionsParams.push(options.to);
+      roomWhere.push('COALESCE(finished_at, started_at, created_at) <= ?');
       roomParams.push(options.to);
     }
 
-    const sessionWhereSql = `WHERE ${sessionWhere.join(' AND ')}`;
-    const gameWhereSql = `WHERE ${gameWhere.join(' AND ')}`;
+    const allSessionsWhereSql = `WHERE ${allSessionsWhere.join(' AND ')}`;
     const roomWhereSql = `WHERE ${roomWhere.join(' AND ')}`;
 
-    const gamesCountRow = db
-      .prepare(`SELECT COUNT(*) as cnt FROM games ${gameWhereSql}`)
-      .get(...gameParams) as { cnt: number };
+    // 3. Fetch all solo sessions in scope (FINISHED, IN_PROGRESS, ABANDONED)
+    const sessionRows = db
+      .prepare(
+        `SELECT
+          session_id, game_id, owner_user_id, game_title, game_type, scoring_mode,
+          state, total_questions, answered_questions, correct_answers, wrong_answers,
+          total_score, max_possible_score, max_streak, duration_ms,
+          started_at, finished_at, created_at
+        FROM practice_sessions
+        ${allSessionsWhereSql}
+        ORDER BY COALESCE(finished_at, started_at, created_at) DESC`
+      )
+      .all(...allSessionsParams) as Record<string, any>[];
 
-    // Fetch finished multiplayer rooms in scope
+    // 4. Fetch persisted multiplayer rooms in scope
     const roomRows = db
       .prepare(
         `SELECT
@@ -174,16 +227,38 @@ export class AnalyticsService {
           started_at, finished_at, created_at
         FROM room_history
         ${roomWhereSql}
-        ORDER BY COALESCE(finished_at, created_at) DESC`
+        ORDER BY COALESCE(finished_at, started_at, created_at) DESC`
       )
       .all(...roomParams) as Record<string, any>[];
 
+    const persistedRoomIds = new Set<string>(roomRows.map(r => String(r.room_id)));
+
+    // Also inspect active/closed rooms in memory (deduplicated against persistedRoomIds)
+    const memoryRooms = roomStore.getAll().filter(rm => {
+      if (persistedRoomIds.has(rm.roomId)) return false;
+      const belongsToAccount = userId
+        ? ownedGameIdSet.has(rm.gameId) || rm.ownerUserId === userId
+        : !rm.ownerUserId && (ownedGameIdSet.size === 0 || ownedGameIdSet.has(rm.gameId));
+      if (!belongsToAccount) return false;
+      const createdIso = rm.startedAtIso || new Date(rm.createdAt).toISOString();
+      if (options.from && createdIso < options.from) return false;
+      if (options.to && createdIso > options.to) return false;
+      return true;
+    });
+
+    let completedMultiplayerRooms = 0;
+    let inProgressMultiplayerRooms = 0;
+    let abandonedMultiplayerRooms = 0;
     let multiplayerPlayersCount = 0;
     let multiplayerTotalCorrectAnswers = 0;
     let multiplayerTotalScoreEarned = 0;
     let multiplayerBestStreak = 0;
+    let multiplayerValidScoreEntriesCount = 0;
 
-    const parsedRooms: MultiplayerRoomAnalyticsItem[] = roomRows.map(row => {
+    const parsedRooms: MultiplayerRoomAnalyticsItem[] = [];
+
+    for (const row of roomRows) {
+      const rmState = String(row.state || 'FINISHED');
       let rawLb: any[] = [];
       try {
         rawLb = JSON.parse(String(row.leaderboard_json || '[]'));
@@ -192,37 +267,50 @@ export class AnalyticsService {
         rawLb = [];
       }
 
-      const safeLb = rawLb.map((entry, idx) => ({
-        rank: Number(entry?.rank || idx + 1),
-        displayName: String(entry?.displayName || `Người chơi ${idx + 1}`),
-        score: Number(entry?.score || 0),
-        correctCount: Number(entry?.correctCount || 0),
-        streak: Number(entry?.streak || 0),
-      }));
+      const safeLb = rawLb
+        .filter(entry => entry && Number.isFinite(Number(entry.score)) && Number(entry.score) >= 0)
+        .map((entry, idx) => ({
+          rank: Number(entry?.rank || idx + 1),
+          displayName: String(entry?.displayName || `Người chơi ${idx + 1}`),
+          score: Number(entry.score),
+          correctCount: Math.max(0, Number(entry?.correctCount || 0)),
+          streak: Math.max(0, Number(entry?.streak || 0)),
+        }));
 
       const roomPlayers = Math.max(Number(row.player_count || 0), safeLb.length);
       const roomTopScore = safeLb.reduce((max, e) => Math.max(max, e.score), 0);
       const roomSumScore = safeLb.reduce((sum, e) => sum + e.score, 0);
+      const roomAvgScore = safeLb.length > 0 ? Math.round(roomSumScore / safeLb.length) : null;
       const roomSumCorrect = safeLb.reduce((sum, e) => sum + e.correctCount, 0);
       const roomMaxStreak = safeLb.reduce((max, e) => Math.max(max, e.streak), 0);
 
-      multiplayerPlayersCount += roomPlayers;
-      multiplayerTotalCorrectAnswers += roomSumCorrect;
-      multiplayerTotalScoreEarned += roomSumScore;
-      if (roomMaxStreak > multiplayerBestStreak) {
-        multiplayerBestStreak = roomMaxStreak;
+      if (rmState === 'FINISHED') {
+        completedMultiplayerRooms += 1;
+        multiplayerPlayersCount += roomPlayers;
+        multiplayerTotalCorrectAnswers += roomSumCorrect;
+        multiplayerTotalScoreEarned += roomSumScore;
+        multiplayerValidScoreEntriesCount += safeLb.length;
+        if (roomMaxStreak > multiplayerBestStreak) {
+          multiplayerBestStreak = roomMaxStreak;
+        }
+      } else if (rmState === 'CLOSED' || rmState === 'ABANDONED') {
+        abandonedMultiplayerRooms += 1;
+      } else {
+        inProgressMultiplayerRooms += 1;
       }
 
-      return {
+      parsedRooms.push({
         roomId: String(row.room_id),
         roomCode: String(row.room_code),
         gameId: String(row.game_id),
         gameTitle: String(row.game_title),
         gameType: String(row.game_type),
         scoringMode: String(row.scoring_mode || 'STANDARD'),
+        state: rmState,
         playerCount: roomPlayers,
         totalQuestions: Number(row.total_questions || 0),
         topScore: roomTopScore,
+        averageScore: roomAvgScore,
         totalScoreEarned: roomSumScore,
         totalCorrectAnswers: roomSumCorrect,
         bestStreak: roomMaxStreak,
@@ -230,226 +318,527 @@ export class AnalyticsService {
         finishedAt: row.finished_at ? String(row.finished_at) : null,
         createdAt: String(row.created_at),
         leaderboard: safeLb,
-      };
-    });
+      });
+    }
 
-    const aggRow = db
-      .prepare(
-        `SELECT
-          COUNT(*) as completed_sessions,
-          SUM(CASE WHEN ${userId ? 'owner_user_id = ?' : 'owner_user_id IS NULL'} THEN 1 ELSE 0 END) as personal_sessions,
-          SUM(CASE WHEN ${userId ? '(owner_user_id IS NULL OR owner_user_id != ?)' : '0'} THEN 1 ELSE 0 END) as creator_external_sessions,
-          SUM(answered_questions) as sum_answered,
-          SUM(correct_answers) as sum_correct,
-          SUM(wrong_answers) as sum_wrong,
-          SUM(total_score) as sum_score,
-          AVG(total_score) as avg_score,
-          MAX(max_streak) as best_streak,
-          SUM(duration_ms) as sum_duration_ms
-        FROM practice_sessions
-        ${sessionWhereSql}`
-      )
-      .get(...(userId ? [userId, userId, ...sessionParams] : sessionParams)) as Record<string, any>;
+    for (const memRoom of memoryRooms) {
+      if (memRoom.state === 'FINISHED') {
+        completedMultiplayerRooms += 1;
+      } else if (memRoom.state === 'CLOSED') {
+        abandonedMultiplayerRooms += 1;
+      } else {
+        inProgressMultiplayerRooms += 1;
+      }
+    }
 
-    const completedPracticeSessions = Number(aggRow?.completed_sessions || 0);
-    const personalPracticeSessions = Number(aggRow?.personal_sessions || 0);
-    const creatorGamePracticeSessions = Number(aggRow?.creator_external_sessions || 0);
-    const completedMultiplayerRooms = parsedRooms.length;
-    const totalGamesCreated = Number(gamesCountRow?.cnt || 0);
-    const totalQuestionsAnswered = Number(aggRow?.sum_answered || 0);
-    const totalCorrectAnswers = Number(aggRow?.sum_correct || 0);
-    const totalWrongAnswers = Number(aggRow?.sum_wrong || 0);
-    const soloTotalScoreEarned = Number(aggRow?.sum_score || 0);
+    // 5. Aggregate solo sessions by state and compute valid scores
+    let completedPracticeSessions = 0;
+    let inProgressPracticeSessions = 0;
+    let abandonedPracticeSessions = 0;
+    let personalPracticeSessions = 0;
+    let creatorGamePracticeSessions = 0;
+    let totalQuestionsAnswered = 0;
+    let totalCorrectAnswers = 0;
+    let totalWrongAnswers = 0;
+    let soloTotalScoreEarned = 0;
+    let soloValidScoreSum = 0;
+    let soloValidScoreCount = 0;
+    let soloBestStreak = 0;
+    let totalPracticeDurationMs = 0;
+
+    for (const sRow of sessionRows) {
+      const sState = String(sRow.state || 'IN_PROGRESS');
+      if (sState === 'FINISHED') {
+        completedPracticeSessions += 1;
+        const isPersonal = userId ? sRow.owner_user_id === userId : sRow.owner_user_id === null;
+        if (isPersonal) {
+          personalPracticeSessions += 1;
+        } else {
+          creatorGamePracticeSessions += 1;
+        }
+
+        const qAnswered = Math.max(0, Number(sRow.answered_questions || 0));
+        const qCorrect = Math.max(0, Number(sRow.correct_answers || 0));
+        const qWrong = Math.max(0, Number(sRow.wrong_answers || 0));
+        const rawScore = sRow.total_score;
+        const numericScore = Number(rawScore);
+        const totalQs = Number(sRow.total_questions || 0);
+        const streak = Math.max(0, Number(sRow.max_streak || 0));
+        const dur = Math.max(0, Number(sRow.duration_ms || 0));
+
+        totalQuestionsAnswered += qAnswered;
+        totalCorrectAnswers += qCorrect;
+        totalWrongAnswers += qWrong;
+        totalPracticeDurationMs += dur;
+        if (streak > soloBestStreak) {
+          soloBestStreak = streak;
+        }
+
+        if (rawScore !== null && rawScore !== undefined && Number.isFinite(numericScore) && numericScore >= 0 && totalQs > 0) {
+          soloTotalScoreEarned += numericScore;
+          soloValidScoreSum += numericScore;
+          soloValidScoreCount += 1;
+        }
+      } else if (sState === 'ABANDONED') {
+        abandonedPracticeSessions += 1;
+      } else {
+        inProgressPracticeSessions += 1;
+      }
+    }
+
+    const totalPracticeSessions =
+      completedPracticeSessions + inProgressPracticeSessions + abandonedPracticeSessions;
+    const totalMultiplayerRooms =
+      completedMultiplayerRooms + inProgressMultiplayerRooms + abandonedMultiplayerRooms;
+    const totalPlaysCount = totalPracticeSessions + totalMultiplayerRooms;
+    const completedPlaysCount = completedPracticeSessions + completedMultiplayerRooms;
+    const inProgressPlaysCount = inProgressPracticeSessions + inProgressMultiplayerRooms;
+    const abandonedPlaysCount = abandonedPracticeSessions + abandonedMultiplayerRooms;
+
     const totalScoreEarned = soloTotalScoreEarned + multiplayerTotalScoreEarned;
-    const soloBestStreak = Number(aggRow?.best_streak || 0);
     const bestStreak = Math.max(soloBestStreak, multiplayerBestStreak);
-    const totalPracticeDurationMs = Number(aggRow?.sum_duration_ms || 0);
 
-    const hasData =
-      completedPracticeSessions > 0 || completedMultiplayerRooms > 0 || totalGamesCreated > 0;
+    const hasPlayData = totalPlaysCount > 0;
+    const hasData = totalGamesCreated > 0 || totalPlaysCount > 0;
 
     const overallAccuracyPercent =
       totalQuestionsAnswered > 0
         ? Math.round((totalCorrectAnswers / totalQuestionsAnswered) * 100)
         : null;
 
+    const totalValidScoreEntries = soloValidScoreCount + multiplayerValidScoreEntriesCount;
     const averageScorePerSession =
-      completedPracticeSessions > 0 && aggRow?.avg_score !== null
-        ? Math.round(Number(aggRow.avg_score))
+      totalValidScoreEntries > 0
+        ? Math.round((soloValidScoreSum + multiplayerTotalScoreEarned) / totalValidScoreEntries)
         : null;
 
-    // SQLite modifier for timezone offset: e.g. '+420 minutes' or '-300 minutes'
-    const tzModifier = `${tzOffsetMinutes >= 0 ? '+' : ''}${tzOffsetMinutes} minutes`;
+    const completionRatePercent =
+      totalPlaysCount > 0 ? Math.round((completedPlaysCount / totalPlaysCount) * 100) : null;
+    const soloCompletionRatePercent =
+      totalPracticeSessions > 0
+        ? Math.round((completedPracticeSessions / totalPracticeSessions) * 100)
+        : null;
+    const multiplayerCompletionRatePercent =
+      totalMultiplayerRooms > 0
+        ? Math.round((completedMultiplayerRooms / totalMultiplayerRooms) * 100)
+        : null;
+    const soloAverageScore =
+      soloValidScoreCount > 0 ? Math.round(soloValidScoreSum / soloValidScoreCount) : null;
+    const multiplayerAverageScore =
+      multiplayerValidScoreEntriesCount > 0
+        ? Math.round(multiplayerTotalScoreEarned / multiplayerValidScoreEntriesCount)
+        : null;
 
-    const progressRows = db
-      .prepare(
-        `SELECT
-          date(COALESCE(finished_at, created_at), ?) as bucket_date,
-          COUNT(*) as sessions_count,
-          SUM(answered_questions) as sum_answered,
-          SUM(correct_answers) as sum_correct,
-          AVG(total_score) as avg_score,
-          SUM(duration_ms) as sum_duration
-        FROM practice_sessions
-        ${sessionWhereSql}
-        GROUP BY bucket_date
-        ORDER BY bucket_date ASC
-        LIMIT 60`
-      )
-      .all(tzModifier, ...sessionParams) as Record<string, any>[];
+    // 6. Daily activity chart series (progressOverTime) combining solo & multiplayer plays by local date
+    const toLocalDateBucket = (isoStr: string | null | undefined): string => {
+      const raw = isoStr ? Date.parse(isoStr) : NaN;
+      if (!Number.isFinite(raw)) return 'N/A';
+      const shifted = new Date(raw + tzOffsetMinutes * 60_000);
+      return shifted.toISOString().slice(0, 10);
+    };
 
-    const byTypeRows = db
-      .prepare(
-        `SELECT
-          game_type,
-          COUNT(*) as sessions_count,
-          SUM(answered_questions) as sum_answered,
-          SUM(correct_answers) as sum_correct,
-          AVG(total_score) as avg_score
-        FROM practice_sessions
-        ${sessionWhereSql}
-        GROUP BY game_type
-        ORDER BY sessions_count DESC`
-      )
-      .all(...sessionParams) as Record<string, any>[];
+    const dailyMap = new Map<
+      string,
+      {
+        date: string;
+        totalPlaysCount: number;
+        completedPlaysCount: number;
+        inProgressPlaysCount: number;
+        abandonedPlaysCount: number;
+        soloSessionsCount: number;
+        multiplayerRoomsCount: number;
+        questionsAnswered: number;
+        correctAnswers: number;
+        validScoreSum: number;
+        validScoreCount: number;
+        totalDurationMs: number;
+      }
+    >();
 
+    const ensureDayBucket = (dateKey: string) => {
+      let bucket = dailyMap.get(dateKey);
+      if (!bucket) {
+        bucket = {
+          date: dateKey,
+          totalPlaysCount: 0,
+          completedPlaysCount: 0,
+          inProgressPlaysCount: 0,
+          abandonedPlaysCount: 0,
+          soloSessionsCount: 0,
+          multiplayerRoomsCount: 0,
+          questionsAnswered: 0,
+          correctAnswers: 0,
+          validScoreSum: 0,
+          validScoreCount: 0,
+          totalDurationMs: 0,
+        };
+        dailyMap.set(dateKey, bucket);
+      }
+      return bucket;
+    };
+
+    for (const sRow of sessionRows) {
+      const dateKey = toLocalDateBucket(
+        (sRow.finished_at as string) || (sRow.started_at as string) || (sRow.created_at as string)
+      );
+      if (dateKey === 'N/A') continue;
+      const bucket = ensureDayBucket(dateKey);
+      const sState = String(sRow.state || 'IN_PROGRESS');
+      bucket.totalPlaysCount += 1;
+      bucket.soloSessionsCount += 1;
+
+      if (sState === 'FINISHED') {
+        bucket.completedPlaysCount += 1;
+        bucket.questionsAnswered += Math.max(0, Number(sRow.answered_questions || 0));
+        bucket.correctAnswers += Math.max(0, Number(sRow.correct_answers || 0));
+        bucket.totalDurationMs += Math.max(0, Number(sRow.duration_ms || 0));
+        const numericScore = Number(sRow.total_score);
+        if (
+          sRow.total_score !== null &&
+          sRow.total_score !== undefined &&
+          Number.isFinite(numericScore) &&
+          numericScore >= 0 &&
+          Number(sRow.total_questions || 0) > 0
+        ) {
+          bucket.validScoreSum += numericScore;
+          bucket.validScoreCount += 1;
+        }
+      } else if (sState === 'ABANDONED') {
+        bucket.abandonedPlaysCount += 1;
+      } else {
+        bucket.inProgressPlaysCount += 1;
+      }
+    }
+
+    for (const rm of parsedRooms) {
+      const dateKey = toLocalDateBucket(rm.finishedAt || rm.startedAt || rm.createdAt);
+      if (dateKey === 'N/A') continue;
+      const bucket = ensureDayBucket(dateKey);
+      bucket.totalPlaysCount += 1;
+      bucket.multiplayerRoomsCount += 1;
+
+      if (rm.state === 'FINISHED') {
+        bucket.completedPlaysCount += 1;
+        bucket.correctAnswers += rm.totalCorrectAnswers;
+        if (rm.leaderboard.length > 0) {
+          bucket.validScoreSum += rm.totalScoreEarned;
+          bucket.validScoreCount += rm.leaderboard.length;
+        }
+      } else if (rm.state === 'CLOSED' || rm.state === 'ABANDONED') {
+        bucket.abandonedPlaysCount += 1;
+      } else {
+        bucket.inProgressPlaysCount += 1;
+      }
+    }
+
+    for (const memRoom of memoryRooms) {
+      const dateKey = toLocalDateBucket(memRoom.startedAtIso || new Date(memRoom.createdAt).toISOString());
+      if (dateKey === 'N/A') continue;
+      const bucket = ensureDayBucket(dateKey);
+      bucket.totalPlaysCount += 1;
+      bucket.multiplayerRoomsCount += 1;
+      if (memRoom.state === 'FINISHED') {
+        bucket.completedPlaysCount += 1;
+      } else if (memRoom.state === 'CLOSED') {
+        bucket.abandonedPlaysCount += 1;
+      } else {
+        bucket.inProgressPlaysCount += 1;
+      }
+    }
+
+    const progressOverTime = Array.from(dailyMap.values())
+      .sort((a, b) => a.date.localeCompare(b.date))
+      .slice(-365)
+      .map(b => ({
+        date: b.date,
+        totalPlaysCount: b.totalPlaysCount,
+        completedPlaysCount: b.completedPlaysCount,
+        inProgressPlaysCount: b.inProgressPlaysCount,
+        abandonedPlaysCount: b.abandonedPlaysCount,
+        sessionsCount: b.completedPlaysCount,
+        soloSessionsCount: b.soloSessionsCount,
+        multiplayerRoomsCount: b.multiplayerRoomsCount,
+        questionsAnswered: b.questionsAnswered,
+        correctAnswers: b.correctAnswers,
+        accuracyPercent:
+          b.questionsAnswered > 0 ? Math.round((b.correctAnswers / b.questionsAnswered) * 100) : null,
+        averageScore:
+          b.validScoreCount > 0 ? Math.round(b.validScoreSum / b.validScoreCount) : 0,
+        totalDurationMs: b.totalDurationMs,
+      }));
+
+    // 7. Breakdown by gameType
     const byTypeMap = new Map<
       string,
       {
         gameType: string;
+        totalPlaysCount: number;
+        completedPlaysCount: number;
         sessionsCount: number;
         multiplayerRoomsCount: number;
         questionsAnswered: number;
         correctAnswers: number;
-        accuracyPercent: number | null;
-        averageScore: number;
+        validScoreSum: number;
+        validScoreCount: number;
       }
     >();
 
-    for (const r of byTypeRows) {
-      const answered = Number(r.sum_answered || 0);
-      const correct = Number(r.sum_correct || 0);
-      const gt = String(r.game_type);
-      byTypeMap.set(gt, {
-        gameType: gt,
-        sessionsCount: Number(r.sessions_count || 0),
-        multiplayerRoomsCount: 0,
-        questionsAnswered: answered,
-        correctAnswers: correct,
-        accuracyPercent: answered > 0 ? Math.round((correct / answered) * 100) : null,
-        averageScore: Math.round(Number(r.avg_score || 0)),
-      });
+    const ensureTypeEntry = (gt: string) => {
+      let entry = byTypeMap.get(gt);
+      if (!entry) {
+        entry = {
+          gameType: gt,
+          totalPlaysCount: 0,
+          completedPlaysCount: 0,
+          sessionsCount: 0,
+          multiplayerRoomsCount: 0,
+          questionsAnswered: 0,
+          correctAnswers: 0,
+          validScoreSum: 0,
+          validScoreCount: 0,
+        };
+        byTypeMap.set(gt, entry);
+      }
+      return entry;
+    };
+
+    for (const sRow of sessionRows) {
+      const gt = String(sRow.game_type);
+      const entry = ensureTypeEntry(gt);
+      const sState = String(sRow.state || 'IN_PROGRESS');
+      entry.totalPlaysCount += 1;
+      if (sState === 'FINISHED') {
+        entry.completedPlaysCount += 1;
+        entry.sessionsCount += 1;
+        entry.questionsAnswered += Math.max(0, Number(sRow.answered_questions || 0));
+        entry.correctAnswers += Math.max(0, Number(sRow.correct_answers || 0));
+        const numericScore = Number(sRow.total_score);
+        if (
+          sRow.total_score !== null &&
+          sRow.total_score !== undefined &&
+          Number.isFinite(numericScore) &&
+          numericScore >= 0 &&
+          Number(sRow.total_questions || 0) > 0
+        ) {
+          entry.validScoreSum += numericScore;
+          entry.validScoreCount += 1;
+        }
+      }
     }
 
     for (const rm of parsedRooms) {
-      const existing = byTypeMap.get(rm.gameType);
-      if (existing) {
-        existing.multiplayerRoomsCount += 1;
-      } else {
-        byTypeMap.set(rm.gameType, {
-          gameType: rm.gameType,
-          sessionsCount: 0,
-          multiplayerRoomsCount: 1,
-          questionsAnswered: 0,
-          correctAnswers: rm.totalCorrectAnswers,
-          accuracyPercent: null,
-          averageScore: rm.topScore,
-        });
+      const entry = ensureTypeEntry(rm.gameType);
+      entry.totalPlaysCount += 1;
+      if (rm.state === 'FINISHED') {
+        entry.completedPlaysCount += 1;
+        entry.multiplayerRoomsCount += 1;
+        entry.correctAnswers += rm.totalCorrectAnswers;
+        if (rm.leaderboard.length > 0) {
+          entry.validScoreSum += rm.totalScoreEarned;
+          entry.validScoreCount += rm.leaderboard.length;
+        }
       }
     }
 
-    const byTopicRows = db
-      .prepare(
-        `SELECT
-          game_id,
-          game_title,
-          game_type,
-          COUNT(*) as sessions_count,
-          SUM(CASE WHEN ${userId ? 'owner_user_id = ?' : 'owner_user_id IS NULL'} THEN 1 ELSE 0 END) as personal_sessions_count,
-          SUM(CASE WHEN ${userId ? '(owner_user_id IS NULL OR owner_user_id != ?)' : '0'} THEN 1 ELSE 0 END) as public_sessions_count,
-          SUM(answered_questions) as sum_answered,
-          SUM(correct_answers) as sum_correct,
-          MAX(total_score) as best_score,
-          MAX(COALESCE(finished_at, created_at)) as last_played_at
-        FROM practice_sessions
-        ${sessionWhereSql}
-        GROUP BY game_id, game_title, game_type
-        ORDER BY last_played_at DESC`
-      )
-      .all(...(userId ? [userId, userId, ...sessionParams] : sessionParams)) as Record<string, any>[];
-
-    const byTopicMap = new Map<
+    // 8. Breakdown by Owned Game ("Game nổi bật" — includes games with 0 plays, sorted by totalPlaysCount DESC)
+    const gameStatsMap = new Map<
       string,
-      {
-        gameId: string;
-        gameTitle: string;
-        gameType: string;
-        sessionsCount: number;
-        personalSessionsCount: number;
-        publicSessionsCount: number;
-        multiplayerRoomsCount: number;
-        multiplayerPlayersCount: number;
-        questionsAnswered: number;
-        correctAnswers: number;
-        accuracyPercent: number | null;
-        bestScore: number;
-        lastPlayedAt: string;
+      OwnedGameAnalyticsItem & {
+        validScoreSum: number;
+        validScoreCount: number;
       }
     >();
 
-    for (const r of byTopicRows) {
-      const answered = Number(r.sum_answered || 0);
-      const correct = Number(r.sum_correct || 0);
-      const gid = String(r.game_id);
-      byTopicMap.set(gid, {
+    for (const gRow of ownedGameRows) {
+      const gid = String(gRow.game_id);
+      let qCount = Number(gRow.question_count || 0);
+      if (qCount === 0 && gRow.settings_json) {
+        try {
+          const parsedSettings = JSON.parse(String(gRow.settings_json));
+          qCount = Number(parsedSettings?.questionCount || 0);
+        } catch {
+          // ignore
+        }
+      }
+
+      gameStatsMap.set(gid, {
         gameId: gid,
-        gameTitle: String(r.game_title),
-        gameType: String(r.game_type),
-        sessionsCount: Number(r.sessions_count || 0),
-        personalSessionsCount: Number(r.personal_sessions_count || 0),
-        publicSessionsCount: Number(r.public_sessions_count || 0),
+        gameTitle: String(gRow.title),
+        gameType: String(gRow.game_type),
+        isPublic: Number(gRow.is_public) === 1,
+        questionCount: qCount,
+        createdAt: String(gRow.created_at || ''),
+        totalPlaysCount: 0,
+        completedPlaysCount: 0,
+        inProgressPlaysCount: 0,
+        abandonedPlaysCount: 0,
+        sessionsCount: 0,
+        personalSessionsCount: 0,
+        publicSessionsCount: 0,
         multiplayerRoomsCount: 0,
         multiplayerPlayersCount: 0,
-        questionsAnswered: answered,
-        correctAnswers: correct,
-        accuracyPercent: answered > 0 ? Math.round((correct / answered) * 100) : null,
-        bestScore: Number(r.best_score || 0),
-        lastPlayedAt: String(r.last_played_at || ''),
+        questionsAnswered: 0,
+        correctAnswers: 0,
+        accuracyPercent: null,
+        averageScore: null,
+        bestScore: 0,
+        lastPlayedAt: '',
+        validScoreSum: 0,
+        validScoreCount: 0,
       });
     }
 
-    for (const rm of parsedRooms) {
-      const roomPlayedAt = rm.finishedAt || rm.createdAt;
-      const existing = byTopicMap.get(rm.gameId);
-      if (existing) {
-        existing.multiplayerRoomsCount += 1;
-        existing.multiplayerPlayersCount += rm.playerCount;
-        existing.bestScore = Math.max(existing.bestScore, rm.topScore);
-        if (roomPlayedAt > existing.lastPlayedAt) {
-          existing.lastPlayedAt = roomPlayedAt;
-        }
-      } else {
-        byTopicMap.set(rm.gameId, {
-          gameId: rm.gameId,
-          gameTitle: rm.gameTitle,
-          gameType: rm.gameType,
+    const ensureGameEntry = (gid: string, title: string, gameType: string, createdAt: string) => {
+      let item = gameStatsMap.get(gid);
+      if (!item) {
+        item = {
+          gameId: gid,
+          gameTitle: title,
+          gameType,
+          isPublic: false,
+          questionCount: 0,
+          createdAt,
+          totalPlaysCount: 0,
+          completedPlaysCount: 0,
+          inProgressPlaysCount: 0,
+          abandonedPlaysCount: 0,
           sessionsCount: 0,
           personalSessionsCount: 0,
           publicSessionsCount: 0,
-          multiplayerRoomsCount: 1,
-          multiplayerPlayersCount: rm.playerCount,
+          multiplayerRoomsCount: 0,
+          multiplayerPlayersCount: 0,
           questionsAnswered: 0,
-          correctAnswers: rm.totalCorrectAnswers,
+          correctAnswers: 0,
           accuracyPercent: null,
-          bestScore: rm.topScore,
-          lastPlayedAt: roomPlayedAt,
-        });
+          averageScore: null,
+          bestScore: 0,
+          lastPlayedAt: '',
+          validScoreSum: 0,
+          validScoreCount: 0,
+        };
+        gameStatsMap.set(gid, item);
+      }
+      return item;
+    };
+
+    for (const sRow of sessionRows) {
+      const gid = String(sRow.game_id);
+      const playedAt = String(sRow.finished_at || sRow.started_at || sRow.created_at || '');
+      const item = ensureGameEntry(
+        gid,
+        String(sRow.game_title),
+        String(sRow.game_type),
+        String(sRow.created_at || '')
+      );
+      const sState = String(sRow.state || 'IN_PROGRESS');
+
+      item.totalPlaysCount += 1;
+      if (playedAt > item.lastPlayedAt) {
+        item.lastPlayedAt = playedAt;
+      }
+
+      if (sState === 'FINISHED') {
+        item.completedPlaysCount += 1;
+        item.sessionsCount += 1;
+        const isPersonal = userId ? sRow.owner_user_id === userId : sRow.owner_user_id === null;
+        if (isPersonal) {
+          item.personalSessionsCount += 1;
+        } else {
+          item.publicSessionsCount += 1;
+        }
+
+        const qAnswered = Math.max(0, Number(sRow.answered_questions || 0));
+        const qCorrect = Math.max(0, Number(sRow.correct_answers || 0));
+        item.questionsAnswered += qAnswered;
+        item.correctAnswers += qCorrect;
+
+        const numericScore = Number(sRow.total_score);
+        if (
+          sRow.total_score !== null &&
+          sRow.total_score !== undefined &&
+          Number.isFinite(numericScore) &&
+          numericScore >= 0 &&
+          Number(sRow.total_questions || 0) > 0
+        ) {
+          item.validScoreSum += numericScore;
+          item.validScoreCount += 1;
+          if (numericScore > item.bestScore) {
+            item.bestScore = numericScore;
+          }
+        }
+      } else if (sState === 'ABANDONED') {
+        item.abandonedPlaysCount += 1;
+      } else {
+        item.inProgressPlaysCount += 1;
       }
     }
 
-    const mergedTopics = Array.from(byTopicMap.values())
-      .sort((a, b) => b.lastPlayedAt.localeCompare(a.lastPlayedAt))
-      .slice(0, 15);
+    for (const rm of parsedRooms) {
+      const roomPlayedAt = rm.finishedAt || rm.startedAt || rm.createdAt;
+      const item = ensureGameEntry(rm.gameId, rm.gameTitle, rm.gameType, rm.createdAt);
+      item.totalPlaysCount += 1;
+      if (roomPlayedAt > item.lastPlayedAt) {
+        item.lastPlayedAt = roomPlayedAt;
+      }
+
+      if (rm.state === 'FINISHED') {
+        item.completedPlaysCount += 1;
+        item.multiplayerRoomsCount += 1;
+        item.multiplayerPlayersCount += rm.playerCount;
+        item.correctAnswers += rm.totalCorrectAnswers;
+        if (rm.topScore > item.bestScore) {
+          item.bestScore = rm.topScore;
+        }
+        if (rm.leaderboard.length > 0) {
+          item.validScoreSum += rm.totalScoreEarned;
+          item.validScoreCount += rm.leaderboard.length;
+        }
+      } else if (rm.state === 'CLOSED' || rm.state === 'ABANDONED') {
+        item.abandonedPlaysCount += 1;
+      } else {
+        item.inProgressPlaysCount += 1;
+      }
+    }
+
+    for (const memRoom of memoryRooms) {
+      const item = ensureGameEntry(
+        memRoom.gameId,
+        memRoom.gameSpecification.title,
+        memRoom.gameSpecification.gameType,
+        new Date(memRoom.createdAt).toISOString()
+      );
+      item.totalPlaysCount += 1;
+      if (memRoom.state === 'FINISHED') {
+        item.completedPlaysCount += 1;
+      } else if (memRoom.state === 'CLOSED') {
+        item.abandonedPlaysCount += 1;
+      } else {
+        item.inProgressPlaysCount += 1;
+      }
+    }
+
+    const ownedGamesList: OwnedGameAnalyticsItem[] = Array.from(gameStatsMap.values())
+      .map(({ validScoreSum, validScoreCount, ...rest }) => ({
+        ...rest,
+        accuracyPercent:
+          rest.questionsAnswered > 0
+            ? Math.round((rest.correctAnswers / rest.questionsAnswered) * 100)
+            : null,
+        averageScore:
+          validScoreCount > 0 ? Math.round(validScoreSum / validScoreCount) : null,
+      }))
+      .sort((a, b) => {
+        if (b.totalPlaysCount !== a.totalPlaysCount) {
+          return b.totalPlaysCount - a.totalPlaysCount;
+        }
+        if (b.completedPlaysCount !== a.completedPlaysCount) {
+          return b.completedPlaysCount - a.completedPlaysCount;
+        }
+        if (b.lastPlayedAt !== a.lastPlayedAt) {
+          return b.lastPlayedAt.localeCompare(a.lastPlayedAt);
+        }
+        return b.createdAt.localeCompare(a.createdAt);
+      });
 
     return {
       scope: {
@@ -459,12 +848,28 @@ export class AnalyticsService {
         tzOffsetMinutes,
       },
       hasData,
+      hasPlayData,
       overview: {
         totalGamesCreated,
+        totalPlaysCount,
+        completedPlaysCount,
+        inProgressPlaysCount,
+        abandonedPlaysCount,
+        completionRatePercent,
+        soloCompletionRatePercent,
+        multiplayerCompletionRatePercent,
+        soloAverageScore,
+        multiplayerAverageScore,
+        totalPracticeSessions,
         completedPracticeSessions,
+        inProgressPracticeSessions,
+        abandonedPracticeSessions,
         personalPracticeSessions,
         creatorGamePracticeSessions,
+        totalMultiplayerRooms,
         completedMultiplayerRooms,
+        inProgressMultiplayerRooms,
+        abandonedMultiplayerRooms,
         multiplayerPlayersCount,
         multiplayerTotalCorrectAnswers,
         multiplayerTotalScoreEarned,
@@ -479,21 +884,22 @@ export class AnalyticsService {
         bestStreak,
         totalPracticeDurationMs,
       },
-      progressOverTime: progressRows.map(r => {
-        const answered = Number(r.sum_answered || 0);
-        const correct = Number(r.sum_correct || 0);
-        return {
-          date: String(r.bucket_date || 'N/A'),
-          sessionsCount: Number(r.sessions_count || 0),
-          questionsAnswered: answered,
-          correctAnswers: correct,
-          accuracyPercent: answered > 0 ? Math.round((correct / answered) * 100) : null,
-          averageScore: Math.round(Number(r.avg_score || 0)),
-          totalDurationMs: Number(r.sum_duration || 0),
-        };
-      }),
-      byGameType: Array.from(byTypeMap.values()),
-      byGameTopic: mergedTopics,
+      progressOverTime,
+      byGameType: Array.from(byTypeMap.values()).map(t => ({
+        gameType: t.gameType,
+        totalPlaysCount: t.totalPlaysCount,
+        completedPlaysCount: t.completedPlaysCount,
+        sessionsCount: t.sessionsCount,
+        multiplayerRoomsCount: t.multiplayerRoomsCount,
+        questionsAnswered: t.questionsAnswered,
+        correctAnswers: t.correctAnswers,
+        accuracyPercent:
+          t.questionsAnswered > 0 ? Math.round((t.correctAnswers / t.questionsAnswered) * 100) : null,
+        averageScore:
+          t.validScoreCount > 0 ? Math.round(t.validScoreSum / t.validScoreCount) : 0,
+      })),
+      byGameTopic: ownedGamesList.slice(0, 30),
+      ownedGames: ownedGamesList,
       recentMultiplayerRooms: parsedRooms.slice(0, 20),
     };
   }

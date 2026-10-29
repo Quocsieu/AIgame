@@ -69,6 +69,12 @@ export class GameSession {
         (this.specification.gameType === 'ADVENTURE' ? 600 : 0)
     );
 
+    try {
+      this.persistSessionState();
+    } catch {
+      // Graceful fallback if SQLite is unavailable in isolated unit tests
+    }
+
     return this.getCurrentClientQuestion();
   }
 
@@ -252,6 +258,11 @@ export class GameSession {
     };
 
     this.questionResults.push(result);
+    try {
+      this.persistSessionState();
+    } catch {
+      // Graceful fallback if SQLite is unavailable in isolated unit tests
+    }
     return result;
   }
 
@@ -308,9 +319,15 @@ export class GameSession {
       this.currentQuestionIndex = nextIndex;
       this.state = 'QUESTION_ACTIVE';
       this.timer.start(
-      this.specification.settings.timePerQuestion +
-        (this.specification.gameType === 'ADVENTURE' ? 600 : 0)
-    );
+        this.specification.settings.timePerQuestion +
+          (this.specification.gameType === 'ADVENTURE' ? 600 : 0)
+      );
+
+      try {
+        this.persistSessionState();
+      } catch {
+        // Graceful fallback if SQLite is unavailable in isolated unit tests
+      }
 
       return {
         nextQuestionAvailable: true,

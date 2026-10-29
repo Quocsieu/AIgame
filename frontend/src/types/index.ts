@@ -483,9 +483,11 @@ export interface MultiplayerRoomAnalyticsItem {
   gameTitle: string;
   gameType: string;
   scoringMode: string;
+  state?: string;
   playerCount: number;
   totalQuestions: number;
   topScore: number;
+  averageScore?: number | null;
   totalScoreEarned: number;
   totalCorrectAnswers: number;
   bestStreak: number;
@@ -501,6 +503,30 @@ export interface MultiplayerRoomAnalyticsItem {
   }>;
 }
 
+export interface OwnedGameAnalyticsItem {
+  gameId: string;
+  gameTitle: string;
+  gameType: string;
+  isPublic?: boolean;
+  questionCount?: number;
+  createdAt?: string;
+  totalPlaysCount?: number;
+  completedPlaysCount?: number;
+  inProgressPlaysCount?: number;
+  abandonedPlaysCount?: number;
+  sessionsCount: number;
+  personalSessionsCount?: number;
+  publicSessionsCount?: number;
+  multiplayerRoomsCount?: number;
+  multiplayerPlayersCount?: number;
+  questionsAnswered: number;
+  correctAnswers: number;
+  accuracyPercent: number | null;
+  averageScore?: number | null;
+  bestScore: number;
+  lastPlayedAt: string;
+}
+
 export interface LearningAnalyticsSummary {
   scope: {
     userId: string | null;
@@ -509,12 +535,28 @@ export interface LearningAnalyticsSummary {
     tzOffsetMinutes: number;
   };
   hasData: boolean;
+  hasPlayData?: boolean;
   overview: {
     totalGamesCreated: number;
+    totalPlaysCount?: number;
+    completedPlaysCount?: number;
+    inProgressPlaysCount?: number;
+    abandonedPlaysCount?: number;
+    completionRatePercent?: number | null;
+    soloCompletionRatePercent?: number | null;
+    multiplayerCompletionRatePercent?: number | null;
+    soloAverageScore?: number | null;
+    multiplayerAverageScore?: number | null;
+    totalPracticeSessions?: number;
     completedPracticeSessions: number;
+    inProgressPracticeSessions?: number;
+    abandonedPracticeSessions?: number;
     personalPracticeSessions?: number;
     creatorGamePracticeSessions?: number;
+    totalMultiplayerRooms?: number;
     completedMultiplayerRooms: number;
+    inProgressMultiplayerRooms?: number;
+    abandonedMultiplayerRooms?: number;
     multiplayerPlayersCount?: number;
     multiplayerTotalCorrectAnswers?: number;
     multiplayerTotalScoreEarned?: number;
@@ -531,37 +573,32 @@ export interface LearningAnalyticsSummary {
   };
   progressOverTime: Array<{
     date: string;
+    totalPlaysCount?: number;
+    completedPlaysCount?: number;
+    inProgressPlaysCount?: number;
+    abandonedPlaysCount?: number;
     sessionsCount: number;
+    soloSessionsCount?: number;
+    multiplayerRoomsCount?: number;
     questionsAnswered: number;
     correctAnswers: number;
     accuracyPercent: number | null;
-    averageScore: number;
+    averageScore: number | null;
     totalDurationMs: number;
   }>;
   byGameType: Array<{
     gameType: string;
+    totalPlaysCount?: number;
+    completedPlaysCount?: number;
     sessionsCount: number;
     multiplayerRoomsCount?: number;
     questionsAnswered: number;
     correctAnswers: number;
     accuracyPercent: number | null;
-    averageScore: number;
+    averageScore: number | null;
   }>;
-  byGameTopic: Array<{
-    gameId: string;
-    gameTitle: string;
-    gameType: string;
-    sessionsCount: number;
-    personalSessionsCount?: number;
-    publicSessionsCount?: number;
-    multiplayerRoomsCount?: number;
-    multiplayerPlayersCount?: number;
-    questionsAnswered: number;
-    correctAnswers: number;
-    accuracyPercent: number | null;
-    bestScore: number;
-    lastPlayedAt: string;
-  }>;
+  byGameTopic: OwnedGameAnalyticsItem[];
+  ownedGames?: OwnedGameAnalyticsItem[];
   recentMultiplayerRooms?: MultiplayerRoomAnalyticsItem[];
 }
 

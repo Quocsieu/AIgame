@@ -98,7 +98,13 @@ export const AppContent: React.FC = () => {
     let token = (params.get('token') || '').trim();
     let name = (params.get('name') || '').trim();
     const rawTab = params.get('tab') || '';
-    const tab = (rawTab === 'discover' ? 'analytics' : rawTab) as Tab;
+    const tab = (
+      rawTab === 'discover'
+        ? 'analytics'
+        : rawTab === 'statistics' || rawTab === 'stats'
+          ? 'reports'
+          : rawTab
+    ) as Tab;
     const typeParam = params.get('type') as GameType;
 
     if (
@@ -333,12 +339,12 @@ export const AppContent: React.FC = () => {
     }
   };
 
-  // Navigation bên trái chuẩn hóa theo mô hình Kahoot: Trang Chủ, Khám phá, Thư viện, Báo cáo, Nhập mã PIN
+  // Navigation bên trái chuẩn hóa theo mô hình Kahoot: Trang Chủ, Khám phá, Thư viện, Thống kê, Nhập mã PIN
   const navItems = [
     { id: 'home' as Tab, label: 'Trang Chủ', icon: <HomeIcon size={17} /> },
     { id: 'analytics' as Tab, label: 'Khám phá', icon: <SearchIcon size={17} /> },
     { id: 'library' as Tab, label: 'Thư viện', icon: <BookOpenIcon size={17} /> },
-    { id: 'reports' as Tab, label: 'Báo cáo', icon: <BarChartIcon size={17} /> },
+    { id: 'reports' as Tab, label: 'Thống kê', icon: <BarChartIcon size={17} /> },
     { id: 'join' as Tab, label: 'Nhập mã PIN', icon: <UsersIcon size={17} /> },
   ];
 
@@ -679,7 +685,7 @@ export const AppContent: React.FC = () => {
             {activeTab === 'reports' && (
               <ReportsPage
                 currentUser={currentUser}
-                onNavigateToLibrary={() => handleNavigateToLibrary()}
+                onNavigateToLibrary={handleNavigateToLibrary}
                 onNavigateToDiscover={() => navigateWithHistory('analytics', '/?tab=analytics')}
                 onNavigateToCreate={() => handleNavigateToCreate()}
                 onNavigateToSoloPlay={(spec) => handleSelectSavedGame(spec, true)}
