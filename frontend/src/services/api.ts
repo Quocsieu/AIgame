@@ -412,19 +412,46 @@ export async function closeMultiplayerRoom(
   roomCode: string,
   hostToken?: string
 ): Promise<{ closed: boolean; roomCode: string }> {
-  const headers = buildAuthHeaders();
-  if (hostToken) {
-    headers['x-host-token'] = hostToken;
+  let effectiveHostToken = hostToken;
+  if (!effectiveHostToken) {
+    try {
+      const activeRoom = sessionStorage.getItem('active_host_room');
+      const activeToken = sessionStorage.getItem('active_host_token');
+      if (activeRoom === roomCode && activeToken) {
+        effectiveHostToken = activeToken;
+      } else {
+        effectiveHostToken =
+          sessionStorage.getItem(`host_token_${roomCode}`) ||
+          localStorage.getItem(`host_token_${roomCode}`) ||
+          undefined;
+      }
+    } catch {}
   }
+
+  const headers = buildAuthHeaders({ 'Content-Type': 'application/json' });
+  if (effectiveHostToken) {
+    headers['x-host-token'] = effectiveHostToken;
+  }
+
   const res = await fetch(`${API_BASE_URL}/rooms/${encodeURIComponent(roomCode)}/close`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ hostToken }),
+    body: JSON.stringify({ hostToken: effectiveHostToken }),
   });
   const data = await res.json();
   if (!data.success) {
     throw new Error(data.error?.message || 'Không thể đóng phòng chơi trực tiếp.');
   }
+
+  try {
+    sessionStorage.removeItem(`host_token_${roomCode}`);
+    localStorage.removeItem(`host_token_${roomCode}`);
+    if (sessionStorage.getItem('active_host_room') === roomCode) {
+      sessionStorage.removeItem('active_host_room');
+      sessionStorage.removeItem('active_host_token');
+    }
+  } catch {}
+
   return data.data;
 }
 
@@ -637,6 +664,14 @@ export async function createRoom(params: {
     const err = new Error(data.error?.message || 'Lỗi khi tạo phòng chơi.');
     (err as any).code = data.error?.code;
     throw err;
+  }
+  if (data.data?.roomCode && data.data?.hostToken) {
+    try {
+      sessionStorage.setItem(`host_token_${data.data.roomCode}`, data.data.hostToken);
+      sessionStorage.setItem('active_host_room', data.data.roomCode);
+      sessionStorage.setItem('active_host_token', data.data.hostToken);
+      localStorage.setItem(`host_token_${data.data.roomCode}`, data.data.hostToken);
+    } catch {}
   }
   return data.data;
 }

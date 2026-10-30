@@ -42,7 +42,10 @@ export function createApp(): express.Application {
       res.setHeader('Vary', 'Origin');
       res.setHeader('Access-Control-Allow-Credentials', 'true');
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type,Authorization,X-Guest-Token,X-Player-Token,X-Game-Access-Token');
+      res.setHeader(
+        'Access-Control-Allow-Headers',
+        'Content-Type,Authorization,X-Guest-Token,X-Player-Token,X-Game-Access-Token,X-Host-Token,x-host-token'
+      );
     }
 
     if (req.method === 'OPTIONS') {

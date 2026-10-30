@@ -429,7 +429,7 @@ export const HostPage: React.FC<HostPageProps> = ({
           >
             <button
               type="button"
-              onClick={handleRestart}
+              onClick={handleCancelRoom}
               style={{
                 backgroundColor: 'var(--bg-card)',
                 color: 'var(--text-secondary)',
@@ -1210,7 +1210,7 @@ export const HostPage: React.FC<HostPageProps> = ({
           <div style={{ marginTop: '2.5rem' }}>
             <button
               type="button"
-              onClick={handleRestart}
+              onClick={handleCancelRoom}
               style={{
                 backgroundColor: 'var(--primary)',
                 color: '#ffffff',
