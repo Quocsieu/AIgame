@@ -246,21 +246,35 @@ gameRouter.post(
       });
 
       let gameSpecification = rawGameSpecification;
+      let adventureAssetsReady = true;
       if (gameSpecification.gameType === 'ADVENTURE') {
         const assetProvision = await provisionAdventureAssetsForGame(gameSpecification, {
           userId: req.user?.userId ?? null,
         });
         gameSpecification = assetProvision.specification;
+        adventureAssetsReady = assetProvision.verified;
       }
 
-      // Save generated specification in store and SQLite persistence as draft (isPublic = false)
-      gameStore.save(gameSpecification, Date.now(), req.user?.userId ?? null, false);
+      const resolvedIsPublic =
+        gameSpecification.gameType === 'ADVENTURE' && !adventureAssetsReady
+          ? false
+          : requestData.isPublic !== undefined
+            ? Boolean(requestData.isPublic)
+            : true;
+
+      // Save generated specification in store and SQLite persistence (public by default for newly created games)
+      gameStore.save(
+        { ...gameSpecification, isPublic: resolvedIsPublic },
+        Date.now(),
+        req.user?.userId ?? null,
+        resolvedIsPublic
+      );
 
       // 6. Return validated GameSpecification
       const savedSpec = gameStore.get(gameSpecification.gameId) || {
         ...gameSpecification,
         ownerUserId: req.user?.userId ?? null,
-        isPublic: false,
+        isPublic: resolvedIsPublic,
       };
       res.status(200).json(
         createSuccessResponse(savedSpec)

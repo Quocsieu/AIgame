@@ -989,18 +989,22 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     try {
       const fetchLimit = isLibraryMode ? PAGE_SIZE : OVERVIEW_FETCH_LIMIT;
       const offset = isLibraryMode ? (targetPage - 1) * PAGE_SIZE : 0;
-      const scopeParam: 'manage' | 'public' | 'mine' =
-        tab === 'MINE' ? 'mine' : tab === 'PUBLISHED' ? 'manage' : 'manage';
-      const effectiveStatus: 'ALL' | 'PUBLISHED' | 'DRAFT' =
-        tab === 'PUBLISHED' ? 'PUBLISHED' : tab === 'DRAFT' ? 'DRAFT' : status;
+      const scopeParam: 'manage' | 'public' | 'mine' = isLibraryMode ? 'mine' : 'public';
+      const effectiveStatus: 'ALL' | 'PUBLISHED' | 'DRAFT' = isLibraryMode
+        ? tab === 'PUBLISHED'
+          ? 'PUBLISHED'
+          : tab === 'DRAFT'
+            ? 'DRAFT'
+            : status
+        : 'PUBLISHED';
 
       const data = await fetchSavedGames({
         limit: fetchLimit,
         offset,
         gameType: gameType !== 'ALL' ? gameType : undefined,
         search: search.trim() || undefined,
-        status: isLibraryMode ? effectiveStatus : 'ALL',
-        scope: isLibraryMode ? scopeParam : 'manage',
+        status: effectiveStatus,
+        scope: scopeParam,
       });
       setSavedGames(data.games || []);
       if (data.counts) {
@@ -1532,7 +1536,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
 
   // Áp dụng lọc chủ đề/ngành nghề + từ khóa mở rộng + sắp xếp trên danh sách đã tải
   const displayedGames = useMemo(() => {
-    let list = [...savedGames];
+    let list = isLibraryMode
+      ? [...savedGames]
+      : savedGames.filter((g) => Boolean(g.isPublic));
 
     if (selectedIndustryFilter !== 'ALL') {
       list = list.filter((g) => g.adventureConfig?.industryId === selectedIndustryFilter);
@@ -1571,18 +1577,21 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     });
 
     return list;
-  }, [savedGames, selectedIndustryFilter, searchQuery, sortBy]);
+  }, [savedGames, isLibraryMode, selectedIndustryFilter, searchQuery, sortBy]);
 
   // Kệ "Mới tạo gần đây" (hiển thị tối đa 4 game mới nhất khi ở chế độ khám phá mặc định)
   const recentlyCreatedShelf = useMemo(() => {
-    return [...savedGames]
+    const baseList = isLibraryMode
+      ? savedGames
+      : savedGames.filter((g) => Boolean(g.isPublic));
+    return [...baseList]
       .sort(
         (a, b) =>
           new Date(b.createdAt || b.updatedAt || 0).getTime() -
           new Date(a.createdAt || a.updatedAt || 0).getTime()
       )
       .slice(0, 4);
-  }, [savedGames]);
+  }, [savedGames, isLibraryMode]);
 
   // Các chỉ số thực tế của toàn bộ kho theo phạm vi hiện tại (không bị giới hạn ở 12/24 bản ghi trên trang)
   const summaryStats = useMemo(() => {

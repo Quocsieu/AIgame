@@ -1220,7 +1220,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }
 
     const nextIsPublic =
-      publishFlag !== undefined ? publishFlag : Boolean(generatedSpec.isPublic);
+      publishFlag !== undefined ? publishFlag : (generatedSpec.isPublic ?? true);
 
     setIsSavingSpec(true);
     try {
@@ -1334,7 +1334,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const handleSaveForLater = async () => {
     if (!generatedSpec) return;
     if (!validateSpecBeforeLaunch(generatedSpec)) return;
-    const saved = await handleSaveSpecEdits(false);
+    const saved = await handleSaveSpecEdits(generatedSpec.isPublic ?? true);
     if (saved) {
       setSavedForLater(true);
     }
@@ -4037,7 +4037,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         cursor: isSavingSpec ? 'not-allowed' : 'pointer',
                         minHeight: '38px',
                       }}
-                      title="Lưu vào Kho Game ở trạng thái Bản nháp"
+                      title="Lưu vào Kho Game"
                     >
                       Lưu Vào Kho
                     </button>

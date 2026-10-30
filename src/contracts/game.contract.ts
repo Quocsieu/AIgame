@@ -595,7 +595,7 @@ export const GenerateGameRequestSchema = z.object({
   customIndustryName: z.string().trim().max(120).optional(),
   adventureSelectionMode: z.enum(['AI_DETECT', 'MANUAL']).optional(),
   adventureConfig: GenerateAdventureConfigInputSchema.optional(),
-
+  isPublic: z.boolean().optional(),
 }).refine(
   data => {
     const hasValidSourceId =
