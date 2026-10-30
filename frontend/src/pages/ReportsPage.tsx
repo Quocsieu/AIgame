@@ -338,15 +338,6 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           >
             Thống kê hiệu quả chơi game
           </h1>
-          <p
-            style={{
-              margin: '4px 0 0 0',
-              fontSize: '0.86rem',
-              color: 'var(--text-secondary)',
-            }}
-          >
-            Phân tích tỷ lệ hoàn thành phiên chơi, đối chiếu chế độ Solo và Multiplayer cùng xu hướng lượt chơi theo ngày.
-          </p>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
@@ -498,9 +489,6 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           >
             {isLoading ? '—' : totalGames.toLocaleString('vi-VN')}
           </strong>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-            Bộ câu hỏi thuộc quyền sở hữu của tài khoản
-          </span>
         </div>
 
         {/* 2. Tổng lượt chơi */}
@@ -599,13 +587,13 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 ? `${averageScore.toLocaleString('vi-VN')} đ`
                 : 'Chưa có dữ liệu'}
           </strong>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-            {averageScore !== null
-              ? overview?.overallAccuracyPercent !== null && overview?.overallAccuracyPercent !== undefined
-                ? `Tỷ lệ đúng: ${Math.round(overview.overallAccuracyPercent)}% • Chuỗi cao nhất: ${overview?.bestStreak ?? 0}`
-                : 'Tính trên các phiên hoàn thành có điểm hợp lệ'
-              : 'Chỉ tính từ các phiên hoàn thành có dữ liệu điểm hợp lệ'}
-          </span>
+          {averageScore !== null &&
+            overview?.overallAccuracyPercent !== null &&
+            overview?.overallAccuracyPercent !== undefined && (
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                Tỷ lệ đúng: {Math.round(overview.overallAccuracyPercent)}% • Chuỗi cao nhất: {overview?.bestStreak ?? 0}
+              </span>
+            )}
         </div>
       </section>
 
@@ -655,19 +643,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
             <ChartBarIcon size={24} />
           </div>
           <h2 style={{ margin: 0, fontSize: '1.08rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-            Tài khoản chưa tạo game và chưa có dữ liệu lượt chơi
+            Chưa có dữ liệu lượt chơi
           </h2>
-          <p
-            style={{
-              margin: 0,
-              fontSize: '0.86rem',
-              color: 'var(--text-secondary)',
-              maxWidth: '520px',
-              lineHeight: 1.5,
-            }}
-          >
-            Hãy khởi tạo bộ câu hỏi đầu tiên bằng AI hoặc mở Thư viện của tôi. Khi có người chơi tham gia, các phân tích tỷ lệ hoàn thành, đối chiếu Solo — Multiplayer và biểu đồ hoạt động theo ngày sẽ hiển thị tại đây.
-          </p>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '6px' }}>
             {onNavigateToCreate && (
               <button
@@ -748,19 +725,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
             <TrophyIcon size={22} />
           </div>
           <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-            Bạn đã tạo {totalGames} game nhưng chưa có lượt chơi nào để phân tích
+            Đã tạo {totalGames} game • Chưa có lượt chơi
           </h2>
-          <p
-            style={{
-              margin: 0,
-              fontSize: '0.85rem',
-              color: 'var(--text-secondary)',
-              maxWidth: '520px',
-              lineHeight: 1.5,
-            }}
-          >
-            Phân tích tỷ lệ hoàn thành phiên chơi, so sánh lượt chơi Solo — Multiplayer và biểu đồ hoạt động theo ngày sẽ hiển thị ngay khi có lượt chơi thực tế. Quản lý và mở các bộ câu hỏi đã tạo trong Thư viện của tôi.
-          </p>
           <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', marginTop: '6px' }}>
             {onNavigateToLibrary && (
               <button
@@ -850,9 +816,6 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                     <h2 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 800, color: 'var(--text-primary)' }}>
                       Tỷ lệ phiên chơi hoàn thành
                     </h2>
-                    <p style={{ margin: '3px 0 0 0', fontSize: '0.77rem', color: 'var(--text-secondary)' }}>
-                      Đo lường mức độ người chơi đi hết bộ câu hỏi so với số phiên bị bỏ dở
-                    </p>
                   </div>
                   <strong
                     style={{
@@ -1040,9 +1003,6 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                     <h2 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 800, color: 'var(--text-primary)' }}>
                       So sánh lượt chơi Solo và Multiplayer
                     </h2>
-                    <p style={{ margin: '3px 0 0 0', fontSize: '0.77rem', color: 'var(--text-secondary)' }}>
-                      Đối chiếu tỷ trọng phiên chơi đơn và phòng thi đấu trực tiếp bằng mã PIN / QR
-                    </p>
                   </div>
                   <span
                     style={{

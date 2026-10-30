@@ -887,6 +887,38 @@ describe('MIXED Game & Adventure Question Type Configuration — Full BE + FE Ve
       assert.equal(mixedUiState.hasPanel, true, 'MIXED distribution panel must render');
       assert.ok(mixedUiState.badgeText.includes('100%'), 'Default MIXED total must be 100%');
 
+      // Verify MIXED UI never allows total > 100%:
+      // Default is 40 / 20 / 20 / 20 = 100%.
+      // 1) Lower QUICK_BUTTON from 20% to 10% (sum of others for MC becomes 10 + 20 + 20 = 50%)
+      // 2) Attempt to set MULTIPLE_CHOICE to 90% -> UI must cap it at 50% so total is 100% (never > 100%)
+      await page.eval(`(() => {
+        const qbInput = document.querySelector('[data-testid="mixed-input-QUICK_BUTTON"]');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(qbInput, '10');
+        qbInput.dispatchEvent(new Event('input', { bubbles: true }));
+        qbInput.dispatchEvent(new Event('change', { bubbles: true }));
+      })()`);
+      await sleep(150);
+
+      await page.eval(`(() => {
+        const mcInput = document.querySelector('[data-testid="mixed-input-MULTIPLE_CHOICE"]');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(mcInput, '90');
+        mcInput.dispatchEvent(new Event('input', { bubbles: true }));
+        mcInput.dispatchEvent(new Event('change', { bubbles: true }));
+      })()`);
+      await sleep(150);
+
+      const mixedCapState = await page.eval(`(() => {
+        const mcVal = document.querySelector('[data-testid="mixed-input-MULTIPLE_CHOICE"]')?.value;
+        const qbVal = document.querySelector('[data-testid="mixed-input-QUICK_BUTTON"]')?.value;
+        const badgeText = document.querySelector('[data-testid="mixed-total-badge"]')?.textContent || '';
+        return { mcVal, qbVal, badgeText };
+      })()`);
+      assert.equal(mixedCapState.qbVal, '10');
+      assert.equal(mixedCapState.mcVal, '50', 'MIXED input must be capped at remaining percentage (50%) so total <= 100%');
+      assert.ok(mixedCapState.badgeText.includes('100%'));
+
       // Select ADVENTURE game type and verify 4 question types + ratio config panel
       await page.eval(`(() => {
         const btn = document.querySelector('[data-testid="game-type-option-ADVENTURE"]');
@@ -949,6 +981,36 @@ describe('MIXED Game & Adventure Question Type Configuration — Full BE + FE Ve
       assert.equal(advFourTypesState.fillVal, '25');
       assert.equal(advFourTypesState.cwVal, '25');
       assert.ok(advFourTypesState.selectedBadge.includes('4/4'));
+
+      // Verify ADVENTURE UI never allows total > 100%:
+      // Lower QUICK_BUTTON from 25% to 5% (others sum for MC = 5 + 25 + 25 = 55%), then try setting MC to 85% -> capped at 45%
+      await page.eval(`(() => {
+        const qbInput = document.querySelector('[data-testid="adventure-input-QUICK_BUTTON"]');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(qbInput, '5');
+        qbInput.dispatchEvent(new Event('input', { bubbles: true }));
+        qbInput.dispatchEvent(new Event('change', { bubbles: true }));
+      })()`);
+      await sleep(150);
+
+      await page.eval(`(() => {
+        const mcInput = document.querySelector('[data-testid="adventure-input-MULTIPLE_CHOICE"]');
+        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+        setter.call(mcInput, '85');
+        mcInput.dispatchEvent(new Event('input', { bubbles: true }));
+        mcInput.dispatchEvent(new Event('change', { bubbles: true }));
+      })()`);
+      await sleep(150);
+
+      const advCapState = await page.eval(`(() => {
+        const mcVal = document.querySelector('[data-testid="adventure-input-MULTIPLE_CHOICE"]')?.value;
+        const qbVal = document.querySelector('[data-testid="adventure-input-QUICK_BUTTON"]')?.value;
+        const badgeText = document.querySelector('[data-testid="adventure-total-badge"]')?.textContent || '';
+        return { mcVal, qbVal, badgeText };
+      })()`);
+      assert.equal(advCapState.qbVal, '5');
+      assert.equal(advCapState.mcVal, '45', 'ADVENTURE input must be capped at remaining percentage (45%) so total <= 100%');
+      assert.ok(advCapState.badgeText.includes('100%'));
 
       // 2. Navigate to guest play link for advGame and verify all 4 checkpoint question types in AdventureGameEngine
       await page.goto(`${baseUrl}/?play=${advGame.gameId}`, { settleMs: 900 });

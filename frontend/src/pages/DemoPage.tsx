@@ -97,27 +97,24 @@ const formatFileSize = (bytes: number): string => {
 const formatGameTypeLabel = (type: string): string => {
   switch (type) {
     case 'QUIZ':
-      return 'Quiz (Trắc nghiệm)';
     case 'MULTIPLE_CHOICE':
-      return 'Quiz — Trắc nghiệm 4 lựa chọn';
+      return 'Trắc nghiệm 4 lựa chọn';
     case 'TRUE_FALSE':
-      return 'True/False — Đúng hoặc Sai';
     case 'QUICK_BUTTON':
-      return 'True/False — Đúng / Sai';
+      return 'Đúng hoặc Sai';
     case 'TYPE_ANSWER':
-      return 'Type Answer — Tự nhập đáp án';
     case 'FILL_IN_THE_BLANK':
-      return 'Type Answer — Điền từ';
+      return 'Điền vào chỗ trống';
     case 'PUZZLE':
-      return 'Puzzle — Sắp xếp thứ tự';
+      return 'Sắp xếp thứ tự';
     case 'SLIDER':
-      return 'Slider — Thanh trượt giá trị';
+      return 'Thanh trượt giá trị';
     case 'CROSSWORD':
-      return 'Ô chữ (Legacy)';
+      return 'Ô chữ từ khóa';
     case 'MIXED':
-      return 'Hỗn hợp (Legacy)';
+      return 'Hỗn hợp';
     case 'ADVENTURE':
-      return 'Game đi cảnh theo ngành nghề';
+      return 'Đi cảnh theo ngành nghề';
     default:
       return type;
   }
@@ -1540,6 +1537,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           {typesConfig.map(tc => {
             const currentVal = mixedDistribution[tc.key] || 0;
             const countForType = counts[tc.key] || 0;
+            const otherSum = total - currentVal;
+            const maxAllowed = Math.max(0, 100 - otherSum);
 
             return (
               <div
@@ -1579,9 +1578,19 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     step="5"
                     value={currentVal}
                     onChange={e => {
-                      const raw = parseInt(e.target.value, 10);
-                      const clamped = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(100, raw));
-                      setMixedDistribution(prev => ({ ...prev, [tc.key]: clamped }));
+                      const raw = Number.parseInt(e.target.value, 10);
+                      setMixedDistribution(prev => {
+                        const cur = prev[tc.key] || 0;
+                        const sumOthers =
+                          (prev.MULTIPLE_CHOICE || 0) +
+                          (prev.QUICK_BUTTON || 0) +
+                          (prev.FILL_IN_THE_BLANK || 0) +
+                          (prev.CROSSWORD || 0) -
+                          cur;
+                        const allowed = Math.max(0, 100 - sumOthers);
+                        const clamped = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(allowed, Math.trunc(raw)));
+                        return { ...prev, [tc.key]: clamped };
+                      });
                     }}
                     style={{
                       flex: 1,
@@ -1595,12 +1604,23 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       type="number"
                       data-testid={`mixed-input-${tc.key}`}
                       min={0}
-                      max={100}
+                      max={maxAllowed}
+                      step={1}
                       value={currentVal}
                       onChange={e => {
-                        const raw = parseInt(e.target.value, 10);
-                        const clamped = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(100, raw));
-                        setMixedDistribution(prev => ({ ...prev, [tc.key]: clamped }));
+                        const raw = Number.parseInt(e.target.value, 10);
+                        setMixedDistribution(prev => {
+                          const cur = prev[tc.key] || 0;
+                          const sumOthers =
+                            (prev.MULTIPLE_CHOICE || 0) +
+                            (prev.QUICK_BUTTON || 0) +
+                            (prev.FILL_IN_THE_BLANK || 0) +
+                            (prev.CROSSWORD || 0) -
+                            cur;
+                          const allowed = Math.max(0, 100 - sumOthers);
+                          const clamped = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(allowed, Math.trunc(raw)));
+                          return { ...prev, [tc.key]: clamped };
+                        });
                       }}
                       style={{
                         width: '44px',
@@ -2309,10 +2329,6 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   />
                 </div>
               )}
-              <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                Khi tạo game, hệ thống sẽ phân tích nội dung nguồn để dựng đường đi, nhân vật, vật cản có va chạm và các trạm câu hỏi khớp với ngữ cảnh thực tế.
-              </div>
-
               {/* Bước chọn loại câu hỏi và cấu hình tỷ lệ trong hành trình đi cảnh */}
               {(() => {
                 const advTotal =
@@ -2333,7 +2349,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   },
                   {
                     type: 'QUICK_BUTTON' as const,
-                    label: 'Bấm nhanh / Đúng-Sai',
+                    label: 'Đúng hoặc Sai',
                     shortLabel: 'Đúng / Sai',
                     desc: 'Nhận định nhanh Đúng hoặc Sai',
                     color: 'var(--game-qb)',
@@ -2349,7 +2365,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   },
                   {
                     type: 'CROSSWORD' as const,
-                    label: 'Ô chữ (Crossword)',
+                    label: 'Ô chữ từ khóa',
                     shortLabel: 'Ô chữ',
                     desc: 'Giải từ khóa theo gợi ý định nghĩa',
                     color: 'var(--game-cross)',
@@ -2420,9 +2436,6 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         </span>
                       </div>
                     </div>
-                    <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                      Chọn từ 1 đến 4 loại câu hỏi nguyên tử xuất hiện tại các checkpoint và tùy chỉnh tỷ lệ phần trăm (tổng phải đúng 100%).
-                    </div>
 
                     <div
                       style={{
@@ -2435,6 +2448,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         const checked = adventureQuestionTypes.includes(opt.type);
                         const pct = checked ? adventureQuestionDistribution[opt.type] || 0 : 0;
                         const countForType = checked ? advCounts[opt.type] || 0 : 0;
+                        const otherSum = advTotal - pct;
+                        const maxAllowed = checked ? Math.max(0, 100 - otherSum) : 0;
                         return (
                           <div
                             key={opt.type}
@@ -2528,12 +2543,22 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                 disabled={!checked}
                                 onChange={e => {
                                   if (!checked) return;
-                                  const raw = parseInt(e.target.value, 10);
-                                  const clamped = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(100, raw));
-                                  setAdventureQuestionDistribution(prev => ({
-                                    ...prev,
-                                    [opt.type]: clamped,
-                                  }));
+                                  const raw = Number.parseInt(e.target.value, 10);
+                                  setAdventureQuestionDistribution(prev => {
+                                    const cur = prev[opt.type] || 0;
+                                    const sumOthers =
+                                      (prev.MULTIPLE_CHOICE || 0) +
+                                      (prev.QUICK_BUTTON || 0) +
+                                      (prev.FILL_IN_THE_BLANK || 0) +
+                                      (prev.CROSSWORD || 0) -
+                                      cur;
+                                    const allowed = Math.max(0, 100 - sumOthers);
+                                    const clamped = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(allowed, Math.trunc(raw)));
+                                    return {
+                                      ...prev,
+                                      [opt.type]: clamped,
+                                    };
+                                  });
                                 }}
                                 style={{
                                   flex: 1,
@@ -2547,17 +2572,28 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                   type="number"
                                   data-testid={`adventure-input-${opt.type}`}
                                   min={0}
-                                  max={100}
+                                  max={maxAllowed}
+                                  step={1}
                                   value={pct}
                                   disabled={!checked}
                                   onChange={e => {
                                     if (!checked) return;
-                                    const raw = parseInt(e.target.value, 10);
-                                    const clamped = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(100, raw));
-                                    setAdventureQuestionDistribution(prev => ({
-                                      ...prev,
-                                      [opt.type]: clamped,
-                                    }));
+                                    const raw = Number.parseInt(e.target.value, 10);
+                                    setAdventureQuestionDistribution(prev => {
+                                      const cur = prev[opt.type] || 0;
+                                      const sumOthers =
+                                        (prev.MULTIPLE_CHOICE || 0) +
+                                        (prev.QUICK_BUTTON || 0) +
+                                        (prev.FILL_IN_THE_BLANK || 0) +
+                                        (prev.CROSSWORD || 0) -
+                                        cur;
+                                      const allowed = Math.max(0, 100 - sumOthers);
+                                      const clamped = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(allowed, Math.trunc(raw)));
+                                      return {
+                                        ...prev,
+                                        [opt.type]: clamped,
+                                      };
+                                    });
                                   }}
                                   style={{
                                     width: '44px',

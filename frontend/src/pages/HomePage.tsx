@@ -55,15 +55,16 @@ interface HomePageProps {
 const MultipleChoiceIllustration: React.FC = () => <GameFormatIllustration type="MULTIPLE_CHOICE" />;
 const QuickButtonIllustration: React.FC = () => <GameFormatIllustration type="QUICK_BUTTON" />;
 const FillInBlankIllustration: React.FC = () => <GameFormatIllustration type="FILL_IN_THE_BLANK" />;
+const CrosswordIllustration: React.FC = () => <GameFormatIllustration type="CROSSWORD" />;
 const PuzzleIllustration: React.FC = () => <GameFormatIllustration type="PUZZLE" />;
 const SliderIllustration: React.FC = () => <GameFormatIllustration type="SLIDER" />;
+const MixedIllustration: React.FC = () => <GameFormatIllustration type="MIXED" />;
 const AdventureIllustration: React.FC = () => <GameFormatIllustration type="ADVENTURE" />;
 
 interface FormatMeta {
   type: GameType;
   title: string;
   shortDesc: string;
-  badge: string;
   accent: string;
   badgeBg: string;
   illustration: React.ReactNode;
@@ -72,54 +73,64 @@ interface FormatMeta {
 const GAME_FORMATS: FormatMeta[] = [
   {
     type: 'MULTIPLE_CHOICE',
-    title: 'Quiz — Trắc nghiệm 4 màu',
-    shortDesc: 'Câu hỏi 4 đáp án A/B/C/D trực quan để thi đấu tốc độ hoặc ôn tập lớp học.',
-    badge: 'Ưu tiên #1 • Quiz',
+    title: 'Trắc nghiệm 4 lựa chọn',
+    shortDesc: 'Chọn đáp án đúng trong 4 phương án A, B, C, D.',
     accent: 'var(--accent-rose)',
     badgeBg: 'var(--accent-rose-subtle)',
     illustration: <MultipleChoiceIllustration />,
   },
   {
     type: 'QUICK_BUTTON',
-    title: 'True/False — Đúng hoặc Sai',
-    shortDesc: 'Phản xạ quyết định nhanh Đúng hoặc Sai với các mệnh đề nhận định trọng tâm.',
-    badge: 'Ưu tiên #2 • True/False',
+    title: 'Đúng hoặc Sai',
+    shortDesc: 'Phản xạ chọn nhanh Đúng hoặc Sai trước các nhận định.',
     accent: 'var(--accent-sky)',
     badgeBg: 'var(--accent-sky-subtle)',
     illustration: <QuickButtonIllustration />,
   },
   {
     type: 'FILL_IN_THE_BLANK',
-    title: 'Type Answer — Tự nhập đáp án',
-    shortDesc: 'Người chơi tự gõ câu trả lời ngắn gọn, ghi nhớ chính xác khái niệm và thuật ngữ.',
-    badge: 'Ưu tiên #3 • Type Answer',
+    title: 'Điền vào chỗ trống',
+    shortDesc: 'Tự nhập câu trả lời ngắn gọn cho khái niệm và thuật ngữ.',
     accent: 'var(--accent-amber)',
     badgeBg: 'var(--accent-amber-subtle)',
     illustration: <FillInBlankIllustration />,
   },
   {
+    type: 'CROSSWORD',
+    title: 'Ô chữ từ khóa',
+    shortDesc: 'Giải từ khóa chuyên ngành dựa trên gợi ý định nghĩa.',
+    accent: 'var(--accent-emerald)',
+    badgeBg: 'var(--accent-emerald-subtle)',
+    illustration: <CrosswordIllustration />,
+  },
+  {
     type: 'PUZZLE',
-    title: 'Puzzle — Sắp xếp thứ tự',
-    shortDesc: 'Sắp xếp các bước quy trình, sự kiện hoặc cấp độ theo đúng trình tự logic.',
-    badge: 'Ưu tiên #4 • Puzzle',
+    title: 'Sắp xếp thứ tự',
+    shortDesc: 'Sắp xếp các bước quy trình hoặc sự kiện theo đúng trình tự.',
     accent: 'var(--accent-emerald)',
     badgeBg: 'var(--accent-emerald-subtle)',
     illustration: <PuzzleIllustration />,
   },
   {
     type: 'SLIDER',
-    title: 'Slider — Thanh trượt giá trị',
-    shortDesc: 'Kéo thanh trượt để chọn con số, mốc năm, tỷ lệ hoặc thông số định lượng chính xác.',
-    badge: 'Ưu tiên #5 • Slider',
+    title: 'Thanh trượt giá trị',
+    shortDesc: 'Kéo thanh trượt để chọn con số hoặc mốc định lượng.',
     accent: 'var(--accent-violet)',
     badgeBg: 'var(--accent-violet-subtle)',
     illustration: <SliderIllustration />,
   },
   {
+    type: 'MIXED',
+    title: 'Hỗn hợp',
+    shortDesc: 'Phối hợp linh hoạt tỷ lệ 4 dạng câu hỏi truyền thống.',
+    accent: 'var(--accent-violet)',
+    badgeBg: 'var(--accent-violet-subtle)',
+    illustration: <MixedIllustration />,
+  },
+  {
     type: 'ADVENTURE',
     title: 'Đi cảnh theo ngành nghề',
-    shortDesc: 'Nhập vai xử lý tình huống thực tế theo từng lĩnh vực và ngành nghề.',
-    badge: 'Nhập vai 2D',
+    shortDesc: 'Vượt chướng ngại vật và trả lời câu hỏi theo bối cảnh ngành.',
     accent: 'var(--accent-coral, var(--accent-amber))',
     badgeBg: 'var(--accent-coral-subtle, var(--accent-amber-subtle))',
     illustration: <AdventureIllustration />,
@@ -504,16 +515,6 @@ export const HomePage: React.FC<HomePageProps> = ({
             >
               Biên soạn học liệu tương tác & tổ chức phòng thi đấu trực tiếp
             </h1>
-            <p
-              style={{
-                margin: '6px 0 0 0',
-                fontSize: '0.9rem',
-                color: 'var(--text-secondary)',
-                lineHeight: 1.5,
-              }}
-            >
-              Chuyển đổi tài liệu hoặc liên kết thành bộ câu hỏi tương tác bằng AI, khởi tạo game đi cảnh theo ngành nghề và mở phòng chơi bằng mã PIN hoặc QR.
-            </p>
           </div>
 
           {/* Cụm CTA Chính & Phụ + Lối tắt thao tác */}
@@ -1128,17 +1129,12 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       )}
 
-      {/* 3. CHỌN LOẠI GAME ĐỂ TẠO (6 ĐỊNH DẠNG THỰC TẾ) */}
+      {/* 3. CHỌN LOẠI GAME ĐỂ TẠO */}
       <section aria-label="Chọn thể loại để tạo trò chơi" style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '8px' }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-              Chọn thể loại để bắt đầu tạo trò chơi
-            </h2>
-            <p style={{ margin: '2px 0 0 0', fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-              Nhấn nút Tạo trên bất kỳ loại game nào để mở trình khởi tạo câu hỏi từ tài liệu hoặc liên kết
-            </p>
-          </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+          <h2 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+            Chọn thể loại để bắt đầu tạo trò chơi
+          </h2>
           <span
             style={{
               fontSize: '0.76rem',
@@ -1147,14 +1143,14 @@ export const HomePage: React.FC<HomePageProps> = ({
               fontVariantNumeric: 'tabular-nums',
             }}
           >
-            {GAME_FORMATS.length} định dạng hỗ trợ
+            {GAME_FORMATS.length} định dạng
           </span>
         </div>
 
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))',
             gap: '14px',
           }}
         >
@@ -1186,7 +1182,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   }}
                   style={{
                     width: '100%',
-                    height: '108px',
+                    height: '104px',
                     borderRadius: '6px',
                     overflow: 'hidden',
                     marginBottom: '10px',
@@ -1197,39 +1193,7 @@ export const HomePage: React.FC<HomePageProps> = ({
                   {fmt.illustration}
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
-                  <span
-                    style={{
-                      fontSize: '0.72rem',
-                      fontWeight: 700,
-                      padding: '2px 8px',
-                      borderRadius: '4px',
-                      backgroundColor: fmt.badgeBg,
-                      color: fmt.accent,
-                    }}
-                  >
-                    {fmt.badge}
-                  </span>
-                  {onNavigateToLibrary && (
-                    <button
-                      type="button"
-                      onClick={() => onNavigateToLibrary({ gameType: fmt.type, nonce: Date.now() })}
-                      style={{
-                        background: 'none',
-                        border: 'none',
-                        color: 'var(--text-secondary)',
-                        fontSize: '0.74rem',
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                        padding: 0,
-                      }}
-                    >
-                      Xem trong Thư viện
-                    </button>
-                  )}
-                </div>
-
-                <h3 style={{ margin: '0 0 4px 0', fontSize: '0.98rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                <h3 style={{ margin: '0 0 4px 0', fontSize: '0.96rem', fontWeight: 800, color: 'var(--text-primary)' }}>
                   {fmt.title}
                 </h3>
                 <p style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
@@ -1294,13 +1258,8 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
           <div>
             <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-              {currentUser?.userId ? 'Thư viện của bạn • Game gần đây' : 'Game gần đây (Kho học liệu chung)'}
+              {currentUser?.userId ? 'Thư viện của bạn • Game gần đây' : 'Game gần đây'}
             </h2>
-            <p style={{ margin: '2px 0 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-              {currentUser?.userId
-                ? 'Tiếp tục chỉnh sửa hoặc tổ chức chơi từ các bộ câu hỏi do bạn biên soạn'
-                : 'Tiếp tục chỉnh sửa hoặc tổ chức chơi từ các bộ câu hỏi vừa được cập nhật'}
-            </p>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -1617,9 +1576,6 @@ export const HomePage: React.FC<HomePageProps> = ({
             <h2 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>
               Nội dung đã xuất bản & Chủ đề khám phá
             </h2>
-            <p style={{ margin: '2px 0 0 0', fontSize: '0.82rem', color: 'var(--text-secondary)' }}>
-              Các bộ câu hỏi công khai sẵn sàng chơi đơn hoặc mở phòng trực tiếp ngay lập tức
-            </p>
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
