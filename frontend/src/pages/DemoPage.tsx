@@ -2382,20 +2382,127 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       borderTop: '1px solid var(--border-subtle)',
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: '0.55rem',
+                      gap: '0.5rem',
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}>
-                      <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                    <style>{`
+                      [data-testid="adventure-question-config-panel"] {
+                        container-type: inline-size;
+                      }
+                      [data-testid="adventure-question-config-panel"] .adv-qtype-grid {
+                        display: grid;
+                        grid-template-columns: repeat(2, minmax(0, 1fr));
+                        grid-auto-rows: 1fr;
+                        gap: 0.45rem;
+                        align-items: stretch;
+                      }
+                      @container (max-width: 445px) {
+                        [data-testid="adventure-question-config-panel"] .adv-qtype-header-title {
+                          font-size: 0.74rem !important;
+                        }
+                        [data-testid="adventure-question-config-panel"] [data-testid="adventure-selected-types-badge"],
+                        [data-testid="adventure-question-config-panel"] [data-testid="adventure-total-badge"] {
+                          font-size: 0.64rem !important;
+                          padding: 0.1rem 0.36rem !important;
+                        }
+                        [data-testid="adventure-question-config-panel"] [data-testid^="adventure-type-card-"] {
+                          padding: 0.44rem 0.42rem !important;
+                        }
+                        [data-testid="adventure-question-config-panel"] [data-testid^="adventure-label-"] {
+                          font-size: 0.68rem !important;
+                          letter-spacing: -0.02em !important;
+                        }
+                        [data-testid="adventure-question-config-panel"] [data-testid^="adventure-count-"] {
+                          font-size: 0.63rem !important;
+                          padding: 0.04rem 0.22rem !important;
+                        }
+                        [data-testid="adventure-question-config-panel"] .adv-qtype-footer-note {
+                          font-size: 0.66rem !important;
+                        }
+                        [data-testid="adventure-question-config-panel"] [data-testid="adventure-rebalance-btn"] {
+                          font-size: 0.66rem !important;
+                          padding: 0.14rem 0.42rem !important;
+                        }
+                      }
+                      @container (max-width: 390px) {
+                        [data-testid="adventure-question-config-panel"] .adv-qtype-grid {
+                          grid-template-columns: 1fr;
+                          grid-auto-rows: auto;
+                        }
+                      }
+                      @media (max-width: 520px) {
+                        [data-testid="adventure-question-config-panel"] .adv-qtype-grid {
+                          grid-template-columns: 1fr;
+                          grid-auto-rows: auto;
+                        }
+                      }
+                      [data-testid="adventure-question-config-panel"] .adv-pct-input::-webkit-inner-spin-button,
+                      [data-testid="adventure-question-config-panel"] .adv-pct-input::-webkit-outer-spin-button {
+                        -webkit-appearance: none;
+                        margin: 0;
+                      }
+                      [data-testid="adventure-question-config-panel"] .adv-pct-input {
+                        -moz-appearance: textfield;
+                        appearance: textfield;
+                      }
+                      [data-testid="adventure-question-config-panel"] .adv-range-slider {
+                        margin: 0;
+                        padding: 0;
+                      }
+                    `}</style>
+
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        flexWrap: 'wrap',
+                        gap: '0.3rem 0.4rem',
+                      }}
+                    >
+                      <span
+                        className="adv-qtype-header-title"
+                        style={{
+                          fontSize: '0.79rem',
+                          fontWeight: 800,
+                          letterSpacing: '-0.01em',
+                          color: 'var(--text-primary)',
+                          lineHeight: 1.3,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
                         Loại câu hỏi trong game đi cảnh
                       </span>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                          flexWrap: 'wrap',
+                        }}
+                      >
                         <span
                           data-testid="adventure-selected-types-badge"
                           style={{
-                            fontSize: '0.72rem',
+                            padding: '0.12rem 0.42rem',
+                            borderRadius: '999px',
+                            fontSize: '0.68rem',
                             fontWeight: 700,
-                            color: adventureQuestionTypes.length > 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                            whiteSpace: 'nowrap',
+                            lineHeight: 1.3,
+                            backgroundColor:
+                              adventureQuestionTypes.length > 0
+                                ? 'rgba(16, 185, 129, 0.12)'
+                                : 'rgba(239, 68, 68, 0.12)',
+                            color:
+                              adventureQuestionTypes.length > 0
+                                ? 'var(--accent-emerald)'
+                                : 'var(--accent-rose)',
+                            border: `1px solid ${
+                              adventureQuestionTypes.length > 0
+                                ? 'rgba(16, 185, 129, 0.35)'
+                                : 'rgba(239, 68, 68, 0.35)'
+                            }`,
                           }}
                         >
                           {adventureQuestionTypes.length > 0
@@ -2405,10 +2512,12 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         <span
                           data-testid="adventure-total-badge"
                           style={{
-                            padding: '0.15rem 0.5rem',
-                            borderRadius: '16px',
-                            fontSize: '0.72rem',
+                            padding: '0.12rem 0.46rem',
+                            borderRadius: '999px',
+                            fontSize: '0.68rem',
                             fontWeight: 800,
+                            whiteSpace: 'nowrap',
+                            lineHeight: 1.3,
                             backgroundColor: advValid
                               ? 'rgba(16, 185, 129, 0.15)'
                               : advTotal > 100 || adventureQuestionTypes.length === 0
@@ -2429,7 +2538,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                           }}
                         >
                           {advValid
-                            ? 'Tổng: 100% Hợp lệ'
+                            ? 'Tổng: 100% — Hợp lệ'
                             : advTotal > 100
                               ? `Tổng: ${advTotal}% (Vượt ${advTotal - 100}%)`
                               : `Tổng: ${advTotal}% (Còn thiếu ${100 - advTotal}%)`}
@@ -2437,13 +2546,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       </div>
                     </div>
 
-                    <div
-                      style={{
-                        display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
-                        gap: '0.45rem',
-                      }}
-                    >
+                    <div className="adv-qtype-grid">
                       {advTypeOptions.map(opt => {
                         const checked = adventureQuestionTypes.includes(opt.type);
                         const pct = checked ? adventureQuestionDistribution[opt.type] || 0 : 0;
@@ -2455,7 +2558,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                             key={opt.type}
                             data-testid={`adventure-type-card-${opt.type}`}
                             style={{
-                              padding: '0.55rem 0.65rem',
+                              padding: '0.48rem 0.54rem',
                               borderRadius: '8px',
                               backgroundColor: checked ? 'var(--bg-elevated)' : 'var(--bg-card)',
                               border: checked
@@ -2465,76 +2568,145 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                               color: 'var(--text-primary)',
                               display: 'flex',
                               flexDirection: 'column',
-                              gap: '0.4rem',
-                              opacity: checked ? 1 : 0.72,
+                              justifyContent: 'space-between',
+                              gap: '0.36rem',
+                              height: '100%',
+                              minWidth: 0,
+                              boxSizing: 'border-box',
+                              opacity: checked ? 1 : 0.68,
                               transition: 'border-color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease',
                             }}
                           >
-                            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.4rem' }}>
-                              <button
-                                type="button"
-                                role="checkbox"
-                                data-testid={`adventure-type-toggle-${opt.type}`}
-                                aria-checked={checked}
-                                onClick={() => toggleAdventureQuestionType(opt.type)}
+                            <button
+                              type="button"
+                              role="checkbox"
+                              data-testid={`adventure-type-toggle-${opt.type}`}
+                              aria-checked={checked}
+                              onClick={() => toggleAdventureQuestionType(opt.type)}
+                              style={{
+                                textAlign: 'left',
+                                padding: 0,
+                                border: 'none',
+                                background: 'transparent',
+                                color: 'var(--text-primary)',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.2rem',
+                                width: '100%',
+                                minWidth: 0,
+                              }}
+                            >
+                              <div
                                 style={{
-                                  textAlign: 'left',
-                                  padding: 0,
-                                  border: 'none',
-                                  background: 'transparent',
-                                  color: 'var(--text-primary)',
-                                  cursor: 'pointer',
                                   display: 'flex',
-                                  alignItems: 'flex-start',
-                                  gap: '0.45rem',
-                                  flex: 1,
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  gap: '0.3rem',
+                                  width: '100%',
                                   minWidth: 0,
                                 }}
                               >
-                                <span
+                                <div
                                   style={{
-                                    width: '16px',
-                                    height: '16px',
-                                    borderRadius: '4px',
-                                    marginTop: '1px',
-                                    flexShrink: 0,
-                                    display: 'inline-flex',
+                                    display: 'flex',
                                     alignItems: 'center',
-                                    justifyContent: 'center',
-                                    backgroundColor: checked ? 'var(--primary)' : 'var(--bg-input)',
-                                    border: checked ? 'none' : '1px solid var(--border-strong)',
-                                    color: 'var(--primary-ink, #090d16)',
-                                    fontSize: '0.68rem',
-                                    fontWeight: 900,
+                                    gap: '0.34rem',
+                                    minWidth: 0,
+                                    flex: 1,
                                   }}
                                 >
-                                  {checked ? '✓' : ''}
-                                </span>
-                                <div style={{ minWidth: 0 }}>
-                                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: checked ? opt.color : 'var(--text-primary)' }}>
-                                    {opt.icon} {opt.label}
-                                  </div>
-                                  <div style={{ fontSize: '0.69rem', color: 'var(--text-secondary)', marginTop: '0.08rem' }}>
-                                    {opt.desc}
-                                  </div>
+                                  <span
+                                    style={{
+                                      width: '14px',
+                                      height: '14px',
+                                      borderRadius: '3.5px',
+                                      flexShrink: 0,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      backgroundColor: checked ? 'var(--primary)' : 'var(--bg-input)',
+                                      border: checked ? '1px solid var(--primary)' : '1px solid var(--border-strong)',
+                                      color: 'var(--primary-ink, #090d16)',
+                                      fontSize: '0.62rem',
+                                      fontWeight: 900,
+                                      lineHeight: 1,
+                                    }}
+                                  >
+                                    {checked ? '✓' : ''}
+                                  </span>
+                                  <span
+                                    data-testid={`adventure-label-${opt.type}`}
+                                    title={opt.label}
+                                    style={{
+                                      fontSize: '0.73rem',
+                                      fontWeight: 800,
+                                      letterSpacing: '-0.015em',
+                                      color: checked ? opt.color : 'var(--text-primary)',
+                                      lineHeight: 1.25,
+                                      whiteSpace: 'nowrap',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      minWidth: 0,
+                                    }}
+                                  >
+                                    {opt.label}
+                                  </span>
                                 </div>
-                              </button>
-                              <span
-                                data-testid={`adventure-count-${opt.type}`}
+                                <span
+                                  data-testid={`adventure-count-${opt.type}`}
+                                  style={{
+                                    fontSize: '0.67rem',
+                                    fontWeight: 800,
+                                    color: checked ? 'var(--text-primary)' : 'var(--text-muted)',
+                                    backgroundColor: checked ? 'var(--bg-input)' : 'transparent',
+                                    border: checked
+                                      ? '1px solid var(--border-subtle)'
+                                      : '1px solid transparent',
+                                    borderRadius: '4px',
+                                    padding: '0.05rem 0.28rem',
+                                    whiteSpace: 'nowrap',
+                                    flexShrink: 0,
+                                    lineHeight: 1.25,
+                                    fontVariantNumeric: 'tabular-nums',
+                                  }}
+                                >
+                                  {countForType} câu
+                                </span>
+                              </div>
+                              <div
+                                data-testid={`adventure-desc-${opt.type}`}
+                                title={opt.desc}
                                 style={{
-                                  fontSize: '0.72rem',
-                                  fontWeight: 800,
-                                  color: checked ? 'var(--text-primary)' : 'var(--text-muted)',
+                                  fontSize: '0.67rem',
+                                  color: 'var(--text-secondary)',
+                                  lineHeight: 1.3,
                                   whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  width: '100%',
+                                  boxSizing: 'border-box',
                                 }}
                               >
-                                {countForType} câu
-                              </span>
-                            </div>
+                                {opt.desc}
+                              </div>
+                            </button>
 
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '0.45rem',
+                                marginTop: 'auto',
+                                paddingTop: '0.1rem',
+                                height: '24px',
+                                width: '100%',
+                                boxSizing: 'border-box',
+                              }}
+                            >
                               <input
                                 type="range"
+                                className="adv-range-slider"
                                 data-testid={`adventure-slider-${opt.type}`}
                                 min="0"
                                 max="100"
@@ -2562,14 +2734,34 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                 }}
                                 style={{
                                   flex: 1,
+                                  minWidth: 0,
+                                  width: '100%',
                                   accentColor: opt.color,
                                   cursor: checked ? 'pointer' : 'not-allowed',
                                   height: '4px',
+                                  opacity: checked ? 1 : 0.45,
                                 }}
                               />
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.15rem' }}>
+                              <div
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'flex-end',
+                                  gap: '1px',
+                                  height: '24px',
+                                  minWidth: '50px',
+                                  padding: '0 0.3rem',
+                                  borderRadius: '5px',
+                                  border: '1px solid var(--border-strong)',
+                                  backgroundColor: checked ? 'var(--bg-input)' : 'var(--bg-card)',
+                                  opacity: checked ? 1 : 0.65,
+                                  flexShrink: 0,
+                                  boxSizing: 'border-box',
+                                }}
+                              >
                                 <input
                                   type="number"
+                                  className="adv-pct-input"
                                   data-testid={`adventure-input-${opt.type}`}
                                   min={0}
                                   max={maxAllowed}
@@ -2596,19 +2788,35 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                     });
                                   }}
                                   style={{
-                                    width: '44px',
-                                    padding: '0.16rem 0.22rem',
-                                    borderRadius: '5px',
-                                    border: '1px solid var(--border-strong)',
-                                    backgroundColor: checked ? 'var(--bg-input)' : 'var(--bg-card)',
+                                    width: '28px',
+                                    height: '20px',
+                                    padding: 0,
+                                    margin: 0,
+                                    border: 'none',
+                                    backgroundColor: 'transparent',
                                     color: checked ? 'var(--text-primary)' : 'var(--text-muted)',
-                                    fontSize: '0.76rem',
+                                    fontSize: '0.74rem',
                                     fontWeight: 800,
-                                    textAlign: 'center',
+                                    textAlign: 'right',
+                                    outline: 'none',
                                     boxSizing: 'border-box',
+                                    fontVariantNumeric: 'tabular-nums',
+                                    lineHeight: 1,
+                                    cursor: checked ? 'text' : 'not-allowed',
                                   }}
                                 />
-                                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>%</span>
+                                <span
+                                  style={{
+                                    fontSize: '0.69rem',
+                                    fontWeight: 700,
+                                    color: checked ? 'var(--text-secondary)' : 'var(--text-muted)',
+                                    lineHeight: 1,
+                                    flexShrink: 0,
+                                    userSelect: 'none',
+                                  }}
+                                >
+                                  %
+                                </span>
                               </div>
                             </div>
                           </div>
@@ -2617,8 +2825,26 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     </div>
 
                     {adventureQuestionTypes.length > 0 && (
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.4rem', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '0.71rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '0.4rem',
+                          flexWrap: 'wrap',
+                          paddingTop: '0.3rem',
+                          borderTop: '1px dashed var(--border-subtle)',
+                        }}
+                      >
+                        <span
+                          className="adv-qtype-footer-note"
+                          style={{
+                            fontSize: '0.71rem',
+                            color: 'var(--text-muted)',
+                            fontWeight: 600,
+                            lineHeight: 1.3,
+                          }}
+                        >
                           Loại không chọn cố định ở 0% và không sinh câu hỏi.
                         </span>
                         <button
@@ -2631,6 +2857,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                           }
                           style={{
                             padding: '0.18rem 0.55rem',
+                            height: '25px',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
                             borderRadius: '6px',
                             backgroundColor: 'var(--bg-card)',
                             border: '1px solid var(--border-strong)',
@@ -2638,6 +2868,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                             fontSize: '0.71rem',
                             fontWeight: 700,
                             cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                            flexShrink: 0,
                           }}
                         >
                           Chia đều 100% ({adventureQuestionTypes.length} loại)
