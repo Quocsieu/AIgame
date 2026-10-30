@@ -10,6 +10,7 @@ import { authService } from '../src/services/auth.service.js';
 import { GameSpecificationSchema, type GameSpecification } from '../src/contracts/game.contract.js';
 import { gameStore } from '../src/game/game.store.js';
 import { resolveAdventureAssetPack } from '../src/services/adventure-asset-pack.service.js';
+import { persistenceRepo } from '../src/storage/persistence.repository.js';
 // @ts-ignore
 import { Browser, sleep } from '../../../WEB_2064/ASM/.agents/skills/design-taste-frontend/scripts/lib/cdp.mjs';
 
@@ -120,6 +121,7 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
       title: 'Bộ câu hỏi Mạng Máy Tính Truyền Thống',
       description: 'Bộ câu hỏi trắc nghiệm truyền thống về mạng máy tính.',
       gameType: 'MULTIPLE_CHOICE',
+      coverImageUrl: '/assets/adventure-packs/it_technology/background.jpg',
       generatedAt: new Date(baseNow + 1000).toISOString(),
       isPublic: true,
       sourceSummary: validSourceSummary,
@@ -182,6 +184,134 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
     });
     gameStore.save(adventureGame, baseNow + 3000, reg.user.userId, true);
 
+    const quickBtnGame: GameSpecification = GameSpecificationSchema.parse({
+      gameId: `game_qb_ui_${baseNow}`,
+      title: 'Bộ câu hỏi Quick Button Bảo Mật',
+      description: 'Bộ câu hỏi Đúng/Sai phản xạ nhanh.',
+      gameType: 'QUICK_BUTTON',
+      generatedAt: new Date(baseNow + 4000).toISOString(),
+      isPublic: true,
+      sourceSummary: validSourceSummary,
+      settings: {
+        questionCount: 1,
+        timePerQuestion: 15,
+        scoringMode: 'SPEED_BONUS',
+      },
+      questions: [
+        {
+          id: 'qqb1',
+          type: 'QUICK_BUTTON',
+          difficulty: 'EASY',
+          question: 'SSH mặc định hoạt động trên cổng 22?',
+          choices: ['Đúng', 'Sai'],
+          correctAnswer: 'Đúng',
+          explanation: 'SSH dùng cổng 22.',
+          sourceReference: validSourceRef,
+        },
+      ],
+    });
+    gameStore.save(quickBtnGame, baseNow + 4000, reg.user.userId, true);
+
+    const fillBlankGame: GameSpecification = GameSpecificationSchema.parse({
+      gameId: `game_fib_ui_${baseNow}`,
+      title: 'Bộ câu hỏi Điền Khuyết Hệ Điều Hành',
+      description: 'Bộ câu hỏi điền vào chỗ trống về Linux.',
+      gameType: 'FILL_IN_THE_BLANK',
+      generatedAt: new Date(baseNow + 5000).toISOString(),
+      isPublic: true,
+      sourceSummary: validSourceSummary,
+      settings: {
+        questionCount: 1,
+        timePerQuestion: 20,
+        scoringMode: 'STANDARD',
+      },
+      questions: [
+        {
+          id: 'qfib1',
+          type: 'FILL_IN_THE_BLANK',
+          difficulty: 'MEDIUM',
+          question: 'Nhân hệ điều hành mã nguồn mở phổ biến nhất cho máy chủ là ___.',
+          correctAnswer: 'LINUX',
+          acceptedAlternatives: ['linux'],
+          explanation: 'Linux kernel được sử dụng rộng rãi trên máy chủ.',
+          sourceReference: validSourceRef,
+        },
+      ],
+    });
+    gameStore.save(fillBlankGame, baseNow + 5000, reg.user.userId, true);
+
+    const crosswordGame: GameSpecification = GameSpecificationSchema.parse({
+      gameId: `game_cw_ui_${baseNow}`,
+      title: 'Bộ câu hỏi Ô Chữ Điện Toán Đám Mây',
+      description: 'Bộ câu hỏi giải ô chữ thuật ngữ Cloud.',
+      gameType: 'CROSSWORD',
+      generatedAt: new Date(baseNow + 6000).toISOString(),
+      isPublic: true,
+      sourceSummary: validSourceSummary,
+      settings: {
+        questionCount: 1,
+        timePerQuestion: 25,
+        scoringMode: 'STANDARD',
+      },
+      questions: [
+        {
+          id: 'qcw1',
+          type: 'CROSSWORD',
+          difficulty: 'MEDIUM',
+          question: 'Giải ô chữ (5 chữ cái): Máy chủ bộ nhớ đệm in-memory tốc độ cao?',
+          crosswordClue: 'Máy chủ bộ nhớ đệm in-memory tốc độ cao (5 chữ cái)',
+          crosswordAnswer: 'REDIS',
+          correctAnswer: 'REDIS',
+          explanation: 'Redis là hệ thống lưu trữ key-value trong bộ nhớ.',
+          sourceReference: validSourceRef,
+        },
+      ],
+    });
+    gameStore.save(crosswordGame, baseNow + 6000, reg.user.userId, true);
+
+    const otherReg = await authService.register({
+      email: `other_owner_${Date.now()}@test.local`,
+      password: 'Password123!',
+      displayName: 'Other Creator',
+    });
+    const otherUserGame: GameSpecification = GameSpecificationSchema.parse({
+      gameId: `game_other_ui_${baseNow}`,
+      title: 'Bộ câu hỏi Công Khai Của Người Khác',
+      description: 'Bộ câu hỏi thuộc quyền sở hữu của người dùng khác.',
+      gameType: 'MULTIPLE_CHOICE',
+      generatedAt: new Date(baseNow + 7000).toISOString(),
+      isPublic: true,
+      sourceSummary: validSourceSummary,
+      settings: {
+        questionCount: 1,
+        timePerQuestion: 15,
+        scoringMode: 'STANDARD',
+      },
+      questions: [
+        {
+          id: 'qo1',
+          type: 'MULTIPLE_CHOICE',
+          difficulty: 'EASY',
+          question: 'DNS dùng để phân giải tên miền sang địa chỉ nào?',
+          choices: ['A. IP', 'B. MAC', 'C. IMEI', 'D. UUID'],
+          correctAnswer: 'A. IP',
+          explanation: 'DNS phân giải tên miền sang IP.',
+          sourceReference: validSourceRef,
+        },
+      ],
+    });
+    gameStore.save(otherUserGame, baseNow + 7000, otherReg.user.userId, true);
+
+    const seededGameIds = [
+      sampleGame.gameId,
+      traditionalGame.gameId,
+      adventureGame.gameId,
+      quickBtnGame.gameId,
+      fillBlankGame.gameId,
+      crosswordGame.gameId,
+      otherUserGame.gameId,
+    ];
+
     const server = http.createServer(app);
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', () => resolve()));
     const addr = server.address() as { port: number };
@@ -228,15 +358,20 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
           return btns.some(b => (b.textContent || '').includes('Tạo game'));
         }).length;
 
+        const allHomeButtons = Array.from(document.querySelectorAll('button')).map(b => (b.textContent || '').trim());
+        const hasAiCoverBtnOnHome = allHomeButtons.some(t => /Ảnh bìa AI|Tạo lại bìa AI/i.test(t));
+
         return {
           foundForbidden,
           formatIds,
           formatTitles,
           createButtonsCount,
+          hasAiCoverBtnOnHome,
         };
       })()`);
 
       assert.deepEqual(homeCheck.foundForbidden, [], 'Home page must not contain any of the 4 removed verbose strings');
+      assert.equal(homeCheck.hasAiCoverBtnOnHome, false, 'Home page must not contain any Ảnh bìa AI button');
       assert.equal(homeCheck.formatIds.length, 8, 'Home page must display all 8 game format cards');
       const mixedIdxHome = homeCheck.formatIds.indexOf('MIXED');
       const advIdxHome = homeCheck.formatIds.indexOf('ADVENTURE');
@@ -298,6 +433,8 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
             found: true,
             btnTexts,
             hasQr: btnTexts.some(t => /QR/i.test(t)),
+            hasAiCoverBtn: btnTexts.some(t => /Ảnh bìa AI|Tạo lại bìa AI/i.test(t)),
+            hasCoverVisual: Boolean(card.querySelector('img, svg')),
             firstBtnText: btnTexts[0] || '',
             secondBtnText: btnTexts[1] || '',
             isFirstLeftmost: Boolean(firstRect && secondRect && firstRect.left < secondRect.left),
@@ -306,6 +443,8 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
 
         assert.equal(exploreCardInfo.found, true, `Explore card for ${targetGame.gameType} ("${targetGame.title}") must be rendered`);
         assert.equal(exploreCardInfo.hasQr, false, `Explore card for ${targetGame.gameType} must NOT have a QR button`);
+        assert.equal(exploreCardInfo.hasAiCoverBtn, false, `Explore card for ${targetGame.gameType} must NOT have an Ảnh bìa AI button`);
+        assert.equal(exploreCardInfo.hasCoverVisual, true, `Explore card for ${targetGame.gameType} must keep its cover visual`);
         assert.equal(exploreCardInfo.firstBtnText, 'Mở game', `Explore card leftmost button must be "Mở game" for ${targetGame.gameType}`);
         assert.equal(exploreCardInfo.secondBtnText, 'Chi tiết', `Explore card right button must be "Chi tiết" for ${targetGame.gameType}`);
         assert.equal(exploreCardInfo.isFirstLeftmost, true, `"Mở game" must be physically at the leftmost position on the card for ${targetGame.gameType}`);
@@ -324,9 +463,15 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
 
         const exploreDetailCheck = await page.eval(`(() => {
           const openGameBtn = document.querySelector('[data-testid="explore-detail-open-game-btn"]');
+          const editGameBtn = document.querySelector('[data-testid="library-detail-edit-game-btn"]');
+          const deleteGameBtn = document.querySelector('[data-testid="library-detail-delete-game-btn"]');
           const allBtnTexts = Array.from(document.querySelectorAll('button')).map(b => (b.textContent || '').trim());
           return {
             hasSingleOpenGameBtn: Boolean(openGameBtn) && (openGameBtn?.textContent || '').trim() === 'Mở game',
+            hasEditBtn: Boolean(editGameBtn) || allBtnTexts.some(t => t === 'Sửa' || t === 'Sửa game'),
+            hasDeleteBtn: Boolean(deleteGameBtn) || allBtnTexts.some(t => t === 'Xóa'),
+            hasDuplicateBtn: allBtnTexts.some(t => t === 'Sao chép'),
+            hasAiCoverBtn: allBtnTexts.some(t => /Ảnh bìa AI|Tạo lại bìa AI/i.test(t)),
             hasOldPlaySoloBtn: allBtnTexts.some(t => t === 'Chơi đơn'),
             hasOldSoloQrBtn: allBtnTexts.some(t => t.includes('Link / QR Chơi đơn')),
             hasOldMultiplayerBtn: allBtnTexts.some(t => t.includes('Mở phòng Multiplayer')),
@@ -337,6 +482,26 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
           exploreDetailCheck.hasSingleOpenGameBtn,
           true,
           `Explore detail view for ${targetGame.gameType} must display the single "Mở game" button`
+        );
+        assert.equal(
+          exploreDetailCheck.hasEditBtn,
+          false,
+          `Explore detail view for ${targetGame.gameType} must NEVER display "Sửa" or "Sửa game" even for owner`
+        );
+        assert.equal(
+          exploreDetailCheck.hasDeleteBtn,
+          false,
+          `Explore detail view for ${targetGame.gameType} must NEVER display "Xóa" even for owner`
+        );
+        assert.equal(
+          exploreDetailCheck.hasDuplicateBtn,
+          true,
+          `Explore detail view for ${targetGame.gameType} must preserve "Sao chép" to library`
+        );
+        assert.equal(
+          exploreDetailCheck.hasAiCoverBtn,
+          false,
+          `Explore detail view for ${targetGame.gameType} must NOT display any "Ảnh bìa AI" or "Tạo lại bìa AI" button`
         );
         assert.equal(
           exploreDetailCheck.hasOldPlaySoloBtn,
@@ -475,8 +640,18 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
       assert.equal(libraryCardCheck.hasOpenBtn, true, 'Library game card must keep Mở game button');
       assert.equal(libraryCardCheck.hasDetailBtn, true, 'Library game card must keep Chi tiết button');
 
-      // Verify Library Detail View for all 3 game types: Traditional (MULTIPLE_CHOICE), MIXED, and ADVENTURE
-      for (const libTargetGame of [traditionalGame, sampleGame, adventureGame]) {
+      // Verify Library Detail View for all 6 user-owned game types:
+      // MULTIPLE_CHOICE, QUICK_BUTTON, FILL_IN_THE_BLANK, CROSSWORD, MIXED, and ADVENTURE
+      const userOwnedGames = [
+        traditionalGame,
+        quickBtnGame,
+        fillBlankGame,
+        crosswordGame,
+        sampleGame,
+        adventureGame,
+      ];
+
+      for (const libTargetGame of userOwnedGames) {
         await page.eval(`((gameTitle) => {
           const cards = Array.from(document.querySelectorAll('article'));
           const targetCard = cards.find(c => (c.textContent || '').includes(gameTitle));
@@ -489,19 +664,50 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
 
         const detailViewCheck = await page.eval(`(() => {
           const openGameBtn = document.querySelector('[data-testid="explore-detail-open-game-btn"]');
+          const editGameBtn = document.querySelector('[data-testid="library-detail-edit-game-btn"]');
+          const deleteGameBtn = document.querySelector('[data-testid="library-detail-delete-game-btn"]');
           const btnTexts = Array.from(document.querySelectorAll('button')).map(b => (b.textContent || '').trim());
           return {
             hasSingleOpenGameBtn: Boolean(openGameBtn) && (openGameBtn?.textContent || '').trim() === 'Mở game',
+            hasEditBtn: Boolean(editGameBtn) && (editGameBtn?.textContent || '').trim() === 'Sửa',
+            hasDeleteBtn: Boolean(deleteGameBtn) && (deleteGameBtn?.textContent || '').trim() === 'Xóa',
+            hasAiCoverBtn: btnTexts.some(t => /Ảnh bìa AI|Tạo lại bìa AI/i.test(t)),
+            hasOldEditGameBtn: btnTexts.some(t => t === 'Sửa game'),
             hasOldPlaySolo: btnTexts.some(t => t === 'Chơi đơn'),
             hasOldHostLive: btnTexts.some(t => t.includes('Mở phòng Multiplayer')),
             hasOldShareQr: btnTexts.some(t => t.includes('Link / QR Chơi đơn')),
-            hasDuplicate: btnTexts.some(t => t.includes('Sao chép')),
+            hasDuplicate: btnTexts.some(t => t === 'Sao chép'),
           };
         })()`);
         assert.equal(
           detailViewCheck.hasSingleOpenGameBtn,
           true,
           `Library detail view for ${libTargetGame.gameType} must have only the single "Mở game" button`
+        );
+        assert.equal(
+          detailViewCheck.hasAiCoverBtn,
+          false,
+          `Library detail view for ${libTargetGame.gameType} must NOT display any "Ảnh bìa AI" or "Tạo lại bìa AI" button`
+        );
+        assert.equal(
+          detailViewCheck.hasEditBtn,
+          true,
+          `Library detail view for user-owned ${libTargetGame.gameType} must display the "Sửa" button`
+        );
+        assert.equal(
+          detailViewCheck.hasDeleteBtn,
+          true,
+          `Library detail view for user-owned ${libTargetGame.gameType} must display the "Xóa" button`
+        );
+        assert.equal(
+          detailViewCheck.hasDuplicate,
+          false,
+          `Library detail view for user-owned ${libTargetGame.gameType} must replace "Sao chép" with "Sửa"`
+        );
+        assert.equal(
+          detailViewCheck.hasOldEditGameBtn,
+          false,
+          `Library detail view for user-owned ${libTargetGame.gameType} must not have duplicate "Sửa game" button`
         );
         assert.equal(
           detailViewCheck.hasOldPlaySolo,
@@ -518,7 +724,78 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
           false,
           `Library detail view for ${libTargetGame.gameType} must NOT have old "Mở phòng Multiplayer" button`
         );
-        assert.equal(detailViewCheck.hasDuplicate, true, 'Library detail view must preserve Sao chép');
+
+        // Test clicking "Sửa" -> enters edit mode for the current game, edits Question #1, and saves in-place without duplicating
+        const totalGamesBeforeSave = persistenceRepo.getAllGameIds().length;
+        const editedQuestionText =
+          libTargetGame.gameType === 'FILL_IN_THE_BLANK'
+            ? `Câu hỏi đã cập nhật (${libTargetGame.gameType}): Nhân hệ điều hành mã nguồn mở là ___.`
+            : `Câu hỏi đã cập nhật trực tiếp cho ${libTargetGame.gameType}?`;
+
+        await page.eval(`(() => {
+          const editBtn = document.querySelector('[data-testid="library-detail-edit-game-btn"]');
+          if (editBtn) editBtn.click();
+        })()`);
+        await sleep(300);
+
+        const inEditModeCheck = await page.eval(`((newQuestionVal) => {
+          const titleInput = document.querySelector('#edit-spec-title');
+          const qInput = document.querySelector('[data-testid="edit-question-input-0"]');
+          const saveBtn = Array.from(document.querySelectorAll('button')).find(
+            b => (b.textContent || '').includes('Lưu Thay Đổi')
+          );
+          if (qInput) {
+            const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+              window.HTMLInputElement.prototype,
+              'value'
+            )?.set;
+            if (nativeInputValueSetter) {
+              nativeInputValueSetter.call(qInput, newQuestionVal);
+            } else {
+              qInput.value = newQuestionVal;
+            }
+            qInput.dispatchEvent(new Event('input', { bubbles: true }));
+            qInput.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          return {
+            hasTitleInput: Boolean(titleInput),
+            hasQuestionInput: Boolean(qInput),
+            hasSaveBtn: Boolean(saveBtn),
+          };
+        })(${JSON.stringify(editedQuestionText)})`);
+
+        assert.equal(inEditModeCheck.hasTitleInput, true, `Edit mode for ${libTargetGame.gameType} must show title input`);
+        assert.equal(inEditModeCheck.hasQuestionInput, true, `Edit mode for ${libTargetGame.gameType} must show question #1 input`);
+        assert.equal(inEditModeCheck.hasSaveBtn, true, `Edit mode for ${libTargetGame.gameType} must show Lưu Thay Đổi button`);
+
+        await page.eval(`(() => {
+          const saveBtn = Array.from(document.querySelectorAll('button')).find(
+            b => (b.textContent || '').includes('Lưu Thay Đổi')
+          );
+          if (saveBtn) saveBtn.click();
+        })()`);
+        for (let attempt = 0; attempt < 20; attempt++) {
+          const exitedEdit = await page.eval(
+            `Boolean(document.querySelector('[data-testid="library-detail-edit-game-btn"]'))`
+          );
+          if (exitedEdit) break;
+          await sleep(150);
+        }
+
+        const totalGamesAfterSave = persistenceRepo.getAllGameIds().length;
+        assert.equal(
+          totalGamesAfterSave,
+          totalGamesBeforeSave,
+          `Saving edited ${libTargetGame.gameType} game must NOT create a new game record or increase total game count`
+        );
+
+        const updatedSpecInStore = gameStore.get(libTargetGame.gameId);
+        assert.ok(updatedSpecInStore, `Updated game ${libTargetGame.gameId} must still exist under the exact same gameId`);
+        assert.equal(
+          updatedSpecInStore!.questions[0].question,
+          editedQuestionText,
+          `Question #1 of ${libTargetGame.gameType} (${libTargetGame.gameId}) must be updated in-place`
+        );
 
         // Click "Mở game" inside Library detail view -> must open GameModeSelectionModal
         await page.eval(`(() => {
@@ -614,6 +891,11 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
 
           // Navigate back to Library from Host lobby
           await page.goto(`${baseUrl}/?tab=library`, { settleMs: 700 });
+          for (let attempt = 0; attempt < 20; attempt++) {
+            const ready = await page.eval(`Boolean(document.querySelector('article'))`);
+            if (ready) break;
+            await sleep(150);
+          }
         } else {
           // Close modal and detail view
           await page.eval(`(() => {
@@ -630,6 +912,91 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
           await sleep(300);
         }
       }
+
+      // Test #6: Verify permission check on a game NOT owned by the current user (otherUserGame)
+      await page.eval(`((gameTitle) => {
+        const cards = Array.from(document.querySelectorAll('article'));
+        const targetCard = cards.find(c => (c.textContent || '').includes(gameTitle));
+        const detailBtn = Array.from(targetCard?.querySelectorAll('button') || []).find(
+          b => (b.textContent || '').trim() === 'Chi tiết'
+        );
+        if (detailBtn) detailBtn.click();
+      })(${JSON.stringify(otherUserGame.title)})`);
+      await sleep(500);
+
+      const nonOwnedDetailCheck = await page.eval(`(() => {
+        const editGameBtn = document.querySelector('[data-testid="library-detail-edit-game-btn"]');
+        const btnTexts = Array.from(document.querySelectorAll('button')).map(b => (b.textContent || '').trim());
+        return {
+          hasEditBtn: Boolean(editGameBtn) || btnTexts.some(t => t === 'Sửa' || t === 'Sửa game'),
+          hasDuplicateBtn: btnTexts.some(t => t === 'Sao chép'),
+          hasDeleteBtn: btnTexts.some(t => t === 'Xóa'),
+        };
+      })()`);
+      assert.equal(
+        nonOwnedDetailCheck.hasEditBtn,
+        false,
+        'Non-owned game in Library must NOT display Sửa button (ownership & permission check)'
+      );
+      assert.equal(
+        nonOwnedDetailCheck.hasDeleteBtn,
+        false,
+        'Non-owned game in Library must NOT display Xóa button'
+      );
+      assert.equal(
+        nonOwnedDetailCheck.hasDuplicateBtn,
+        true,
+        'Non-owned public game must preserve Sao chép button'
+      );
+
+      await page.eval(`(() => {
+        const closeDetailBtn = Array.from(document.querySelectorAll('button')).find(
+          b => (b.textContent || '').trim() === 'Đóng'
+        );
+        if (closeDetailBtn) closeDetailBtn.click();
+      })()`);
+      await sleep(300);
+
+      // Test #7: Verify Delete Confirmation Modal in My Library on a user-owned game
+      await page.eval(`((gameTitle) => {
+        const cards = Array.from(document.querySelectorAll('article'));
+        const targetCard = cards.find(c => (c.textContent || '').includes(gameTitle));
+        const detailBtn = Array.from(targetCard?.querySelectorAll('button') || []).find(
+          b => (b.textContent || '').trim() === 'Chi tiết'
+        );
+        if (detailBtn) detailBtn.click();
+      })(${JSON.stringify(crosswordGame.title)})`);
+      await sleep(400);
+
+      await page.eval(`(() => {
+        const delBtn = document.querySelector('[data-testid="library-detail-delete-game-btn"]');
+        if (delBtn) delBtn.click();
+      })()`);
+      await sleep(300);
+
+      const deleteModalCheck = await page.eval(`(() => {
+        const dialog = document.querySelector('[role="dialog"][aria-labelledby="delete-confirm-title"]');
+        const text = dialog?.textContent || '';
+        const cancelBtn = Array.from(dialog?.querySelectorAll('button') || []).find(
+          b => (b.textContent || '').includes('Hủy bỏ')
+        );
+        if (cancelBtn) cancelBtn.click();
+        return {
+          isOpen: Boolean(dialog),
+          hasConfirmText: text.includes('Xác Nhận Xóa Bộ Câu Hỏi') && text.includes('Xác nhận xóa vĩnh viễn'),
+        };
+      })()`);
+      assert.equal(deleteModalCheck.isOpen, true, 'Clicking Xóa in My Library must open delete confirmation modal');
+      assert.equal(deleteModalCheck.hasConfirmText, true, 'Delete confirmation modal must display confirmation button');
+      await sleep(250);
+
+      await page.eval(`(() => {
+        const closeDetailBtn = Array.from(document.querySelectorAll('button')).find(
+          b => (b.textContent || '').trim() === 'Đóng'
+        );
+        if (closeDetailBtn) closeDetailBtn.click();
+      })()`);
+      await sleep(300);
 
       // =========================================================================
       // 4. TAB THỐNG KÊ (REPORTS PAGE)
@@ -681,8 +1048,12 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
         const options = Array.from(document.querySelectorAll('[data-testid^="game-type-option-"]'));
         const ids = options.map(el => el.getAttribute('data-testid')?.replace('game-type-option-', '') || '');
         const labels = options.map(el => (el.textContent || '').trim());
-        return { ids, labels };
+        const btnTexts = Array.from(document.querySelectorAll('button')).map(b => (b.textContent || '').trim());
+        const hasAiCoverBtn = btnTexts.some(t => /Ảnh bìa AI|Tạo lại bìa AI/i.test(t));
+        return { ids, labels, hasAiCoverBtn };
       })()`);
+
+      assert.equal(createSelectorOrder.hasAiCoverBtn, false, 'Create Game page must not contain any Ảnh bìa AI button');
 
       const mixedIdxSelector = createSelectorOrder.ids.indexOf('MIXED');
       const advIdxSelector = createSelectorOrder.ids.indexOf('ADVENTURE');
@@ -740,6 +1111,11 @@ describe('Clean UI/UX Verification — All 5 Tabs & Responsive Viewports', () =>
         );
       }
     } finally {
+      for (const gid of seededGameIds) {
+        try {
+          gameStore.delete(gid);
+        } catch {}
+      }
       await browser.close();
       await new Promise<void>(resolve => server.close(() => resolve()));
     }

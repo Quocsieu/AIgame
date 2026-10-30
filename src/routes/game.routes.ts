@@ -821,39 +821,64 @@ gameRouter.post(
 
 /**
  * DELETE /api/games
- * Safely deletes all saved game specifications in the shared game repository,
- * skipping and reporting any game currently locked by an active practice session or multiplayer room.
- * Rejects deletion if requested with a player token.
+ * Safely deletes saved game specifications scoped strictly by authorization:
+ * - Rejects Player and Guest tokens (403 ACCESS_DENIED).
+ * - Requires an authenticated user session (401 UNAUTHORIZED).
+ * - Regular authenticated users (USER) can only delete games they own (ownerUserId === req.user.userId).
+ * - Administrators (ADMIN) can delete across the repository per admin policy.
+ * - Skips and reports any game currently locked by an active practice session or multiplayer room.
  */
 gameRouter.delete(
   '/',
   gameDeleteRateLimiter.middleware,
   (req: Request, res: Response, next: NextFunction) => {
     try {
-      if (req.headers['x-player-token']) {
+      rejectGuestOrPlayerWrite(req, 'xóa hàng loạt bộ câu hỏi');
+
+      if (!req.user || !req.user.userId) {
         throw new AppError(
-          'ACCESS_DENIED',
-          'Người chơi trong phòng không có quyền xóa game.',
-          403
+          'UNAUTHORIZED',
+          'Yêu cầu đăng nhập để thực hiện thao tác xóa hàng loạt bộ câu hỏi.',
+          401
         );
       }
 
-      // Collect all game IDs across persistent SQLite and in-memory cache
-      const dbGameIds = persistenceRepo.getAllGameIds();
-      const memGameIds = gameStore.getAllKeys();
-      const allGameIds = Array.from(new Set([...dbGameIds, ...memGameIds]));
+      const isAdmin = req.user.role === 'ADMIN';
+      const currentUserId = req.user.userId;
+
+      // Collect game IDs strictly scoped to the caller's permission (owner-only for USER, all for ADMIN)
+      const dbGameIds = persistenceRepo.getGameIdsForUser({
+        userId: currentUserId,
+        isAdmin,
+      });
+      const memGameIds = gameStore.getAllKeys().filter((id) => {
+        if (isAdmin) return true;
+        const spec = gameStore.get(id);
+        const ownerInfo = persistenceRepo.getGameOwnerInfo(id);
+        const ownerUserId = spec?.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+        return ownerUserId !== null && ownerUserId === currentUserId;
+      });
+      const targetGameIds = Array.from(new Set([...dbGameIds, ...memGameIds]));
 
       let deletedCount = 0;
       let skippedActiveCount = 0;
       const skippedGames: Array<{ gameId: string; title?: string; reason: string }> = [];
 
-      for (const gameId of allGameIds) {
+      for (const gameId of targetGameIds) {
+        const spec = gameStore.get(gameId);
+        const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+        const ownerUserId = spec?.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+
+        // Defense-in-depth: regular users can never delete another user's game or unowned system games in bulk
+        if (!isAdmin && ownerUserId !== currentUserId) {
+          continue;
+        }
+
         const hasSession = sessionStore.hasActiveSessionForGame(gameId);
         const hasRoom = roomStore.hasActiveRoomForGame(gameId);
 
         if (hasSession || hasRoom) {
           skippedActiveCount++;
-          const spec = gameStore.get(gameId);
           skippedGames.push({
             gameId,
             title: spec?.title || gameId,
@@ -865,7 +890,6 @@ gameRouter.delete(
         }
 
         try {
-          const spec = gameStore.get(gameId);
           const coverUrl =
             spec?.coverImageUrl ?? persistenceRepo.getGameCoverMetadata(gameId)?.coverImageUrl ?? null;
           gameStore.delete(gameId);
@@ -887,7 +911,7 @@ gameRouter.delete(
           deleted: true,
           deletedCount,
           skippedActiveCount,
-          totalTargeted: allGameIds.length,
+          totalTargeted: targetGameIds.length,
           skippedGames,
         })
       );
@@ -900,27 +924,33 @@ gameRouter.delete(
 /**
  * DELETE /api/games/:gameId
  * Safely deletes a saved game specification from the game repository.
- * Proactively allows game repository managers to delete any game in the warehouse,
- * while rejecting player tokens (players in rooms) and preventing deletion of active games.
+ * Enforces strict write authorization:
+ * - Rejects Guest and Player tokens (403 ACCESS_DENIED).
+ * - Verifies ownership via authService.assertResourceAccess(..., mode: 'write') so only the owner or ADMIN can delete an owned game.
+ * - Prevents deletion of games currently in use by an active session or multiplayer room (409 GAME_IN_USE).
  */
 gameRouter.delete(
   '/:gameId',
   gameDeleteRateLimiter.middleware,
   (req: Request, res: Response, next: NextFunction) => {
     try {
-      if (req.headers['x-player-token']) {
-        throw new AppError(
-          'ACCESS_DENIED',
-          'Người chơi trong phòng không có quyền xóa game.',
-          403
-        );
-      }
+      rejectGuestOrPlayerWrite(req, 'xóa game');
 
       const gameId = String(req.params.gameId || '');
       const existing = gameStore.get(gameId);
       if (!existing) {
         throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
       }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = existing.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+
+      authService.assertResourceAccess({
+        resourceType: 'bộ câu hỏi',
+        ownerUserId,
+        currentUser: req.user,
+        mode: 'write',
+      });
 
       if (sessionStore.hasActiveSessionForGame(gameId) || roomStore.hasActiveRoomForGame(gameId)) {
         throw new AppError(

@@ -166,18 +166,30 @@ describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION (NO PASSWORDS)', 
       assert.equal(gameStore.get(gameId)?.title, gameA.title);
     });
 
-    it('2.2. User B in Kho Game CAN proactively delete game created by User A (200 OK)', async () => {
-      const gameId = `test_owned_del_isolation_${Date.now()}`;
-      createTestGame({ gameId, ownerUserId: userIdA });
+    it('2.2. User B CANNOT delete game created by User A, and User A CANNOT delete game created by User B (403 ACCESS_DENIED)', async () => {
+      const gameIdA = `test_owned_del_isolation_a_${Date.now()}`;
+      createTestGame({ gameId: gameIdA, ownerUserId: userIdA });
 
-      const res = await request(app)
-        .delete(`/api/games/${gameId}`)
+      const gameIdB = `test_owned_del_isolation_b_${Date.now()}`;
+      createTestGame({ gameId: gameIdB, ownerUserId: userIdB });
+
+      const resBDeletesA = await request(app)
+        .delete(`/api/games/${gameIdA}`)
         .set('Authorization', `Bearer ${userTokenB}`);
 
-      assert.equal(res.status, 200);
-      assert.equal(res.body.success, true);
-      assert.equal(res.body.data.deleted, true);
-      assert.equal(gameStore.get(gameId), undefined);
+      assert.equal(resBDeletesA.status, 403);
+      assert.equal(resBDeletesA.body.success, false);
+      assert.equal(resBDeletesA.body.error.code, 'ACCESS_DENIED');
+      assert.ok(gameStore.get(gameIdA), 'Game A must remain intact when User B attempts deletion');
+
+      const resADeletesB = await request(app)
+        .delete(`/api/games/${gameIdB}`)
+        .set('Authorization', `Bearer ${userTokenA}`);
+
+      assert.equal(resADeletesB.status, 403);
+      assert.equal(resADeletesB.body.success, false);
+      assert.equal(resADeletesB.body.error.code, 'ACCESS_DENIED');
+      assert.ok(gameStore.get(gameIdB), 'Game B must remain intact when User A attempts deletion');
     });
 
     it('2.3. User A (owner) CAN edit and delete their own game without password (200 OK)', async () => {
@@ -209,7 +221,7 @@ describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION (NO PASSWORDS)', 
   // 3. GUEST & PLAYER REJECTION
   // ========================================================
   describe('Group 3: Guest and Player Token Rejection', () => {
-    it('3.1. Guest token CANNOT edit games (403), while Kho Game manager can proactively delete (200)', async () => {
+    it('3.1. Guest token CANNOT edit or delete games (403 ACCESS_DENIED)', async () => {
       const gameId = `test_guest_guard_${Date.now()}`;
       const game = createTestGame({ gameId, ownerUserId: null });
 
@@ -223,8 +235,9 @@ describe('BACKEND HARDENING — GAME EDIT/DELETE AUTHORIZATION (NO PASSWORDS)', 
       const delRes = await request(app)
         .delete(`/api/games/${gameId}`)
         .set('X-Guest-Token', guestToken);
-      assert.equal(delRes.status, 200);
-      assert.equal(delRes.body.data.deleted, true);
+      assert.equal(delRes.status, 403);
+      assert.equal(delRes.body.error.code, 'ACCESS_DENIED');
+      assert.ok(gameStore.get(gameId), 'Game must remain intact when Guest attempts deletion');
     });
 
     it('3.2. Player token (X-Player-Token) CANNOT delete or edit games (403)', async () => {

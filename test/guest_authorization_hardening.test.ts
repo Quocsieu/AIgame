@@ -1,4 +1,4 @@
-import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
+import { describe, it, before, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
 import { app } from '../src/app.js';
@@ -214,8 +214,8 @@ describe('GUEST AUTHORIZATION HARDENING — Regression & Security Tests', () => 
     assert.equal(patchWithMatchingGuest.body.error.code, 'ACCESS_DENIED');
   });
 
-  // 4. Player token cannot DELETE a game (403), while Kho Game manager can proactively delete (200)
-  it('4. Player token cannot DELETE a game (403), while Kho Game manager can proactively delete (200)', async () => {
+  // 4. Player token and Guest token cannot DELETE a game or bulk-delete games (403)
+  it('4. Player token and Guest token cannot DELETE a game or bulk-delete games (403)', async () => {
     const orgGame = await createOrganizerGame(false);
 
     // Player client is strictly rejected with 403
@@ -226,13 +226,20 @@ describe('GUEST AUTHORIZATION HARDENING — Regression & Security Tests', () => 
     assert.equal(playerDelRes.body.error.code, 'ACCESS_DENIED');
     assert.ok(gameStore.get(orgGame.gameId), 'Game must not be deleted by player');
 
-    // Kho Game manager is permitted to delete
-    const delRes = await request(app)
+    // Guest token is strictly rejected with 403
+    const guestDelRes = await request(app)
       .delete(`/api/games/${orgGame.gameId}`)
       .set('X-Guest-Token', guestToken);
-    assert.equal(delRes.status, 200);
-    assert.equal(delRes.body.data.deleted, true);
-    assert.ok(!gameStore.get(orgGame.gameId), 'Game is removed from store');
+    assert.equal(guestDelRes.status, 403);
+    assert.equal(guestDelRes.body.error.code, 'ACCESS_DENIED');
+    assert.ok(gameStore.get(orgGame.gameId), 'Game must not be deleted by guest');
+
+    // Guest bulk delete is strictly rejected with 403
+    const guestBulkDelRes = await request(app)
+      .delete('/api/games')
+      .set('X-Guest-Token', guestToken);
+    assert.equal(guestBulkDelRes.status, 403);
+    assert.equal(guestBulkDelRes.body.error.code, 'ACCESS_DENIED');
   });
 
   // 5. Guest không thể xuất bản game
@@ -456,8 +463,8 @@ describe('GUEST AUTHORIZATION HARDENING — Regression & Security Tests', () => 
     assert.equal(soloRes.body.error.code, 'GAME_NOT_PUBLISHED');
   });
 
-  // 13. Cross-user IDOR protection strictly rejects User B from editing User A games, while Kho Game deletion is permitted
-  it('13. Cross-user IDOR protection strictly rejects User B from editing User A games, while Kho Game deletion is permitted', async () => {
+  // 13. Cross-user IDOR protection strictly rejects User B from editing or deleting User A games
+  it('13. Cross-user IDOR protection strictly rejects User B from editing or deleting User A games', async () => {
     const orgGameA = await createOrganizerGame(false);
 
     // User B attempts to patch User A's game -> 403 ACCESS_DENIED
@@ -471,11 +478,12 @@ describe('GUEST AUTHORIZATION HARDENING — Regression & Security Tests', () => 
     assert.equal(patchRes.status, 403);
     assert.equal(patchRes.body.error.code, 'ACCESS_DENIED');
 
-    // In Kho Game, organizer can proactively delete games
+    // User B attempts to delete User A's game -> 403 ACCESS_DENIED
     const delRes = await request(app)
       .delete(`/api/games/${orgGameA.gameId}`)
       .set('Authorization', `Bearer ${organizerBToken}`);
-    assert.equal(delRes.status, 200);
-    assert.equal(delRes.body.data.deleted, true);
+    assert.equal(delRes.status, 403);
+    assert.equal(delRes.body.error.code, 'ACCESS_DENIED');
+    assert.ok(gameStore.get(orgGameA.gameId), 'User A game must remain intact');
   });
 });

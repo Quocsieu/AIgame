@@ -1042,6 +1042,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   ]);
 
   useEffect(() => {
+    if (!isLibraryMode) {
+      setIsEditMode(false);
+    }
     setPage(1);
     loadSavedGames(1, searchQuery, selectedTypeFilter, statusFilter, discoverTab);
   }, [isLibraryMode, selectedTypeFilter, statusFilter, discoverTab]);
@@ -1165,7 +1168,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       const spec = await fetchGameById(gameId, { mode: 'manage' });
       setActiveGameSpec(spec);
       syncEditorFromSpec(spec);
-      setIsEditMode(startInEditMode && canManageGame(spec));
+      setIsEditMode(isLibraryMode && startInEditMode && canManageGame(spec));
     } catch (err: any) {
       toast.error(err.message || 'Không thể tải chi tiết bộ câu hỏi.', 'Lỗi');
     } finally {
@@ -2061,7 +2064,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               </div>
 
               <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {isEditMode ? (
+                {isLibraryMode && isEditMode && canManageGame(activeGameSpec) ? (
                   <>
                     <button
                       type="button"
@@ -2160,11 +2163,15 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       <GamepadIcon size={15} />
                       <span>Mở game</span>
                     </button>
-                    {canManageGame(activeGameSpec) && (
+                    {isLibraryMode && canManageGame(activeGameSpec) ? (
                       <>
                         <button
                           type="button"
-                          onClick={() => setIsEditMode(true)}
+                          data-testid="library-detail-edit-game-btn"
+                          onClick={() => {
+                            syncEditorFromSpec(activeGameSpec);
+                            setIsEditMode(true);
+                          }}
                           style={{
                             backgroundColor: 'var(--bg-input)',
                             color: 'var(--accent-amber)',
@@ -2179,154 +2186,120 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             alignItems: 'center',
                             gap: '6px',
                           }}
+                          title="Chỉnh sửa nội dung câu hỏi và thiết lập của bộ câu hỏi này"
                         >
                           <PencilIcon size={14} />
-                          <span>Sửa game</span>
+                          <span>Sửa</span>
                         </button>
                         <button
                           type="button"
-                          onClick={() =>
-                            handleGenerateAiCover(
-                              {
-                                gameId: activeGameSpec.gameId,
-                                title: activeGameSpec.title,
-                                coverImageUrl: activeGameSpec.coverImageUrl,
-                              },
-                              true
-                            )
-                          }
-                          disabled={generatingCoverGameId === activeGameSpec.gameId}
+                          onClick={() => handleExportGame(activeGameSpec.gameId, 'csv')}
                           style={{
                             backgroundColor: 'var(--bg-input)',
-                            color: 'var(--primary)',
+                            color: 'var(--accent-emerald)',
                             border: '1px solid var(--border-strong)',
                             borderRadius: '8px',
                             padding: '0 12px',
                             height: '38px',
                             fontWeight: 700,
                             fontSize: '0.82rem',
-                            cursor: generatingCoverGameId === activeGameSpec.gameId ? 'not-allowed' : 'pointer',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Xuất CSV
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleExportGame(activeGameSpec.gameId, 'json')}
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--accent-sky)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '8px',
+                            padding: '0 12px',
+                            height: '38px',
+                            fontWeight: 700,
+                            fontSize: '0.82rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Xuất JSON
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="library-detail-delete-game-btn"
+                          onClick={() => {
+                            const matched = savedGames.find((item) => item.gameId === activeGameSpec.gameId);
+                            handleOpenDeleteModal(
+                              matched || {
+                                gameId: activeGameSpec.gameId,
+                                title: activeGameSpec.title,
+                                description: activeGameSpec.description,
+                                gameType: activeGameSpec.gameType,
+                                scoringMode: activeGameSpec.settings.scoringMode,
+                                questionCount: activeGameSpec.questions.length,
+                                timePerQuestion: activeGameSpec.settings.timePerQuestion,
+                                isPublic: Boolean(activeGameSpec.isPublic),
+                                ownerUserId: activeGameSpec.ownerUserId ?? null,
+                                sourceCount: activeGameSpec.sourceSummary?.sourceCount || 1,
+                                generatedAt: activeGameSpec.generatedAt,
+                                createdAt: activeGameSpec.generatedAt,
+                                updatedAt: activeGameSpec.generatedAt,
+                              }
+                            );
+                          }}
+                          style={{
+                            backgroundColor: 'rgba(244, 63, 94, 0.12)',
+                            color: 'var(--accent-rose)',
+                            border: '1px solid rgba(244, 63, 94, 0.35)',
+                            borderRadius: '8px',
+                            padding: '0 12px',
+                            height: '38px',
+                            fontWeight: 700,
+                            fontSize: '0.82rem',
+                            cursor: 'pointer',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: '6px',
+                            gap: '5px',
                           }}
-                          title="Tạo hoặc làm mới ảnh bìa minh họa bằng Gemini AI"
                         >
-                          {generatingCoverGameId === activeGameSpec.gameId ? (
-                            <SpinnerIcon size={14} />
-                          ) : (
-                            <SparklesIcon size={14} />
-                          )}
-                          <span>{activeGameSpec.coverImageUrl ? 'Tạo lại bìa AI' : 'Ảnh bìa AI'}</span>
+                          <TrashIcon size={14} />
+                          <span>Xóa</span>
                         </button>
                       </>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        handleDuplicateGame({
-                          gameId: activeGameSpec.gameId,
-                          title: activeGameSpec.title,
-                        })
-                      }
-                      disabled={duplicatingGameId === activeGameSpec.gameId}
-                      style={{
-                        backgroundColor: 'var(--bg-input)',
-                        color: 'var(--text-primary)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: '8px',
-                        padding: '0 12px',
-                        height: '38px',
-                        fontWeight: 700,
-                        fontSize: '0.82rem',
-                        cursor: duplicatingGameId === activeGameSpec.gameId ? 'not-allowed' : 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                      }}
-                      title="Nhân bản bộ câu hỏi này sang bản nháp mới"
-                    >
-                      {duplicatingGameId === activeGameSpec.gameId ? (
-                        <SpinnerIcon size={14} />
-                      ) : (
-                        <PlusIcon size={14} />
-                      )}
-                      <span>Sao chép</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleExportGame(activeGameSpec.gameId, 'csv')}
-                      style={{
-                        backgroundColor: 'var(--bg-input)',
-                        color: 'var(--accent-emerald)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: '8px',
-                        padding: '0 12px',
-                        height: '38px',
-                        fontWeight: 700,
-                        fontSize: '0.82rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Xuất CSV
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleExportGame(activeGameSpec.gameId, 'json')}
-                      style={{
-                        backgroundColor: 'var(--bg-input)',
-                        color: 'var(--accent-sky)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: '8px',
-                        padding: '0 12px',
-                        height: '38px',
-                        fontWeight: 700,
-                        fontSize: '0.82rem',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Xuất JSON
-                    </button>
-                    {canManageGame(activeGameSpec) && (
+                    ) : (
                       <button
                         type="button"
-                        onClick={() => {
-                          const matched = savedGames.find((item) => item.gameId === activeGameSpec.gameId);
-                          handleOpenDeleteModal(
-                            matched || {
-                              gameId: activeGameSpec.gameId,
-                              title: activeGameSpec.title,
-                              description: activeGameSpec.description,
-                              gameType: activeGameSpec.gameType,
-                              scoringMode: activeGameSpec.settings.scoringMode,
-                              questionCount: activeGameSpec.questions.length,
-                              timePerQuestion: activeGameSpec.settings.timePerQuestion,
-                              isPublic: Boolean(activeGameSpec.isPublic),
-                              ownerUserId: activeGameSpec.ownerUserId ?? null,
-                              sourceCount: activeGameSpec.sourceSummary?.sourceCount || 1,
-                              generatedAt: activeGameSpec.generatedAt,
-                              createdAt: activeGameSpec.generatedAt,
-                              updatedAt: activeGameSpec.generatedAt,
-                            }
-                          );
-                        }}
+                        data-testid="detail-duplicate-game-btn"
+                        onClick={() =>
+                          handleDuplicateGame({
+                            gameId: activeGameSpec.gameId,
+                            title: activeGameSpec.title,
+                          })
+                        }
+                        disabled={duplicatingGameId === activeGameSpec.gameId}
                         style={{
-                          backgroundColor: 'rgba(244, 63, 94, 0.12)',
-                          color: 'var(--accent-rose)',
-                          border: '1px solid rgba(244, 63, 94, 0.35)',
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border-strong)',
                           borderRadius: '8px',
                           padding: '0 12px',
                           height: '38px',
                           fontWeight: 700,
                           fontSize: '0.82rem',
-                          cursor: 'pointer',
+                          cursor: duplicatingGameId === activeGameSpec.gameId ? 'not-allowed' : 'pointer',
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '5px',
+                          gap: '6px',
                         }}
+                        title="Nhân bản bộ câu hỏi này sang bản nháp mới"
                       >
-                        <TrashIcon size={14} />
-                        <span>Xóa</span>
+                        {duplicatingGameId === activeGameSpec.gameId ? (
+                          <SpinnerIcon size={14} />
+                        ) : (
+                          <PlusIcon size={14} />
+                        )}
+                        <span>Sao chép</span>
                       </button>
                     )}
                   </>
@@ -2459,7 +2432,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           <CopyIcon size={13} />
                           <span>Nhân bản</span>
                         </button>
-                        {activeGameSpec.gameType === 'MIXED' && (
+                        {(activeGameSpec.gameType === 'MIXED' ||
+                          activeGameSpec.gameType === 'ADVENTURE') && (
                           <select
                             value={q.type}
                             onChange={(e) =>
@@ -2521,8 +2495,14 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         </label>
                         <input
                           type="text"
+                          data-testid={`edit-question-input-${idx}`}
                           value={q.question}
-                          onChange={(e) => handleUpdateEditQuestion(idx, { question: e.target.value })}
+                          onChange={(e) =>
+                            handleUpdateEditQuestion(idx, {
+                              question: e.target.value,
+                              ...(q.type === 'CROSSWORD' ? { crosswordClue: e.target.value } : {}),
+                            })
+                          }
                           style={{
                             width: '100%',
                             padding: '8px 12px',
