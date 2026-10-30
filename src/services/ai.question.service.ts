@@ -2,10 +2,14 @@ import { LIMITS } from '../config/limits.js';
 import {
   ADVENTURE_THEME_PRESETS,
   AdventureConfig,
+  AdventureQuestionDistribution,
   AdventureQuestionType,
   analyzeSourceContentForAdventure,
+  BaseDistributionQuestionType,
+  buildDefaultQuestionDistributionForTypes,
   INDUSTRY_CATALOG,
   IndustryId,
+  normalizeToBaseDistributionType,
   sanitizeAdventureConfig,
 } from '../contracts/adventure.contract.js';
 import { CanonicalDocument } from '../contracts/canonical.contract.js';
@@ -21,6 +25,7 @@ import {
   GenerateGameRequest,
   isStrictTrueFalseChoicePair,
   MixedQuestionDistribution,
+  MixedQuestionDistributionSchema,
   normalizeTrueFalsePolarity,
   parsePuzzleSequence,
   QuestionType,
@@ -387,6 +392,17 @@ export function calculateMixedTypeCounts(
   totalCount: number,
   distribution?: MixedQuestionDistribution
 ): Record<keyof MixedQuestionDistribution, number> {
+  const result: Record<keyof MixedQuestionDistribution, number> = {
+    MULTIPLE_CHOICE: 0,
+    QUICK_BUTTON: 0,
+    FILL_IN_THE_BLANK: 0,
+    CROSSWORD: 0,
+  };
+
+  if (totalCount <= 0) {
+    return result;
+  }
+
   const dist = distribution || {
     MULTIPLE_CHOICE: 40,
     QUICK_BUTTON: 20,
@@ -402,34 +418,31 @@ export function calculateMixedTypeCounts(
   ];
 
   const rawCounts = types.map(type => {
-    const ratio = (dist[type] ?? 0) / 100;
+    const pct = Math.max(0, Number(dist[type] ?? 0));
+    const ratio = pct / 100;
     const exact = totalCount * ratio;
-    const floor = Math.floor(exact);
-    const remainder = exact - floor;
-    return { type, exact, floor, remainder };
+    const floor = pct > 0 ? Math.floor(exact) : 0;
+    const remainder = pct > 0 ? exact - floor : 0;
+    return { type, pct, exact, floor, remainder };
   });
 
   const allocated = rawCounts.reduce((sum, item) => sum + item.floor, 0);
   const deficit = totalCount - allocated;
 
-  // Largest Remainder Method (Hamilton-Hare): sort descending by remainder, break ties with higher configured ratio
-  rawCounts.sort((a, b) => {
-    if (Math.abs(b.remainder - a.remainder) > 1e-6) {
-      return b.remainder - a.remainder;
+  // Largest Remainder Method (Hamilton-Hare): only types with pct > 0 can receive remainder questions
+  const positiveBuckets = rawCounts.filter(item => item.pct > 0);
+  if (positiveBuckets.length > 0 && deficit > 0) {
+    positiveBuckets.sort((a, b) => {
+      if (Math.abs(b.remainder - a.remainder) > 1e-6) {
+        return b.remainder - a.remainder;
+      }
+      return b.pct - a.pct;
+    });
+
+    for (let i = 0; i < deficit; i++) {
+      positiveBuckets[i % positiveBuckets.length].floor += 1;
     }
-    return (dist[b.type] ?? 0) - (dist[a.type] ?? 0);
-  });
-
-  for (let i = 0; i < deficit; i++) {
-    rawCounts[i % rawCounts.length].floor += 1;
   }
-
-  const result: Record<keyof MixedQuestionDistribution, number> = {
-    MULTIPLE_CHOICE: 0,
-    QUICK_BUTTON: 0,
-    FILL_IN_THE_BLANK: 0,
-    CROSSWORD: 0,
-  };
 
   for (const item of rawCounts) {
     result[item.type] = item.floor;
@@ -489,6 +502,7 @@ export class AiQuestionService {
       '- QUIZ / MULTIPLE_CHOICE: Exactly 4 distinct choices (A, B, C, D) and exactly 1 correct answer that matches one of the choices.',
       '- TRUE_FALSE / QUICK_BUTTON: Dạng câu hỏi Đúng/Sai bằng tiếng Việt. Mỗi câu phải là một nhận định (statement) có thể xác định rõ là ĐÚNG hoặc SAI dựa trên nội dung nguồn. Trường choices PHẢI chứa chính xác 2 phần tử theo đúng thứ tự: ["Đúng", "Sai"]. Không sử dụng tiền tố A/B/C/D hay A., B. Không sử dụng lựa chọn thứ 3. correctAnswer PHẢI là chính xác một trong hai chuỗi: "Đúng" hoặc "Sai".',
       '- TYPE_ANSWER / FILL_IN_THE_BLANK: Người chơi tự nhập câu trả lời ngắn gọn (TUYỆT ĐỐI KHÔNG trả về mảng choices). Cung cấp câu hỏi rõ ràng (có thể chứa "___" hoặc câu hỏi trả lời ngắn), correctAnswer chính xác theo nguồn và acceptedAlternatives (các cách viết tương đương hợp lệ).',
+      '- CROSSWORD: Dạng câu hỏi Ô chữ từ khóa (TUYỆT ĐỐI KHÔNG trả về mảng choices). Trường question và crosswordClue là gợi ý tiếng Việt rõ ràng; trường crosswordAnswer và correctAnswer là từ khóa đáp án viết hoa không dấu, không khoảng trắng, chỉ gồm chữ cái A-Z và chữ số 0-9.',
       '- PUZZLE: Dạng câu hỏi sắp xếp thứ tự (sequence ordering). Trích xuất một quy trình, trình tự các bước, cấp độ hoặc thứ tự logic gồm từ 3 đến 5 mục khác nhau có thật trong nội dung nguồn. Trường choices chứa mảng từ 3 đến 5 mục theo đúng thứ tự chuẩn, và trường correctAnswer chứa đúng các mục đó nối với nhau bằng " | " theo thứ tự chuẩn (ví dụ: "Bước 1 | Bước 2 | Bước 3").',
       '- SLIDER: Dạng câu hỏi kéo thanh chọn giá trị số (numeric slider). Dựa trên các con số, tỷ lệ, mốc năm, nhiệt độ, thời lượng hoặc thông số định lượng có thật trong tài liệu nguồn. TUYỆT ĐỐI KHÔNG trả về mảng choices. Bắt buộc cung cấp đối tượng sliderConfig gồm: min (min < max), max (max > min), step (bước nhảy > 0 và <= max - min), correctValue (giá trị đúng nằm trong [min, max] và khớp với min + k * step), tolerance (sai số cho phép >= 0 và < max - min), và unit (đơn vị tùy chọn như "%", "năm", "°C", "giây"). Trường correctAnswer phải là chuỗi số khớp chính xác với sliderConfig.correctValue.',
     ].join('\n');
@@ -504,6 +518,7 @@ export class AiQuestionService {
       sectionFilter?: string[];
       mixedDistribution?: MixedQuestionDistribution;
       adventureQuestionTypes?: AdventureQuestionType[];
+      adventureQuestionDistribution?: AdventureQuestionDistribution;
       outDiagnostics?: string[];
     }
   ): string {
@@ -563,6 +578,7 @@ export class AiQuestionService {
 
     const isQuickButton = gameType === 'QUICK_BUTTON' || gameType === 'TRUE_FALSE';
     const isTypeAnswer = gameType === 'TYPE_ANSWER' || gameType === 'FILL_IN_THE_BLANK';
+    const isCrossword = gameType === 'CROSSWORD';
     const isPuzzle = gameType === 'PUZZLE';
     const isSlider = gameType === 'SLIDER';
     const isMixed = gameType === 'MIXED';
@@ -574,15 +590,33 @@ export class AiQuestionService {
       options?.adventureQuestionTypes && options.adventureQuestionTypes.length > 0
         ? options.adventureQuestionTypes
         : ['MULTIPLE_CHOICE', 'QUICK_BUTTON'];
+    const allAdventureTypesAreBase = resolvedAdventureTypes.every(
+      t => normalizeToBaseDistributionType(t) !== null
+    );
+    const resolvedAdventureDist =
+      isAdventure && (options?.adventureQuestionDistribution || allAdventureTypesAreBase)
+        ? options?.adventureQuestionDistribution ||
+          buildDefaultQuestionDistributionForTypes(resolvedAdventureTypes)
+        : null;
+    const adventureBaseCounts = resolvedAdventureDist
+      ? calculateMixedTypeCounts(questionCount, resolvedAdventureDist)
+      : null;
+
     const adventureTypeAllocationLines = resolvedAdventureTypes.map((t, idx) => {
+      const mappedBase = normalizeToBaseDistributionType(t);
       const count =
-        Math.floor(questionCount / resolvedAdventureTypes.length) +
-        (idx < questionCount % resolvedAdventureTypes.length ? 1 : 0);
+        adventureBaseCounts && mappedBase
+          ? adventureBaseCounts[mappedBase]
+          : Math.floor(questionCount / resolvedAdventureTypes.length) +
+            (idx < questionCount % resolvedAdventureTypes.length ? 1 : 0);
       if (t === 'MULTIPLE_CHOICE' || t === 'QUIZ') {
         return `  + ${t} (Trắc nghiệm Quiz 4 lựa chọn): ${count} câu`;
       }
       if (t === 'QUICK_BUTTON' || t === 'TRUE_FALSE') {
         return `  + ${t} (Đúng / Sai - choices đúng bằng ["Đúng", "Sai"], correctAnswer là "Đúng" hoặc "Sai"): ${count} câu`;
+      }
+      if (t === 'CROSSWORD') {
+        return `  + CROSSWORD (Ô chữ từ khóa - KHÔNG có choices, có crosswordClue gợi ý tiếng Việt và crosswordAnswer/correctAnswer là từ khóa viết hoa không dấu không khoảng trắng): ${count} câu`;
       }
       if (t === 'PUZZLE') {
         return `  + PUZZLE (Sắp xếp thứ tự 3-5 bước - choices là mảng các bước, correctAnswer nối bằng " | "): ${count} câu`;
@@ -593,9 +627,9 @@ export class AiQuestionService {
       return `  + ${t} (Nhập đáp án ngắn / Điền từ - KHÔNG có choices, có correctAnswer và acceptedAlternatives): ${count} câu`;
     });
     const adventureQuestionRuleText = [
-      '- Phân bổ các loại câu hỏi trong "questions" CHÍNH XÁC theo lựa chọn của người tạo:',
+      '- Phân bổ các loại câu hỏi trong "questions" CHÍNH XÁC theo lựa chọn và tỷ lệ của người tạo:',
       ...adventureTypeAllocationLines,
-      `- Mỗi câu hỏi trong "questions" CHỈ ĐƯỢC PHÉP có trường "type" thuộc [${resolvedAdventureTypes.map(t => `"${t}"`).join(', ')}]. TUYỆT ĐỐI KHÔNG sinh loại câu hỏi ngoài danh sách này và KHÔNG ghi type là "ADVENTURE" trong từng câu hỏi.`,
+      `- Mỗi câu hỏi trong "questions" CHỈ ĐƯỢC PHÉP có trường "type" thuộc [${resolvedAdventureTypes.map(t => `"${t}"`).join(', ')}]. TUYỆT ĐỐI KHÔNG sinh loại câu hỏi ngoài danh sách này và KHÔNG ghi type là "ADVENTURE" hay "MIXED" trong từng câu hỏi.`,
     ].join('\n');
     const quickButtonInstruction = isQuickButton
       ? [
@@ -613,7 +647,15 @@ export class AiQuestionService {
             '- Trường "correctAnswer" PHẢI ngắn gọn, chính xác tuyệt đối theo tài liệu nguồn; bổ sung các cách viết tương đương hợp lệ vào "acceptedAlternatives".',
             '',
           ].join('\n')
-        : isPuzzle
+        : isCrossword
+          ? [
+              'CRITICAL RULES FOR CROSSWORD (Ô CHỮ TỪ KHÓA):',
+              '- TUYỆT ĐỐI KHÔNG trả về trường "choices".',
+              '- Trường "question" và "crosswordClue" là gợi ý bằng tiếng Việt mô tả một thuật ngữ, khái niệm hoặc từ khóa quan trọng trong tài liệu nguồn.',
+              '- Trường "crosswordAnswer" và "correctAnswer" PHẢI là một từ khóa viết hoa không dấu, không khoảng trắng, chỉ gồm chữ cái A-Z và chữ số 0-9 (ví dụ: "BLOCKCHAIN", "FIREWALL", "BAODUONG").',
+              '',
+            ].join('\n')
+          : isPuzzle
           ? [
               'CRITICAL RULES FOR PUZZLE (SẮP XẾP THỨ TỰ):',
               '- Mỗi câu hỏi yêu cầu người chơi sắp xếp từ 3 đến 5 mục/bước theo đúng thứ tự quy trình, trình tự thời gian, cấp độ hoặc thứ tự thực hiện được nêu trong tài liệu nguồn.',
@@ -701,7 +743,26 @@ export class AiQuestionService {
     }
   }
 ]`
-        : isPuzzle
+        : isCrossword
+          ? `[
+  {
+    "id": "q_1",
+    "type": "CROSSWORD",
+    "question": "Gợi ý tiếng Việt cho từ khóa ô chữ dựa trên tài liệu nguồn?",
+    "crosswordClue": "Gợi ý tiếng Việt cho từ khóa ô chữ dựa trên tài liệu nguồn?",
+    "crosswordAnswer": "TUKHOA",
+    "correctAnswer": "TUKHOA",
+    "explanation": "Giải thích ngắn gọn từ khóa căn cứ vào nội dung nguồn bằng tiếng Việt",
+    "difficulty": "${difficulty}",
+    "sourceReference": {
+      "sourceId": "source_id_here",
+      "sourceType": "WEBSITE" | "DOCX" | "XLSX" | "PDF" | "TXT" | "MARKDOWN" | "CSV",
+      "sourceLocation": "location_here",
+      "section": "Section name if applicable"
+    }
+  }
+]`
+          : isPuzzle
           ? `[
   {
     "id": "q_1",
@@ -838,12 +899,74 @@ export class AiQuestionService {
     const description = `Bộ trò chơi tương tác ${getGameTypeLabelVi(gameType)} được tạo từ ${documents.length} nguồn tài liệu.`;
 
     const generationDiagnostics: string[] = [];
+    const resolvedMixedDistribution: MixedQuestionDistribution | undefined =
+      gameType === 'MIXED'
+        ? request.mixedDistribution || {
+            MULTIPLE_CHOICE: 40,
+            QUICK_BUTTON: 20,
+            FILL_IN_THE_BLANK: 20,
+            CROSSWORD: 20,
+          }
+        : request.mixedDistribution;
+
+    if (gameType === 'MIXED') {
+      const distParse = MixedQuestionDistributionSchema.safeParse(resolvedMixedDistribution);
+      if (!distParse.success) {
+        const issues = distParse.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
+        throw new AppError(
+          'INVALID_REQUEST',
+          `Invalid mixedDistribution: ${issues}`,
+          400
+        );
+      }
+    }
+
+    const allowedAdventureTypes: AdventureQuestionType[] =
+      gameType === 'ADVENTURE' &&
+      Array.isArray(request.adventureConfig?.questionTypes) &&
+      request.adventureConfig.questionTypes.length > 0
+        ? request.adventureConfig.questionTypes
+        : gameType === 'ADVENTURE' && request.adventureConfig?.questionDistribution
+          ? (['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK', 'CROSSWORD'] as const).filter(
+              k => (request.adventureConfig!.questionDistribution![k] ?? 0) > 0
+            )
+          : ['MULTIPLE_CHOICE', 'QUICK_BUTTON'];
+
+    const hasExplicitAdventureQuestionConfig =
+      gameType === 'ADVENTURE' &&
+      (Boolean(request.adventureConfig?.questionDistribution) ||
+        Boolean(
+          Array.isArray(request.adventureConfig?.questionTypes) &&
+            request.adventureConfig.questionTypes.length > 0
+        ));
+
+    const allAllowedAdventureAreBase =
+      gameType === 'ADVENTURE' &&
+      allowedAdventureTypes.every(t => normalizeToBaseDistributionType(t) !== null);
+
+    const resolvedAdventureDistribution: AdventureQuestionDistribution | undefined =
+      gameType === 'ADVENTURE' && allAllowedAdventureAreBase
+        ? request.adventureConfig?.questionDistribution ||
+          buildDefaultQuestionDistributionForTypes(allowedAdventureTypes)
+        : undefined;
+
+    const enforceStrictPerTypeCounts =
+      gameType === 'MIXED' || (hasExplicitAdventureQuestionConfig && Boolean(resolvedAdventureDistribution));
+
+    const targetTypeCounts: Record<BaseDistributionQuestionType, number> | null =
+      gameType === 'MIXED'
+        ? calculateMixedTypeCounts(questionCount, resolvedMixedDistribution)
+        : resolvedAdventureDistribution
+          ? calculateMixedTypeCounts(questionCount, resolvedAdventureDistribution)
+          : null;
+
     const systemInstruction = this.buildSystemInstruction();
     const prompt = this.buildBoundedPrompt(documents, gameType, questionCount, effectiveDifficulty, {
       topicFocus: request.topicFocus,
       sectionFilter: request.sectionFilter,
-      mixedDistribution: request.mixedDistribution,
-      adventureQuestionTypes: request.adventureConfig?.questionTypes,
+      mixedDistribution: resolvedMixedDistribution,
+      adventureQuestionTypes: allowedAdventureTypes,
+      adventureQuestionDistribution: resolvedAdventureDistribution,
       outDiagnostics: generationDiagnostics,
     });
 
@@ -928,12 +1051,6 @@ export class AiQuestionService {
     const seenQuestions = new Set<string>();
     const rejectedReasons: string[] = [];
     let duplicateCount = 0;
-    const allowedAdventureTypes: AdventureQuestionType[] =
-      gameType === 'ADVENTURE' &&
-      Array.isArray(request.adventureConfig?.questionTypes) &&
-      request.adventureConfig.questionTypes.length > 0
-        ? request.adventureConfig.questionTypes
-        : ['MULTIPLE_CHOICE', 'QUICK_BUTTON'];
 
     const validQuestionTypes = new Set<QuestionType>([
       'QUIZ',
@@ -944,6 +1061,7 @@ export class AiQuestionService {
       'MULTIPLE_CHOICE',
       'FILL_IN_THE_BLANK',
       'QUICK_BUTTON',
+      'CROSSWORD',
     ]);
 
     const areCompatibleTypes = (a: string, b: string): boolean => {
@@ -954,268 +1072,474 @@ export class AiQuestionService {
       return false;
     };
 
-    for (let i = 0; i < rawQuestions.length && validatedQuestions.length < questionCount; i++) {
-      const q = rawQuestions[i];
-      if (!q || typeof q !== 'object') {
-        const msg = `Generated question ${i + 1} failed schema validation: item is not an object`;
-        rejectedReasons.push(msg);
-        generationDiagnostics.push(msg);
-        continue;
+    const bucketedQuestions: Record<BaseDistributionQuestionType, GameQuestion[]> = {
+      MULTIPLE_CHOICE: [],
+      QUICK_BUTTON: [],
+      FILL_IN_THE_BLANK: [],
+      CROSSWORD: [],
+    };
+
+    const resolveConcreteQuestionTypeForBase = (
+      baseType: BaseDistributionQuestionType
+    ): QuestionType => {
+      if (gameType === 'MIXED') {
+        return baseType;
       }
-
-      const rawType = typeof q.type === 'string' ? (q.type.trim().toUpperCase() as QuestionType) : undefined;
-
-      // Resolve concrete question type for this item without silently mutating incompatible types
-      let itemQuestionType: QuestionType;
       if (gameType === 'ADVENTURE') {
-        if (rawType && validQuestionTypes.has(rawType)) {
-          itemQuestionType = rawType;
-        } else if (q.sliderConfig && typeof q.sliderConfig === 'object') {
-          itemQuestionType = 'SLIDER';
-        } else if (isExplicitTrueFalseChoices(q.choices)) {
-          itemQuestionType = allowedAdventureTypes.includes('TRUE_FALSE') ? 'TRUE_FALSE' : 'QUICK_BUTTON';
-        } else if (Array.isArray(q.choices) && q.choices.length === 4) {
-          itemQuestionType = allowedAdventureTypes.includes('QUIZ') ? 'QUIZ' : 'MULTIPLE_CHOICE';
-        } else {
-          itemQuestionType =
-            allowedAdventureTypes.includes('TYPE_ANSWER')
-              ? 'TYPE_ANSWER'
-              : allowedAdventureTypes.includes('FILL_IN_THE_BLANK')
-                ? 'FILL_IN_THE_BLANK'
-                : allowedAdventureTypes[0] || 'MULTIPLE_CHOICE';
+        if (
+          baseType === 'MULTIPLE_CHOICE' &&
+          allowedAdventureTypes.includes('QUIZ') &&
+          !allowedAdventureTypes.includes('MULTIPLE_CHOICE')
+        ) {
+          return 'QUIZ';
         }
-      } else {
-        if (rawType && !areCompatibleTypes(rawType, gameType)) {
-          const msg = `Generated question ${i + 1} rejected: AI returned type "${rawType}" instead of requested gameType "${gameType}".`;
+        if (
+          baseType === 'QUICK_BUTTON' &&
+          allowedAdventureTypes.includes('TRUE_FALSE') &&
+          !allowedAdventureTypes.includes('QUICK_BUTTON')
+        ) {
+          return 'TRUE_FALSE';
+        }
+        if (
+          baseType === 'FILL_IN_THE_BLANK' &&
+          allowedAdventureTypes.includes('TYPE_ANSWER') &&
+          !allowedAdventureTypes.includes('FILL_IN_THE_BLANK')
+        ) {
+          return 'TYPE_ANSWER';
+        }
+      }
+      return baseType;
+    };
+
+    const processRawQuestionBatch = (batch: any[]) => {
+      for (let i = 0; i < batch.length; i++) {
+        if (!targetTypeCounts && validatedQuestions.length >= questionCount) {
+          break;
+        }
+        if (
+          targetTypeCounts &&
+          validatedQuestions.length >= questionCount &&
+          (['MULTIPLE_CHOICE', 'QUICK_BUTTON', 'FILL_IN_THE_BLANK', 'CROSSWORD'] as const).every(
+            bt => bucketedQuestions[bt].length >= targetTypeCounts[bt]
+          )
+        ) {
+          break;
+        }
+
+        const q = batch[i];
+        if (!q || typeof q !== 'object') {
+          const msg = `Generated question ${i + 1} failed schema validation: item is not an object`;
           rejectedReasons.push(msg);
           generationDiagnostics.push(msg);
           continue;
         }
-        itemQuestionType = gameType as QuestionType;
-      }
 
-      // In ADVENTURE mode with explicit questionTypes filter, reject disallowed types rather than mutating them
-      if (
-        gameType === 'ADVENTURE' &&
-        Array.isArray(request.adventureConfig?.questionTypes) &&
-        request.adventureConfig.questionTypes.length > 0 &&
-        !allowedAdventureTypes.some(allowed => areCompatibleTypes(allowed, itemQuestionType))
-      ) {
-        const msg = `Generated question ${i + 1} rejected: type "${itemQuestionType}" is not in selected adventure question types [${allowedAdventureTypes.join(', ')}]`;
-        rejectedReasons.push(msg);
-        generationDiagnostics.push(msg);
-        continue;
-      }
-      const fallbackDoc = documents[0];
-      const rawRef = q.sourceReference;
+        const rawType = typeof q.type === 'string' ? (q.type.trim().toUpperCase() as QuestionType) : undefined;
 
-      const rawSection = typeof rawRef?.section === 'string' && rawRef.section.trim().length > 0
-        ? rawRef.section.trim()
-        : (typeof rawRef?.sectionHeading === 'string' && rawRef.sectionHeading.trim().length > 0
-          ? rawRef.sectionHeading.trim()
-          : undefined);
-      const fallbackSection = (fallbackDoc.sections?.[0]?.title && fallbackDoc.sections[0].title.trim().length > 0)
-        ? fallbackDoc.sections[0].title.trim()
-        : undefined;
-
-      const matchedDoc = (typeof rawRef?.sourceId === 'string' && documents.find(d => d.sourceId === rawRef.sourceId.trim())) || fallbackDoc;
-
-      const sourceReference = {
-        sourceId: (typeof rawRef?.sourceId === 'string' && rawRef.sourceId.trim().length > 0)
-          ? rawRef.sourceId.trim()
-          : matchedDoc.sourceId,
-        sourceType: (typeof rawRef?.sourceType === 'string' && rawRef.sourceType.trim().length > 0)
-          ? rawRef.sourceType
-          : matchedDoc.sourceType,
-        sourceLocation: (typeof rawRef?.sourceLocation === 'string' && rawRef.sourceLocation.trim().length > 0)
-          ? rawRef.sourceLocation.trim()
-          : matchedDoc.sourceLocation,
-        section: rawSection ?? fallbackSection,
-        page: typeof rawRef?.page === 'number' && !Number.isNaN(rawRef.page) ? rawRef.page : undefined,
-        sheet: typeof rawRef?.sheet === 'string' && rawRef.sheet.trim().length > 0 ? rawRef.sheet.trim() : undefined,
-        row: typeof rawRef?.row === 'number' && !Number.isNaN(rawRef.row) ? rawRef.row : undefined,
-        paragraphIndex: typeof rawRef?.paragraphIndex === 'number' && !Number.isNaN(rawRef.paragraphIndex) ? rawRef.paragraphIndex : undefined,
-      };
-
-      // Normalize question field with priority: q.question -> q.questionText -> q.question_text
-      let normalizedQuestion: string | undefined;
-      if (typeof q.question === 'string' && q.question.trim().length > 0) {
-        normalizedQuestion = q.question.trim();
-      } else if (typeof q.questionText === 'string' && q.questionText.trim().length > 0) {
-        normalizedQuestion = q.questionText.trim();
-      } else if (typeof q.question_text === 'string' && q.question_text.trim().length > 0) {
-        normalizedQuestion = q.question_text.trim();
-      } else if (itemQuestionType === 'CROSSWORD') {
-        if (typeof q.crosswordClue === 'string' && q.crosswordClue.trim().length > 0) {
-          normalizedQuestion = q.crosswordClue.trim();
-        } else if (typeof q.clue === 'string' && q.clue.trim().length > 0) {
-          normalizedQuestion = q.clue.trim();
-        }
-      }
-
-      // Normalize correctAnswer field and choices
-      let normalizedCorrectAnswer: string | undefined;
-      let normalizedChoices: string[] | undefined =
-        itemQuestionType === 'FILL_IN_THE_BLANK' || itemQuestionType === 'TYPE_ANSWER'
-          ? undefined
-          : itemQuestionType === 'SLIDER'
-            ? Array.isArray(q.choices) && q.choices.length > 0
-              ? q.choices
-              : undefined
-            : Array.isArray(q.choices)
-              ? q.choices
-              : undefined;
-
-      if (itemQuestionType === 'SLIDER') {
-        const rawAns =
-          q.correctAnswer !== undefined
-            ? q.correctAnswer
-            : q.correct_answer !== undefined
-              ? q.correct_answer
-              : q.answer;
-        if (typeof rawAns === 'string' && rawAns.trim().length > 0) {
-          normalizedCorrectAnswer = rawAns.trim();
-        } else if (typeof rawAns === 'number' && Number.isFinite(rawAns)) {
-          normalizedCorrectAnswer = String(rawAns);
-        } else if (
-          q.sliderConfig &&
-          typeof q.sliderConfig === 'object' &&
-          typeof q.sliderConfig.correctValue === 'number' &&
-          Number.isFinite(q.sliderConfig.correctValue)
-        ) {
-          normalizedCorrectAnswer = String(q.sliderConfig.correctValue);
-        }
-      } else if (itemQuestionType === 'QUICK_BUTTON' || itemQuestionType === 'TRUE_FALSE') {
-        const rawAns = q.correctAnswer !== undefined
-          ? q.correctAnswer
-          : (q.correct_answer !== undefined ? q.correct_answer : q.answer);
-
-        const qbAns = normalizeQuickButtonAnswer(rawAns);
-        const hasValidTFChoices =
-          !Array.isArray(q.choices) ||
-          q.choices.length === 0 ||
-          isExplicitTrueFalseChoices(q.choices);
-
-        if (qbAns && hasValidTFChoices) {
-          normalizedCorrectAnswer = qbAns;
-          normalizedChoices = ['Đúng', 'Sai'];
+        // Resolve concrete question type for this item without silently mutating incompatible types
+        let itemQuestionType: QuestionType;
+        if (gameType === 'MIXED') {
+          const mappedRaw = rawType ? normalizeToBaseDistributionType(rawType) : null;
+          if (mappedRaw) {
+            itemQuestionType = mappedRaw;
+          } else if (rawType && rawType !== ('MIXED' as any)) {
+            const msg = `Generated question ${i + 1} rejected in MIXED mode: unsupported type "${rawType}".`;
+            rejectedReasons.push(msg);
+            generationDiagnostics.push(msg);
+            continue;
+          } else if (
+            (typeof q.crosswordAnswer === 'string' && q.crosswordAnswer.trim().length > 0) ||
+            (typeof q.crosswordClue === 'string' && q.crosswordClue.trim().length > 0)
+          ) {
+            itemQuestionType = 'CROSSWORD';
+          } else if (isExplicitTrueFalseChoices(q.choices)) {
+            itemQuestionType = 'QUICK_BUTTON';
+          } else if (Array.isArray(q.choices) && q.choices.length === 4) {
+            itemQuestionType = 'MULTIPLE_CHOICE';
+          } else {
+            itemQuestionType = 'FILL_IN_THE_BLANK';
+          }
+        } else if (gameType === 'ADVENTURE') {
+          if (rawType && validQuestionTypes.has(rawType)) {
+            const mappedBase = normalizeToBaseDistributionType(rawType);
+            itemQuestionType = mappedBase ? resolveConcreteQuestionTypeForBase(mappedBase) : rawType;
+          } else if (
+            (typeof q.crosswordAnswer === 'string' && q.crosswordAnswer.trim().length > 0) ||
+            (typeof q.crosswordClue === 'string' && q.crosswordClue.trim().length > 0)
+          ) {
+            itemQuestionType = 'CROSSWORD';
+          } else if (q.sliderConfig && typeof q.sliderConfig === 'object') {
+            itemQuestionType = 'SLIDER';
+          } else if (isExplicitTrueFalseChoices(q.choices)) {
+            itemQuestionType = resolveConcreteQuestionTypeForBase('QUICK_BUTTON');
+          } else if (Array.isArray(q.choices) && q.choices.length === 4) {
+            itemQuestionType = resolveConcreteQuestionTypeForBase('MULTIPLE_CHOICE');
+          } else {
+            itemQuestionType = resolveConcreteQuestionTypeForBase('FILL_IN_THE_BLANK');
+          }
         } else {
-          const reason = `Generated question ${i + 1} failed True/False validation: choices must be a binary True/False pair and correctAnswer must be Đúng/Sai.`;
+          if (rawType && !areCompatibleTypes(rawType, gameType)) {
+            const msg = `Generated question ${i + 1} rejected: AI returned type "${rawType}" instead of requested gameType "${gameType}".`;
+            rejectedReasons.push(msg);
+            generationDiagnostics.push(msg);
+            continue;
+          }
+          itemQuestionType = gameType as QuestionType;
+        }
+
+        // In ADVENTURE mode with explicit questionTypes filter, reject disallowed types rather than mutating them
+        if (
+          gameType === 'ADVENTURE' &&
+          hasExplicitAdventureQuestionConfig &&
+          !allowedAdventureTypes.some(allowed => areCompatibleTypes(allowed, itemQuestionType))
+        ) {
+          const msg = `Generated question ${i + 1} rejected: type "${itemQuestionType}" is not in selected adventure question types [${allowedAdventureTypes.join(', ')}]`;
+          rejectedReasons.push(msg);
+          generationDiagnostics.push(msg);
+          continue;
+        }
+
+        const baseBucketType = normalizeToBaseDistributionType(itemQuestionType);
+        if (targetTypeCounts && baseBucketType) {
+          if (targetTypeCounts[baseBucketType] <= 0) {
+            const msg = `Generated question ${i + 1} rejected: type "${baseBucketType}" has 0% allocation in configured distribution.`;
+            rejectedReasons.push(msg);
+            generationDiagnostics.push(msg);
+            continue;
+          }
+          if (bucketedQuestions[baseBucketType].length >= targetTypeCounts[baseBucketType]) {
+            generationDiagnostics.push(
+              `Skipped extra question at index ${i + 1} for type "${baseBucketType}" (already met target ${targetTypeCounts[baseBucketType]}).`
+            );
+            continue;
+          }
+        }
+
+        const fallbackDoc = documents[0];
+        const rawRef = q.sourceReference;
+
+        const rawSection = typeof rawRef?.section === 'string' && rawRef.section.trim().length > 0
+          ? rawRef.section.trim()
+          : (typeof rawRef?.sectionHeading === 'string' && rawRef.sectionHeading.trim().length > 0
+            ? rawRef.sectionHeading.trim()
+            : undefined);
+        const fallbackSection = (fallbackDoc.sections?.[0]?.title && fallbackDoc.sections[0].title.trim().length > 0)
+          ? fallbackDoc.sections[0].title.trim()
+          : undefined;
+
+        const matchedDoc = (typeof rawRef?.sourceId === 'string' && documents.find(d => d.sourceId === rawRef.sourceId.trim())) || fallbackDoc;
+
+        const sourceReference = {
+          sourceId: (typeof rawRef?.sourceId === 'string' && rawRef.sourceId.trim().length > 0)
+            ? rawRef.sourceId.trim()
+            : matchedDoc.sourceId,
+          sourceType: (typeof rawRef?.sourceType === 'string' && rawRef.sourceType.trim().length > 0)
+            ? rawRef.sourceType
+            : matchedDoc.sourceType,
+          sourceLocation: (typeof rawRef?.sourceLocation === 'string' && rawRef.sourceLocation.trim().length > 0)
+            ? rawRef.sourceLocation.trim()
+            : matchedDoc.sourceLocation,
+          section: rawSection ?? fallbackSection,
+          page: typeof rawRef?.page === 'number' && !Number.isNaN(rawRef.page) ? rawRef.page : undefined,
+          sheet: typeof rawRef?.sheet === 'string' && rawRef.sheet.trim().length > 0 ? rawRef.sheet.trim() : undefined,
+          row: typeof rawRef?.row === 'number' && !Number.isNaN(rawRef.row) ? rawRef.row : undefined,
+          paragraphIndex: typeof rawRef?.paragraphIndex === 'number' && !Number.isNaN(rawRef.paragraphIndex) ? rawRef.paragraphIndex : undefined,
+        };
+
+        // Normalize question field with priority: q.question -> q.questionText -> q.question_text
+        let normalizedQuestion: string | undefined;
+        if (typeof q.question === 'string' && q.question.trim().length > 0) {
+          normalizedQuestion = q.question.trim();
+        } else if (typeof q.questionText === 'string' && q.questionText.trim().length > 0) {
+          normalizedQuestion = q.questionText.trim();
+        } else if (typeof q.question_text === 'string' && q.question_text.trim().length > 0) {
+          normalizedQuestion = q.question_text.trim();
+        } else if (itemQuestionType === 'CROSSWORD') {
+          if (typeof q.crosswordClue === 'string' && q.crosswordClue.trim().length > 0) {
+            normalizedQuestion = q.crosswordClue.trim();
+          } else if (typeof q.clue === 'string' && q.clue.trim().length > 0) {
+            normalizedQuestion = q.clue.trim();
+          }
+        }
+
+        // Normalize correctAnswer field and choices
+        let normalizedCorrectAnswer: string | undefined;
+        let normalizedChoices: string[] | undefined =
+          itemQuestionType === 'FILL_IN_THE_BLANK' ||
+          itemQuestionType === 'TYPE_ANSWER' ||
+          itemQuestionType === 'CROSSWORD'
+            ? undefined
+            : itemQuestionType === 'SLIDER'
+              ? Array.isArray(q.choices) && q.choices.length > 0
+                ? q.choices
+                : undefined
+              : Array.isArray(q.choices)
+                ? q.choices
+                : undefined;
+
+        if (itemQuestionType === 'SLIDER') {
+          const rawAns =
+            q.correctAnswer !== undefined
+              ? q.correctAnswer
+              : q.correct_answer !== undefined
+                ? q.correct_answer
+                : q.answer;
+          if (typeof rawAns === 'string' && rawAns.trim().length > 0) {
+            normalizedCorrectAnswer = rawAns.trim();
+          } else if (typeof rawAns === 'number' && Number.isFinite(rawAns)) {
+            normalizedCorrectAnswer = String(rawAns);
+          } else if (
+            q.sliderConfig &&
+            typeof q.sliderConfig === 'object' &&
+            typeof q.sliderConfig.correctValue === 'number' &&
+            Number.isFinite(q.sliderConfig.correctValue)
+          ) {
+            normalizedCorrectAnswer = String(q.sliderConfig.correctValue);
+          }
+        } else if (itemQuestionType === 'QUICK_BUTTON' || itemQuestionType === 'TRUE_FALSE') {
+          const rawAns = q.correctAnswer !== undefined
+            ? q.correctAnswer
+            : (q.correct_answer !== undefined ? q.correct_answer : q.answer);
+
+          const qbAns = normalizeQuickButtonAnswer(rawAns);
+          const hasValidTFChoices =
+            !Array.isArray(q.choices) ||
+            q.choices.length === 0 ||
+            isExplicitTrueFalseChoices(q.choices);
+
+          if (qbAns && hasValidTFChoices) {
+            normalizedCorrectAnswer = qbAns;
+            normalizedChoices = ['Đúng', 'Sai'];
+          } else {
+            const reason = `Generated question ${i + 1} failed True/False validation: choices must be a binary True/False pair and correctAnswer must be Đúng/Sai.`;
+            rejectedReasons.push(reason);
+            generationDiagnostics.push(reason);
+            continue;
+          }
+        } else if (itemQuestionType === 'PUZZLE') {
+          const rawSeqItems = Array.isArray(q.choices)
+            ? q.choices
+            : Array.isArray(q.items)
+              ? q.items
+              : Array.isArray(q.steps)
+                ? q.steps
+                : Array.isArray(q.sequence)
+                  ? q.sequence
+                  : undefined;
+
+          if (Array.isArray(rawSeqItems)) {
+            normalizedChoices = rawSeqItems
+              .filter((item: unknown): item is string => typeof item === 'string')
+              .map((item: string) => item.trim())
+              .filter(Boolean);
+          }
+
+          const rawAns =
+            q.correctAnswer !== undefined
+              ? q.correctAnswer
+              : q.correct_answer !== undefined
+                ? q.correct_answer
+                : q.correctOrder !== undefined
+                  ? q.correctOrder
+                  : q.answer;
+
+          if (Array.isArray(rawAns)) {
+            const cleaned = rawAns
+              .filter((item: unknown): item is string => typeof item === 'string')
+              .map((item: string) => item.trim())
+              .filter(Boolean);
+            normalizedCorrectAnswer = formatCanonicalPuzzleAnswer(cleaned);
+          } else if (typeof rawAns === 'string' && rawAns.trim().length > 0) {
+            const parsedSeq = parsePuzzleSequence(rawAns);
+            if (parsedSeq.length >= 3) {
+              normalizedCorrectAnswer = formatCanonicalPuzzleAnswer(parsedSeq);
+              if (!normalizedChoices || normalizedChoices.length === 0) {
+                normalizedChoices = [...parsedSeq];
+              }
+            } else {
+              normalizedCorrectAnswer = rawAns.trim();
+            }
+          } else if (normalizedChoices && normalizedChoices.length >= 3 && normalizedChoices.length <= 6) {
+            normalizedCorrectAnswer = formatCanonicalPuzzleAnswer(normalizedChoices);
+          }
+        } else {
+          if (typeof q.correctAnswer === 'string' && q.correctAnswer.trim().length > 0) {
+            normalizedCorrectAnswer = q.correctAnswer.trim();
+          } else if (typeof q.correct_answer === 'string' && q.correct_answer.trim().length > 0) {
+            normalizedCorrectAnswer = q.correct_answer.trim();
+          } else if (typeof q.answer === 'string' && q.answer.trim().length > 0) {
+            normalizedCorrectAnswer = q.answer.trim();
+          }
+
+          if (itemQuestionType === 'CROSSWORD') {
+            const rawCrosswordWord =
+              (typeof q.crosswordAnswer === 'string' && q.crosswordAnswer.trim().length > 0
+                ? q.crosswordAnswer
+                : typeof q.crossword_answer === 'string' && q.crossword_answer.trim().length > 0
+                  ? q.crossword_answer
+                  : normalizedCorrectAnswer) || '';
+
+            if (rawCrosswordWord) {
+              normalizedCorrectAnswer = normalizeCrosswordWord(rawCrosswordWord);
+            }
+          }
+        }
+
+        const candidate = {
+          ...q,
+          id: q.id || `q_${validatedQuestions.length + 1}`,
+          type: itemQuestionType,
+          difficulty: effectiveDifficulty,
+          question: normalizedQuestion,
+          choices: normalizedChoices,
+          correctAnswer: normalizedCorrectAnswer,
+          sourceReference,
+          crosswordClue:
+            q.crosswordClue ||
+            (itemQuestionType === 'CROSSWORD' ? normalizedQuestion : undefined),
+          crosswordAnswer:
+            itemQuestionType === 'CROSSWORD'
+              ? normalizedCorrectAnswer
+              : q.crosswordAnswer,
+        };
+
+        const parseResult = GameQuestionSchema.safeParse(candidate);
+        if (!parseResult.success) {
+          const issues = parseResult.error.issues.map(iss => `${iss.path.join('.')}: ${iss.message}`).join('; ');
+          const reason = `Generated question ${i + 1} failed schema validation: ${issues}`;
           rejectedReasons.push(reason);
           generationDiagnostics.push(reason);
           continue;
         }
-      } else if (itemQuestionType === 'PUZZLE') {
-        const rawSeqItems = Array.isArray(q.choices)
-          ? q.choices
-          : Array.isArray(q.items)
-            ? q.items
-            : Array.isArray(q.steps)
-              ? q.steps
-              : Array.isArray(q.sequence)
-                ? q.sequence
-                : undefined;
 
-        if (Array.isArray(rawSeqItems)) {
-          normalizedChoices = rawSeqItems
-            .filter((item: unknown): item is string => typeof item === 'string')
-            .map((item: string) => item.trim())
-            .filter(Boolean);
+        // Deduplicate questions by normalized question text
+        const dedupKey = parseResult.data.question
+          .toLowerCase()
+          .replace(/\s+/g, ' ')
+          .trim();
+
+        if (seenQuestions.has(dedupKey)) {
+          duplicateCount++;
+          generationDiagnostics.push(`Skipped duplicate question at index ${i + 1}: "${parseResult.data.question.slice(0, 80)}"`);
+          continue;
         }
 
-        const rawAns =
-          q.correctAnswer !== undefined
-            ? q.correctAnswer
-            : q.correct_answer !== undefined
-              ? q.correct_answer
-              : q.correctOrder !== undefined
-                ? q.correctOrder
-                : q.answer;
+        seenQuestions.add(dedupKey);
+        if (targetTypeCounts && baseBucketType) {
+          bucketedQuestions[baseBucketType].push(parseResult.data);
+        }
+        validatedQuestions.push(parseResult.data);
+      }
+    };
 
-        if (Array.isArray(rawAns)) {
-          const cleaned = rawAns
-            .filter((item: unknown): item is string => typeof item === 'string')
-            .map((item: string) => item.trim())
-            .filter(Boolean);
-          normalizedCorrectAnswer = formatCanonicalPuzzleAnswer(cleaned);
-        } else if (typeof rawAns === 'string' && rawAns.trim().length > 0) {
-          const parsedSeq = parsePuzzleSequence(rawAns);
-          if (parsedSeq.length >= 3) {
-            normalizedCorrectAnswer = formatCanonicalPuzzleAnswer(parsedSeq);
-            if (!normalizedChoices || normalizedChoices.length === 0) {
-              normalizedChoices = [...parsedSeq];
-            }
-          } else {
-            normalizedCorrectAnswer = rawAns.trim();
+    processRawQuestionBatch(rawQuestions);
+
+    // Supplemental AI call if strict per-type counts are enforced and any requested bucket is short
+    if (enforceStrictPerTypeCounts && targetTypeCounts) {
+      const baseKeys: BaseDistributionQuestionType[] = [
+        'MULTIPLE_CHOICE',
+        'QUICK_BUTTON',
+        'FILL_IN_THE_BLANK',
+        'CROSSWORD',
+      ];
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const deficits = baseKeys
+          .map(bt => ({
+            type: bt,
+            missing: Math.max(0, targetTypeCounts[bt] - bucketedQuestions[bt].length),
+          }))
+          .filter(d => d.missing > 0);
+
+        if (deficits.length === 0) {
+          break;
+        }
+
+        const totalMissing = deficits.reduce((s, d) => s + d.missing, 0);
+        const deficitLines = deficits.map(d => {
+          const concreteType = resolveConcreteQuestionTypeForBase(d.type);
+          if (d.type === 'MULTIPLE_CHOICE') {
+            return `- ${concreteType}: tạo thêm đúng ${d.missing} câu (4 lựa chọn khác nhau trong choices, correctAnswer khớp 1 lựa chọn)`;
           }
-        } else if (normalizedChoices && normalizedChoices.length >= 3 && normalizedChoices.length <= 6) {
-          normalizedCorrectAnswer = formatCanonicalPuzzleAnswer(normalizedChoices);
-        }
-      } else {
-        if (typeof q.correctAnswer === 'string' && q.correctAnswer.trim().length > 0) {
-          normalizedCorrectAnswer = q.correctAnswer.trim();
-        } else if (typeof q.correct_answer === 'string' && q.correct_answer.trim().length > 0) {
-          normalizedCorrectAnswer = q.correct_answer.trim();
-        } else if (typeof q.answer === 'string' && q.answer.trim().length > 0) {
-          normalizedCorrectAnswer = q.answer.trim();
-        }
-
-        if (itemQuestionType === 'CROSSWORD') {
-          const rawCrosswordWord =
-            (typeof q.crosswordAnswer === 'string' && q.crosswordAnswer.trim().length > 0
-              ? q.crosswordAnswer
-              : typeof q.crossword_answer === 'string' && q.crossword_answer.trim().length > 0
-                ? q.crossword_answer
-                : normalizedCorrectAnswer) || '';
-
-          if (rawCrosswordWord) {
-            normalizedCorrectAnswer = normalizeCrosswordWord(rawCrosswordWord);
+          if (d.type === 'QUICK_BUTTON') {
+            return `- ${concreteType}: tạo thêm đúng ${d.missing} câu (nhận định Đúng/Sai, choices = ["Đúng", "Sai"], correctAnswer = "Đúng" hoặc "Sai")`;
           }
+          if (d.type === 'CROSSWORD') {
+            return `- CROSSWORD: tạo thêm đúng ${d.missing} câu (KHÔNG có choices, có crosswordClue gợi ý tiếng Việt và crosswordAnswer/correctAnswer là từ khóa viết hoa không dấu không khoảng trắng)`;
+          }
+          return `- ${concreteType}: tạo thêm đúng ${d.missing} câu (KHÔNG có choices, có correctAnswer ngắn gọn chính xác)`;
+        });
+
+        const existingTexts = validatedQuestions.map(q => `- ${q.question}`).join('\n');
+        const supplementalPrompt = [
+          prompt,
+          '',
+          `SUPPLEMENTAL REQUEST (ATTEMPT ${attempt + 1}):`,
+          `Bạn cần tạo bổ sung đúng ${totalMissing} câu hỏi còn thiếu theo đúng phân bổ loại câu hỏi sau (KHÔNG lặp lại các câu đã tạo):`,
+          ...deficitLines,
+          existingTexts ? `Các câu hỏi đã có (KHÔNG trùng lặp):\n${existingTexts}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n');
+
+        try {
+          const suppResponse = await this.provider.generateJson(
+            supplementalPrompt,
+            systemInstruction
+          );
+          const suppQuestions = Array.isArray(suppResponse)
+            ? suppResponse
+            : suppResponse?.questions && Array.isArray(suppResponse.questions)
+              ? suppResponse.questions
+              : [];
+          if (suppQuestions.length > 0) {
+            processRawQuestionBatch(suppQuestions);
+          }
+        } catch (suppErr) {
+          generationDiagnostics.push(
+            `Supplemental generation attempt ${attempt + 1} failed: ${suppErr instanceof Error ? suppErr.message : String(suppErr)}`
+          );
+          break;
         }
       }
 
-      const candidate = {
-        ...q,
-        id: q.id || `q_${validatedQuestions.length + 1}`,
-        type: itemQuestionType,
-        difficulty: effectiveDifficulty,
-        question: normalizedQuestion,
-        choices: normalizedChoices,
-        correctAnswer: normalizedCorrectAnswer,
-        sourceReference,
-        crosswordClue:
-          q.crosswordClue ||
-          (itemQuestionType === 'CROSSWORD' ? normalizedQuestion : undefined),
-        crosswordAnswer:
-          itemQuestionType === 'CROSSWORD'
-            ? normalizedCorrectAnswer
-            : q.crosswordAnswer,
-      };
+      const remainingDeficits = baseKeys
+        .map(bt => ({
+          type: bt,
+          requested: targetTypeCounts[bt],
+          actual: bucketedQuestions[bt].length,
+        }))
+        .filter(d => d.actual < d.requested);
 
-      const parseResult = GameQuestionSchema.safeParse(candidate);
-      if (!parseResult.success) {
-        const issues = parseResult.error.issues.map(iss => `${iss.path.join('.')}: ${iss.message}`).join('; ');
-        const reason = `Generated question ${i + 1} failed schema validation: ${issues}`;
-        rejectedReasons.push(reason);
-        generationDiagnostics.push(reason);
-        continue;
+      if (remainingDeficits.length > 0) {
+        const actualTypeCounts: Record<BaseDistributionQuestionType, number> = {
+          MULTIPLE_CHOICE: bucketedQuestions.MULTIPLE_CHOICE.length,
+          QUICK_BUTTON: bucketedQuestions.QUICK_BUTTON.length,
+          FILL_IN_THE_BLANK: bucketedQuestions.FILL_IN_THE_BLANK.length,
+          CROSSWORD: bucketedQuestions.CROSSWORD.length,
+        };
+        const deficitSummary = remainingDeficits
+          .map(d => `${d.type}: cần ${d.requested}, hợp lệ ${d.actual}`)
+          .join('; ');
+        throw new AppError(
+          'AI_QUESTION_DISTRIBUTION_UNMET',
+          `Không tạo đủ câu hỏi hợp lệ theo đúng tỷ lệ các loại đã chọn (${deficitSummary}). Hệ thống không tự động đổi sang loại câu hỏi khác.${rejectedReasons.length > 0 ? ` Chi tiết: ${rejectedReasons.slice(0, 3).join(' | ')}` : ''}`,
+          422,
+          {
+            targetTypeCounts,
+            actualTypeCounts,
+            rejectedCount: rejectedReasons.length,
+            reasons: rejectedReasons,
+          }
+        );
       }
-
-      // Deduplicate questions by normalized question text
-      const dedupKey = parseResult.data.question
-        .toLowerCase()
-        .replace(/\s+/g, ' ')
-        .trim();
-
-      if (seenQuestions.has(dedupKey)) {
-        duplicateCount++;
-        generationDiagnostics.push(`Skipped duplicate question at index ${i + 1}: "${parseResult.data.question.slice(0, 80)}"`);
-        continue;
-      }
-
-      seenQuestions.add(dedupKey);
-      validatedQuestions.push(parseResult.data);
     }
+
+    // Re-number question IDs sequentially
+    validatedQuestions.forEach((q, idx) => {
+      if (!q.id || /^q_\d+$/.test(q.id)) {
+        q.id = `q_${idx + 1}`;
+      }
+    });
 
     if (validatedQuestions.length === 0) {
       if (!context?.skipObservabilityLog) {
@@ -1295,7 +1619,7 @@ export class AiQuestionService {
         questionCount: validatedQuestions.length,
         timePerQuestion: request.timePerQuestion || 20,
         scoringMode: request.scoringMode || 'STANDARD',
-        ...(request.mixedDistribution ? { mixedDistribution: request.mixedDistribution } : {}),
+        ...(resolvedMixedDistribution ? { mixedDistribution: resolvedMixedDistribution } : {}),
         ...(gameType === 'ADVENTURE'
           ? {
               adventureConfig: (() => {
@@ -1306,6 +1630,7 @@ export class AiQuestionService {
                 const fallbackAdventure = analyzeSourceContentForAdventure(documents, {
                   preferredIndustryId: request.industryId || preferredIndustryId,
                   customIndustryLabel: request.adventureConfig?.industryLabel,
+                  customSubEnvironment: request.adventureConfig?.subEnvironment,
                   topicFocus: request.topicFocus,
                   questionCount: validatedQuestions.length,
                   questions: validatedQuestions,
@@ -1319,8 +1644,11 @@ export class AiQuestionService {
                     ? {
                         ...aiProposal,
                         industryId: fallbackAdventure.industryId,
+                        industryLabel: fallbackAdventure.industryLabel,
                         themePresetId: fallbackAdventure.themePresetId,
                         subEnvironment: fallbackAdventure.subEnvironment,
+                        environmentTitle: fallbackAdventure.environmentTitle,
+                        environmentSubtitle: fallbackAdventure.environmentSubtitle,
                         gameplayArchetype: fallbackAdventure.gameplayArchetype,
                         controlScheme: fallbackAdventure.controlScheme,
                         questionTriggerMode: fallbackAdventure.questionTriggerMode,
@@ -1333,6 +1661,10 @@ export class AiQuestionService {
                     : {}),
                   ...(request.adventureConfig && typeof request.adventureConfig === 'object'
                     ? request.adventureConfig
+                    : {}),
+                  questionTypes: allowedAdventureTypes,
+                  ...(resolvedAdventureDistribution
+                    ? { questionDistribution: resolvedAdventureDistribution }
                     : {}),
                 };
                 return sanitizeAdventureConfig(

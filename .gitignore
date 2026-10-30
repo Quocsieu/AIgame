@@ -7,6 +7,5 @@ dist/
 coverage/
 *.log
 data/*.sqlite*
+public/adventure-assets/games/
 .taste-skill/
-
-

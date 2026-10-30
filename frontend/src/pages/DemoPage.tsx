@@ -49,9 +49,11 @@ import {
   generateGame,
   ingestSources,
   analyzeAdventureContextApi,
+  retryAdventureAssetsApi,
   saveEditedQuestions,
 } from '../services/api.js';
 import {
+  buildDefaultQuestionDistributionForTypes,
   calculateMixedTypeCounts,
   type AuthenticatedUser,
   type Difficulty,
@@ -358,6 +360,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [savedForLater, setSavedForLater] = useState(false);
   const [adventureIndustryMode, setAdventureIndustryMode] = useState<'AI_DETECT' | IndustryId>('AI_DETECT');
   const [customIndustryName, setCustomIndustryName] = useState<string>('');
+  const [customSubEnvironment, setCustomSubEnvironment] = useState<string>('');
   const [adventureConfig, setAdventureConfig] = useState<AdventureConfig>(() =>
     buildDefaultAdventureConfig('theme_edu_campus', 5)
   );
@@ -367,11 +370,29 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     'MULTIPLE_CHOICE',
     'QUICK_BUTTON',
   ]);
+  const [adventureQuestionDistribution, setAdventureQuestionDistribution] =
+    useState<MixedQuestionDistribution>({
+      MULTIPLE_CHOICE: 50,
+      QUICK_BUTTON: 50,
+      FILL_IN_THE_BLANK: 0,
+      CROSSWORD: 0,
+    });
 
   const toggleAdventureQuestionType = (qType: QuestionType) => {
-    setAdventureQuestionTypes(prev =>
-      prev.includes(qType) ? prev.filter(t => t !== qType) : [...prev, qType]
-    );
+    setAdventureQuestionTypes(prev => {
+      const next = prev.includes(qType) ? prev.filter(t => t !== qType) : [...prev, qType];
+      if (next.length === 0) {
+        setAdventureQuestionDistribution({
+          MULTIPLE_CHOICE: 0,
+          QUICK_BUTTON: 0,
+          FILL_IN_THE_BLANK: 0,
+          CROSSWORD: 0,
+        });
+      } else {
+        setAdventureQuestionDistribution(buildDefaultQuestionDistributionForTypes(next));
+      }
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -382,12 +403,24 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       setScoringMode(initialSpec.settings.scoringMode);
       setTimePerQuestion(initialSpec.settings.timePerQuestion);
       setQuestionCount(initialSpec.questions.length);
+      if (initialSpec.settings?.mixedDistribution) {
+        setMixedDistribution(initialSpec.settings.mixedDistribution);
+      }
       if (initialSpec.settings?.adventureConfig) {
-        if (
+        const advQTypes =
           Array.isArray(initialSpec.settings.adventureConfig.questionTypes) &&
           initialSpec.settings.adventureConfig.questionTypes.length > 0
-        ) {
-          setAdventureQuestionTypes(initialSpec.settings.adventureConfig.questionTypes);
+            ? initialSpec.settings.adventureConfig.questionTypes
+            : (['MULTIPLE_CHOICE', 'QUICK_BUTTON'] as QuestionType[]);
+        setAdventureQuestionTypes(advQTypes);
+        if (initialSpec.settings.adventureConfig.questionDistribution) {
+          setAdventureQuestionDistribution(
+            initialSpec.settings.adventureConfig.questionDistribution
+          );
+        } else {
+          setAdventureQuestionDistribution(
+            buildDefaultQuestionDistributionForTypes(advQTypes)
+          );
         }
         setAdventureConfig(
           syncAdventureStagesWithQuestions(initialSpec.settings.adventureConfig, initialSpec.questions)
@@ -648,9 +681,23 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       }
     }
 
-    if (gameType === 'ADVENTURE' && adventureQuestionTypes.length === 0) {
-      toast.error('Vui lòng chọn ít nhất một loại câu hỏi.', 'Thiếu loại câu hỏi');
-      return null;
+    if (gameType === 'ADVENTURE') {
+      if (adventureQuestionTypes.length === 0) {
+        toast.error('Vui lòng chọn ít nhất một loại câu hỏi.', 'Thiếu loại câu hỏi');
+        return null;
+      }
+      const advSum =
+        (adventureQuestionDistribution.MULTIPLE_CHOICE || 0) +
+        (adventureQuestionDistribution.QUICK_BUTTON || 0) +
+        (adventureQuestionDistribution.FILL_IN_THE_BLANK || 0) +
+        (adventureQuestionDistribution.CROSSWORD || 0);
+      if (advSum !== 100) {
+        toast.error(
+          `Tổng tỷ lệ các loại câu hỏi trong game đi cảnh hiện tại là ${advSum}%. Bạn cần điều chỉnh để tổng đúng chính xác 100%.`,
+          'Tỷ lệ câu hỏi chưa đúng 100%'
+        );
+        return null;
+      }
     }
 
     isGeneratingRef.current = true;
@@ -675,15 +722,23 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         adventureConfig:
           gameType === 'ADVENTURE'
             ? adventureIndustryMode === 'AI_DETECT'
-              ? ({ aiDetectedIndustry: true, questionTypes: adventureQuestionTypes } as any)
+              ? ({
+                  aiDetectedIndustry: true,
+                  questionTypes: adventureQuestionTypes,
+                  questionDistribution: adventureQuestionDistribution,
+                } as any)
               : ({
                   industryId: adventureIndustryMode,
                   industryLabel:
                     adventureIndustryMode === 'CUSTOM'
                       ? customIndustryName.trim() || 'Ngành nghề Tùy chỉnh'
                       : INDUSTRY_CATALOG.find(i => i.industryId === adventureIndustryMode)?.label,
+                  ...(adventureIndustryMode === 'CUSTOM' && customSubEnvironment.trim()
+                    ? { subEnvironment: customSubEnvironment.trim() }
+                    : {}),
                   aiDetectedIndustry: false,
                   questionTypes: adventureQuestionTypes,
+                  questionDistribution: adventureQuestionDistribution,
                 } as any)
             : undefined,
       });
@@ -752,9 +807,38 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       return;
     }
 
-    if (gameType === 'ADVENTURE' && adventureQuestionTypes.length === 0) {
-      toast.error('Vui lòng chọn ít nhất một loại câu hỏi.', 'Thiếu loại câu hỏi');
-      return;
+    if (gameType === 'MIXED') {
+      const mixedSum =
+        (mixedDistribution.MULTIPLE_CHOICE || 0) +
+        (mixedDistribution.QUICK_BUTTON || 0) +
+        (mixedDistribution.FILL_IN_THE_BLANK || 0) +
+        (mixedDistribution.CROSSWORD || 0);
+      if (mixedSum !== 100) {
+        toast.error(
+          `Tổng tỷ lệ các loại câu hỏi cho chế độ MIXED hiện tại là ${mixedSum}%. Bạn cần điều chỉnh để tổng đúng chính xác 100%.`,
+          'Tỷ lệ câu hỏi chưa đúng 100%'
+        );
+        return;
+      }
+    }
+
+    if (gameType === 'ADVENTURE') {
+      if (adventureQuestionTypes.length === 0) {
+        toast.error('Vui lòng chọn ít nhất một loại câu hỏi.', 'Thiếu loại câu hỏi');
+        return;
+      }
+      const advSum =
+        (adventureQuestionDistribution.MULTIPLE_CHOICE || 0) +
+        (adventureQuestionDistribution.QUICK_BUTTON || 0) +
+        (adventureQuestionDistribution.FILL_IN_THE_BLANK || 0) +
+        (adventureQuestionDistribution.CROSSWORD || 0);
+      if (advSum !== 100) {
+        toast.error(
+          `Tổng tỷ lệ các loại câu hỏi trong game đi cảnh hiện tại là ${advSum}%. Bạn cần điều chỉnh để tổng đúng chính xác 100%.`,
+          'Tỷ lệ câu hỏi chưa đúng 100%'
+        );
+        return;
+      }
     }
 
     let trimmedTitle = customGameTitle.trim();
@@ -1186,6 +1270,41 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }
   };
 
+  const [isRetryingAdventureAssets, setIsRetryingAdventureAssets] = useState(false);
+
+  const handleRetryAdventureAssets = async () => {
+    if (!generatedSpec || isRetryingAdventureAssets) return;
+    setIsRetryingAdventureAssets(true);
+    try {
+      const currentAdv = generatedSpec.settings?.adventureConfig || adventureConfig;
+      const updated = await retryAdventureAssetsApi(generatedSpec.gameId, {
+        industryId: currentAdv.industryId,
+        industryLabel: currentAdv.industryLabel,
+        subEnvironment: currentAdv.subEnvironment,
+        title: customGameTitle.trim() || generatedSpec.title,
+        description: generatedSpec.description,
+        questions: generatedSpec.questions,
+        forceRegenerate: false,
+      });
+      setGeneratedSpec(updated);
+      if (updated.settings?.adventureConfig) {
+        setAdventureConfig(updated.settings.adventureConfig);
+      }
+      toast.success(
+        'Đã tạo và xác thực thành công bộ 3 tài nguyên hình ảnh Adventure 2D (Background, Character, Obstacle)!',
+        'Tài nguyên ảnh sẵn sàng'
+      );
+    } catch (err: any) {
+      toast.error(
+        err.message ||
+          'Không thể tạo bộ tài nguyên hình ảnh Adventure. Bộ câu hỏi hiện tại vẫn được giữ nguyên.',
+        'Lỗi tạo tài nguyên ảnh'
+      );
+    } finally {
+      setIsRetryingAdventureAssets(false);
+    }
+  };
+
   const handleStartImmediately = async () => {
     if (!generatedSpec) {
       toast.error('Vui lòng tạo bộ câu hỏi trước.', 'Chưa có bộ câu hỏi');
@@ -1195,6 +1314,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       return;
     }
     const saved = await handleSaveSpecEdits(generatedSpec.isPublic);
+    if (!saved && generatedSpec.gameType === 'ADVENTURE') {
+      return;
+    }
     const target = saved || generatedSpec;
     setModeModalSpec(target);
     setIsModeModalOpen(true);
@@ -1204,6 +1326,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     if (!generatedSpec) return;
     if (!validateSpecBeforeLaunch(generatedSpec)) return;
     const saved = await handleSaveSpecEdits(true);
+    if (!saved && generatedSpec.gameType === 'ADVENTURE') {
+      return;
+    }
     const target = saved || generatedSpec;
     setModeModalSpec(target);
     setIsModeModalOpen(true);
@@ -1261,7 +1386,6 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       (mixedDistribution.FILL_IN_THE_BLANK || 0) +
       (mixedDistribution.CROSSWORD || 0);
     const isValid = total === 100;
-    const remaining = Math.max(0, 100 - total);
     const counts = calculateMixedTypeCounts(questionCount, mixedDistribution);
 
     const typesConfig = [
@@ -1293,6 +1417,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
     return (
       <div
+        data-testid="mixed-distribution-panel"
         style={{
           marginTop: '0.65rem',
           backgroundColor: 'var(--bg-input)',
@@ -1311,11 +1436,12 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
             <SparklesIcon size={15} style={{ color: 'var(--accent-sky)' }} />
             <span style={{ fontSize: '0.84rem', fontWeight: 900, color: 'var(--text-primary)', letterSpacing: '-0.01em' }}>
-              Tỉ Lệ Bộ Đề Hỗn Hợp
+              Tỉ Lệ Bộ Đề Hỗn Hợp (4 loại cơ sở)
             </span>
           </div>
 
           <div
+            data-testid="mixed-total-badge"
             style={{
               padding: '0.2rem 0.55rem',
               borderRadius: '20px',
@@ -1332,17 +1458,17 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             {isValid ? (
               <>
                 <CheckIcon size={12} />
-                <span>100% Đầy đủ (Đã khóa tăng)</span>
+                <span>Tổng: 100% Hợp lệ</span>
               </>
             ) : total > 100 ? (
               <>
                 <AlertTriangleIcon size={12} />
-                <span>{total}% (Vượt {total - 100}%)</span>
+                <span>Tổng: {total}% (Vượt {total - 100}%)</span>
               </>
             ) : (
               <>
                 <AlertTriangleIcon size={12} />
-                <span>{total}% (Còn lại {100 - total}%)</span>
+                <span>Tổng: {total}% (Còn thiếu {100 - total}%)</span>
               </>
             )}
           </div>
@@ -1361,11 +1487,12 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         >
           {typesConfig.map(tc => {
             const pct = Math.max(0, Math.min(100, mixedDistribution[tc.key] || 0));
+            const visualPct = total > 100 ? (pct / total) * 100 : pct;
             return (
               <div
                 key={tc.key}
                 style={{
-                  width: `${pct}%`,
+                  width: `${visualPct}%`,
                   backgroundColor: tc.color,
                   transition: 'width 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
                 }}
@@ -1374,6 +1501,33 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             );
           })}
         </div>
+
+        {!isValid && (
+          <div
+            role="alert"
+            data-testid="mixed-ratio-warning"
+            style={{
+              padding: '0.45rem 0.65rem',
+              borderRadius: '8px',
+              backgroundColor: total > 100 ? 'rgba(239, 68, 68, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+              border: `1px solid ${total > 100 ? 'var(--accent-rose)' : 'var(--accent-amber)'}`,
+              color: total > 100 ? 'var(--accent-rose)' : 'var(--accent-amber)',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '0.5rem',
+              flexWrap: 'wrap',
+            }}
+          >
+            <span>
+              {total < 100
+                ? `Cảnh báo: Tổng tỷ lệ hiện tại là ${total}% (< 100%). Còn thiếu ${100 - total}% để tạo game.`
+                : `Cảnh báo: Tổng tỷ lệ hiện tại là ${total}% (> 100%). Vui lòng giảm ${total - 100}% để tạo game.`}
+            </span>
+          </div>
+        )}
 
         {/* 4 Cards Grid (2 cột x 2 hàng) */}
         <div
@@ -1386,15 +1540,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           {typesConfig.map(tc => {
             const currentVal = mixedDistribution[tc.key] || 0;
             const countForType = counts[tc.key] || 0;
-            // KHI ĐỦ 100% THÌ KHÔNG CHO TĂNG TỈ LỆ 4 THẰNG NỮA:
-            // maxAllowed = currentVal + remaining (với remaining = max(0, 100 - total))
-            // Khi total === 100, remaining === 0 => maxAllowed === currentVal (chỉ có thể giảm hoặc giữ nguyên)
-            const maxAllowed = Math.min(100, currentVal + remaining);
-            const isLockedFromIncreasing = total >= 100;
 
             return (
               <div
                 key={tc.key}
+                data-testid={`mixed-card-${tc.key}`}
                 style={{
                   backgroundColor: 'var(--bg-card)',
                   border: '1px solid var(--border-subtle)',
@@ -1404,7 +1554,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   display: 'flex',
                   flexDirection: 'column',
                   gap: '0.35rem',
-                  opacity: isLockedFromIncreasing && currentVal === 0 ? 0.65 : 1,
+                  opacity: currentVal === 0 ? 0.8 : 1,
                   transition: 'opacity 0.2s ease',
                 }}
               >
@@ -1412,7 +1562,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   <span style={{ fontWeight: 800, fontSize: '0.78rem', color: tc.color, display: 'inline-flex', alignItems: 'center', gap: '0.25rem' }}>
                     <span>{tc.icon}</span> {tc.label}
                   </span>
-                  <span style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                  <span
+                    data-testid={`mixed-count-${tc.key}`}
+                    style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--text-primary)' }}
+                  >
                     {countForType} câu
                   </span>
                 </div>
@@ -1420,38 +1573,37 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
                   <input
                     type="range"
+                    data-testid={`mixed-slider-${tc.key}`}
                     min="0"
-                    max={maxAllowed}
+                    max="100"
                     step="5"
                     value={currentVal}
-                    disabled={maxAllowed === 0}
                     onChange={e => {
-                      const inputVal = parseInt(e.target.value, 10) || 0;
-                      const clamped = Math.max(0, Math.min(maxAllowed, inputVal));
+                      const raw = parseInt(e.target.value, 10);
+                      const clamped = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(100, raw));
                       setMixedDistribution(prev => ({ ...prev, [tc.key]: clamped }));
                     }}
-                    title={isLockedFromIncreasing ? (currentVal === 0 ? 'Tổng đã đạt 100%. Hãy giảm loại khác để tăng loại này.' : 'Tổng đã đạt 100%. Chỉ có thể giảm tỉ lệ.') : undefined}
                     style={{
                       flex: 1,
                       accentColor: tc.color,
-                      cursor: maxAllowed > currentVal ? 'pointer' : currentVal > 0 ? 'pointer' : 'not-allowed',
+                      cursor: 'pointer',
                       height: '4px',
                     }}
                   />
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.15rem' }}>
                     <input
                       type="number"
+                      data-testid={`mixed-input-${tc.key}`}
                       min={0}
-                      max={maxAllowed}
+                      max={100}
                       value={currentVal}
-                      disabled={maxAllowed === 0 && currentVal === 0}
                       onChange={e => {
-                        const inputVal = parseInt(e.target.value, 10) || 0;
-                        const clamped = Math.max(0, Math.min(maxAllowed, inputVal));
+                        const raw = parseInt(e.target.value, 10);
+                        const clamped = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(100, raw));
                         setMixedDistribution(prev => ({ ...prev, [tc.key]: clamped }));
                       }}
                       style={{
-                        width: '42px',
+                        width: '44px',
                         padding: '0.18rem 0.25rem',
                         borderRadius: '5px',
                         border: '1px solid var(--border-strong)',
@@ -2122,149 +2274,381 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                 ))}
               </select>
               {adventureIndustryMode === 'CUSTOM' && (
-                <input
-                  type="text"
-                  value={customIndustryName}
-                  onChange={e => setCustomIndustryName(e.target.value)}
-                  placeholder="Nhập tên ngành nghề tùy chỉnh của bạn..."
-                  style={{
-                    width: '100%',
-                    backgroundColor: 'var(--bg-card)',
-                    border: '1px solid var(--border-strong)',
-                    borderRadius: '8px',
-                    padding: '0.45rem 0.65rem',
-                    color: 'var(--text-primary)',
-                    fontSize: '0.8rem',
-                    fontWeight: 600,
-                  }}
-                />
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                  <input
+                    type="text"
+                    value={customIndustryName}
+                    onChange={e => setCustomIndustryName(e.target.value)}
+                    placeholder="Nhập tên ngành nghề tùy chỉnh của bạn (VD: Kỹ thuật hàng không vũ trụ)..."
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--bg-card)',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: '8px',
+                      padding: '0.45rem 0.65rem',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.8rem',
+                      fontWeight: 600,
+                    }}
+                  />
+                  <input
+                    type="text"
+                    value={customSubEnvironment}
+                    onChange={e => setCustomSubEnvironment(e.target.value)}
+                    placeholder="Bối cảnh mong muốn (VD: Trung tâm nghiên cứu và lắp ráp tàu vũ trụ)..."
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--bg-card)',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: '8px',
+                      padding: '0.45rem 0.65rem',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.8rem',
+                      fontWeight: 500,
+                    }}
+                  />
+                </div>
               )}
               <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
                 Khi tạo game, hệ thống sẽ phân tích nội dung nguồn để dựng đường đi, nhân vật, vật cản có va chạm và các trạm câu hỏi khớp với ngữ cảnh thực tế.
               </div>
 
-              {/* Bước chọn loại câu hỏi trong hành trình đi cảnh */}
-              <div
-                style={{
-                  marginTop: '0.35rem',
-                  paddingTop: '0.65rem',
-                  borderTop: '1px solid var(--border-subtle)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.5rem',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', flexWrap: 'wrap', gap: '0.35rem' }}>
-                  <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                    Chọn loại câu hỏi trong hành trình
-                  </span>
-                  <span style={{ fontSize: '0.72rem', fontWeight: 700, color: adventureQuestionTypes.length > 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
-                    {adventureQuestionTypes.length > 0
-                      ? `Đã chọn ${adventureQuestionTypes.length} loại`
-                      : 'Chưa chọn loại nào'}
-                  </span>
-                </div>
-                <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
-                  Bạn có thể chọn một hoặc nhiều dạng câu hỏi để xuất hiện tại các checkpoint trong game.
-                </div>
+              {/* Bước chọn loại câu hỏi và cấu hình tỷ lệ trong hành trình đi cảnh */}
+              {(() => {
+                const advTotal =
+                  (adventureQuestionDistribution.MULTIPLE_CHOICE || 0) +
+                  (adventureQuestionDistribution.QUICK_BUTTON || 0) +
+                  (adventureQuestionDistribution.FILL_IN_THE_BLANK || 0) +
+                  (adventureQuestionDistribution.CROSSWORD || 0);
+                const advValid = adventureQuestionTypes.length > 0 && advTotal === 100;
+                const advCounts = calculateMixedTypeCounts(questionCount, adventureQuestionDistribution);
+                const advTypeOptions = [
+                  {
+                    type: 'MULTIPLE_CHOICE' as const,
+                    label: 'Trắc nghiệm 4 lựa chọn',
+                    shortLabel: 'Trắc nghiệm',
+                    desc: '4 phương án A, B, C, D',
+                    color: 'var(--game-mc)',
+                    icon: '▲',
+                  },
+                  {
+                    type: 'QUICK_BUTTON' as const,
+                    label: 'Bấm nhanh / Đúng-Sai',
+                    shortLabel: 'Đúng / Sai',
+                    desc: 'Nhận định nhanh Đúng hoặc Sai',
+                    color: 'var(--game-qb)',
+                    icon: '◆',
+                  },
+                  {
+                    type: 'FILL_IN_THE_BLANK' as const,
+                    label: 'Điền vào chỗ trống',
+                    shortLabel: 'Điền từ',
+                    desc: 'Điền từ khóa còn thiếu vào câu',
+                    color: 'var(--game-fill)',
+                    icon: '●',
+                  },
+                  {
+                    type: 'CROSSWORD' as const,
+                    label: 'Ô chữ (Crossword)',
+                    shortLabel: 'Ô chữ',
+                    desc: 'Giải từ khóa theo gợi ý định nghĩa',
+                    color: 'var(--game-cross)',
+                    icon: '■',
+                  },
+                ];
 
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
-                    gap: '0.45rem',
-                  }}
-                >
-                  {[
-                    {
-                      type: 'MULTIPLE_CHOICE' as QuestionType,
-                      label: 'Trắc nghiệm 4 lựa chọn',
-                      desc: '4 phương án A, B, C, D',
-                    },
-                    {
-                      type: 'QUICK_BUTTON' as QuestionType,
-                      label: 'Đúng / Sai',
-                      desc: 'Nhận định nhanh Đúng hoặc Sai',
-                    },
-                    {
-                      type: 'FILL_IN_THE_BLANK' as QuestionType,
-                      label: 'Điền từ vào chỗ trống',
-                      desc: 'Điền từ khóa còn thiếu vào câu',
-                    },
-                  ].map(opt => {
-                    const checked = adventureQuestionTypes.includes(opt.type);
-                    return (
-                      <button
-                        key={opt.type}
-                        type="button"
-                        role="checkbox"
-                        aria-checked={checked}
-                        onClick={() => toggleAdventureQuestionType(opt.type)}
-                        style={{
-                          textAlign: 'left',
-                          padding: '0.55rem 0.65rem',
-                          borderRadius: '8px',
-                          backgroundColor: checked ? 'var(--bg-elevated)' : 'var(--bg-card)',
-                          border: checked
-                            ? '1.5px solid var(--primary)'
-                            : '1px solid var(--border-strong)',
-                          color: 'var(--text-primary)',
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'flex-start',
-                          gap: '0.5rem',
-                          transition: 'border-color 0.15s ease, background-color 0.15s ease',
-                        }}
-                      >
-                        <span
-                          style={{
-                            width: '16px',
-                            height: '16px',
-                            borderRadius: '4px',
-                            marginTop: '1px',
-                            flexShrink: 0,
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            backgroundColor: checked ? 'var(--primary)' : 'var(--bg-input)',
-                            border: checked ? 'none' : '1px solid var(--border-strong)',
-                            color: 'var(--primary-ink, #090d16)',
-                            fontSize: '0.68rem',
-                            fontWeight: 900,
-                          }}
-                        >
-                          {checked ? '✓' : ''}
-                        </span>
-                        <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-primary)' }}>
-                            {opt.label}
-                          </div>
-                          <div style={{ fontSize: '0.7rem', color: 'var(--text-secondary)', marginTop: '0.1rem' }}>
-                            {opt.desc}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                {adventureQuestionTypes.length === 0 && (
+                return (
                   <div
-                    role="alert"
+                    data-testid="adventure-question-config-panel"
                     style={{
-                      padding: '0.45rem 0.65rem',
-                      borderRadius: '6px',
-                      backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                      border: '1px solid var(--accent-rose)',
-                      color: 'var(--accent-rose)',
-                      fontSize: '0.75rem',
-                      fontWeight: 700,
+                      marginTop: '0.35rem',
+                      paddingTop: '0.65rem',
+                      borderTop: '1px solid var(--border-subtle)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.55rem',
                     }}
                   >
-                    Vui lòng chọn ít nhất một loại câu hỏi.
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                        Loại câu hỏi trong game đi cảnh
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <span
+                          data-testid="adventure-selected-types-badge"
+                          style={{
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            color: adventureQuestionTypes.length > 0 ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                          }}
+                        >
+                          {adventureQuestionTypes.length > 0
+                            ? `Đã chọn ${adventureQuestionTypes.length}/4 loại`
+                            : 'Chưa chọn loại nào'}
+                        </span>
+                        <span
+                          data-testid="adventure-total-badge"
+                          style={{
+                            padding: '0.15rem 0.5rem',
+                            borderRadius: '16px',
+                            fontSize: '0.72rem',
+                            fontWeight: 800,
+                            backgroundColor: advValid
+                              ? 'rgba(16, 185, 129, 0.15)'
+                              : advTotal > 100 || adventureQuestionTypes.length === 0
+                                ? 'rgba(239, 68, 68, 0.15)'
+                                : 'rgba(245, 158, 11, 0.15)',
+                            color: advValid
+                              ? 'var(--accent-emerald)'
+                              : advTotal > 100 || adventureQuestionTypes.length === 0
+                                ? 'var(--accent-rose)'
+                                : 'var(--accent-amber)',
+                            border: `1px solid ${
+                              advValid
+                                ? 'var(--accent-emerald)'
+                                : advTotal > 100 || adventureQuestionTypes.length === 0
+                                  ? 'var(--accent-rose)'
+                                  : 'var(--accent-amber)'
+                            }`,
+                          }}
+                        >
+                          {advValid
+                            ? 'Tổng: 100% Hợp lệ'
+                            : advTotal > 100
+                              ? `Tổng: ${advTotal}% (Vượt ${advTotal - 100}%)`
+                              : `Tổng: ${advTotal}% (Còn thiếu ${100 - advTotal}%)`}
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                      Chọn từ 1 đến 4 loại câu hỏi nguyên tử xuất hiện tại các checkpoint và tùy chỉnh tỷ lệ phần trăm (tổng phải đúng 100%).
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(185px, 1fr))',
+                        gap: '0.45rem',
+                      }}
+                    >
+                      {advTypeOptions.map(opt => {
+                        const checked = adventureQuestionTypes.includes(opt.type);
+                        const pct = checked ? adventureQuestionDistribution[opt.type] || 0 : 0;
+                        const countForType = checked ? advCounts[opt.type] || 0 : 0;
+                        return (
+                          <div
+                            key={opt.type}
+                            data-testid={`adventure-type-card-${opt.type}`}
+                            style={{
+                              padding: '0.55rem 0.65rem',
+                              borderRadius: '8px',
+                              backgroundColor: checked ? 'var(--bg-elevated)' : 'var(--bg-card)',
+                              border: checked
+                                ? '1.5px solid var(--primary)'
+                                : '1px solid var(--border-strong)',
+                              borderLeft: `3px solid ${checked ? opt.color : 'var(--border-strong)'}`,
+                              color: 'var(--text-primary)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.4rem',
+                              opacity: checked ? 1 : 0.72,
+                              transition: 'border-color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease',
+                            }}
+                          >
+                            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.4rem' }}>
+                              <button
+                                type="button"
+                                role="checkbox"
+                                data-testid={`adventure-type-toggle-${opt.type}`}
+                                aria-checked={checked}
+                                onClick={() => toggleAdventureQuestionType(opt.type)}
+                                style={{
+                                  textAlign: 'left',
+                                  padding: 0,
+                                  border: 'none',
+                                  background: 'transparent',
+                                  color: 'var(--text-primary)',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'flex-start',
+                                  gap: '0.45rem',
+                                  flex: 1,
+                                  minWidth: 0,
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    width: '16px',
+                                    height: '16px',
+                                    borderRadius: '4px',
+                                    marginTop: '1px',
+                                    flexShrink: 0,
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    backgroundColor: checked ? 'var(--primary)' : 'var(--bg-input)',
+                                    border: checked ? 'none' : '1px solid var(--border-strong)',
+                                    color: 'var(--primary-ink, #090d16)',
+                                    fontSize: '0.68rem',
+                                    fontWeight: 900,
+                                  }}
+                                >
+                                  {checked ? '✓' : ''}
+                                </span>
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontSize: '0.78rem', fontWeight: 800, color: checked ? opt.color : 'var(--text-primary)' }}>
+                                    {opt.icon} {opt.label}
+                                  </div>
+                                  <div style={{ fontSize: '0.69rem', color: 'var(--text-secondary)', marginTop: '0.08rem' }}>
+                                    {opt.desc}
+                                  </div>
+                                </div>
+                              </button>
+                              <span
+                                data-testid={`adventure-count-${opt.type}`}
+                                style={{
+                                  fontSize: '0.72rem',
+                                  fontWeight: 800,
+                                  color: checked ? 'var(--text-primary)' : 'var(--text-muted)',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {countForType} câu
+                              </span>
+                            </div>
+
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                              <input
+                                type="range"
+                                data-testid={`adventure-slider-${opt.type}`}
+                                min="0"
+                                max="100"
+                                step="5"
+                                value={pct}
+                                disabled={!checked}
+                                onChange={e => {
+                                  if (!checked) return;
+                                  const raw = parseInt(e.target.value, 10);
+                                  const clamped = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(100, raw));
+                                  setAdventureQuestionDistribution(prev => ({
+                                    ...prev,
+                                    [opt.type]: clamped,
+                                  }));
+                                }}
+                                style={{
+                                  flex: 1,
+                                  accentColor: opt.color,
+                                  cursor: checked ? 'pointer' : 'not-allowed',
+                                  height: '4px',
+                                }}
+                              />
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.15rem' }}>
+                                <input
+                                  type="number"
+                                  data-testid={`adventure-input-${opt.type}`}
+                                  min={0}
+                                  max={100}
+                                  value={pct}
+                                  disabled={!checked}
+                                  onChange={e => {
+                                    if (!checked) return;
+                                    const raw = parseInt(e.target.value, 10);
+                                    const clamped = Number.isNaN(raw) ? 0 : Math.max(0, Math.min(100, raw));
+                                    setAdventureQuestionDistribution(prev => ({
+                                      ...prev,
+                                      [opt.type]: clamped,
+                                    }));
+                                  }}
+                                  style={{
+                                    width: '44px',
+                                    padding: '0.16rem 0.22rem',
+                                    borderRadius: '5px',
+                                    border: '1px solid var(--border-strong)',
+                                    backgroundColor: checked ? 'var(--bg-input)' : 'var(--bg-card)',
+                                    color: checked ? 'var(--text-primary)' : 'var(--text-muted)',
+                                    fontSize: '0.76rem',
+                                    fontWeight: 800,
+                                    textAlign: 'center',
+                                    boxSizing: 'border-box',
+                                  }}
+                                />
+                                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-muted)' }}>%</span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {adventureQuestionTypes.length > 0 && (
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.4rem', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.71rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                          Loại không chọn cố định ở 0% và không sinh câu hỏi.
+                        </span>
+                        <button
+                          type="button"
+                          data-testid="adventure-rebalance-btn"
+                          onClick={() =>
+                            setAdventureQuestionDistribution(
+                              buildDefaultQuestionDistributionForTypes(adventureQuestionTypes)
+                            )
+                          }
+                          style={{
+                            padding: '0.18rem 0.55rem',
+                            borderRadius: '6px',
+                            backgroundColor: 'var(--bg-card)',
+                            border: '1px solid var(--border-strong)',
+                            color: 'var(--text-secondary)',
+                            fontSize: '0.71rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Chia đều 100% ({adventureQuestionTypes.length} loại)
+                        </button>
+                      </div>
+                    )}
+
+                    {adventureQuestionTypes.length === 0 && (
+                      <div
+                        role="alert"
+                        data-testid="adventure-empty-types-warning"
+                        style={{
+                          padding: '0.45rem 0.65rem',
+                          borderRadius: '6px',
+                          backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                          border: '1px solid var(--accent-rose)',
+                          color: 'var(--accent-rose)',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                        }}
+                      >
+                        Vui lòng chọn ít nhất một loại câu hỏi cho game Đi cảnh.
+                      </div>
+                    )}
+
+                    {adventureQuestionTypes.length > 0 && advTotal !== 100 && (
+                      <div
+                        role="alert"
+                        data-testid="adventure-ratio-warning"
+                        style={{
+                          padding: '0.45rem 0.65rem',
+                          borderRadius: '6px',
+                          backgroundColor: advTotal > 100 ? 'rgba(239, 68, 68, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+                          border: `1px solid ${advTotal > 100 ? 'var(--accent-rose)' : 'var(--accent-amber)'}`,
+                          color: advTotal > 100 ? 'var(--accent-rose)' : 'var(--accent-amber)',
+                          fontSize: '0.75rem',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {advTotal < 100
+                          ? `Cảnh báo: Tổng tỷ lệ câu hỏi Adventure hiện tại là ${advTotal}% (< 100%). Còn thiếu ${100 - advTotal}% để tạo game.`
+                          : `Cảnh báo: Tổng tỷ lệ câu hỏi Adventure hiện tại là ${advTotal}% (> 100%). Vui lòng giảm ${advTotal - 100}% để tạo game.`}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
+                );
+              })()}
             </div>
           )}
         </div>
@@ -3070,55 +3454,63 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               </div>
 
               {/* Nút hành động chính: Tạo Game Bằng AI */}
-              <button
-                type="button"
-                onClick={handleCreateGameUnified}
-                disabled={
-                  isGenerating ||
-                  isIngesting ||
-                  (!urls.some(u => u.trim()) && files.length === 0 && !topicFocus.trim() && ingestedSources.length === 0)
-                }
-                style={{
-                  width: '100%',
-                  backgroundColor: 'var(--primary)',
-                  color: 'var(--primary-ink)',
-                  border: 'none',
-                  borderRadius: '10px',
-                  padding: '0.75rem 1.25rem',
-                  fontSize: '0.92rem',
-                  fontWeight: 900,
-                  cursor:
-                    isGenerating ||
-                    isIngesting ||
-                    (!urls.some(u => u.trim()) && files.length === 0 && !topicFocus.trim() && ingestedSources.length === 0)
-                      ? 'not-allowed'
-                      : 'pointer',
-                  opacity:
-                    isGenerating ||
-                    isIngesting ||
-                    (!urls.some(u => u.trim()) && files.length === 0 && !topicFocus.trim() && ingestedSources.length === 0)
-                      ? 0.6
-                      : 1,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.45rem',
-                  minHeight: '44px',
-                  boxShadow: 'var(--btn-shadow)',
-                }}
-              >
-                {isGenerating || isIngesting ? (
-                  <>
-                    <SpinnerIcon size={16} />
-                    <span>{isIngesting ? 'Đang Nạp Nguồn...' : 'AI Đang Biên Soạn...'}</span>
-                  </>
-                ) : (
-                  <>
-                    <SparklesIcon size={16} />
-                    <span>{generatedSpec ? 'Tái Tạo Bộ Câu Hỏi AI' : 'Tạo Game Bằng AI'}</span>
-                  </>
-                )}
-              </button>
+              {(() => {
+                const mixedTotalNow =
+                  (mixedDistribution.MULTIPLE_CHOICE || 0) +
+                  (mixedDistribution.QUICK_BUTTON || 0) +
+                  (mixedDistribution.FILL_IN_THE_BLANK || 0) +
+                  (mixedDistribution.CROSSWORD || 0);
+                const advTotalNow =
+                  (adventureQuestionDistribution.MULTIPLE_CHOICE || 0) +
+                  (adventureQuestionDistribution.QUICK_BUTTON || 0) +
+                  (adventureQuestionDistribution.FILL_IN_THE_BLANK || 0) +
+                  (adventureQuestionDistribution.CROSSWORD || 0);
+                const isRatioInvalid =
+                  (gameType === 'MIXED' && mixedTotalNow !== 100) ||
+                  (gameType === 'ADVENTURE' && (adventureQuestionTypes.length === 0 || advTotalNow !== 100));
+                const isSourceMissing =
+                  !urls.some(u => u.trim()) && files.length === 0 && !topicFocus.trim() && ingestedSources.length === 0;
+                const isBtnDisabled = isGenerating || isIngesting || isSourceMissing || isRatioInvalid;
+
+                return (
+                  <button
+                    type="button"
+                    data-testid="create-game-submit-btn"
+                    onClick={handleCreateGameUnified}
+                    disabled={isBtnDisabled}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--primary)',
+                      color: 'var(--primary-ink)',
+                      border: 'none',
+                      borderRadius: '10px',
+                      padding: '0.75rem 1.25rem',
+                      fontSize: '0.92rem',
+                      fontWeight: 900,
+                      cursor: isBtnDisabled ? 'not-allowed' : 'pointer',
+                      opacity: isBtnDisabled ? 0.6 : 1,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.45rem',
+                      minHeight: '44px',
+                      boxShadow: 'var(--btn-shadow)',
+                    }}
+                  >
+                    {isGenerating || isIngesting ? (
+                      <>
+                        <SpinnerIcon size={16} />
+                        <span>{isIngesting ? 'Đang Nạp Nguồn...' : 'AI Đang Biên Soạn...'}</span>
+                      </>
+                    ) : (
+                      <>
+                        <SparklesIcon size={16} />
+                        <span>{generatedSpec ? 'Tái Tạo Bộ Câu Hỏi AI' : 'Tạo Game Bằng AI'}</span>
+                      </>
+                    )}
+                  </button>
+                );
+              })()}
 
               {/* Loading Telemetry State (khi đang xử lý) */}
               {(isGenerating || isIngesting) && (
@@ -3316,7 +3708,101 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                             {generatedSpec.questions.filter(q => q.type === 'FILL_IN_THE_BLANK').length} câu
                           </span>
                         </div>
+                        <div>
+                          <span style={{ color: 'var(--game-cross)', fontWeight: 800 }}>■ Ô chữ: </span>
+                          <span style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
+                            {generatedSpec.questions.filter(q => q.type === 'CROSSWORD').length} câu
+                          </span>
+                        </div>
                       </div>
+                      {/* Trạng thái xác thực tài nguyên hình ảnh Adventure 2D */}
+                      {(() => {
+                        const activeAdv = generatedSpec.settings?.adventureConfig || adventureConfig;
+                        const status = activeAdv?.assetStatus;
+                        const hasVerifiedAssets =
+                          status === 'READY' &&
+                          Boolean(
+                            activeAdv?.assets?.background?.verified &&
+                              activeAdv?.assets?.character?.verified &&
+                              activeAdv?.assets?.obstacle?.verified
+                          );
+                        if (hasVerifiedAssets) {
+                          return (
+                            <div
+                              style={{
+                                marginTop: '0.25rem',
+                                padding: '0.45rem 0.65rem',
+                                borderRadius: '6px',
+                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                border: '1px solid rgba(16, 185, 129, 0.3)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                flexWrap: 'wrap',
+                                gap: '0.4rem',
+                                fontSize: '0.75rem',
+                              }}
+                            >
+                              <span style={{ color: 'var(--accent-emerald)', fontWeight: 800 }}>
+                                ✓ Đã xác thực đủ 3/3 tài nguyên ảnh 2D (Background • Character • Obstacle)
+                              </span>
+                              <span style={{ color: 'var(--text-secondary)', fontWeight: 700 }}>
+                                {activeAdv.assetPackSource === 'GEMINI_BANANA_RUNTIME'
+                                  ? 'Banana Runtime'
+                                  : 'Banana Asset Pack'}
+                              </span>
+                            </div>
+                          );
+                        }
+                        if (status === 'ASSET_GENERATION_FAILED' || status === 'ASSET_GENERATION_PENDING') {
+                          return (
+                            <div
+                              role="alert"
+                              style={{
+                                marginTop: '0.25rem',
+                                padding: '0.6rem 0.75rem',
+                                borderRadius: '8px',
+                                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                border: '1px solid var(--accent-rose)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.4rem',
+                                fontSize: '0.76rem',
+                              }}
+                            >
+                              <div style={{ color: 'var(--accent-rose)', fontWeight: 800 }}>
+                                ⚠ Chưa thể hoàn tất lưu/xuất bản vì thiếu bộ 3 tài nguyên ảnh 2D hợp lệ (Background, Character, Obstacle).
+                              </div>
+                              <div style={{ color: 'var(--text-secondary)', lineHeight: 1.4 }}>
+                                {activeAdv.assetError ||
+                                  'Không thể tạo ảnh từ Banana API. Bộ câu hỏi đã tạo vẫn được giữ nguyên trong bản nháp.'}
+                              </div>
+                              <div>
+                                <button
+                                  type="button"
+                                  onClick={handleRetryAdventureAssets}
+                                  disabled={isRetryingAdventureAssets}
+                                  style={{
+                                    backgroundColor: 'var(--primary)',
+                                    color: 'var(--primary-ink)',
+                                    border: 'none',
+                                    borderRadius: '6px',
+                                    padding: '0.35rem 0.7rem',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 800,
+                                    cursor: isRetryingAdventureAssets ? 'not-allowed' : 'pointer',
+                                  }}
+                                >
+                                  {isRetryingAdventureAssets
+                                    ? 'Đang thử tạo lại ảnh...'
+                                    : 'Thử Tạo Lại Tài Nguyên Ảnh (Giữ Nguyên Câu Hỏi)'}
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                   )}
                   {generatedSpec.gameType === 'ADVENTURE' && (

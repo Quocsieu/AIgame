@@ -1,2240 +1,1925 @@
-import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  buildDefaultAdventureConfig,
+  syncAdventureStagesWithQuestions,
+} from '../config/adventureThemes.js';
 import type {
+  AdventureAssetMetadata,
   AdventureConfig,
-  AvatarId,
   GameQuestion,
   GameSpecification,
-  ObstacleType,
+  IndustryId,
   PracticeFinalResult,
   PracticeQuestionResult,
   SanitizedQuestion,
 } from '../types/index.js';
-import {
-  OBSTACLE_METADATA,
-  syncAdventureStagesWithQuestions,
-} from '../config/adventureThemes.js';
-import { resolveSceneRendererDescriptor } from './AdventureSceneRegistry.js';
-import {
-  MechanicalDiagnosticGarageScene,
-  KitchenFoodSafetyLabScene,
-  CustomerConsultationShowroomScene,
-  CodingIdeDebuggerScene,
-  CyberDefenseSocRadarScene,
-  MedicalClinicalTriageScene,
-  AcademyKnowledgeLabScene,
-} from './AdventureInteractiveScenes.js';
 
-function playTone(freq: number, durationSec: number, type: OscillatorType = 'sine'): void {
-  try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = type;
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.08, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + durationSec);
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + durationSec);
-  } catch {
-    // Ignore audio context restrictions
-  }
+export type AdventureAssetItem = AdventureAssetMetadata;
+
+export const ADVENTURE_START_INSTRUCTION =
+  'Nhân vật tự chạy. Chạm màn hình hoặc nhấn Space để nhảy. Trả lời câu hỏi tại checkpoint để đi tiếp.';
+
+const KNOWN_CONCRETE_INDUSTRIES: ReadonlySet<IndustryId> = new Set<IndustryId>([
+  'MOTORCYCLE_TRAFFIC',
+  'BUSINESS_SALES',
+  'MANUFACTURING_INDUSTRIAL',
+  'IT_TECHNOLOGY',
+  'HEALTHCARE_TRAINING',
+  'FINANCE_BANKING',
+  'FNB_HOSPITALITY',
+  'EDUCATION_GENERAL',
+]);
+
+export type JumpState = 'GROUNDED' | 'JUMPING' | 'LANDING';
+
+export interface ResolvedAdventureEngineAssets {
+  valid: boolean;
+  isLegacyFallback: boolean;
+  industryId: IndustryId;
+  errorCode: string | null;
+  errorMessage: string | null;
+  missingOrInvalidAssets: Array<'BACKGROUND' | 'CHARACTER' | 'OBSTACLE'>;
+  assets: {
+    background: AdventureAssetItem;
+    character: AdventureAssetItem;
+    obstacle: AdventureAssetItem;
+  } | null;
 }
 
-const playClickSound = () => playTone(520, 0.08, 'triangle');
-const playCorrectSound = () => {
-  playTone(587.33, 0.12, 'sine');
-  setTimeout(() => playTone(880, 0.18, 'sine'), 90);
-};
-const playWrongSound = () => playTone(220, 0.22, 'sawtooth');
-const playVictorySound = () => {
-  playTone(523.25, 0.12, 'triangle');
-  setTimeout(() => playTone(659.25, 0.12, 'triangle'), 100);
-  setTimeout(() => playTone(783.99, 0.25, 'triangle'), 200);
-};
+function isSafeAssetUrl(url: unknown): url is string {
+  if (typeof url !== 'string') return false;
+  const trimmed = url.trim();
+  if (!trimmed || trimmed.includes('..') || trimmed.includes('\\') || /\s/.test(trimmed)) {
+    return false;
+  }
+  return (
+    trimmed.startsWith('/adventure-assets/') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://') ||
+    trimmed.startsWith('data:image/')
+  );
+}
 
-interface WorldObstacle {
+/**
+ * Validates and resolves the 3 required 2D Adventure image assets (background, character, obstacle).
+ * Strictly forbids cross-industry fallback (e.g. never uses MOTORCYCLE_TRAFFIC assets for another industry).
+ */
+export function resolveAdventureRuntimeAssets(
+  config: AdventureConfig
+): ResolvedAdventureEngineAssets {
+  const industryId = config.industryId;
+
+  if (
+    config.assetStatus === 'ASSET_GENERATION_FAILED' ||
+    config.assetStatus === 'ASSET_GENERATION_PENDING'
+  ) {
+    return {
+      valid: false,
+      isLegacyFallback: false,
+      industryId,
+      errorCode: config.assetErrorCode || 'ADVENTURE_ASSETS_NOT_READY',
+      errorMessage:
+        config.assetError ||
+        `Tài nguyên hình ảnh 2D cho ngành "${config.industryLabel || industryId}" chưa sẵn sàng hoặc tạo thất bại.`,
+      missingOrInvalidAssets: ['BACKGROUND', 'CHARACTER', 'OBSTACLE'],
+      assets: null,
+    };
+  }
+
+  if (config.assets) {
+    const rawBg = config.assets.background;
+    const rawChar = config.assets.character;
+    const rawObs = config.assets.obstacle;
+
+    const missingOrInvalid: Array<'BACKGROUND' | 'CHARACTER' | 'OBSTACLE'> = [];
+    const mismatchErrors: string[] = [];
+
+    const checkSlot = (
+      item: AdventureAssetItem | undefined,
+      expectedType: 'BACKGROUND' | 'CHARACTER' | 'OBSTACLE'
+    ) => {
+      if (!item || !isSafeAssetUrl(item.url) || item.verified === false) {
+        missingOrInvalid.push(expectedType);
+        return;
+      }
+      if (item.assetType !== expectedType) {
+        missingOrInvalid.push(expectedType);
+        return;
+      }
+      if (item.industryId !== industryId) {
+        missingOrInvalid.push(expectedType);
+        mismatchErrors.push(
+          `Tài nguyên ${expectedType} thuộc ngành "${item.industryId}" không khớp với ngành của game ("${industryId}").`
+        );
+      }
+    };
+
+    checkSlot(rawBg, 'BACKGROUND');
+    checkSlot(rawChar, 'CHARACTER');
+    checkSlot(rawObs, 'OBSTACLE');
+
+    if (missingOrInvalid.length > 0) {
+      const isCrossIndustry = mismatchErrors.length > 0;
+      return {
+        valid: false,
+        isLegacyFallback: false,
+        industryId,
+        errorCode: isCrossIndustry ? 'CROSS_INDUSTRY_ASSET_MISMATCH' : 'INVALID_ADVENTURE_ASSETS',
+        errorMessage: isCrossIndustry
+          ? mismatchErrors.join(' ')
+          : `Thiếu hoặc không hợp lệ các tài nguyên hình ảnh bắt buộc: ${missingOrInvalid.join(', ')}.`,
+        missingOrInvalidAssets: missingOrInvalid,
+        assets: null,
+      };
+    }
+
+    return {
+      valid: true,
+      isLegacyFallback: false,
+      industryId,
+      errorCode: null,
+      errorMessage: null,
+      missingOrInvalidAssets: [],
+      assets: {
+        background: rawBg,
+        character: rawChar,
+        obstacle: rawObs,
+      },
+    };
+  }
+
+  // No assets object bound on config:
+  // If this is a Phase 3+ game (version >= 2, assetStatus present, or CUSTOM industry), block gameplay!
+  const isPhase3OrCustom =
+    industryId === 'CUSTOM' ||
+    (config.version ?? 1) >= 2 ||
+    config.assetStatus !== undefined;
+
+  if (isPhase3OrCustom) {
+    return {
+      valid: false,
+      isLegacyFallback: false,
+      industryId,
+      errorCode: 'MISSING_ADVENTURE_ASSETS',
+      errorMessage: `Game Adventure ngành "${config.industryLabel || industryId}" thiếu bộ 3 tài nguyên hình ảnh bắt buộc (background, character, obstacle).`,
+      missingOrInvalidAssets: ['BACKGROUND', 'CHARACTER', 'OBSTACLE'],
+      assets: null,
+    };
+  }
+
+  // Legacy v1 Adventure game created before Phase 3: resolve its own industry's verified static pack
+  if (KNOWN_CONCRETE_INDUSTRIES.has(industryId)) {
+    const basePackPath = `/adventure-assets/packs/${industryId}`;
+    const relPackPath = `adventure-assets/packs/${industryId}`;
+    return {
+      valid: true,
+      isLegacyFallback: true,
+      industryId,
+      errorCode: null,
+      errorMessage: null,
+      missingOrInvalidAssets: [],
+      assets: {
+        background: {
+          assetType: 'BACKGROUND',
+          industryId,
+          fileName: 'background.png',
+          url: `${basePackPath}/background.png`,
+          relativePath: `${relPackPath}/background.png`,
+          mimeType: 'image/png',
+          sizeBytes: 1,
+          width: 1376,
+          height: 768,
+          sha256: 'legacy-pack-bg',
+          source: 'ANTIGRAVITY_BANANA_PACK',
+          verified: true,
+        },
+        character: {
+          assetType: 'CHARACTER',
+          industryId,
+          fileName: 'character.png',
+          url: `${basePackPath}/character.png`,
+          relativePath: `${relPackPath}/character.png`,
+          mimeType: 'image/png',
+          sizeBytes: 1,
+          width: 1024,
+          height: 1024,
+          sha256: 'legacy-pack-char',
+          source: 'ANTIGRAVITY_BANANA_PACK',
+          verified: true,
+        },
+        obstacle: {
+          assetType: 'OBSTACLE',
+          industryId,
+          fileName: 'obstacle.png',
+          url: `${basePackPath}/obstacle.png`,
+          relativePath: `${relPackPath}/obstacle.png`,
+          mimeType: 'image/png',
+          sizeBytes: 1,
+          width: 1024,
+          height: 1024,
+          sha256: 'legacy-pack-obs',
+          source: 'ANTIGRAVITY_BANANA_PACK',
+          verified: true,
+        },
+      },
+    };
+  }
+
+  return {
+    valid: false,
+    isLegacyFallback: false,
+    industryId,
+    errorCode: 'UNKNOWN_INDUSTRY_PACK',
+    errorMessage: `Không tìm thấy gói tài nguyên hình ảnh hợp lệ cho ngành "${industryId}".`,
+    missingOrInvalidAssets: ['BACKGROUND', 'CHARACTER', 'OBSTACLE'],
+    assets: null,
+  };
+}
+
+export interface RunnerObstacleInstance {
   id: string;
-  stageIndex: number;
   x: number;
   width: number;
   height: number;
-  type: ObstacleType;
+  stageIndex: number;
   cleared: boolean;
-  hit: boolean;
+  hitCooldown: number;
 }
 
-interface WorldCollectible {
-  id: string;
-  x: number;
-  yOffset: number;
-  label: string;
-  collected: boolean;
-}
-
-interface WorldDecor {
-  id: string;
-  x: number;
-  kind: 'SIGN' | 'LAMP' | 'TREE' | 'PILLAR' | 'BANNER';
-  label?: string;
-}
-
-interface FloatingParticle {
-  id: number;
-  x: number;
-  y: number;
+export interface AdventureRunnerPhysicsState {
+  playerX: number;
+  playerY: number; // 0 = grounded on road surface, negative = airborne height above ground
   vx: number;
   vy: number;
-  color: string;
-  size: number;
-  alpha: number;
-  text?: string;
+  isGrounded: boolean;
+  jumpState: JumpState;
+  cameraX: number;
+  obstacles: RunnerObstacleInstance[];
+  checkpointPositions: number[];
+  finishLineX: number;
+  unlockedStageCount: number;
+  activeStageIndex: number;
+  isAtCheckpoint: boolean;
+  isFinished: boolean;
+  hitFlashTimer: number;
+  obstaclesCleared: number;
+  obstacleHits: number;
+}
+
+export const RUNNER_START_X = 140;
+export const RUNNER_STAGE_SEGMENT_LENGTH = 900;
+export const RUNNER_BASE_SPEED = 290;
+export const RUNNER_JUMP_VELOCITY = -640;
+export const RUNNER_GRAVITY = 1580;
+export const RUNNER_CHECKPOINT_STOP_OFFSET = 28;
+export const RUNNER_MAX_FRAME_DT = 0.033;
+
+export function createInitialRunnerPhysicsState(params: {
+  totalStages: number;
+  obstacleDensity?: 'LOW' | 'MEDIUM' | 'HIGH';
+  initialUnlockedStages?: number;
+}): AdventureRunnerPhysicsState {
+  const totalStages = Math.max(1, params.totalStages);
+  const density = params.obstacleDensity || 'MEDIUM';
+  const checkpointPositions: number[] = [];
+  const obstacles: RunnerObstacleInstance[] = [];
+
+  for (let idx = 0; idx < totalStages; idx++) {
+    const cpX = (idx + 1) * RUNNER_STAGE_SEGMENT_LENGTH;
+    checkpointPositions.push(cpX);
+
+    const segStart = idx === 0 ? RUNNER_START_X : checkpointPositions[idx - 1];
+    // Guaranteed minimum >= 280px spacing between obstacles and safe buffers from start/checkpoint
+    const obsPositions =
+      density === 'LOW'
+        ? [segStart + 380]
+        : [segStart + 290, segStart + 590];
+
+    obsPositions.forEach((ox, oIdx) => {
+      if (ox < cpX - 220) {
+        obstacles.push({
+          id: `obs_${idx}_${oIdx}`,
+          x: ox,
+          width: 58,
+          height: 58,
+          stageIndex: idx,
+          cleared: false,
+          hitCooldown: 0,
+        });
+      }
+    });
+  }
+
+  const finishLineX = totalStages * RUNNER_STAGE_SEGMENT_LENGTH + 340;
+  const unlockedStageCount = Math.max(
+    0,
+    Math.min(totalStages, params.initialUnlockedStages ?? 0)
+  );
+  const startX =
+    unlockedStageCount > 0 && checkpointPositions[unlockedStageCount - 1] !== undefined
+      ? checkpointPositions[unlockedStageCount - 1] + 36
+      : RUNNER_START_X;
+
+  for (const obs of obstacles) {
+    if (obs.x < startX) {
+      obs.cleared = true;
+    }
+  }
+
+  return {
+    playerX: startX,
+    playerY: 0,
+    vx: 0,
+    vy: 0,
+    isGrounded: true,
+    jumpState: 'GROUNDED',
+    cameraX: Math.max(0, startX - 180),
+    obstacles,
+    checkpointPositions,
+    finishLineX,
+    unlockedStageCount,
+    activeStageIndex: Math.min(unlockedStageCount, totalStages - 1),
+    isAtCheckpoint: false,
+    isFinished: false,
+    hitFlashTimer: 0,
+    obstaclesCleared: 0,
+    obstacleHits: 0,
+  };
+}
+
+/**
+ * Initiates a jump ONLY if the character is currently grounded and controls are unlocked.
+ * Prevents mid-air double/infinite jumping and blocks jumping while a checkpoint modal is open.
+ */
+export function triggerRunnerJump(
+  state: AdventureRunnerPhysicsState,
+  canControl: boolean
+): boolean {
+  if (!canControl) return false;
+  if (state.isAtCheckpoint || state.isFinished) return false;
+  if (!state.isGrounded || state.jumpState !== 'GROUNDED' || state.playerY < -0.5) {
+    return false;
+  }
+
+  state.vy = RUNNER_JUMP_VELOCITY;
+  state.isGrounded = false;
+  state.jumpState = 'JUMPING';
+  return true;
+}
+
+export interface StepRunnerPhysicsOptions {
+  canMove: boolean;
+  speedMultiplier?: number;
+  playerAnchorScreenX?: number;
+}
+
+export interface StepRunnerPhysicsEvents {
+  reachedCheckpointIndex: number | null;
+  reachedFinish: boolean;
+  collidedObstacleIds: string[];
+  newlyClearedCount: number;
+}
+
+/**
+ * Advances the 2D side-scrolling runner physics by a clamped delta time.
+ * When `canMove` is false (paused, modal open, tab hidden, or before start), all movement is frozen.
+ */
+export function stepAdventureRunnerPhysics(
+  state: AdventureRunnerPhysicsState,
+  rawDt: number,
+  options: StepRunnerPhysicsOptions
+): StepRunnerPhysicsEvents {
+  const events: StepRunnerPhysicsEvents = {
+    reachedCheckpointIndex: null,
+    reachedFinish: false,
+    collidedObstacleIds: [],
+    newlyClearedCount: 0,
+  };
+
+  const dt = Math.min(RUNNER_MAX_FRAME_DT, Math.max(0, Number.isFinite(rawDt) ? rawDt : 0));
+  const anchorX = options.playerAnchorScreenX ?? 180;
+
+  if (!options.canMove || state.isFinished || state.isAtCheckpoint || dt <= 0) {
+    state.vx = 0;
+    state.cameraX = Math.max(0, state.playerX - anchorX);
+    return events;
+  }
+
+  const speedMult = Math.max(0.75, Math.min(1.5, options.speedMultiplier ?? 1));
+  const targetSpeed = RUNNER_BASE_SPEED * speedMult;
+
+  if (state.hitFlashTimer > 0) {
+    state.hitFlashTimer = Math.max(0, state.hitFlashTimer - dt);
+  }
+
+  const effectiveSpeed = state.hitFlashTimer > 0.15 ? targetSpeed * 0.55 : targetSpeed;
+  state.vx = effectiveSpeed;
+  state.playerX += state.vx * dt;
+
+  // Vertical jump & gravity state machine: GROUNDED -> JUMPING -> LANDING -> GROUNDED
+  if (!state.isGrounded || state.playerY < 0 || state.vy !== 0) {
+    state.vy += RUNNER_GRAVITY * dt;
+    state.playerY += state.vy * dt;
+
+    if (state.vy >= 0 && state.playerY < 0) {
+      state.jumpState = 'LANDING';
+    }
+
+    if (state.playerY >= 0) {
+      state.playerY = 0;
+      state.vy = 0;
+      state.isGrounded = true;
+      state.jumpState = 'GROUNDED';
+    }
+  } else {
+    state.playerY = 0;
+    state.vy = 0;
+    state.isGrounded = true;
+    state.jumpState = 'GROUNDED';
+  }
+
+  // Check checkpoint stop BEFORE allowing player to pass locked checkpoint
+  const nextCheckpointIdx = state.unlockedStageCount;
+  if (nextCheckpointIdx < state.checkpointPositions.length) {
+    const checkpointStopX =
+      state.checkpointPositions[nextCheckpointIdx] - RUNNER_CHECKPOINT_STOP_OFFSET;
+    if (state.playerX >= checkpointStopX) {
+      state.playerX = checkpointStopX;
+      state.playerY = 0;
+      state.vx = 0;
+      state.vy = 0;
+      state.isGrounded = true;
+      state.jumpState = 'GROUNDED';
+      state.isAtCheckpoint = true;
+      state.activeStageIndex = nextCheckpointIdx;
+      state.cameraX = Math.max(0, state.playerX - anchorX);
+      events.reachedCheckpointIndex = nextCheckpointIdx;
+      return events;
+    }
+  } else if (state.playerX >= state.finishLineX) {
+    state.playerX = state.finishLineX;
+    state.playerY = 0;
+    state.vx = 0;
+    state.vy = 0;
+    state.isGrounded = true;
+    state.jumpState = 'GROUNDED';
+    state.isFinished = true;
+    state.cameraX = Math.max(0, state.playerX - anchorX);
+    events.reachedFinish = true;
+    return events;
+  }
+
+  // Obstacle AABB collision & clearance
+  const pLeft = state.playerX - 18;
+  const pRight = state.playerX + 18;
+  const pBottom = state.playerY; // 0 when on ground, negative when jumping
+
+  for (const obs of state.obstacles) {
+    if (obs.hitCooldown > 0) {
+      obs.hitCooldown = Math.max(0, obs.hitCooldown - dt);
+    }
+
+    const halfW = obs.width * 0.36;
+    const oLeft = obs.x - halfW;
+    const oRight = obs.x + halfW;
+    const oTop = -obs.height * 0.78;
+
+    if (pRight > oLeft && pLeft < oRight && pBottom > oTop) {
+      if (obs.hitCooldown <= 0) {
+        obs.hitCooldown = 0.85;
+        state.hitFlashTimer = 0.4;
+        state.obstacleHits += 1;
+        events.collidedObstacleIds.push(obs.id);
+      }
+    }
+
+    if (!obs.cleared && state.playerX > obs.x + halfW + 10) {
+      obs.cleared = true;
+      if (obs.hitCooldown <= 0) {
+        state.obstaclesCleared += 1;
+        events.newlyClearedCount += 1;
+      }
+    }
+  }
+
+  state.cameraX = Math.max(0, state.playerX - anchorX);
+  return events;
+}
+
+export function normalizeCrosswordAnswerForRunner(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, m => (m === 'đ' ? 'd' : 'D'))
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+export function evaluateRunnerPreviewAnswer(
+  q: GameQuestion | SanitizedQuestion,
+  rawSubmitted: string
+): boolean {
+  const submitted = rawSubmitted.trim().toLowerCase();
+  const fullQ = q as Partial<GameQuestion>;
+  const expected = (fullQ.correctAnswer || '').trim().toLowerCase();
+  if (!submitted) return false;
+
+  if (q.type === 'SLIDER' && q.sliderConfig) {
+    const numVal = Number(rawSubmitted.trim());
+    if (!Number.isFinite(numVal)) return false;
+    const sliderCfg = q.sliderConfig as Partial<NonNullable<GameQuestion['sliderConfig']>>;
+    const tolerance = Math.max(0, Number(sliderCfg.tolerance) || 0);
+    return Math.abs(numVal - Number(sliderCfg.correctValue)) <= tolerance + 1e-6;
+  }
+
+  if (q.type === 'CROSSWORD') {
+    const normSubmitted = normalizeCrosswordAnswerForRunner(rawSubmitted);
+    const normExpected = normalizeCrosswordAnswerForRunner(
+      fullQ.crosswordAnswer || fullQ.correctAnswer || ''
+    );
+    if (!normSubmitted || !normExpected) return false;
+    if (normSubmitted === normExpected) return true;
+    if (
+      Array.isArray(fullQ.acceptedAlternatives) &&
+      fullQ.acceptedAlternatives.some(
+        alt => normalizeCrosswordAnswerForRunner(alt) === normSubmitted
+      )
+    ) {
+      return true;
+    }
+    return false;
+  }
+
+  if (submitted === expected) return true;
+  if (
+    Array.isArray(fullQ.acceptedAlternatives) &&
+    fullQ.acceptedAlternatives.some(alt => alt.trim().toLowerCase() === submitted)
+  ) {
+    return true;
+  }
+
+  if ((q.type === 'MULTIPLE_CHOICE' || q.type === 'QUIZ') && Array.isArray(q.choices)) {
+    const letters = ['a', 'b', 'c', 'd'];
+    const letterIdx = letters.indexOf(submitted);
+    if (letterIdx >= 0 && q.choices[letterIdx]) {
+      return q.choices[letterIdx].trim().toLowerCase() === expected;
+    }
+  }
+
+  return false;
+}
+
+interface ProcessedSprite {
+  source: CanvasImageSource;
+  width: number;
+  height: number;
+  aspectRatio: number;
+}
+
+const processedSpriteCache = new Map<string, ProcessedSprite>();
+
+/**
+ * Removes contiguous studio white/light background from 1:1 sprites once on load
+ * and crops transparent padding so the bottom of the character/obstacle aligns flush with the road.
+ */
+function prepareCleanSprite(
+  img: HTMLImageElement,
+  isBackground: boolean,
+  cacheKey?: string
+): ProcessedSprite {
+  if (cacheKey && processedSpriteCache.has(cacheKey)) {
+    return processedSpriteCache.get(cacheKey)!;
+  }
+
+  const natW = Math.max(1, img.naturalWidth || img.width || 512);
+  const natH = Math.max(1, img.naturalHeight || img.height || 512);
+
+  if (isBackground || typeof document === 'undefined') {
+    const bgSprite: ProcessedSprite = {
+      source: img,
+      width: natW,
+      height: natH,
+      aspectRatio: natW / natH,
+    };
+    if (cacheKey) processedSpriteCache.set(cacheKey, bgSprite);
+    return bgSprite;
+  }
+
+  try {
+    const workSize = 256;
+    const canvas = document.createElement('canvas');
+    canvas.width = workSize;
+    canvas.height = workSize;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) {
+      return { source: img, width: natW, height: natH, aspectRatio: natW / natH };
+    }
+
+    ctx.drawImage(img, 0, 0, workSize, workSize);
+    const imgData = ctx.getImageData(0, 0, workSize, workSize);
+    const data = imgData.data;
+
+    // Sample corner pixels to detect solid studio background
+    const corners = [
+      0,
+      (workSize - 1) * 4,
+      (workSize * (workSize - 1)) * 4,
+      (workSize * workSize - 1) * 4,
+    ];
+    let cornerAlphaSum = 0;
+    let bgR = 0;
+    let bgG = 0;
+    let bgB = 0;
+    for (const c of corners) {
+      bgR += data[c];
+      bgG += data[c + 1];
+      bgB += data[c + 2];
+      cornerAlphaSum += data[c + 3];
+    }
+    bgR /= 4;
+    bgG /= 4;
+    bgB /= 4;
+    const avgCornerAlpha = cornerAlphaSum / 4;
+
+    if (avgCornerAlpha > 30) {
+      // Flood-fill from all 4 borders where color matches the corner background
+      const visited = new Uint8Array(workSize * workSize);
+      const queue = new Int32Array(workSize * workSize);
+      let head = 0;
+      let tail = 0;
+
+      const isBgMatch = (pixelIdx: number): boolean => {
+        const i = pixelIdx * 4;
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const a = data[i + 3];
+        if (a < 25) return true;
+        const dr = r - bgR;
+        const dg = g - bgG;
+        const db = b - bgB;
+        const distSq = dr * dr + dg * dg + db * db;
+        if (distSq <= 46 * 46) return true;
+        // Also match bright neutral studio backdrop near borders
+        const maxC = Math.max(r, g, b);
+        const minC = Math.min(r, g, b);
+        return minC >= 230 && maxC - minC <= 20;
+      };
+
+      const pushIfBg = (x: number, y: number) => {
+        const idx = y * workSize + x;
+        if (visited[idx]) return;
+        if (isBgMatch(idx)) {
+          visited[idx] = 1;
+          queue[tail++] = idx;
+        }
+      };
+
+      for (let x = 0; x < workSize; x++) {
+        pushIfBg(x, 0);
+        pushIfBg(x, workSize - 1);
+      }
+      for (let y = 0; y < workSize; y++) {
+        pushIfBg(0, y);
+        pushIfBg(workSize - 1, y);
+      }
+
+      while (head < tail) {
+        const curr = queue[head++];
+        data[curr * 4 + 3] = 0;
+        const cx = curr % workSize;
+        const cy = (curr / workSize) | 0;
+
+        if (cx > 0) pushIfBg(cx - 1, cy);
+        if (cx + 1 < workSize) pushIfBg(cx + 1, cy);
+        if (cy > 0) pushIfBg(cx, cy - 1);
+        if (cy + 1 < workSize) pushIfBg(cx, cy + 1);
+      }
+
+      // Soften 1px silhouette edge
+      for (let y = 1; y < workSize - 1; y++) {
+        for (let x = 1; x < workSize - 1; x++) {
+          const idx = y * workSize + x;
+          if (visited[idx]) continue;
+          const neighborsBg =
+            visited[idx - 1] +
+            visited[idx + 1] +
+            visited[idx - workSize] +
+            visited[idx + workSize];
+          if (neighborsBg > 0) {
+            const aIdx = idx * 4 + 3;
+            data[aIdx] = Math.min(data[aIdx], neighborsBg >= 2 ? 120 : 190);
+          }
+        }
+      }
+
+      ctx.putImageData(imgData, 0, 0);
+    }
+
+    // Find tight non-transparent bounding box so feet/wheels touch ground line directly
+    let minX = workSize;
+    let minY = workSize;
+    let maxX = 0;
+    let maxY = 0;
+    let foundOpaque = false;
+
+    for (let y = 0; y < workSize; y++) {
+      for (let x = 0; x < workSize; x++) {
+        const a = data[(y * workSize + x) * 4 + 3];
+        if (a > 40) {
+          foundOpaque = true;
+          if (x < minX) minX = x;
+          if (x > maxX) maxX = x;
+          if (y < minY) minY = y;
+          if (y > maxY) maxY = y;
+        }
+      }
+    }
+
+    if (!foundOpaque || maxX <= minX || maxY <= minY) {
+      return { source: img, width: natW, height: natH, aspectRatio: natW / natH };
+    }
+
+    const pad = 2;
+    const cropX = Math.max(0, minX - pad);
+    const cropY = Math.max(0, minY - pad);
+    const cropW = Math.min(workSize - cropX, maxX - minX + 1 + pad * 2);
+    const cropH = Math.min(workSize - cropY, maxY - minY + 1 + pad); // tight bottom edge!
+
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = cropW;
+    outCanvas.height = cropH;
+    const outCtx = outCanvas.getContext('2d');
+    if (!outCtx) {
+      return { source: canvas, width: workSize, height: workSize, aspectRatio: 1 };
+    }
+    outCtx.drawImage(canvas, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+    const processed: ProcessedSprite = {
+      source: outCanvas,
+      width: cropW,
+      height: cropH,
+      aspectRatio: cropW / Math.max(1, cropH),
+    };
+    if (cacheKey) processedSpriteCache.set(cacheKey, processed);
+    return processed;
+  } catch {
+    const fallback: ProcessedSprite = {
+      source: img,
+      width: natW,
+      height: natH,
+      aspectRatio: natW / natH,
+    };
+    if (cacheKey) processedSpriteCache.set(cacheKey, fallback);
+    return fallback;
+  }
 }
 
 export interface AdventureGameEngineProps {
   game: GameSpecification;
   adventureConfig?: AdventureConfig;
-  mode: 'LIVE_SESSION' | 'CREATOR_PREVIEW';
+  mode: 'CREATOR_PREVIEW' | 'LIVE_SESSION';
   sessionStarted?: boolean;
   startingSession?: boolean;
-  onStartSession?: () => void;
-  currentQuestion?: SanitizedQuestion | null;
+  onStartSession?: () => Promise<void> | void;
+  currentQuestion?: GameQuestion | SanitizedQuestion | null;
   currentQuestionIndex?: number;
   totalQuestions?: number;
   timeRemaining?: number;
   liveScore?: number;
+  liveStreak?: number;
   liveCorrectCount?: number;
   liveWrongCount?: number;
   questionFeedback?: PracticeQuestionResult | null;
+  lastAnswerResult?: {
+    isCorrect: boolean;
+    pointsEarned: number;
+    correctAnswer: string;
+    explanation: string;
+    totalScore: number;
+  } | null;
   submittingAnswer?: boolean;
-  onSubmitAnswer?: (answer: string) => void;
-  onNextQuestion?: () => void;
+  onSubmitAnswer?: (answer: string) => Promise<void> | void;
+  onNextQuestion?: () => Promise<void> | void;
+  isSessionFinished?: boolean;
   finalResult?: PracticeFinalResult | null;
-  onRestartSession?: () => void;
+  liveFinalResult?: {
+    totalScore: number;
+    correctAnswers: number;
+    totalQuestions: number;
+    accuracyPercentage?: number;
+  } | null;
+  onStartLiveSession?: () => Promise<void> | void;
+  onSubmitLiveAnswer?: (answer: string) => Promise<void> | void;
+  onNextLiveQuestion?: () => Promise<void> | void;
+  onRestartSession?: () => Promise<void> | void;
+  onRestartLiveSession?: () => Promise<void> | void;
   onExit: () => void;
-}
-
-const STAGE_SEGMENT_LENGTH = 760;
-const FIRST_CHECKPOINT_X = 720;
-const GRAVITY = 1750;
-const JUMP_VELOCITY = -650;
-const BASE_MOVE_SPEED = 285;
-
-function getIndustryGameplayProfile(config: AdventureConfig) {
-  const archetype = config.gameplayArchetype || 'DIAGNOSTIC_WORKBENCH_SIM';
-  if (archetype === 'TRAFFIC_RUNNER_SIM') {
-    return {
-      archetypeId: 'TRAFFIC_RUNNER_SIM' as const,
-      archetypeBadge: 'RUNNER MÔ PHỎNG LỘ TRÌNH',
-      mechanicTitle:
-        config.industryId === 'MANUFACTURING_INDUSTRIAL'
-          ? 'Điều Phối Lộ Trình Kho Vận & Xử Lý Vật Cản Logistics'
-          : 'Sa Hình Lộ Trình & Xử Lý Tình Huống Giao Thông Thực Tế',
-      autoMoveOn: 'Phương tiện tự chạy: BẬT',
-      autoMoveOff: 'Phương tiện tự chạy: TẠM DỪNG',
-      actionVerb: 'NHẢY NÉ VẬT CẢN',
-      clearFloatingText: '+15 AN TOÀN LỘ TRÌNH',
-      checkpointAction: 'Mở chốt sát hạch chặng',
-      clearedMetricLabel: 'Vật cản vượt qua',
-      continueLabel: 'Tiếp tục di chuyển sang chặng kế tiếp (Space)',
-    };
-  }
-  if (archetype === 'DIAGNOSTIC_WORKBENCH_SIM') {
-    return {
-      archetypeId: 'DIAGNOSTIC_WORKBENCH_SIM' as const,
-      archetypeBadge: 'BÀN CHẨN ĐOÁN KỸ THUẬT',
-      mechanicTitle:
-        config.industryId === 'MANUFACTURING_INDUSTRIAL'
-          ? 'Kiểm Định Trạm Máy Dây Chuyền & Xử Lý Lỗi QA/QC - 5S'
-          : 'Chẩn Đoán Bộ Phận Kỹ Thuật & Sửa Chữa Bảo Dưỡng Xưởng',
-      autoMoveOn: 'Máy quét chẩn đoán: SẴN SÀNG',
-      autoMoveOff: 'Máy quét chẩn đoán: TẠM DỪNG',
-      actionVerb: 'QUÉT CHẨN ĐOÁN BỘ PHẬN',
-      clearFloatingText: '+15 KỸ THUẬT CHẨN ĐOÁN',
-      checkpointAction: 'Mở phiếu chẩn đoán cụm',
-      clearedMetricLabel: 'Bộ phận đã chẩn đoán',
-      continueLabel: 'Xác nhận & Chuyển sang cụm kỹ thuật kế tiếp (Space)',
-    };
-  }
-  if (archetype === 'CYBER_DEFENSE_CONSOLE_SIM') {
-    return {
-      archetypeId: 'CYBER_DEFENSE_CONSOLE_SIM' as const,
-      archetypeBadge: 'TRUNG TÂM ĐIỀU HÀNH SOC',
-      mechanicTitle: 'Giám Sát Sơ Đồ Node Mạng, Cô Lập Đe Dọa & Phản Ứng Sự Cố SOC',
-      autoMoveOn: 'Radar giám sát SIEM: BẬT',
-      autoMoveOff: 'Radar giám sát SIEM: TẠM DỪNG',
-      actionVerb: 'CÔ LẬP & PHÂN TÍCH NODE',
-      clearFloatingText: '+15 CHẶN SỰ CỐ SOC',
-      checkpointAction: 'Mở phiếu phản ứng Node',
-      clearedMetricLabel: 'Node mạng đã cô lập',
-      continueLabel: 'Hoàn tất xử lý & Chuyển sang Node kế tiếp (Space)',
-    };
-  }
-  return {
-    archetypeId: 'SCENARIO_DECISION_SIM' as const,
-    archetypeBadge: 'BÀN HỒ SƠ TÌNH HUỐNG',
-    mechanicTitle:
-      config.industryId === 'HEALTHCARE_TRAINING'
-        ? 'Mô Phỏng Hồ Sơ Ca Đào Tạo Lâm Sàng & Quyết Định An Toàn Y Khoa'
-        : config.industryId === 'BUSINESS_SALES' || config.themePresetId === 'theme_biz_retail'
-          ? 'Mô Phỏng Tư Vấn Khách Hàng, Showroom & Ra Quyết Định Chốt Deal'
-          : 'Mô Phỏng Phân Tích Hồ Sơ Tình Huống & Ra Quyết Định Chuyên Môn',
-    autoMoveOn: 'Luồng hồ sơ tình huống: SẴN SÀNG',
-    autoMoveOff: 'Luồng hồ sơ tình huống: TẠM DỪNG',
-    actionVerb: 'TIẾP NHẬN & RA QUYẾT ĐỊNH',
-    clearFloatingText: '+15 NGHIỆP VỤ CHUYÊN MÔN',
-    checkpointAction: 'Mở hồ sơ tình huống',
-    clearedMetricLabel: 'Hồ sơ đã thẩm định',
-    continueLabel: 'Xác nhận quyết định & Mở hồ sơ kế tiếp (Space)',
-  };
+  onOpenConfigTab?: () => void;
 }
 
 export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   game,
-  adventureConfig: propAdventureConfig,
+  adventureConfig,
   mode,
   sessionStarted = false,
   startingSession = false,
   onStartSession,
-  currentQuestion: liveCurrentQuestion,
-  currentQuestionIndex: liveQuestionIndex = 0,
-  totalQuestions: liveTotalQuestions,
-  timeRemaining: liveTimeRemaining,
+  currentQuestion,
+  currentQuestionIndex = 0,
+  totalQuestions,
   liveScore = 0,
   liveCorrectCount = 0,
-  liveWrongCount = 0,
-  questionFeedback: liveQuestionFeedback,
+  questionFeedback = null,
+  lastAnswerResult = null,
   submittingAnswer = false,
   onSubmitAnswer,
   onNextQuestion,
-  finalResult: liveFinalResult,
+  isSessionFinished = false,
+  finalResult = null,
+  liveFinalResult = null,
+  onStartLiveSession,
+  onSubmitLiveAnswer,
+  onNextLiveQuestion,
   onRestartSession,
+  onRestartLiveSession,
   onExit,
 }) => {
-  const effectiveConfig = useMemo(() => {
-    const raw = propAdventureConfig || game.settings?.adventureConfig;
-    return syncAdventureStagesWithQuestions(raw, game.questions || []);
-  }, [propAdventureConfig, game.settings?.adventureConfig, game.questions]);
-  const gameplayProfile = useMemo(
-    () => getIndustryGameplayProfile(effectiveConfig),
+  const effectiveOnStartSession = onStartSession || onStartLiveSession;
+  const effectiveOnSubmitAnswer = onSubmitAnswer || onSubmitLiveAnswer;
+  const effectiveOnNextQuestion = onNextQuestion || onNextLiveQuestion;
+  const effectiveOnRestartSession = onRestartSession || onRestartLiveSession;
+  const effectiveLiveFeedback = questionFeedback || lastAnswerResult;
+  const effectiveFinalResult = finalResult || liveFinalResult;
+  const questions = useMemo(() => game.questions || [], [game.questions]);
+  const totalStages = Math.max(1, totalQuestions || questions.length || 1);
+
+  const effectiveConfig: AdventureConfig = useMemo(() => {
+    const raw =
+      adventureConfig ||
+      game.settings?.adventureConfig ||
+      buildDefaultAdventureConfig('theme_moto_circuit', questions.length || 5, questions);
+    return syncAdventureStagesWithQuestions(raw, questions);
+  }, [adventureConfig, game.settings?.adventureConfig, questions]);
+
+  const resolvedAssets = useMemo(
+    () => resolveAdventureRuntimeAssets(effectiveConfig),
     [effectiveConfig]
   );
-  const sceneDescriptor = useMemo(
-    () => resolveSceneRendererDescriptor(effectiveConfig),
-    [effectiveConfig]
+
+  // Asset preloading state (never calls Banana API during gameplay or replay)
+  const [assetLoadStatus, setAssetLoadStatus] = useState<'LOADING' | 'READY' | 'ERROR'>(() =>
+    resolvedAssets.valid ? 'LOADING' : 'ERROR'
+  );
+  const [assetLoadError, setAssetLoadError] = useState<string | null>(() =>
+    resolvedAssets.errorMessage
+  );
+  const [failedAssetSlots, setFailedAssetSlots] = useState<string[]>(() =>
+    resolvedAssets.missingOrInvalidAssets
   );
 
-  const isRunnerArchetype = sceneDescriptor.sceneId === 'TRAFFIC_ROAD_RUNNER_SCENE';
-  const inspectedStagesRef = useRef<Set<number>>(new Set());
-  const [stageInspected, setStageInspected] = useState<boolean>(false);
-
-  const totalStages = Math.max(
-    1,
-    liveTotalQuestions || game.questions?.length || effectiveConfig.stages.length || 1
-  );
-
-  // Preview mode internal state
-  const [previewStarted, setPreviewStarted] = useState<boolean>(false);
-  const [previewStageIdx, setPreviewStageIdx] = useState<number>(0);
-  const [previewFeedback, setPreviewFeedback] = useState<PracticeQuestionResult | null>(null);
-  const [previewFinished, setPreviewFinished] = useState<boolean>(false);
-  const [previewScore, setPreviewScore] = useState<number>(0);
-  const [previewCorrectCount, setPreviewCorrectCount] = useState<number>(0);
-  const [previewWrongCount, setPreviewWrongCount] = useState<number>(0);
-  const [previewStreak, setPreviewStreak] = useState<number>(0);
-  const [, setPreviewMaxStreak] = useState<number>(0);
-  const [previewTimeRemaining, setPreviewTimeRemaining] = useState<number>(
-    game.settings?.timePerQuestion || 20
-  );
-
-  // Shared gameplay state
-  const [activeModalOpen, setActiveModalOpen] = useState<boolean>(false);
-  const [selectedChoice, setSelectedChoice] = useState<string>('');
-  const [textAnswer, setTextAnswer] = useState<string>('');
-  const [puzzleOrder, setPuzzleOrder] = useState<string[]>([]);
-  const [autoCruise, setAutoCruise] = useState<boolean>(true);
-  const [skillBonusScore, setSkillBonusScore] = useState<number>(0);
-  const [obstaclesClearedCount, setObstaclesClearedCount] = useState<number>(0);
-  const [, setObstaclesHitCount] = useState<number>(0);
-  const [energyPercent, setEnergyPercent] = useState<number>(100);
-  const [nearCheckpointIndex, setNearCheckpointIndex] = useState<number | null>(null);
-  const [reachedFinishGate, setReachedFinishGate] = useState<boolean>(false);
-  const [playerProgressPercent, setPlayerProgressPercent] = useState<number>(0);
-  const [showHowToPlay, setShowHowToPlay] = useState<boolean>(false);
-  const [isNativeFullscreen, setIsNativeFullscreen] = useState<boolean>(false);
-  const [isPaused, setIsPaused] = useState<boolean>(false);
-
-  // Dynamic viewport dimensions for full-screen Canvas
-  const viewportContainerRef = useRef<HTMLDivElement | null>(null);
-  const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [canvasSize, setCanvasSize] = useState<{ width: number; height: number }>({
-    width: typeof window !== 'undefined' ? window.innerWidth : 1280,
-    height: typeof window !== 'undefined' ? Math.max(420, window.innerHeight - 60) : 660,
+  const loadedSpritesRef = useRef<{
+    background: ProcessedSprite | null;
+    character: ProcessedSprite | null;
+    obstacle: ProcessedSprite | null;
+  }>({
+    background: null,
+    character: null,
+    obstacle: null,
   });
 
+  // Preload the 3 verified image assets once per game config
   useEffect(() => {
-    const updateSize = () => {
-      const el = canvasWrapperRef.current;
-      if (el) {
-        const rect = el.getBoundingClientRect();
-        if (rect.width > 100 && rect.height > 100) {
-          setCanvasSize({
-            width: Math.round(rect.width),
-            height: Math.round(rect.height),
-          });
-          return;
+    if (!resolvedAssets.valid || !resolvedAssets.assets) {
+      setAssetLoadStatus('ERROR');
+      setAssetLoadError(
+        resolvedAssets.errorMessage ||
+          'Thiếu tài nguyên hình ảnh bắt buộc cho game Adventure.'
+      );
+      setFailedAssetSlots(
+        resolvedAssets.missingOrInvalidAssets.length > 0
+          ? resolvedAssets.missingOrInvalidAssets
+          : ['BACKGROUND', 'CHARACTER', 'OBSTACLE']
+      );
+      return;
+    }
+
+    const { background, character, obstacle } = resolvedAssets.assets;
+    const cachedBg = processedSpriteCache.get(`bg:${background.url}`);
+    const cachedChar = processedSpriteCache.get(`char:${character.url}`);
+    const cachedObs = processedSpriteCache.get(`obs:${obstacle.url}`);
+    if (cachedBg && cachedChar && cachedObs) {
+      loadedSpritesRef.current = {
+        background: cachedBg,
+        character: cachedChar,
+        obstacle: cachedObs,
+      };
+      setAssetLoadStatus('READY');
+      setAssetLoadError(null);
+      setFailedAssetSlots([]);
+      return;
+    }
+
+    let cancelled = false;
+    setAssetLoadStatus('LOADING');
+    setAssetLoadError(null);
+    setFailedAssetSlots([]);
+
+    const loadSingleImage = (
+      slotName: 'BACKGROUND' | 'CHARACTER' | 'OBSTACLE',
+      url: string
+    ): Promise<{ slotName: 'BACKGROUND' | 'CHARACTER' | 'OBSTACLE'; img: HTMLImageElement }> =>
+      new Promise((resolve, reject) => {
+        const img = new Image();
+        img.decoding = 'async';
+        img.onload = () => {
+          if ((img.naturalWidth || img.width) > 0 && (img.naturalHeight || img.height) > 0) {
+            resolve({ slotName, img });
+          } else {
+            reject({ slotName, url, reason: 'Ảnh có kích thước 0px' });
+          }
+        };
+        img.onerror = () => {
+          reject({ slotName, url, reason: 'Không thể tải URL ảnh' });
+        };
+        img.src = url;
+      });
+
+    Promise.allSettled([
+      loadSingleImage('BACKGROUND', background.url),
+      loadSingleImage('CHARACTER', character.url),
+      loadSingleImage('OBSTACLE', obstacle.url),
+    ]).then(results => {
+      if (cancelled) return;
+
+      const failed: string[] = [];
+      let bgImg: HTMLImageElement | null = null;
+      let charImg: HTMLImageElement | null = null;
+      let obsImg: HTMLImageElement | null = null;
+
+      for (const res of results) {
+        if (res.status === 'fulfilled') {
+          if (res.value.slotName === 'BACKGROUND') bgImg = res.value.img;
+          if (res.value.slotName === 'CHARACTER') charImg = res.value.img;
+          if (res.value.slotName === 'OBSTACLE') obsImg = res.value.img;
+        } else {
+          failed.push(String(res.reason?.slotName || 'UNKNOWN'));
         }
       }
-      setCanvasSize({
-        width: window.innerWidth,
-        height: Math.max(360, window.innerHeight - 60),
-      });
-    };
 
-    updateSize();
-    window.addEventListener('resize', updateSize);
+      if (failed.length > 0 || !bgImg || !charImg || !obsImg) {
+        setFailedAssetSlots(failed);
+        setAssetLoadStatus('ERROR');
+        setAssetLoadError(
+          `Không thể tải tài nguyên ảnh 2D (${failed.join(', ')}) cho ngành "${effectiveConfig.industryLabel}". Không tự động thay bằng ảnh ngành khác.`
+        );
+        return;
+      }
 
-    let observer: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== 'undefined' && canvasWrapperRef.current) {
-      observer = new ResizeObserver(() => updateSize());
-      observer.observe(canvasWrapperRef.current);
-    }
-
-    const handleFullscreenChange = () => {
-      setIsNativeFullscreen(Boolean(document.fullscreenElement));
-      setTimeout(updateSize, 60);
-    };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
+      loadedSpritesRef.current = {
+        background: prepareCleanSprite(bgImg, true, `bg:${background.url}`),
+        character: prepareCleanSprite(charImg, false, `char:${character.url}`),
+        obstacle: prepareCleanSprite(obsImg, false, `obs:${obstacle.url}`),
+      };
+      setAssetLoadStatus('READY');
+    });
 
     return () => {
-      window.removeEventListener('resize', updateSize);
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      if (observer) observer.disconnect();
+      cancelled = true;
+    };
+  }, [resolvedAssets, effectiveConfig.industryLabel]);
+
+  // Lock underlying page scroll while full-viewport Adventure engine is mounted
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const prevBodyOverflow = document.body.style.overflow;
+    const prevHtmlOverflow = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBodyOverflow;
+      document.documentElement.style.overflow = prevHtmlOverflow;
     };
   }, []);
 
-  const toggleNativeFullscreen = useCallback(() => {
-    try {
-      if (!document.fullscreenElement) {
-        const target = viewportContainerRef.current || document.documentElement;
-        target.requestFullscreen?.().catch(() => {});
-      } else {
-        document.exitFullscreen?.().catch(() => {});
-      }
-    } catch {
-      // Ignore fullscreen API restrictions
-    }
-  }, []);
+  // Gameplay states
+  const [isJourneyStarted, setIsJourneyStarted] = useState<boolean>(() => Boolean(sessionStarted));
+  const [isPaused, setIsPaused] = useState<boolean>(false);
 
-  const handleExitGame = useCallback(() => {
-    try {
-      if (document.fullscreenElement) {
-        document.exitFullscreen?.().catch(() => {});
-      }
-    } catch {
-      // Ignore
-    }
-    onExit();
-  }, [onExit]);
-
-  const activeStageIndex = mode === 'LIVE_SESSION' ? liveQuestionIndex : previewStageIdx;
-  const activeFeedback = mode === 'LIVE_SESSION' ? liveQuestionFeedback : previewFeedback;
-  const isJourneyStarted = mode === 'LIVE_SESSION' ? sessionStarted : previewStarted;
-  const isJourneyFinished =
-    mode === 'LIVE_SESSION' ? Boolean(liveFinalResult) : previewFinished;
-
-  const activeQuestion: SanitizedQuestion | GameQuestion | null = useMemo(() => {
-    if (mode === 'LIVE_SESSION') {
-      return liveCurrentQuestion || game.questions?.[activeStageIndex] || null;
-    }
-    return game.questions?.[previewStageIdx] || null;
-  }, [mode, liveCurrentQuestion, game.questions, activeStageIndex, previewStageIdx]);
-
-  const activeTimeRemaining = previewTimeRemaining;
-
-  // World geometry calculation
-  const checkpointPositions = useMemo(() => {
-    return Array.from(
-      { length: totalStages },
-      (_, idx) => FIRST_CHECKPOINT_X + idx * STAGE_SEGMENT_LENGTH
-    );
-  }, [totalStages]);
-
-  const finishGateX = useMemo(() => {
-    const lastCheckpoint =
-      checkpointPositions[checkpointPositions.length - 1] || FIRST_CHECKPOINT_X;
-    return lastCheckpoint + 460;
-  }, [checkpointPositions]);
-
-  // Build world obstacles and collectibles
-  const initialWorldObstacles = useMemo<WorldObstacle[]>(() => {
-    const list: WorldObstacle[] = [];
-    const densityCount =
-      effectiveConfig.obstacleDensity === 'HIGH'
-        ? 3
-        : effectiveConfig.obstacleDensity === 'LOW'
-          ? 1
-          : 2;
-    const types: ObstacleType[] =
-      effectiveConfig.obstacleTypes.length > 0
-        ? effectiveConfig.obstacleTypes
-        : ['TRAFFIC_CONE', 'CARGO_CRATE', 'BARRIER_GATE'];
-
-    for (let stageIdx = 0; stageIdx < totalStages; stageIdx++) {
-      const segmentStart =
-        stageIdx === 0 ? 250 : checkpointPositions[stageIdx - 1] + 160;
-      const segmentEnd = checkpointPositions[stageIdx] - 160;
-      const span = Math.max(180, segmentEnd - segmentStart);
-
-      for (let k = 0; k < densityCount; k++) {
-        const ratio = (k + 0.5) / densityCount;
-        const obsX = Math.round(segmentStart + span * ratio);
-        const obsType = types[(stageIdx + k) % types.length];
-        const isTall =
-          obsType === 'SERVER_FIREWALL' ||
-          obsType === 'BIOHAZARD_CART' ||
-          obsType === 'MEDICAL_SCREEN';
-        list.push({
-          id: `obs_${stageIdx}_${k}`,
-          stageIndex: stageIdx,
-          x: obsX,
-          width: isTall ? 46 : 42,
-          height: isTall ? 54 : 44,
-          type: obsType,
-          cleared: false,
-          hit: false,
-        });
-      }
-    }
-    return list;
-  }, [
-    totalStages,
-    checkpointPositions,
-    effectiveConfig.obstacleDensity,
-    effectiveConfig.obstacleTypes,
-  ]);
-
-  const initialWorldCollectibles = useMemo<WorldCollectible[]>(() => {
-    const tokens: WorldCollectible[] = [];
-    for (let stageIdx = 0; stageIdx < totalStages; stageIdx++) {
-      const segmentStart =
-        stageIdx === 0 ? 180 : checkpointPositions[stageIdx - 1] + 110;
-      const segmentEnd = checkpointPositions[stageIdx] - 110;
-      const midX = Math.round((segmentStart + segmentEnd) / 2);
-      tokens.push({
-        id: `token_${stageIdx}_a`,
-        x: segmentStart + 60,
-        yOffset: -26,
-        label: 'HUY HIỆU AN TOÀN',
-        collected: false,
-      });
-      tokens.push({
-        id: `token_${stageIdx}_b`,
-        x: midX + 55,
-        yOffset: -74,
-        label: 'MŨ CHUẨN +10',
-        collected: false,
-      });
-    }
-    return tokens;
-  }, [totalStages, checkpointPositions]);
-
-  const worldDecorList = useMemo<WorldDecor[]>(() => {
-    const decors: WorldDecor[] = [];
-    const kinds: WorldDecor['kind'][] = ['SIGN', 'LAMP', 'TREE', 'PILLAR', 'BANNER'];
-    for (let x = 160; x < finishGateX + 300; x += 220) {
-      const stageIdx = Math.min(
-        totalStages - 1,
-        Math.max(0, Math.floor(x / STAGE_SEGMENT_LENGTH))
-      );
-      const stageInfo = effectiveConfig.stages[stageIdx];
-      decors.push({
-        id: `decor_${x}`,
-        x,
-        kind: kinds[Math.floor(x / 220) % kinds.length],
-        label: stageInfo?.zoneLabel || effectiveConfig.subEnvironment,
-      });
-    }
-    return decors;
-  }, [finishGateX, totalStages, effectiveConfig.stages, effectiveConfig.subEnvironment]);
-
-  // Mutable physics state inside ref for 60fps Canvas loop
-  const physicsRef = useRef({
-    playerX: 90,
-    playerY: 0,
-    vy: 0,
-    vx: 0,
-    facing: 1 as 1 | -1,
-    isGrounded: true,
-    wheelAngle: 0,
-    invulnerableUntil: 0,
-    cameraX: 0,
-    keys: {
-      left: false,
-      right: false,
-      jump: false,
-    },
-    obstacles: [] as WorldObstacle[],
-    collectibles: [] as WorldCollectible[],
-    particles: [] as FloatingParticle[],
-    unlockedStageCount: 0,
-  });
-
+  // Sync when SoloPlayer transitions sessionStarted to true after initializeSession(true)
   useEffect(() => {
-    physicsRef.current.obstacles = initialWorldObstacles.map(o => ({ ...o }));
-    physicsRef.current.collectibles = initialWorldCollectibles.map(c => ({ ...c }));
-  }, [initialWorldObstacles, initialWorldCollectibles]);
+    if (sessionStarted) {
+      setIsJourneyStarted(true);
+    }
+  }, [sessionStarted]);
+  const [isTabHidden, setIsTabHidden] = useState<boolean>(false);
+  const [activeStageIndex, setActiveStageIndex] = useState<number>(0);
+  const [unlockedStageCount, setUnlockedStageCount] = useState<number>(0);
+  const [checkpointModalOpen, setCheckpointModalOpen] = useState<boolean>(false);
 
-  // Reset engine state completely when gameId or archetype/preset changes
+  // Preview mode states (when creator previews without a live backend session)
+  const [previewScore, setPreviewScore] = useState<number>(0);
+  const [previewCorrectCount, setPreviewCorrectCount] = useState<number>(0);
+  const [previewAnswerResult, setPreviewAnswerResult] = useState<{
+    isCorrect: boolean;
+    pointsEarned: number;
+    correctAnswer: string;
+    explanation: string;
+  } | null>(null);
+  const [previewFinished, setPreviewFinished] = useState<boolean>(false);
+
+  // Question input states
+  const [selectedChoice, setSelectedChoice] = useState<string>('');
+  const [textAnswer, setTextAnswer] = useState<string>('');
+  const [sliderValue, setSliderValue] = useState<number | null>(null);
+  const [puzzleOrder, setPuzzleOrder] = useState<string[]>([]);
+
+  // Anti-duplicate submission guard per stage
+  const submittedStageIndicesRef = useRef<Set<number>>(new Set());
+  const submittingStageLockRef = useRef<boolean>(false);
+
+  // HUD / Telemetry reactive snapshots
+  const [journeyProgressPercent, setJourneyProgressPercent] = useState<number>(0);
+  const [obstaclesClearedCount, setObstaclesClearedCount] = useState<number>(0);
+  const [jumpStateSnapshot, setJumpStateSnapshot] = useState<JumpState>('GROUNDED');
+  const [isGroundedSnapshot, setIsGroundedSnapshot] = useState<boolean>(true);
+
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const physicsRef = useRef<AdventureRunnerPhysicsState>(
+    createInitialRunnerPhysicsState({
+      totalStages,
+      obstacleDensity: effectiveConfig.obstacleDensity,
+      initialUnlockedStages: mode === 'LIVE_SESSION' ? currentQuestionIndex : 0,
+    })
+  );
+
+  // Reset physics when gameId or stage count changes
   useEffect(() => {
-    setPreviewStarted(false);
-    setPreviewStageIdx(0);
-    setPreviewFeedback(null);
-    setPreviewFinished(false);
-    setPreviewScore(0);
-    setPreviewCorrectCount(0);
-    setPreviewWrongCount(0);
-    setPreviewStreak(0);
-    setPreviewMaxStreak(0);
-    setActiveModalOpen(false);
-    setStageInspected(false);
-    setIsPaused(false);
-    inspectedStagesRef.current.clear();
-    setSelectedChoice('');
-    setTextAnswer('');
-    setSkillBonusScore(0);
+    const initialUnlocked = mode === 'LIVE_SESSION' ? Math.max(0, currentQuestionIndex) : 0;
+    physicsRef.current = createInitialRunnerPhysicsState({
+      totalStages,
+      obstacleDensity: effectiveConfig.obstacleDensity,
+      initialUnlockedStages: initialUnlocked,
+    });
+    submittedStageIndicesRef.current.clear();
+    submittingStageLockRef.current = false;
+    setUnlockedStageCount(initialUnlocked);
+    setActiveStageIndex(Math.min(initialUnlocked, totalStages - 1));
+    setCheckpointModalOpen(false);
     setObstaclesClearedCount(0);
-    setObstaclesHitCount(0);
-    setEnergyPercent(100);
-    setNearCheckpointIndex(null);
-    setReachedFinishGate(false);
-    setPlayerProgressPercent(0);
-    physicsRef.current.playerX = 90;
-    physicsRef.current.playerY = 0;
-    physicsRef.current.vy = 0;
-    physicsRef.current.vx = 0;
-    physicsRef.current.cameraX = 0;
-    physicsRef.current.particles = [];
-    physicsRef.current.unlockedStageCount = 0;
-  }, [game.gameId, effectiveConfig.themePresetId, effectiveConfig.gameplayArchetype]);
+    setJumpStateSnapshot('GROUNDED');
+    setIsGroundedSnapshot(true);
+    setJourneyProgressPercent(
+      Math.min(
+        100,
+        Math.round(
+          (physicsRef.current.playerX / Math.max(1, physicsRef.current.finishLineX)) * 100
+        )
+      )
+    );
+  }, [game.gameId, totalStages, effectiveConfig.obstacleDensity]);
 
-  // Keep unlockedStageCount in sync with activeStageIndex & activeFeedback
+  // Synchronize live session progress (e.g., on page reload recovery in SoloPlayer)
   useEffect(() => {
-    const unlocked = activeFeedback ? activeStageIndex + 1 : activeStageIndex;
-    physicsRef.current.unlockedStageCount = unlocked;
-    if (activeStageIndex > 0 && checkpointPositions[activeStageIndex - 1]) {
-      const minX = checkpointPositions[activeStageIndex - 1] + 40;
-      if (physicsRef.current.playerX < minX) {
-        physicsRef.current.playerX = minX;
+    if (mode !== 'LIVE_SESSION') return;
+    if (currentQuestionIndex > unlockedStageCount) {
+      setUnlockedStageCount(currentQuestionIndex);
+      setActiveStageIndex(Math.min(currentQuestionIndex, totalStages - 1));
+
+      const p = physicsRef.current;
+      p.unlockedStageCount = currentQuestionIndex;
+      p.activeStageIndex = Math.min(currentQuestionIndex, totalStages - 1);
+      const prevCpX =
+        currentQuestionIndex > 0 ? p.checkpointPositions[currentQuestionIndex - 1] : undefined;
+      if (prevCpX !== undefined && p.playerX < prevCpX) {
+        p.playerX = prevCpX + 36;
+        p.playerY = 0;
+        p.vy = 0;
+        p.isGrounded = true;
+        p.jumpState = 'GROUNDED';
+        p.isAtCheckpoint = false;
+        p.cameraX = Math.max(0, p.playerX - 180);
       }
     }
-  }, [activeStageIndex, activeFeedback, checkpointPositions]);
+  }, [mode, currentQuestionIndex, unlockedStageCount, totalStages]);
 
-  // Reset question input and stage inspection state when stage changes
+  const activeQuestion: GameQuestion | SanitizedQuestion | null = useMemo(() => {
+    if (mode === 'LIVE_SESSION' && currentQuestion) {
+      return currentQuestion;
+    }
+    return questions[activeStageIndex] || questions[0] || null;
+  }, [mode, currentQuestion, questions, activeStageIndex]);
+
+  const activeFeedback = mode === 'LIVE_SESSION' ? effectiveLiveFeedback : previewAnswerResult;
+  const isJourneyFinished =
+    mode === 'LIVE_SESSION' ? Boolean(isSessionFinished || effectiveFinalResult) : previewFinished;
+  const activeModalOpen = checkpointModalOpen && !isJourneyFinished;
+
+  // Reset question input controls when activeQuestion changes
   useEffect(() => {
     setSelectedChoice('');
     setTextAnswer('');
+    if (activeQuestion?.type === 'SLIDER' && activeQuestion.sliderConfig) {
+      const { min, max, step } = activeQuestion.sliderConfig;
+      const safeStep = step > 0 ? step : 1;
+      const mid = min + Math.round((max - min) / 2 / safeStep) * safeStep;
+      setSliderValue(Math.min(max, Math.max(min, Number(mid.toFixed(6)))));
+    } else {
+      setSliderValue(null);
+    }
     if (activeQuestion?.type === 'PUZZLE' && Array.isArray(activeQuestion.choices)) {
-      const initialItems = [...activeQuestion.choices];
-      const maybeFullQ = activeQuestion as GameQuestion;
-      if (
-        mode === 'CREATOR_PREVIEW' &&
-        initialItems.length > 1 &&
-        typeof maybeFullQ.correctAnswer === 'string' &&
-        initialItems.join(' | ').trim().toLowerCase() ===
-          maybeFullQ.correctAnswer.trim().toLowerCase()
-      ) {
-        const first = initialItems.shift()!;
-        initialItems.push(first);
-      }
-      setPuzzleOrder(initialItems);
+      setPuzzleOrder([...activeQuestion.choices]);
     } else {
       setPuzzleOrder([]);
     }
-    setStageInspected(inspectedStagesRef.current.has(activeStageIndex));
-    const serverRemaining =
-      mode === 'LIVE_SESSION' &&
-      typeof (liveCurrentQuestion as SanitizedQuestion | null)?.remainingTimeSeconds === 'number'
-        ? (liveCurrentQuestion as SanitizedQuestion).remainingTimeSeconds!
-        : game.settings?.timePerQuestion || 20;
-    setPreviewTimeRemaining(Math.max(1, serverRemaining));
-  }, [
-    activeStageIndex,
-    activeQuestion?.id,
-    activeQuestion?.type,
-    activeQuestion?.choices,
-    mode,
-    liveCurrentQuestion,
-    game.settings?.timePerQuestion,
-  ]);
+    submittingStageLockRef.current = false;
+  }, [activeQuestion?.id, activeStageIndex]);
 
-  useEffect(() => {
-    if (
-      mode === 'LIVE_SESSION' &&
-      typeof liveTimeRemaining === 'number' &&
-      liveTimeRemaining > 0 &&
-      (activeModalOpen || stageInspected)
-    ) {
-      setPreviewTimeRemaining(prev => Math.min(prev, liveTimeRemaining));
-    }
-  }, [mode, liveTimeRemaining, activeModalOpen, stageInspected]);
-
-  const handleMovePuzzleItem = useCallback((idx: number, direction: -1 | 1) => {
+  const handleMovePuzzleItem = useCallback((index: number, direction: -1 | 1) => {
     setPuzzleOrder(prev => {
-      const targetIdx = idx + direction;
-      if (targetIdx < 0 || targetIdx >= prev.length) return prev;
+      const targetIndex = index + direction;
+      if (targetIndex < 0 || targetIndex >= prev.length) return prev;
       const next = [...prev];
-      const tmp = next[idx];
-      next[idx] = next[targetIdx];
-      next[targetIdx] = tmp;
+      const temp = next[index];
+      next[index] = next[targetIndex];
+      next[targetIndex] = temp;
       return next;
     });
   }, []);
 
-  // Preview countdown timer when checkpoint question modal or inline non-runner question is active
+  // Pause movement automatically on browser tab switch / visibilitychange
   useEffect(() => {
-    const isChallengeActive = isRunnerArchetype ? activeModalOpen : stageInspected;
-    if (!isChallengeActive || Boolean(activeFeedback) || isJourneyFinished || isPaused) return;
-
-    const timer = window.setInterval(() => {
-      setPreviewTimeRemaining(prev => {
-        if (prev <= 1) {
-          clearInterval(timer);
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [
-    mode,
-    isRunnerArchetype,
-    activeModalOpen,
-    stageInspected,
-    previewFeedback,
-    previewFinished,
-    activeFeedback,
-    isJourneyFinished,
-    isPaused,
-  ]);
-
-  const spawnFloatingText = useCallback(
-    (worldX: number, worldY: number, text: string, color: string) => {
-      physicsRef.current.particles.push({
-        id: Date.now() + Math.random(),
-        x: worldX,
-        y: worldY,
-        vx: 0,
-        vy: -48,
-        color,
-        size: 14,
-        alpha: 1,
-        text,
-      });
-    },
-    []
-  );
-
-  const spawnBurstParticles = useCallback(
-    (worldX: number, worldY: number, color: string) => {
-      for (let i = 0; i < 14; i++) {
-        const angle = (Math.PI * 2 * i) / 14;
-        const speed = 70 + Math.random() * 90;
-        physicsRef.current.particles.push({
-          id: Date.now() + Math.random() + i,
-          x: worldX,
-          y: worldY,
-          vx: Math.cos(angle) * speed,
-          vy: Math.sin(angle) * speed - 40,
-          color,
-          size: 5 + Math.random() * 4,
-          alpha: 1,
-        });
-      }
-    },
-    []
-  );
-
-  const triggerJump = useCallback(() => {
-    const p = physicsRef.current;
-    if (p.isGrounded && !activeModalOpen && !isPaused) {
-      p.vy = JUMP_VELOCITY;
-      p.isGrounded = false;
-      playClickSound();
-      setTimeout(() => setShowHowToPlay(false), 1200);
-    }
-  }, [activeModalOpen, isPaused]);
-
-  const handleInspectCurrentStage = useCallback(() => {
-    if (!activeQuestion || isPaused) return;
-    if (!inspectedStagesRef.current.has(activeStageIndex)) {
-      inspectedStagesRef.current.add(activeStageIndex);
-      setSkillBonusScore(prev => prev + 15);
-      setObstaclesClearedCount(prev => prev + 1);
-      playClickSound();
-    }
-    setStageInspected(true);
-  }, [activeQuestion, activeStageIndex, isPaused]);
-
-  const handleCollectArenaBonus = useCallback((bonusPoints: number) => {
-    setSkillBonusScore(prev => Math.max(0, prev + bonusPoints));
-    if (bonusPoints > 0) {
-      playClickSound();
-    }
-  }, []);
-
-  const handleArenaHazardHit = useCallback(() => {
-    setEnergyPercent(prev => Math.max(10, prev - 8));
-    playWrongSound();
-  }, []);
-
-  const handleOpenCheckpointModal = useCallback(() => {
-    if (!activeQuestion || isPaused) return;
-    if (!isRunnerArchetype) {
-      handleInspectCurrentStage();
-      return;
-    }
-    setActiveModalOpen(true);
-    physicsRef.current.keys.left = false;
-    physicsRef.current.keys.right = false;
-  }, [activeQuestion, isPaused, isRunnerArchetype, handleInspectCurrentStage]);
-
-  // Handle Answer Submission (both Live Session and Creator Preview)
-  const handleAnswerSubmit = useCallback(
-    (explicitAnswer?: string) => {
-      if (!activeQuestion || activeFeedback || submittingAnswer || isPaused) return;
-      const rawAns =
-        explicitAnswer !== undefined
-          ? explicitAnswer
-          : activeQuestion.type === 'PUZZLE'
-            ? puzzleOrder.join(' | ')
-            : activeQuestion.type === 'SLIDER' && activeQuestion.sliderConfig
-              ? textAnswer.trim() !== '' && Number.isFinite(Number(textAnswer))
-                ? textAnswer.trim()
-                : String(
-                    activeQuestion.sliderConfig.min +
-                      Math.round(
-                        (activeQuestion.sliderConfig.max - activeQuestion.sliderConfig.min) /
-                          2 /
-                          (activeQuestion.sliderConfig.step > 0 ? activeQuestion.sliderConfig.step : 1)
-                      ) *
-                        (activeQuestion.sliderConfig.step > 0 ? activeQuestion.sliderConfig.step : 1)
-                  )
-              : activeQuestion.type === 'MULTIPLE_CHOICE' ||
-                  activeQuestion.type === 'QUIZ' ||
-                  activeQuestion.type === 'QUICK_BUTTON' ||
-                  activeQuestion.type === 'TRUE_FALSE'
-                ? selectedChoice
-                : textAnswer.trim();
-
-      if (!rawAns) return;
-
-      if (mode === 'LIVE_SESSION' && onSubmitAnswer) {
-        onSubmitAnswer(rawAns);
-        return;
-      }
-
-      // Creator Preview Mode evaluation
-      const fullQ = game.questions?.[previewStageIdx];
-      if (!fullQ) return;
-      let isCorrect = false;
-      if (fullQ.type === 'SLIDER' && fullQ.sliderConfig) {
-        const numericAns = Number(rawAns);
-        const { min, max, correctValue, tolerance = 0 } = fullQ.sliderConfig;
-        if (Number.isFinite(numericAns) && numericAns >= min && numericAns <= max) {
-          isCorrect = Math.abs(numericAns - correctValue) <= Math.max(0, tolerance) + 1e-9;
-        }
-      } else {
-        const normalizeAns = (val: string) =>
-          val.trim().normalize('NFC').toLowerCase().replace(/\s+/g, ' ');
-        const normalizedUser = normalizeAns(rawAns);
-        const validAnswers = new Set<string>();
-        const addCandidate = (rawStr: string) => {
-          const full = normalizeAns(rawStr);
-          if (full) validAnswers.add(full);
-          if (fullQ.type !== 'PUZZLE' && (rawStr.includes('|') || rawStr.includes(';'))) {
-            for (const part of rawStr.split(/[|;]/)) {
-              const p = normalizeAns(part);
-              if (p) validAnswers.add(p);
-            }
-          }
-        };
-        addCandidate(fullQ.correctAnswer || '');
-        for (const alt of fullQ.acceptedAlternatives || []) {
-          if (typeof alt === 'string') addCandidate(alt);
-        }
-        isCorrect = normalizedUser.length > 0 && validAnswers.has(normalizedUser);
-      }
-      const earned = isCorrect ? 100 + previewStreak * 15 : 0;
-      const newStreak = isCorrect ? previewStreak + 1 : 0;
-
-      if (isCorrect) {
-        playCorrectSound();
-        setPreviewScore(prev => prev + earned);
-        setPreviewCorrectCount(prev => prev + 1);
-        setPreviewStreak(newStreak);
-        setPreviewMaxStreak(prev => Math.max(prev, newStreak));
-        setEnergyPercent(prev => Math.min(100, prev + 20));
-        const cpX = checkpointPositions[previewStageIdx] || physicsRef.current.playerX;
-        spawnBurstParticles(cpX, -70, '#3fc07a');
-        spawnFloatingText(cpX, -110, `+${earned} ĐIỂM`, '#3fc07a');
-      } else {
-        playWrongSound();
-        setPreviewStreak(0);
-        setPreviewWrongCount(prev => prev + 1);
-        setEnergyPercent(prev => Math.max(10, prev - 15));
-      }
-
-      setPreviewFeedback({
-        questionId: fullQ.id,
-        answer: rawAns,
-        isCorrect,
-        correctAnswer: fullQ.correctAnswer,
-        explanation: fullQ.explanation,
-        pointsEarned: earned,
-        responseTimeMs: 5000,
-        answeredAt: new Date().toISOString(),
-      });
-    },
-    [
-      activeQuestion,
-      activeFeedback,
-      submittingAnswer,
-      isPaused,
-      selectedChoice,
-      textAnswer,
-      puzzleOrder,
-      mode,
-      onSubmitAnswer,
-      game.questions,
-      previewStageIdx,
-      previewStreak,
-      checkpointPositions,
-      spawnBurstParticles,
-      spawnFloatingText,
-    ]
-  );
-
-  // React to Live Session feedback arrival for particles & sound
-  useEffect(() => {
-    if (mode !== 'LIVE_SESSION' || !liveQuestionFeedback) return;
-    const cpX = checkpointPositions[liveQuestionIndex] || physicsRef.current.playerX;
-    if (liveQuestionFeedback.isCorrect) {
-      playCorrectSound();
-      setEnergyPercent(prev => Math.min(100, prev + 20));
-      spawnBurstParticles(cpX, -70, '#3fc07a');
-      spawnFloatingText(cpX, -110, `+${liveQuestionFeedback.pointsEarned} ĐIỂM`, '#3fc07a');
-    } else {
-      playWrongSound();
-      setEnergyPercent(prev => Math.max(10, prev - 15));
-    }
-  }, [
-    mode,
-    liveQuestionFeedback,
-    liveQuestionIndex,
-    checkpointPositions,
-    spawnBurstParticles,
-    spawnFloatingText,
-  ]);
-
-  // Proceed after answering a checkpoint question — vehicle automatically resumes running
-  const handleContinueJourney = useCallback(() => {
-    setActiveModalOpen(false);
-    setStageInspected(false);
-    setAutoCruise(true);
-    const isLastStage = activeStageIndex + 1 >= totalStages;
-
-    if (!isRunnerArchetype && isLastStage) {
-      setReachedFinishGate(true);
-      playVictorySound();
-      if (mode === 'LIVE_SESSION' && onNextQuestion && !liveFinalResult) {
-        onNextQuestion();
-      } else if (mode === 'CREATOR_PREVIEW') {
-        setPreviewFinished(true);
-      }
-      return;
-    }
-
-    if (mode === 'LIVE_SESSION') {
-      if (!isLastStage && onNextQuestion) {
-        onNextQuestion();
-      }
-    } else {
-      if (!isLastStage) {
-        setPreviewFeedback(null);
-        setPreviewStageIdx(prev => prev + 1);
-        setPreviewTimeRemaining(game.settings?.timePerQuestion || 20);
-      }
-    }
-  }, [
-    activeStageIndex,
-    totalStages,
-    isRunnerArchetype,
-    mode,
-    onNextQuestion,
-    liveFinalResult,
-    game.settings?.timePerQuestion,
-  ]);
-
-  // When player reaches the Finish Gate after unlocking the last stage
-  useEffect(() => {
-    if (!reachedFinishGate) return;
-    const allUnlocked = activeStageIndex + 1 >= totalStages && Boolean(activeFeedback);
-    if (!allUnlocked) return;
-
-    playVictorySound();
-    if (mode === 'LIVE_SESSION' && onNextQuestion && !liveFinalResult) {
-      onNextQuestion();
-    } else if (mode === 'CREATOR_PREVIEW' && !previewFinished) {
-      setPreviewFinished(true);
-    }
-  }, [
-    reachedFinishGate,
-    activeStageIndex,
-    totalStages,
-    activeFeedback,
-    mode,
-    onNextQuestion,
-    liveFinalResult,
-    previewFinished,
-  ]);
-
-  // Keyboard Listeners
-  useEffect(() => {
-    if (isJourneyFinished) return;
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (!isJourneyStarted) return;
-      const tag = (e.target as HTMLElement)?.tagName;
-      if (tag === 'INPUT' || tag === 'TEXTAREA') {
-        if (e.key === 'Enter' && (activeModalOpen || stageInspected) && !activeFeedback) {
-          e.preventDefault();
-          handleAnswerSubmit();
-        }
-        return;
-      }
-
-      if (e.key === 'p' || e.key === 'P') {
-        e.preventDefault();
-        setIsPaused(prev => !prev);
-        return;
-      }
-
-      if (isPaused) return;
-
-      // Non-runner challenge shortcuts
-      if (!isRunnerArchetype) {
-        if (activeFeedback && (e.key === 'Enter' || e.key === ' ')) {
-          e.preventDefault();
-          handleContinueJourney();
-          return;
-        }
-        if (
-          stageInspected &&
-          !activeFeedback &&
-          activeQuestion &&
-          activeQuestion.type !== 'PUZZLE' &&
-          activeQuestion.type !== 'SLIDER' &&
-          Array.isArray(activeQuestion.choices) &&
-          ['1', '2', '3', '4'].includes(e.key)
-        ) {
-          const idx = Number(e.key) - 1;
-          const choice = activeQuestion.choices[idx];
-          if (choice) {
-            e.preventDefault();
-            setSelectedChoice(choice);
-            handleAnswerSubmit(choice);
-          }
-          return;
-        }
-        if (!stageInspected && e.key === 'Enter') {
-          e.preventDefault();
-          handleInspectCurrentStage();
-          return;
-        }
-        return;
-      }
-
-      if (activeModalOpen) {
-        if (activeFeedback && (e.key === 'Enter' || e.key === ' ')) {
-          e.preventDefault();
-          handleContinueJourney();
-          return;
-        }
-        if (
-          !activeFeedback &&
-          activeQuestion &&
-          activeQuestion.type !== 'PUZZLE' &&
-          activeQuestion.type !== 'SLIDER' &&
-          Array.isArray(activeQuestion.choices) &&
-          ['1', '2', '3', '4'].includes(e.key)
-        ) {
-          const idx = Number(e.key) - 1;
-          const choice = activeQuestion.choices[idx];
-          if (choice) {
-            e.preventDefault();
-            setSelectedChoice(choice);
-            handleAnswerSubmit(choice);
-          }
-        }
-        return;
-      }
-
-      if (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') {
-        e.preventDefault();
-        triggerJump();
-      } else if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
-        physicsRef.current.keys.right = true;
-      } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
-        physicsRef.current.keys.left = true;
-      } else if (e.key === 'e' || e.key === 'E' || e.key === 'Enter') {
-        if (nearCheckpointIndex !== null) {
-          e.preventDefault();
-          handleOpenCheckpointModal();
-        }
+    if (typeof document === 'undefined') return;
+    const handleVisibilityChange = () => {
+      const hidden = document.visibilityState === 'hidden';
+      setIsTabHidden(hidden);
+      if (hidden) {
+        physicsRef.current.vx = 0;
       }
     };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, []);
 
-    const handleKeyUp = (e: KeyboardEvent) => {
-      if (e.key === 'ArrowRight' || e.key === 'd' || e.key === 'D') {
-        physicsRef.current.keys.right = false;
-      } else if (e.key === 'ArrowLeft' || e.key === 'a' || e.key === 'A') {
-        physicsRef.current.keys.left = false;
+  const handleStartJourney = useCallback(async () => {
+    if (assetLoadStatus !== 'READY') return;
+    if (mode === 'LIVE_SESSION' && effectiveOnStartSession) {
+      await effectiveOnStartSession();
+    }
+    setIsJourneyStarted(true);
+    setIsPaused(false);
+  }, [assetLoadStatus, mode, effectiveOnStartSession]);
+
+  const handleJumpAction = useCallback(() => {
+    const canControl =
+      assetLoadStatus === 'READY' &&
+      isJourneyStarted &&
+      !isPaused &&
+      !isTabHidden &&
+      !activeModalOpen &&
+      !isJourneyFinished;
+
+    const jumped = triggerRunnerJump(physicsRef.current, canControl);
+    if (jumped) {
+      setJumpStateSnapshot(physicsRef.current.jumpState);
+      setIsGroundedSnapshot(physicsRef.current.isGrounded);
+    }
+  }, [
+    assetLoadStatus,
+    isJourneyStarted,
+    isPaused,
+    isTabHidden,
+    activeModalOpen,
+    isJourneyFinished,
+  ]);
+
+  const handleAnswerSubmit = useCallback(
+    async (answerValue: string) => {
+      if (!activeQuestion || activeFeedback || submittingAnswer) return;
+      const trimmed = answerValue.trim();
+      if (!trimmed) return;
+
+      // Prevent duplicate answer submission for the same stage
+      if (
+        submittedStageIndicesRef.current.has(activeStageIndex) ||
+        submittingStageLockRef.current
+      ) {
+        return;
+      }
+      submittingStageLockRef.current = true;
+      submittedStageIndicesRef.current.add(activeStageIndex);
+
+      try {
+        if (mode === 'LIVE_SESSION' && effectiveOnSubmitAnswer) {
+          await effectiveOnSubmitAnswer(trimmed);
+          return;
+        }
+
+        const fullQ = activeQuestion as Partial<GameQuestion>;
+        const isCorrect = evaluateRunnerPreviewAnswer(activeQuestion, trimmed);
+        const pts = isCorrect ? 100 : 0;
+        setPreviewScore(prev => prev + pts);
+        if (isCorrect) {
+          setPreviewCorrectCount(prev => prev + 1);
+        }
+        setPreviewAnswerResult({
+          isCorrect,
+          pointsEarned: pts,
+          correctAnswer: fullQ.correctAnswer || '',
+          explanation:
+            fullQ.explanation ||
+            'Đã đối chiếu đáp án tại trạm kiểm tra theo nội dung nguồn.',
+        });
+      } finally {
+        submittingStageLockRef.current = false;
+      }
+    },
+    [activeQuestion, activeFeedback, submittingAnswer, activeStageIndex, mode, effectiveOnSubmitAnswer]
+  );
+
+  const handleContinueJourney = useCallback(async () => {
+    if (!activeFeedback) return;
+
+    const nextUnlocked = Math.min(totalStages, activeStageIndex + 1);
+    setUnlockedStageCount(nextUnlocked);
+    physicsRef.current.unlockedStageCount = nextUnlocked;
+    physicsRef.current.isAtCheckpoint = false;
+    setCheckpointModalOpen(false);
+    setSelectedChoice('');
+    setTextAnswer('');
+
+    if (mode === 'LIVE_SESSION' && effectiveOnNextQuestion) {
+      await effectiveOnNextQuestion();
+      if (nextUnlocked < totalStages) {
+        setActiveStageIndex(nextUnlocked);
+        physicsRef.current.activeStageIndex = nextUnlocked;
+      }
+      return;
+    }
+
+    setPreviewAnswerResult(null);
+    if (nextUnlocked < totalStages) {
+      setActiveStageIndex(nextUnlocked);
+      physicsRef.current.activeStageIndex = nextUnlocked;
+    } else {
+      setPreviewFinished(true);
+    }
+  }, [activeFeedback, totalStages, activeStageIndex, mode, effectiveOnNextQuestion]);
+
+  const handleRestartPreview = useCallback(async () => {
+    // Reuses already-loaded assets in loadedSpritesRef; never calls Banana API
+    submittedStageIndicesRef.current.clear();
+    submittingStageLockRef.current = false;
+
+    if (mode === 'LIVE_SESSION' && effectiveOnRestartSession) {
+      await effectiveOnRestartSession();
+    }
+
+    physicsRef.current = createInitialRunnerPhysicsState({
+      totalStages,
+      obstacleDensity: effectiveConfig.obstacleDensity,
+      initialUnlockedStages: 0,
+    });
+    setUnlockedStageCount(0);
+    setActiveStageIndex(0);
+    setCheckpointModalOpen(false);
+    setPreviewScore(0);
+    setPreviewCorrectCount(0);
+    setPreviewAnswerResult(null);
+    setPreviewFinished(false);
+    setObstaclesClearedCount(0);
+    setJumpStateSnapshot('GROUNDED');
+    setIsGroundedSnapshot(true);
+    setJourneyProgressPercent(0);
+    setIsPaused(false);
+    setIsJourneyStarted(true);
+  }, [mode, effectiveOnRestartSession, totalStages, effectiveConfig.obstacleDensity]);
+
+  const handleExitGame = useCallback(() => {
+    setIsPaused(true);
+    setCheckpointModalOpen(false);
+    onExit();
+  }, [onExit]);
+
+  // Keyboard listener (Space / ArrowUp / W to jump; Enter/Space to start or continue after feedback)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA')) {
+        return;
+      }
+
+      if (e.code === 'Space' || e.code === 'ArrowUp' || e.code === 'KeyW') {
+        e.preventDefault();
+        if (assetLoadStatus !== 'READY') return;
+
+        if (!isJourneyStarted && !isJourneyFinished) {
+          handleStartJourney();
+          return;
+        }
+        if (activeModalOpen && activeFeedback) {
+          handleContinueJourney();
+          return;
+        }
+        if (!activeModalOpen && !isPaused && !isJourneyFinished) {
+          handleJumpAction();
+        }
+      } else if (e.code === 'Enter') {
+        if (activeModalOpen && activeFeedback) {
+          e.preventDefault();
+          handleContinueJourney();
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, [
+    assetLoadStatus,
     isJourneyStarted,
     isJourneyFinished,
-    isPaused,
-    isRunnerArchetype,
-    stageInspected,
     activeModalOpen,
     activeFeedback,
-    activeQuestion,
-    nearCheckpointIndex,
-    triggerJump,
-    handleInspectCurrentStage,
-    handleOpenCheckpointModal,
-    handleAnswerSubmit,
+    isPaused,
+    handleStartJourney,
     handleContinueJourney,
+    handleJumpAction,
   ]);
 
-  // Main 60fps Canvas Physics & Rendering Loop
+  // Main 60fps 2D Side-Scrolling Canvas Loop
   useEffect(() => {
-    if (isJourneyFinished || !isRunnerArchetype) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let animationFrameId: number;
+    let animationFrameId = 0;
     let lastTime = performance.now();
 
-    const drawAvatar = (
-      c: CanvasRenderingContext2D,
-      avatarId: AvatarId,
-      screenX: number,
-      groundY: number,
-      playerY: number,
-      wheelAngle: number,
-      invulnerable: boolean,
-      accentColor: string
-    ) => {
-      c.save();
-      c.translate(screenX, groundY + playerY);
-      if (invulnerable && Math.floor(performance.now() / 80) % 2 === 0) {
-        c.globalAlpha = 0.45;
-      }
-
-      if (avatarId === 'MOTO_RIDER') {
-        const drawWheel = (wx: number) => {
-          c.save();
-          c.translate(wx, -16);
-          c.fillStyle = '#0F172A';
-          c.beginPath();
-          c.arc(0, 0, 15, 0, Math.PI * 2);
-          c.fill();
-          c.lineWidth = 3;
-          c.strokeStyle = '#94A3B8';
-          c.stroke();
-          c.rotate(wheelAngle);
-          c.strokeStyle = accentColor;
-          c.lineWidth = 2;
-          c.beginPath();
-          c.moveTo(-10, 0);
-          c.lineTo(10, 0);
-          c.moveTo(0, -10);
-          c.lineTo(0, 10);
-          c.stroke();
-          c.restore();
-        };
-        drawWheel(-22);
-        drawWheel(24);
-
-        c.fillStyle = accentColor;
-        c.beginPath();
-        c.moveTo(-26, -20);
-        c.lineTo(-6, -38);
-        c.lineTo(22, -36);
-        c.lineTo(32, -20);
-        c.closePath();
-        c.fill();
-
-        const grad = c.createLinearGradient(30, -32, 130, -18);
-        grad.addColorStop(0, 'rgba(253, 224, 71, 0.5)');
-        grad.addColorStop(1, 'rgba(253, 224, 71, 0)');
-        c.fillStyle = grad;
-        c.beginPath();
-        c.moveTo(30, -33);
-        c.lineTo(130, -48);
-        c.lineTo(130, -8);
-        c.closePath();
-        c.fill();
-
-        c.fillStyle = '#1E293B';
-        c.fillRect(-10, -56, 16, 22);
-        c.fillStyle = '#F8FAFC';
-        c.beginPath();
-        c.arc(0, -64, 11, 0, Math.PI * 2);
-        c.fill();
-        c.fillStyle = '#38BDF8';
-        c.fillRect(2, -68, 9, 6);
-      } else if (avatarId === 'CYBER_BOT') {
-        const hoverOffset = Math.sin(wheelAngle * 2) * 4;
-        c.translate(0, hoverOffset);
-        c.fillStyle = '#22D3EE';
-        c.beginPath();
-        c.arc(0, -10, 9, 0, Math.PI * 2);
-        c.fill();
-        c.fillStyle = '#0F172A';
-        c.strokeStyle = accentColor;
-        c.lineWidth = 3;
-        c.beginPath();
-        c.roundRect(-20, -54, 40, 38, 10);
-        c.fill();
-        c.stroke();
-        c.beginPath();
-        c.roundRect(-16, -78, 32, 22, 8);
-        c.fill();
-        c.stroke();
-        c.fillStyle = '#22D3EE';
-        c.fillRect(-10, -71, 22, 7);
-      } else {
-        const stride = Math.sin(wheelAngle * 3) * 8;
-        c.strokeStyle = '#1E293B';
-        c.lineWidth = 6;
-        c.lineCap = 'round';
-        c.beginPath();
-        c.moveTo(-4, -26);
-        c.lineTo(-4 - stride, -3);
-        c.moveTo(4, -26);
-        c.lineTo(4 + stride, -3);
-        c.stroke();
-
-        c.fillStyle =
-          avatarId === 'MEDICAL_MEDIC'
-            ? '#F8FAFC'
-            : avatarId === 'FACTORY_ENGINEER'
-              ? '#F59E0B'
-              : avatarId === 'SALES_ADVISOR'
-                ? '#0EA5E9'
-                : accentColor;
-        c.beginPath();
-        c.roundRect(-14, -56, 28, 32, 7);
-        c.fill();
-
-        c.fillStyle = '#FDE68A';
-        c.beginPath();
-        c.arc(0, -67, 11, 0, Math.PI * 2);
-        c.fill();
-
-        if (avatarId === 'FACTORY_ENGINEER') {
-          c.fillStyle = '#EAB308';
-          c.beginPath();
-          c.arc(0, -71, 12, Math.PI, 0);
-          c.fill();
-        } else if (avatarId === 'MEDICAL_MEDIC') {
-          c.fillStyle = '#EF4444';
-          c.fillRect(-5, -45, 10, 3);
-          c.fillRect(-1.5, -48.5, 3, 10);
-        }
-      }
-      c.restore();
-    };
-
-    const drawObstacle = (
-      c: CanvasRenderingContext2D,
-      obs: WorldObstacle,
-      screenX: number,
-      groundY: number,
-      accentColor: string
-    ) => {
-      c.save();
-      c.translate(screenX, groundY);
-
-      if (obs.type === 'TRAFFIC_CONE') {
-        c.fillStyle = '#F97316';
-        c.beginPath();
-        c.moveTo(4, 0);
-        c.lineTo(obs.width / 2, -obs.height);
-        c.lineTo(obs.width - 4, 0);
-        c.closePath();
-        c.fill();
-        c.fillStyle = '#F8FAFC';
-        c.fillRect(11, -obs.height * 0.58, obs.width - 22, 7);
-      } else if (obs.type === 'OIL_BARREL') {
-        c.fillStyle = '#DC2626';
-        c.beginPath();
-        c.roundRect(2, -obs.height, obs.width - 4, obs.height, 6);
-        c.fill();
-        c.fillStyle = '#FACC15';
-        c.fillRect(4, -obs.height * 0.65, obs.width - 8, 8);
-        c.fillStyle = '#0F172A';
-        c.font = 'bold 10px "Be Vietnam Pro", system-ui, sans-serif';
-        c.textAlign = 'center';
-        c.fillText('OIL', obs.width / 2, -obs.height * 0.3);
-      } else if (obs.type === 'TIRE_STACK') {
-        for (let i = 0; i < 3; i++) {
-          c.fillStyle = '#1E293B';
-          c.beginPath();
-          c.roundRect(3, -(i + 1) * 14, obs.width - 6, 13, 5);
-          c.fill();
-          c.strokeStyle = '#64748B';
-          c.lineWidth = 1.5;
-          c.stroke();
-        }
-      } else if (obs.type === 'SERVER_FIREWALL' || obs.type === 'BUG_DRONE') {
-        c.fillStyle = '#0F172A';
-        c.strokeStyle = '#EF4444';
-        c.lineWidth = 2.5;
-        c.beginPath();
-        c.roundRect(2, -obs.height, obs.width - 4, obs.height, 6);
-        c.fill();
-        c.stroke();
-        c.fillStyle = '#EF4444';
-        c.font = 'bold 10px monospace';
-        c.textAlign = 'center';
-        c.fillText(obs.type === 'BUG_DRONE' ? 'BUG' : 'FW', obs.width / 2, -obs.height / 2);
-      } else if (obs.type === 'BIOHAZARD_CART' || obs.type === 'MEDICAL_SCREEN') {
-        c.fillStyle = '#F8FAFC';
-        c.strokeStyle = '#0D9488';
-        c.lineWidth = 2.5;
-        c.beginPath();
-        c.roundRect(2, -obs.height, obs.width - 4, obs.height, 6);
-        c.fill();
-        c.stroke();
-        c.fillStyle = '#EF4444';
-        c.fillRect(obs.width / 2 - 6, -obs.height / 2 - 2, 12, 4);
-        c.fillRect(obs.width / 2 - 2, -obs.height / 2 - 6, 4, 12);
-      } else {
-        c.fillStyle = '#D97706';
-        c.strokeStyle = accentColor;
-        c.lineWidth = 2;
-        c.beginPath();
-        c.roundRect(2, -obs.height, obs.width - 4, obs.height, 4);
-        c.fill();
-        c.stroke();
-        c.strokeStyle = '#78350F';
-        c.beginPath();
-        c.moveTo(4, -obs.height + 4);
-        c.lineTo(obs.width - 4, -4);
-        c.stroke();
-      }
-
-      if (!obs.cleared) {
-        c.fillStyle = '#F8FAFC';
-        c.font = 'bold 10px "Be Vietnam Pro", system-ui, sans-serif';
-        c.textAlign = 'center';
-        c.fillText('NHẢY', obs.width / 2, -obs.height - 8);
-      }
-      c.restore();
-    };
-
-    const step = (now: number) => {
-      const dt =
-        isJourneyStarted && !isPaused ? Math.min(0.05, (now - lastTime) / 1000) : 0;
+    const renderFrame = (now: number) => {
+      const rawDt = (now - lastTime) / 1000;
       lastTime = now;
 
-      const p = physicsRef.current;
-      const palette = effectiveConfig.palette;
+      // Match canvas pixel buffer to viewport container size
+      const parent = canvas.parentElement;
+      const targetW = Math.max(320, parent?.clientWidth || window.innerWidth || 1280);
+      const targetH = Math.max(320, parent?.clientHeight || window.innerHeight || 720);
+      if (canvas.width !== targetW || canvas.height !== targetH) {
+        canvas.width = targetW;
+        canvas.height = targetH;
+      }
+
       const width = canvas.width;
       const height = canvas.height;
-      const groundHeight = Math.max(92, Math.min(140, Math.round(height * 0.18)));
-      const groundY = height - groundHeight;
+      const isCompactViewport = width < 640;
+      const playerAnchorScreenX = isCompactViewport
+        ? Math.round(width * 0.24)
+        : Math.min(240, Math.round(width * 0.2));
 
-      const currentLockedIdx = p.unlockedStageCount;
-      const blockingCheckpointX =
-        currentLockedIdx < checkpointPositions.length
-          ? checkpointPositions[currentLockedIdx]
-          : finishGateX;
+      const canMove =
+        assetLoadStatus === 'READY' &&
+        isJourneyStarted &&
+        !isPaused &&
+        !isTabHidden &&
+        !activeModalOpen &&
+        !isJourneyFinished;
 
-      const moveRightActive =
-        isJourneyStarted && !isPaused && (p.keys.right || (autoCruise && !activeModalOpen));
-      const moveLeftActive = p.keys.left && !activeModalOpen && !isPaused;
+      const physics = physicsRef.current;
+      physics.unlockedStageCount = unlockedStageCount;
 
-      const speed = BASE_MOVE_SPEED * (effectiveConfig.speedMultiplier || 1);
-      if (moveRightActive && !activeModalOpen) {
-        p.vx = speed;
-        p.facing = 1;
-      } else if (moveLeftActive && !activeModalOpen) {
-        p.vx = -speed * 0.85;
-        p.facing = -1;
-      } else {
-        p.vx = 0;
+      const stepEvents = stepAdventureRunnerPhysics(physics, rawDt, {
+        canMove,
+        speedMultiplier: effectiveConfig.speedMultiplier || 1,
+        playerAnchorScreenX,
+      });
+
+      if (stepEvents.reachedCheckpointIndex !== null) {
+        setActiveStageIndex(stepEvents.reachedCheckpointIndex);
+        setCheckpointModalOpen(true);
+      }
+      if (stepEvents.reachedFinish && mode === 'CREATOR_PREVIEW' && !previewFinished) {
+        setPreviewFinished(true);
       }
 
-      p.playerX += p.vx * dt;
-      if (p.playerX < 40) p.playerX = 40;
+      // Update reactive snapshots for HUD & DOM data attributes
+      const pct = Math.min(
+        100,
+        Math.max(0, Math.round((physics.playerX / Math.max(1, physics.finishLineX)) * 100))
+      );
+      setJourneyProgressPercent(prev => (prev !== pct ? pct : prev));
+      setObstaclesClearedCount(prev =>
+        prev !== physics.obstaclesCleared ? physics.obstaclesCleared : prev
+      );
+      setJumpStateSnapshot(prev => (prev !== physics.jumpState ? physics.jumpState : prev));
+      setIsGroundedSnapshot(prev => (prev !== physics.isGrounded ? physics.isGrounded : prev));
 
-      if (p.playerX >= blockingCheckpointX - 18) {
-        p.playerX = blockingCheckpointX - 18;
-        p.vx = 0;
-      }
+      canvas.dataset.playerX = String(Math.round(physics.playerX));
+      canvas.dataset.playerY = String(Math.round(physics.playerY));
+      canvas.dataset.cameraX = String(Math.round(physics.cameraX));
+      canvas.dataset.vx = String(Math.round(physics.vx));
+      canvas.dataset.jumpState = physics.jumpState;
+      canvas.dataset.isGrounded = String(physics.isGrounded);
 
-      if (Math.abs(p.vx) > 5 && p.isGrounded) {
-        p.wheelAngle += (p.vx * dt) / 16;
-      }
+      // ================= RENDER 2D SIDE-SCROLLING WORLD =================
+      ctx.clearRect(0, 0, width, height);
 
-      if (!p.isGrounded || p.vy < 0) {
-        p.playerY += p.vy * dt;
-        p.vy += GRAVITY * dt;
-        if (p.playerY >= 0) {
-          p.playerY = 0;
-          p.vy = 0;
-          p.isGrounded = true;
-        }
-      }
+      const palette = effectiveConfig.palette;
+      const sprites = loadedSpritesRef.current;
+      // Ground surface aligned with the flat lower 18-22% road/floor band of the 16:9 Banana backgrounds
+      const groundSurfaceY = Math.round(height * 0.82);
 
-      const playerLeft = p.playerX - 20;
-      const playerRight = p.playerX + 20;
-      const playerBottom = p.playerY;
-      const playerTop = p.playerY - 58;
+      // 1. Draw Horizontally Scrolling 2D Background Image
+      if (sprites.background) {
+        const bg = sprites.background;
+        const tileWidth = Math.max(width, Math.round(height * bg.aspectRatio));
+        const scrollOffset = ((physics.cameraX * 0.65) % tileWidth + tileWidth) % tileWidth;
 
-      // Collectible Safety Tokens pickup
-      for (const token of p.collectibles) {
-        if (token.collected) continue;
-        const dx = Math.abs(p.playerX - token.x);
-        const dy = Math.abs(p.playerY - 26 - token.yOffset);
-        if (dx < 32 && dy < 38) {
-          token.collected = true;
-          setSkillBonusScore(prev => prev + 10);
-          spawnBurstParticles(token.x, token.yOffset, '#3fc07a');
-          spawnFloatingText(token.x, token.yOffset - 18, '+10 AN TOÀN', '#3fc07a');
-          playClickSound();
-        }
-      }
-
-      // AABB Collision Detection with Obstacles
-      for (const obs of p.obstacles) {
-        const obsLeft = obs.x;
-        const obsRight = obs.x + obs.width;
-        const obsTop = -obs.height;
-
-        if (!obs.cleared && !obs.hit && playerLeft > obsRight) {
-          obs.cleared = true;
-          setSkillBonusScore(prev => prev + 15);
-          setObstaclesClearedCount(prev => prev + 1);
-          spawnFloatingText(obs.x, -obs.height - 25, gameplayProfile.clearFloatingText, '#38BDF8');
-        }
-
-        const horizontalOverlap = playerRight > obsLeft + 4 && playerLeft < obsRight - 4;
-        const verticalOverlap = playerBottom > obsTop + 6 && playerTop < 0;
-
-        if (!obs.hit && horizontalOverlap && verticalOverlap && now > p.invulnerableUntil) {
-          obs.hit = true;
-          p.invulnerableUntil = now + 900;
-          p.playerX = Math.max(40, obsLeft - 28);
-          p.vy = -260;
-          p.isGrounded = false;
-          setObstaclesHitCount(prev => prev + 1);
-          setEnergyPercent(prev => Math.max(10, prev - 12));
-          setSkillBonusScore(prev => Math.max(0, prev - 5));
-          spawnBurstParticles(obs.x + obs.width / 2, -obs.height / 2, '#EF4444');
-          spawnFloatingText(
-            obs.x,
-            -obs.height - 20,
-            `VA CHẠM ${OBSTACLE_METADATA[obs.type]?.label?.toUpperCase() || ''}`,
-            '#F87171'
-          );
-          playWrongSound();
-        }
-      }
-
-      // Proximity to active Checkpoint
-      if (currentLockedIdx < checkpointPositions.length) {
-        const targetCpX = checkpointPositions[currentLockedIdx];
-        const dist = Math.abs(p.playerX - targetCpX);
-        if (dist <= 52) {
-          setNearCheckpointIndex(currentLockedIdx);
-          if (!activeModalOpen && !activeFeedback) {
-            setActiveModalOpen(true);
-            p.keys.right = false;
-            p.keys.left = false;
-          }
-        } else {
-          setNearCheckpointIndex(null);
+        for (let drawX = -scrollOffset; drawX < width + tileWidth; drawX += tileWidth) {
+          ctx.drawImage(bg.source, Math.floor(drawX), 0, tileWidth + 1, height);
         }
       } else {
-        setNearCheckpointIndex(null);
-        if (p.playerX >= finishGateX - 30) {
-          setReachedFinishGate(true);
-        }
+        const skyGrad = ctx.createLinearGradient(0, 0, 0, groundSurfaceY);
+        skyGrad.addColorStop(0, palette.skyTop);
+        skyGrad.addColorStop(1, palette.skyBottom);
+        ctx.fillStyle = skyGrad;
+        ctx.fillRect(0, 0, width, height);
       }
 
-      const pct = Math.min(100, Math.max(0, Math.round((p.playerX / finishGateX) * 100)));
-      setPlayerProgressPercent(pct);
+      // Subtle ground/road running track line for clear visual reference of jump & landing
+      ctx.save();
+      ctx.fillStyle = 'rgba(9, 13, 22, 0.26)';
+      ctx.fillRect(0, groundSurfaceY, width, height - groundSurfaceY);
+      ctx.strokeStyle = palette.accentColor || '#38bdf8';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(0, groundSurfaceY);
+      ctx.lineTo(width, groundSurfaceY);
+      ctx.stroke();
 
-      const targetCamX = Math.max(0, p.playerX - width * 0.26);
-      p.cameraX += (targetCamX - p.cameraX) * (effectiveConfig.reducedMotion ? 1 : 0.14);
-
-      // ================= RENDER SCENE =================
-      const skyGrad = ctx.createLinearGradient(0, 0, 0, groundY);
-      skyGrad.addColorStop(0, palette.skyTop);
-      skyGrad.addColorStop(1, palette.skyBottom);
-      ctx.fillStyle = skyGrad;
-      ctx.fillRect(0, 0, width, groundY);
-
-      const glowGrad = ctx.createLinearGradient(0, groundY - 120, 0, groundY);
-      glowGrad.addColorStop(0, 'rgba(0,0,0,0)');
-      glowGrad.addColorStop(1, `${palette.horizonGlow}44`);
-      ctx.fillStyle = glowGrad;
-      ctx.fillRect(0, groundY - 120, width, 120);
-
-      // Parallax Layer 1
-      const farParallax = effectiveConfig.reducedMotion ? 0 : p.cameraX * 0.2;
-      ctx.fillStyle = `${palette.buildingPrimary}AA`;
-      const farCount = Math.ceil(width / 220) + 4;
-      for (let i = -1; i < farCount; i++) {
-        const bx =
-          ((i * 220 - (farParallax % 220)) + width + 220) % (width + 440) - 220;
-        const bh = 120 + ((Math.abs(i) * 43) % 130);
-        ctx.fillRect(bx, groundY - bh, 160, bh);
+      // Scrolling ground distance ticks
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+      const dashSpacing = 96;
+      const dashStart = -(physics.cameraX % dashSpacing);
+      for (let dx = dashStart; dx < width; dx += dashSpacing) {
+        ctx.fillRect(dx, groundSurfaceY + Math.round((height - groundSurfaceY) * 0.42), 36, 4);
       }
+      ctx.restore();
 
-      // Parallax Layer 2
-      const midParallax = effectiveConfig.reducedMotion ? 0 : p.cameraX * 0.5;
-      const midCount = Math.ceil(width / 290) + 4;
-      for (let i = -1; i < midCount; i++) {
-        const mx =
-          ((i * 290 - (midParallax % 290)) + width + 290) % (width + 580) - 290;
-        const mh = 95 + ((Math.abs(i) * 53) % 90);
-        ctx.fillStyle = palette.buildingSecondary;
-        ctx.beginPath();
-        ctx.roundRect(mx, groundY - mh, 195, mh, [8, 8, 0, 0]);
-        ctx.fill();
+      // 2. Draw Checkpoints along the world track
+      physics.checkpointPositions.forEach((cpX, idx) => {
+        const screenX = cpX - physics.cameraX;
+        if (screenX < -140 || screenX > width + 140) return;
 
-        ctx.fillStyle = `${palette.accentColor}55`;
-        for (let wy = groundY - mh + 16; wy < groundY - 18; wy += 20) {
-          ctx.fillRect(mx + 18, wy, 38, 9);
-          ctx.fillRect(mx + 74, wy, 38, 9);
-          ctx.fillRect(mx + 130, wy, 38, 9);
-        }
-      }
-
-      // World Decor Signboards
-      for (const dec of worldDecorList) {
-        const sx = dec.x - p.cameraX;
-        if (sx < -140 || sx > width + 140) continue;
+        const isUnlocked = idx < unlockedStageCount;
+        const gateColor = isUnlocked ? '#22c55e' : palette.accentColor || '#f59e0b';
+        const poleHeight = Math.round(height * 0.24);
+        const topY = groundSurfaceY - poleHeight;
 
         ctx.save();
-        ctx.translate(sx, groundY);
-        ctx.fillStyle = '#64748B';
-        ctx.fillRect(-2, -68, 4, 68);
-        ctx.fillStyle = '#0F172A';
-        ctx.strokeStyle = palette.accentColor;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.roundRect(-54, -90, 108, 24, 5);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = '#E2E8F0';
-        ctx.font = 'bold 10px "Be Vietnam Pro", system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText((dec.label || '').slice(0, 18), 0, -74);
-        ctx.restore();
-      }
-
-      // Ground & Road Track
-      ctx.fillStyle = palette.roadSurface;
-      ctx.fillRect(0, groundY, width, groundHeight);
-      ctx.fillStyle = palette.accentColor;
-      ctx.fillRect(0, groundY, width, 4);
-
-      ctx.fillStyle = palette.roadLine;
-      const dashOffset = p.cameraX % 90;
-      for (let rx = -dashOffset; rx < width + 90; rx += 90) {
-        ctx.fillRect(rx, groundY + Math.round(groundHeight * 0.42), 48, 5);
-      }
-
-      // Checkpoints
-      checkpointPositions.forEach((cpX, idx) => {
-        const sx = cpX - p.cameraX;
-        if (sx < -160 || sx > width + 160) return;
-        const isUnlocked = idx < p.unlockedStageCount;
-        const isCurrent = idx === p.unlockedStageCount;
-        const stageMeta = effectiveConfig.stages[idx];
-
-        ctx.save();
-        ctx.translate(sx, groundY);
-
-        ctx.fillStyle = isUnlocked ? '#3fc07a' : isCurrent ? palette.accentColor : '#64748B';
-        ctx.fillRect(-40, -130, 8, 130);
-        ctx.fillRect(32, -130, 8, 130);
-
-        ctx.fillStyle = '#0F172A';
-        ctx.strokeStyle = isUnlocked ? '#3fc07a' : isCurrent ? palette.accentColor : '#64748B';
+        // Gate pillar
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(screenX - 6, topY, 12, poleHeight);
+        ctx.strokeStyle = gateColor;
         ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.roundRect(-74, -168, 148, 40, 8);
-        ctx.fill();
-        ctx.stroke();
+        ctx.strokeRect(screenX - 6, topY, 12, poleHeight);
 
-        ctx.fillStyle = isUnlocked ? '#3fc07a' : '#F8FAFC';
-        ctx.font = 'bold 11px "Be Vietnam Pro", system-ui, sans-serif';
+        // Checkpoint banner
+        const bannerW = 108;
+        const bannerH = 30;
+        ctx.fillStyle = '#090d16';
+        ctx.fillRect(screenX - bannerW / 2, topY - bannerH, bannerW, bannerH);
+        ctx.strokeStyle = gateColor;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(screenX - bannerW / 2, topY - bannerH, bannerW, bannerH);
+
+        ctx.fillStyle = gateColor;
+        ctx.font = 'bold 12px "Be Vietnam Pro", system-ui, sans-serif';
         ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
         ctx.fillText(
-          isUnlocked ? `CHẶNG ${idx + 1} ĐÃ QUA` : `CHẶNG ${idx + 1}`,
-          0,
-          -150
+          isUnlocked ? `✓ TRẠM ${idx + 1}` : `CHECKPOINT ${idx + 1}`,
+          screenX,
+          topY - bannerH / 2
         );
-        ctx.fillStyle = '#94A3B8';
-        ctx.font = '10px "Be Vietnam Pro", system-ui, sans-serif';
-        ctx.fillText((stageMeta?.checkpointTitle || '').slice(0, 22), 0, -135);
 
+        // Laser barrier beam when locked
         if (!isUnlocked) {
-          ctx.strokeStyle = isCurrent ? palette.accentColor : '#EF4444';
-          ctx.lineWidth = 3;
-          ctx.setLineDash([6, 6]);
+          ctx.strokeStyle = gateColor;
+          ctx.lineWidth = 4;
+          ctx.setLineDash([8, 6]);
           ctx.beginPath();
-          ctx.moveTo(0, -126);
-          ctx.lineTo(0, 0);
+          ctx.moveTo(screenX, topY);
+          ctx.lineTo(screenX, groundSurfaceY);
           ctx.stroke();
           ctx.setLineDash([]);
         }
         ctx.restore();
       });
 
-      // Finish Gate
-      const finishScreenX = finishGateX - p.cameraX;
-      if (finishScreenX > -160 && finishScreenX < width + 160) {
+      // 3. Draw Finish Gate
+      const finishScreenX = physics.finishLineX - physics.cameraX;
+      if (finishScreenX > -140 && finishScreenX < width + 140) {
+        const poleH = Math.round(height * 0.26);
+        const topY = groundSurfaceY - poleH;
         ctx.save();
-        ctx.translate(finishScreenX, groundY);
-        ctx.fillStyle = '#EAB308';
-        ctx.fillRect(-44, -136, 10, 136);
-        ctx.fillRect(34, -136, 10, 136);
-        ctx.fillStyle = '#0F172A';
-        ctx.strokeStyle = '#EAB308';
+        ctx.fillStyle = '#22c55e';
+        ctx.fillRect(finishScreenX - 6, topY, 12, poleH);
+        ctx.fillStyle = '#090d16';
+        ctx.fillRect(finishScreenX - 56, topY - 32, 112, 30);
+        ctx.strokeStyle = '#22c55e';
         ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.roundRect(-74, -174, 148, 40, 8);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = '#FACC15';
+        ctx.strokeRect(finishScreenX - 56, topY - 32, 112, 30);
+        ctx.fillStyle = '#22c55e';
         ctx.font = 'bold 12px "Be Vietnam Pro", system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillText('ĐÍCH ĐẾN HÀNH TRÌNH', 0, -150);
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🏁 VỀ ĐÍCH', finishScreenX, topY - 17);
         ctx.restore();
       }
 
-      // Collectible Safety Tokens
-      for (const token of p.collectibles) {
-        if (token.collected) continue;
-        const sx = token.x - p.cameraX;
-        if (sx < -60 || sx > width + 60) continue;
-        ctx.save();
-        ctx.translate(sx, groundY + token.yOffset);
-        ctx.fillStyle = '#172a1d';
-        ctx.strokeStyle = '#3fc07a';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, 13, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
-        ctx.fillStyle = '#3fc07a';
-        ctx.font = 'bold 9px "Be Vietnam Pro", system-ui, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText('+10', 0, 3);
-        ctx.restore();
-      }
-
-      // Obstacles
-      for (const obs of p.obstacles) {
-        const sx = obs.x - p.cameraX;
-        if (sx < -80 || sx > width + 80) continue;
-        drawObstacle(ctx, obs, sx, groundY, palette.accentColor);
-      }
-
-      // Player Avatar
-      const playerScreenX = p.playerX - p.cameraX;
-      drawAvatar(
-        ctx,
-        effectiveConfig.avatarId,
-        playerScreenX,
-        groundY,
-        p.playerY,
-        p.wheelAngle,
-        now < p.invulnerableUntil,
-        palette.accentColor
+      // 4. Draw Industry Obstacles from verified Banana obstacle sprite
+      const obsTargetH = Math.round(
+        Math.max(46, Math.min(isCompactViewport ? 60 : 74, height * 0.105))
       );
+      for (const obs of physics.obstacles) {
+        const screenX = obs.x - physics.cameraX;
+        if (screenX < -120 || screenX > width + 120) continue;
 
-      // Floating Particles & Score Popups
-      for (let i = p.particles.length - 1; i >= 0; i--) {
-        const pt = p.particles[i];
-        pt.x += pt.vx * dt;
-        pt.y += pt.vy * dt;
-        pt.alpha -= dt * 0.9;
-        if (pt.alpha <= 0) {
-          p.particles.splice(i, 1);
-          continue;
-        }
         ctx.save();
-        ctx.globalAlpha = Math.max(0, pt.alpha);
-        const px = pt.x - p.cameraX;
-        const py = groundY + pt.y;
-        if (pt.text) {
-          ctx.fillStyle = pt.color;
-          ctx.font = 'bold 13px "Be Vietnam Pro", system-ui, sans-serif';
-          ctx.textAlign = 'center';
-          ctx.fillText(pt.text, px, py);
+        // Ground shadow under obstacle
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
+        ctx.beginPath();
+        ctx.ellipse(screenX, groundSurfaceY + 2, obsTargetH * 0.45, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (sprites.obstacle) {
+          const obsSprite = sprites.obstacle;
+          const drawH = obsTargetH;
+          const drawW = Math.round(
+            Math.max(40, Math.min(drawH * 1.45, drawH * obsSprite.aspectRatio))
+          );
+          obs.width = drawW;
+          obs.height = drawH;
+          ctx.drawImage(
+            obsSprite.source,
+            Math.round(screenX - drawW / 2),
+            Math.round(groundSurfaceY - drawH),
+            drawW,
+            drawH
+          );
         } else {
-          ctx.fillStyle = pt.color;
-          ctx.beginPath();
-          ctx.arc(px, py, pt.size, 0, Math.PI * 2);
-          ctx.fill();
+          ctx.fillStyle = '#ef4444';
+          ctx.fillRect(screenX - 24, groundSurfaceY - 48, 48, 48);
         }
         ctx.restore();
       }
 
-      if (isJourneyStarted) {
-        animationFrameId = requestAnimationFrame(step);
-      } else if (!animationFrameId) {
-        animationFrameId = -1;
-        step(performance.now());
+      // 5. Draw Industry Character / Vehicle from verified Banana character sprite
+      const playerScreenX = physics.playerX - physics.cameraX;
+      const charTargetH = Math.round(
+        Math.max(66, Math.min(isCompactViewport ? 88 : 112, height * 0.155))
+      );
+      const runBobOffset =
+        physics.isGrounded && physics.vx > 10 ? Math.sin(now * 0.018) * 3 : 0;
+      const playerFootY = groundSurfaceY + physics.playerY + runBobOffset;
+
+      ctx.save();
+      // Dynamic ground shadow that shrinks while jumping
+      const heightRatio = Math.max(0.35, 1 - Math.abs(physics.playerY) / 180);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.42)';
+      ctx.beginPath();
+      ctx.ellipse(
+        playerScreenX,
+        groundSurfaceY + 3,
+        charTargetH * 0.42 * heightRatio,
+        7 * heightRatio,
+        0,
+        0,
+        Math.PI * 2
+      );
+      ctx.fill();
+
+      if (physics.hitFlashTimer > 0 && Math.floor(now / 60) % 2 === 0) {
+        ctx.globalAlpha = 0.65;
       }
+
+      if (sprites.character) {
+        const charSprite = sprites.character;
+        const drawH = charTargetH;
+        const drawW = Math.round(
+          Math.max(54, Math.min(drawH * 1.6, drawH * charSprite.aspectRatio))
+        );
+
+        ctx.translate(playerScreenX, playerFootY - drawH / 2);
+        if (!physics.isGrounded) {
+          const tiltAngle =
+            physics.jumpState === 'JUMPING' ? -0.09 : physics.jumpState === 'LANDING' ? 0.06 : 0;
+          ctx.rotate(tiltAngle);
+        }
+        ctx.drawImage(
+          charSprite.source,
+          Math.round(-drawW / 2),
+          Math.round(-drawH / 2),
+          drawW,
+          drawH
+        );
+      } else {
+        ctx.fillStyle = palette.accentColor || '#38bdf8';
+        ctx.fillRect(playerScreenX - 24, playerFootY - 64, 48, 64);
+      }
+      ctx.restore();
+
+      animationFrameId = window.requestAnimationFrame(renderFrame);
     };
 
-    animationFrameId = requestAnimationFrame(step);
-    return () => cancelAnimationFrame(animationFrameId);
+    animationFrameId = window.requestAnimationFrame(renderFrame);
+    return () => window.cancelAnimationFrame(animationFrameId);
   }, [
+    assetLoadStatus,
     isJourneyStarted,
-    isJourneyFinished,
     isPaused,
-    isRunnerArchetype,
-    effectiveConfig,
-    checkpointPositions,
-    finishGateX,
-    worldDecorList,
-    autoCruise,
+    isTabHidden,
     activeModalOpen,
-    activeFeedback,
-    canvasSize.width,
-    canvasSize.height,
-    gameplayProfile.clearFloatingText,
-    spawnBurstParticles,
-    spawnFloatingText,
+    isJourneyFinished,
+    unlockedStageCount,
+    effectiveConfig,
+    mode,
+    previewFinished,
   ]);
 
-  const handleRestartPreview = () => {
-    physicsRef.current.playerX = 90;
-    physicsRef.current.playerY = 0;
-    physicsRef.current.vy = 0;
-    physicsRef.current.cameraX = 0;
-    physicsRef.current.unlockedStageCount = 0;
-    physicsRef.current.obstacles = initialWorldObstacles.map(o => ({ ...o }));
-    physicsRef.current.collectibles = initialWorldCollectibles.map(c => ({ ...c }));
-    setPreviewStageIdx(0);
-    setPreviewFeedback(null);
-    setPreviewFinished(false);
-    setPreviewScore(0);
-    setPreviewCorrectCount(0);
-    setPreviewStreak(0);
-    setPreviewMaxStreak(0);
-    setSkillBonusScore(0);
-    setObstaclesClearedCount(0);
-    setObstaclesHitCount(0);
-    setEnergyPercent(100);
-    inspectedStagesRef.current.clear();
-    setPreviewWrongCount(0);
-    setReachedFinishGate(false);
-    setActiveModalOpen(false);
-    setIsPaused(false);
-    setAutoCruise(true);
-    if (mode === 'LIVE_SESSION' && onRestartSession) {
-      onRestartSession();
-    }
-  };
-
-  const currentStageMeta =
-    effectiveConfig.stages[activeStageIndex] || effectiveConfig.stages[0];
-  const currentQuizScore = mode === 'LIVE_SESSION' ? liveScore : previewScore;
-  const totalDisplayScore = currentQuizScore + skillBonusScore;
-  const currentCorrectCount = mode === 'LIVE_SESSION' ? liveCorrectCount : previewCorrectCount;
-  const currentWrongCount = mode === 'LIVE_SESSION' ? liveWrongCount : previewWrongCount;
-  const currentAnsweredCount = currentCorrectCount + currentWrongCount;
-  const accentHex = effectiveConfig.palette.accentColor || '#F59E0B';
+  const accentHex = effectiveConfig.palette.accentColor || '#38bdf8';
+  const displayedTotalScore =
+    mode === 'LIVE_SESSION'
+      ? (effectiveFinalResult?.totalScore ??
+          (effectiveFinalResult as PracticeFinalResult | null)?.score ??
+          liveScore)
+      : previewScore;
+  const completedQuestionsCount = Math.min(totalStages, unlockedStageCount);
 
   return (
     <div
-      ref={viewportContainerRef}
+      data-testid="adventure-game-viewport"
+       data-industry-id={effectiveConfig.industryId}
+      data-asset-status={assetLoadStatus}
       style={{
         position: 'fixed',
         inset: 0,
-        zIndex: 9999,
-        width: '100dvw',
+        width: '100vw',
         height: '100dvh',
-        backgroundColor: '#090d16',
-        color: '#f8fafc',
-        display: 'flex',
-        flexDirection: 'column',
+        zIndex: 50,
         overflow: 'hidden',
-        userSelect: 'none',
+        backgroundColor: '#090d16',
         fontFamily: 'var(--font-sans, "Be Vietnam Pro", system-ui, sans-serif)',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        touchAction: 'none',
       }}
     >
-      {/* ================= INTEGRATED TOP HUD BAR ================= */}
-      <header
+      {/* ================= MINIMAL HUD (STAGE/PROGRESS, SCORE, COMPLETED QUESTIONS) ================= */}
+      <div
+        data-testid="adventure-minimal-hud"
         style={{
-          minHeight: '52px',
-          padding: '6px 14px',
-          backgroundColor: '#0b0f19',
-          borderBottom: '1px solid #1e293b',
+          position: 'absolute',
+          top: '12px',
+          left: '12px',
+          right: '12px',
+          zIndex: 30,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          flexWrap: 'wrap',
           gap: '10px',
-          flexShrink: 0,
-          zIndex: 30,
+          flexWrap: 'wrap',
+          pointerEvents: 'none',
         }}
       >
-        {/* Left: Game Title & Industry Context */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-          <span
-            style={{
-              padding: '3px 9px',
-              borderRadius: '6px',
-              backgroundColor: '#161f30',
-              border: '1px solid #26334d',
-              color: '#f8fafc',
-              fontSize: '11.5px',
-              fontWeight: 700,
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {effectiveConfig.industryLabel}
-          </span>
-          <div style={{ minWidth: 0 }}>
-            <h1
-              style={{
-                margin: 0,
-                fontSize: '14.5px',
-                fontWeight: 700,
-                color: '#f8fafc',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                maxWidth: '250px',
-              }}
-            >
-              {game.title || effectiveConfig.environmentTitle}
-            </h1>
-          </div>
-        </div>
-
-        {/* Center: Divided KPI Strip (Chặng | Điểm | Năng lượng | Mục tiêu) */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            backgroundColor: '#111726',
-            border: '1px solid #222d42',
-            borderRadius: '8px',
-            overflow: 'hidden',
-            fontVariantNumeric: 'tabular-nums',
+            gap: '8px',
+            flexWrap: 'wrap',
+            backgroundColor: 'rgba(9, 13, 22, 0.86)',
+            border: '1px solid rgba(148, 163, 184, 0.25)',
+            borderRadius: '12px',
+            padding: '8px 14px',
+            backdropFilter: 'blur(8px)',
+            pointerEvents: 'auto',
           }}
         >
+          {/* 1. Chặng / tiến độ */}
           <div
+            data-testid="hud-stage-progress"
             style={{
-              padding: '5px 12px',
               display: 'flex',
-              alignItems: 'baseline',
-              gap: '5px',
-              borderRight: '1px solid #222d42',
+              alignItems: 'center',
+              gap: '8px',
+              paddingRight: '10px',
+              borderRight: '1px solid rgba(148, 163, 184, 0.2)',
             }}
           >
-            <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 500 }}>Chặng</span>
-            <strong style={{ fontSize: '14px', color: '#f8fafc', fontWeight: 700 }}>
-              {Math.min(totalStages, activeStageIndex + 1)}/{totalStages}
-            </strong>
-          </div>
-
-          <div
-            style={{
-              padding: '5px 12px',
-              display: 'flex',
-              alignItems: 'baseline',
-              gap: '5px',
-              borderRight: '1px solid #222d42',
-            }}
-          >
-            <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 500 }}>Điểm</span>
-            <strong
-              data-testid="hud-total-score"
-              style={{ fontSize: '14px', color: accentHex, fontWeight: 700 }}
-            >
-              {totalDisplayScore}
-            </strong>
-          </div>
-
-          <div
-            style={{
-              padding: '5px 12px',
-              display: 'flex',
-              alignItems: 'baseline',
-              gap: '5px',
-              borderRight: '1px solid #222d42',
-            }}
-          >
-            <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 500 }}>An toàn</span>
-            <strong
-              data-testid="hud-safety-percent"
+            <div>
+              <div style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8' }}>
+                CHẶNG / TIẾN ĐỘ
+              </div>
+              <div
+                style={{
+                  fontSize: '13.5px',
+                  fontWeight: 800,
+                  color: '#f8fafc',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                Chặng {Math.min(activeStageIndex + 1, totalStages)}/{totalStages} ({journeyProgressPercent}%)
+              </div>
+            </div>
+            <div
               style={{
-                fontSize: '14px',
-                color: energyPercent >= 50 ? '#3fc07a' : '#e5566f',
-                fontWeight: 700,
+                width: '64px',
+                height: '6px',
+                borderRadius: '999px',
+                backgroundColor: '#1e293b',
+                overflow: 'hidden',
               }}
             >
-              {energyPercent}%
-            </strong>
+              <div
+                style={{
+                  width: `${journeyProgressPercent}%`,
+                  height: '100%',
+                  backgroundColor: accentHex,
+                  transition: 'width 120ms linear',
+                }}
+              />
+            </div>
           </div>
 
+          {/* 2. Điểm */}
           <div
             style={{
-              padding: '5px 12px',
-              display: 'flex',
-              alignItems: 'baseline',
-              gap: '5px',
+              paddingRight: '10px',
+              borderRight: '1px solid rgba(148, 163, 184, 0.2)',
             }}
           >
-            <span style={{ fontSize: '11.5px', color: '#94a3b8', fontWeight: 500 }}>
-              {sceneDescriptor.clearedMetricLabel}
-            </span>
-            <strong style={{ fontSize: '14px', color: '#3fc07a', fontWeight: 700 }}>
-              {obstaclesClearedCount}
-            </strong>
+            <div style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8' }}>ĐIỂM</div>
+            <div
+              data-testid="hud-total-score"
+              style={{
+                fontSize: '15px',
+                fontWeight: 800,
+                color: accentHex,
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {displayedTotalScore}
+            </div>
+          </div>
+
+          {/* 3. Số câu đã hoàn thành */}
+          <div>
+            <div style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8' }}>
+              ĐÃ HOÀN THÀNH
+            </div>
+            <div
+              data-testid="hud-completed-questions"
+              style={{
+                fontSize: '13.5px',
+                fontWeight: 800,
+                color: '#3fc07a',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {completedQuestionsCount}/{totalStages} câu
+            </div>
           </div>
         </div>
 
-        {/* Right: Pause/Resume, How-To-Play Toggle, Fullscreen & Exit */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          {isJourneyStarted && !isJourneyFinished && (
+        {/* Action controls: Pause/Resume & Exit */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            pointerEvents: 'auto',
+          }}
+        >
+          {isJourneyStarted && !isJourneyFinished && assetLoadStatus === 'READY' && (
             <button
               type="button"
               data-testid="hud-pause-button"
-              onClick={() => setIsPaused(prev => !prev)}
+              onClick={() => setIsPaused(p => !p)}
               style={{
-                height: '32px',
-                padding: '0 11px',
-                borderRadius: '6px',
-                backgroundColor: isPaused ? '#f59e0b' : '#111726',
-                border: `1px solid ${isPaused ? '#f59e0b' : '#2e3c56'}`,
-                color: isPaused ? '#090d16' : '#e2e8f0',
-                fontSize: '12px',
-                fontWeight: 700,
+                height: '38px',
+                padding: '0 14px',
+                borderRadius: '10px',
+                backgroundColor: isPaused ? accentHex : 'rgba(15, 23, 42, 0.88)',
+                border: '1px solid rgba(148, 163, 184, 0.3)',
+                color: isPaused ? '#090d16' : '#f8fafc',
+                fontSize: '12.5px',
+                fontWeight: 800,
                 cursor: 'pointer',
-                whiteSpace: 'nowrap',
               }}
             >
               {isPaused ? 'Tiếp tục' : 'Tạm dừng'}
             </button>
           )}
-
           <button
             type="button"
-            data-testid="hud-how-to-play-button"
-            onClick={() => setShowHowToPlay(prev => !prev)}
-            style={{
-              height: '32px',
-              padding: '0 11px',
-              borderRadius: '6px',
-              backgroundColor: showHowToPlay ? '#1e293b' : '#111726',
-              border: '1px solid #2e3c56',
-              color: '#e2e8f0',
-              fontSize: '12px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            Cách chơi
-          </button>
-
-          <button
-            type="button"
-            onClick={toggleNativeFullscreen}
-            style={{
-              height: '32px',
-              padding: '0 11px',
-              borderRadius: '6px',
-              backgroundColor: '#111726',
-              border: '1px solid #2e3c56',
-              color: '#e2e8f0',
-              fontSize: '12px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              whiteSpace: 'nowrap',
-            }}
-          >
-            {isNativeFullscreen ? 'Thu nhỏ' : 'Toàn màn hình'}
-          </button>
-
-          <button
-            type="button"
+            data-testid="hud-exit-button"
             onClick={handleExitGame}
             style={{
-              height: '32px',
-              padding: '0 12px',
-              borderRadius: '6px',
-              backgroundColor: '#2c1a20',
-              border: '1px solid #5c2632',
-              color: '#e5566f',
-              fontSize: '12px',
-              fontWeight: 600,
+              height: '38px',
+              padding: '0 14px',
+              borderRadius: '10px',
+              backgroundColor: 'rgba(15, 23, 42, 0.88)',
+              border: '1px solid rgba(239, 68, 68, 0.45)',
+              color: '#fca5a5',
+              fontSize: '12.5px',
+              fontWeight: 700,
               cursor: 'pointer',
-              whiteSpace: 'nowrap',
             }}
           >
             Thoát
           </button>
         </div>
-      </header>
-
-      {/* Thin 3px Route Progress Bar */}
-      <div
-        style={{
-          height: '3px',
-          width: '100%',
-          backgroundColor: '#111726',
-          flexShrink: 0,
-        }}
-      >
-        <div
-          style={{
-            height: '100%',
-            width: `${
-              isRunnerArchetype
-                ? playerProgressPercent
-                : Math.min(100, Math.round((currentAnsweredCount / totalStages) * 100))
-            }%`,
-            backgroundColor: accentHex,
-            transition: 'width 120ms linear',
-          }}
-        />
       </div>
 
-      {/* ================= MAIN FULL-VIEWPORT GAME WORLD ================= */}
+      {/* ================= 2D SIDE-SCROLLING CANVAS STAGE ================= */}
       <div
-        ref={canvasWrapperRef}
+        data-testid="scene-traffic-road-runner"
+        onPointerDown={e => {
+          const target = e.target as HTMLElement | null;
+          if (target && target.closest('button, input, textarea')) return;
+          handleJumpAction();
+        }}
         style={{
           position: 'relative',
-          flex: 1,
           width: '100%',
           height: '100%',
           overflow: 'hidden',
-          backgroundColor: '#090d16',
-          touchAction: 'none',
-        }}
-        onPointerDown={e => {
-          if (
-            (e.target as HTMLElement)?.tagName === 'CANVAS' &&
-            isJourneyStarted &&
-            !isJourneyFinished &&
-            !activeModalOpen &&
-            !isPaused
-          ) {
-            e.preventDefault();
-            triggerJump();
-          }
+          cursor:
+            isJourneyStarted && !activeModalOpen && !isPaused && !isJourneyFinished
+              ? 'pointer'
+              : 'default',
         }}
       >
-        {(() => {
-          const commonSceneProps = {
-            config: effectiveConfig,
-            sceneDescriptor,
-            activeStageIndex,
-            totalStages,
-            activeQuestion,
-            activeFeedback: activeFeedback || null,
-            activeTimeRemaining,
-            submittingAnswer,
-            selectedChoice,
-            onSelectChoice: setSelectedChoice,
-            textAnswer,
-            onChangeTextAnswer: setTextAnswer,
-            onSubmitAnswer: handleAnswerSubmit,
-            onContinueStage: handleContinueJourney,
-            stageInspected,
-            onInspectStage: () => handleInspectCurrentStage(),
-            energyPercent,
-            skillBonusScore,
-            answeredCount: currentAnsweredCount,
-            correctCount: currentCorrectCount,
-            wrongCount: currentWrongCount,
-            isPaused,
-            onCollectBonus: handleCollectArenaBonus,
-            onHazardHit: handleArenaHazardHit,
-          };
+        <canvas
+          ref={canvasRef}
+          data-testid="adventure-runner-canvas"
+          data-bg-url={resolvedAssets.assets?.background.url || ''}
+          data-char-url={resolvedAssets.assets?.character.url || ''}
+          data-obs-url={resolvedAssets.assets?.obstacle.url || ''}
+          data-industry-id={effectiveConfig.industryId}
+          data-jump-state={jumpStateSnapshot}
+          data-is-grounded={String(isGroundedSnapshot)}
+          style={{
+            display: 'block',
+            width: '100%',
+            height: '100%',
+          }}
+        />
 
-          switch (sceneDescriptor.sceneId) {
-            case 'TRAFFIC_ROAD_RUNNER_SCENE':
-              return (
-                <canvas
-                  data-testid="scene-traffic-road-runner"
-                  ref={canvasRef}
-                  width={canvasSize.width}
-                  height={canvasSize.height}
-                  style={{
-                    width: '100%',
-                    height: '100%',
-                    display: 'block',
-                    touchAction: 'none',
-                  }}
-                />
-              );
-            case 'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE':
-              return <MechanicalDiagnosticGarageScene {...commonSceneProps} />;
-            case 'KITCHEN_FOOD_SAFETY_LAB_SCENE':
-              return <KitchenFoodSafetyLabScene {...commonSceneProps} />;
-            case 'CODING_IDE_DEBUGGER_SCENE':
-              return <CodingIdeDebuggerScene {...commonSceneProps} />;
-            case 'CYBER_DEFENSE_SOC_RADAR_SCENE':
-              return <CyberDefenseSocRadarScene {...commonSceneProps} />;
-            case 'MEDICAL_CLINICAL_TRIAGE_SCENE':
-              return <MedicalClinicalTriageScene {...commonSceneProps} />;
-            case 'ACADEMY_KNOWLEDGE_LAB_SCENE':
-              return <AcademyKnowledgeLabScene {...commonSceneProps} />;
-            case 'CUSTOMER_CONSULTATION_SHOWROOM_SCENE':
-            default:
-              return <CustomerConsultationShowroomScene {...commonSceneProps} />;
-          }
-        })()}
-
-        {/* Scene-Specific Visual How-To-Play Modal Card (Opened via "Cách chơi" in Top Bar) */}
-        {showHowToPlay && isJourneyStarted && !isJourneyFinished && !activeModalOpen && !stageInspected && (
-          <div
-            data-testid="scene-tutorial-banner"
+        {/* Touch-friendly Jump Button on active canvas */}
+        {isJourneyStarted && !activeModalOpen && !isPaused && !isJourneyFinished && assetLoadStatus === 'READY' && (
+          <button
+            type="button"
+            data-testid="mobile-jump-button"
+            onPointerDown={e => {
+              e.stopPropagation();
+              handleJumpAction();
+            }}
             style={{
               position: 'absolute',
-              top: '12px',
-              left: '50%',
-              transform: 'translateX(-50%)',
-              zIndex: 28,
-              backgroundColor: 'rgba(11, 15, 25, 0.96)',
-              border: `1.5px solid ${accentHex}`,
-              borderRadius: '12px',
-              padding: '14px 18px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '10px',
-              width: 'min(640px, calc(100vw - 28px))',
-              boxShadow: '0 14px 32px rgba(0, 0, 0, 0.6)',
+              right: '20px',
+              bottom: '22px',
+              zIndex: 25,
+              height: '54px',
+              padding: '0 22px',
+              borderRadius: '999px',
+              backgroundColor: 'rgba(15, 23, 42, 0.86)',
+              border: `2px solid ${accentHex}`,
+              color: '#f8fafc',
+              fontSize: '13.5px',
+              fontWeight: 800,
+              cursor: 'pointer',
+              boxShadow: '0 8px 24px rgba(0, 0, 0, 0.45)',
+              touchAction: 'manipulation',
             }}
           >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: '10px',
-                borderBottom: '1px solid #1e293b',
-                paddingBottom: '8px',
-              }}
-            >
-              <div style={{ fontSize: '13px', fontWeight: 800, color: accentHex }}>
-                CÁCH CHƠI · {sceneDescriptor.sceneBadge}
-              </div>
-              <button
-                type="button"
-                data-testid="close-how-to-play-btn"
-                onClick={() => setShowHowToPlay(false)}
-                style={{
-                  background: '#161f30',
-                  border: '1px solid #26334d',
-                  borderRadius: '6px',
-                  color: '#f8fafc',
-                  fontSize: '11.5px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  padding: '4px 10px',
-                  flexShrink: 0,
-                }}
-              >
-                Đóng
-              </button>
-            </div>
-
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
-                gap: '8px',
-                fontSize: '12px',
-                color: '#e2e8f0',
-                lineHeight: 1.4,
-              }}
-            >
-              {sceneDescriptor.sceneId === 'TRAFFIC_ROAD_RUNNER_SCENE' && (
-                <>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>DI CHUYỂN &amp; TỐC ĐỘ</strong>
-                    Phím <code>A / D</code> hoặc <code>← / →</code> để giảm/tăng tốc trên làn đường.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>NHẢY NÉ VẬT CẢN</strong>
-                    Nhấn <code>Space</code> / <code>W</code> / <code>↑</code> hoặc chạm trực tiếp màn hình để nhảy.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>VƯỢT CHỐT</strong>
-                    Dừng tại cổng Chốt Sát Hạch và chọn đáp án đúng (phím <code>1-4</code>).
-                  </div>
-                </>
-              )}
-              {sceneDescriptor.sceneId === 'KITCHEN_FOOD_SAFETY_LAB_SCENE' && (
-                <>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>ĐỔI LÀN BẾP</strong>
-                    Phím <code>← / →</code> hoặc <code>A / D</code> (hoặc chạm vào làn) để di chuyển Đầu Bếp.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>SƠ CHẾ &amp; NẤU MÓN</strong>
-                    Nhấn <code>Space</code> hoặc chạm nguyên liệu sạch để chế biến; chạm vi khuẩn để hủy.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>HOÀN THÀNH MÓN</strong>
-                    Đủ 3 nguyên liệu trên khay phục vụ sẽ mở câu hỏi kiểm định VSATTP.
-                  </div>
-                </>
-              )}
-              {sceneDescriptor.sceneId === 'MECHANICAL_DIAGNOSTIC_GARAGE_SCENE' && (
-                <>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>CHỌN DỤNG CỤ</strong>
-                    Chạm vào hình Máy quét, Đồng hồ đo hoặc Cờ-lê trên khay dụng cụ.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>SIẾT BU-LÔNG &amp; CÂN LỰC</strong>
-                    Chạm vào 2 ốc bu-lông lỏng để siết và nhấn <code>Space</code>/đồng hồ khi kim ở vùng xanh.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>AN TOÀN XƯỞNG</strong>
-                    Tránh chạm vào vùng ống xả đang bốc khói nóng đỏ.
-                  </div>
-                </>
-              )}
-              {sceneDescriptor.sceneId === 'CODING_IDE_DEBUGGER_SCENE' && (
-                <>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>CHẠY &amp; NHẢY BẬC</strong>
-                    Phím <code>A / D</code> để chạy, <code>W</code> / <code>↑</code> / <code>Space</code> (hoặc chạm bậc thềm) để nhảy.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>BẮN TIA DIỆT BUG</strong>
-                    Nhấn phím <code>F</code> / <code>E</code> hoặc chạm trực tiếp vào con bọ Bug đỏ để bắn hạ.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>CỔNG ĐÍCH</strong>
-                    Thu thập pha lê dữ liệu và nhảy tới Cổng Xoáy Năng Lượng ở tầng trên cùng.
-                  </div>
-                </>
-              )}
-              {sceneDescriptor.sceneId === 'CYBER_DEFENSE_SOC_RADAR_SCENE' && (
-                <>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>XOAY KHIÊN 360°</strong>
-                    Phím <code>A / D</code>, <code>← / →</code> hoặc chạm quanh Lõi để xoay khiên chắn tường lửa.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>BẮN CHẶN MÃ ĐỘC</strong>
-                    Nhấn <code>Space</code> hoặc chạm vào tên lửa/nhện mã độc đang bay vào để bắn hạ.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>KHÓA MỐI ĐE DỌA</strong>
-                    Chặn đủ 3 mục tiêu tấn công để mở bảng câu hỏi phòng thủ SOC.
-                  </div>
-                </>
-              )}
-              {sceneDescriptor.sceneId === 'MEDICAL_CLINICAL_TRIAGE_SCENE' && (
-                <>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>CHỌN THIẾT BỊ Y KHOA</strong>
-                    Chạm vào khay thiết bị bên trái (hoặc phím <code>1-3</code>: ECG, SpO2, RX-GPP) theo chỉ định trên màn hình ICU.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>ỔN ĐỊNH SINH HIỆU</strong>
-                    Nhấn <code>Space</code> hoặc chạm vào Màn hình Sinh hiệu ICU bên phải để can thiệp và hội chẩn.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>VÔ KHUẨN LÂM SÀNG</strong>
-                    Tránh chạm vào Mầm bệnh Sinh học màu đỏ đang di chuyển ở giữa phòng cấp cứu (<code>-5đ</code>).
-                  </div>
-                </>
-              )}
-              {sceneDescriptor.sceneId === 'ACADEMY_KNOWLEDGE_LAB_SCENE' && (
-                <>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>KÍCH HOẠT NÚT TRI THỨC</strong>
-                    Chạm vào 3 Nút Tinh Vân bên trái (hoặc phím <code>1-3</code>) để kết nối tia năng lượng học thuật (<code>+10đ</code>).
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>TRÁNH NHIỄU NGỤY BIỆN</strong>
-                    Không chạm vào Hạt Nhiễu Ngụy Biện màu đỏ đang bay cắt ngang mạch tri thức (<code>-5đ</code>).
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>MỞ CỔNG NGHIÊN CỨU</strong>
-                    Nhấn <code>Space</code> hoặc chạm vào Cổng Nghiên Cứu trung tâm bên phải để bảo vệ chuyên đề.
-                  </div>
-                </>
-              )}
-              {sceneDescriptor.sceneId === 'CUSTOMER_CONSULTATION_SHOWROOM_SCENE' && (
-                <>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: accentHex, display: 'block', marginBottom: '2px' }}>QUAN SÁT YÊU CẦU</strong>
-                    Nhìn hình ảnh sản phẩm/món ăn trong bóng suy nghĩ của khách ở bàn bên phải.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#38bdf8', display: 'block', marginBottom: '2px' }}>LẤY ĐÚNG SẢN PHẨM</strong>
-                    Chạm vào kệ trưng bày tương ứng bên trái (hoặc phím <code>1-3</code>) để lấy hàng.
-                  </div>
-                  <div style={{ background: '#111726', padding: '8px 10px', borderRadius: '8px', border: '1px solid #1e293b' }}>
-                    <strong style={{ color: '#3fc07a', display: 'block', marginBottom: '2px' }}>GIAO TỚI KHÁCH HÀNG</strong>
-                    Nhấn <code>Space</code> hoặc chạm vào bàn khách hàng để giao sản phẩm và tư vấn.
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
+            NHẢY (Chạm / Space)
+          </button>
         )}
 
-        {/* Pause Overlay */}
-        {isPaused && isJourneyStarted && !isJourneyFinished && (
+        {/* ================= ASSET ERROR OVERLAY ================= */}
+        {assetLoadStatus === 'ERROR' && (
           <div
-            data-testid="scene-pause-overlay"
+            data-testid="adventure-asset-error"
+            data-error-code={resolvedAssets.errorCode || 'ASSET_LOAD_FAILED'}
             style={{
               position: 'absolute',
               inset: 0,
-              zIndex: 38,
-              backgroundColor: 'rgba(9, 13, 22, 0.88)',
+              zIndex: 48,
+              backgroundColor: 'rgba(9, 13, 22, 0.96)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -2244,26 +1929,217 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             <div
               style={{
                 width: '100%',
-                maxWidth: '420px',
+                maxWidth: '520px',
+                backgroundColor: '#111827',
+                border: '1.5px solid #ef4444',
+                borderRadius: '14px',
+                padding: '26px 24px',
+                color: '#f8fafc',
+                boxShadow: '0 20px 50px rgba(0, 0, 0, 0.65)',
+              }}
+            >
+              <div
+                style={{
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  color: '#f87171',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                LỖI TÀI NGUYÊN HÌNH ẢNH 2D · {effectiveConfig.industryLabel || effectiveConfig.industryId}
+              </div>
+              <h2
+                style={{
+                  margin: '8px 0 10px 0',
+                  fontSize: '20px',
+                  fontWeight: 800,
+                  color: '#f8fafc',
+                }}
+              >
+                Không thể khởi chạy màn chơi Adventure 2D
+              </h2>
+              <p
+                style={{
+                  margin: '0 0 14px 0',
+                  fontSize: '14px',
+                  lineHeight: 1.55,
+                  color: '#cbd5e1',
+                }}
+              >
+                {assetLoadError ||
+                  'Màn chơi thiếu tài nguyên hình ảnh bắt buộc (background, character, obstacle) hoặc đường dẫn ảnh bị lỗi.'}
+              </p>
+              {failedAssetSlots.length > 0 && (
+                <div
+                  style={{
+                    marginBottom: '18px',
+                    padding: '10px 12px',
+                    borderRadius: '8px',
+                    backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                    border: '1px solid rgba(239, 68, 68, 0.35)',
+                    fontSize: '12.5px',
+                    color: '#fca5a5',
+                    fontWeight: 700,
+                  }}
+                >
+                  Tài nguyên lỗi / thiếu: {failedAssetSlots.join(', ')}
+                </div>
+              )}
+              <button
+                type="button"
+                data-testid="asset-error-exit-btn"
+                onClick={handleExitGame}
+                style={{
+                  width: '100%',
+                  height: '44px',
+                  borderRadius: '10px',
+                  backgroundColor: '#ef4444',
+                  border: 'none',
+                  color: '#ffffff',
+                  fontSize: '14px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Thoát màn chơi
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ================= START SCREEN OVERLAY ================= */}
+        {assetLoadStatus !== 'ERROR' && !isJourneyStarted && !isJourneyFinished && (
+          <div
+            data-testid="scene-pregame-briefing"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 40,
+              backgroundColor: 'rgba(9, 13, 22, 0.84)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '20px',
+            }}
+          >
+            <div
+              style={{
+                width: '100%',
+                maxWidth: '480px',
                 backgroundColor: '#111726',
-                border: '1px solid #26334d',
-                borderRadius: '12px',
-                padding: '22px',
+                border: `1.5px solid ${accentHex}`,
+                borderRadius: '16px',
+                padding: '26px 24px',
+                color: '#f8fafc',
+                boxShadow: '0 20px 48px rgba(0, 0, 0, 0.6)',
                 textAlign: 'center',
               }}
             >
-              <div style={{ fontSize: '12px', color: accentHex, fontWeight: 800 }}>
-                TẠM DỪNG TRÒ CHƠI
+              <div
+                style={{
+                  fontSize: '11.5px',
+                  fontWeight: 800,
+                  color: accentHex,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                {effectiveConfig.industryLabel} · {totalStages} CHECKPOINT
               </div>
-              <h3 style={{ margin: '6px 0 14px 0', fontSize: '19px', color: '#f8fafc' }}>
+              <h2
+                style={{
+                  margin: '8px 0 12px 0',
+                  fontSize: '21px',
+                  fontWeight: 800,
+                  color: '#f8fafc',
+                  lineHeight: 1.3,
+                }}
+              >
                 {game.title || effectiveConfig.environmentTitle}
+              </h2>
+              <p
+                data-testid="adventure-start-instruction"
+                style={{
+                  margin: '0 0 22px 0',
+                  padding: '12px 14px',
+                  borderRadius: '10px',
+                  backgroundColor: '#0b0f19',
+                  border: '1px solid #1e293b',
+                  fontSize: '14.5px',
+                  fontWeight: 600,
+                  color: '#e2e8f0',
+                  lineHeight: 1.5,
+                }}
+              >
+                {ADVENTURE_START_INSTRUCTION}
+              </p>
+              <button
+                type="button"
+                data-testid="start-adventure-btn"
+                disabled={assetLoadStatus !== 'READY' || startingSession}
+                onClick={handleStartJourney}
+                style={{
+                  width: '100%',
+                  height: '46px',
+                  borderRadius: '10px',
+                  backgroundColor:
+                    assetLoadStatus === 'READY' && !startingSession ? accentHex : '#334155',
+                  border: 'none',
+                  color: '#090d16',
+                  fontSize: '15px',
+                  fontWeight: 800,
+                  cursor: assetLoadStatus === 'READY' ? 'pointer' : 'wait',
+                }}
+              >
+                {assetLoadStatus === 'READY'
+                  ? 'Bắt đầu (Chạm / Space)'
+                  : 'Đang tải tài nguyên 2D...'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ================= PAUSE OVERLAY ================= */}
+        {isJourneyStarted && isPaused && !activeModalOpen && !isJourneyFinished && (
+          <div
+            data-testid="scene-pause-overlay"
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 38,
+              backgroundColor: 'rgba(9, 13, 22, 0.82)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '20px',
+            }}
+          >
+            <div
+              style={{
+                width: '100%',
+                maxWidth: '400px',
+                backgroundColor: '#111726',
+                border: '1px solid #26334d',
+                borderRadius: '14px',
+                padding: '24px',
+                textAlign: 'center',
+                color: '#f8fafc',
+              }}
+            >
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '19px', fontWeight: 800 }}>
+                Đang tạm dừng màn chơi
               </h3>
+              <p style={{ margin: '0 0 18px 0', fontSize: '13.5px', color: '#94a3b8' }}>
+                Tiến trình hiện tại tại Chặng {Math.min(activeStageIndex + 1, totalStages)}/{totalStages} được giữ nguyên.
+              </p>
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
                 <button
                   type="button"
+                  data-testid="resume-adventure-btn"
                   onClick={() => setIsPaused(false)}
                   style={{
-                    height: '40px',
+                    height: '42px',
                     padding: '0 20px',
                     borderRadius: '8px',
                     backgroundColor: accentHex,
@@ -2274,20 +2150,20 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     cursor: 'pointer',
                   }}
                 >
-                  Tiếp tục chơi (P)
+                  Tiếp tục chơi
                 </button>
                 <button
                   type="button"
                   onClick={handleExitGame}
                   style={{
-                    height: '40px',
-                    padding: '0 16px',
+                    height: '42px',
+                    padding: '0 18px',
                     borderRadius: '8px',
                     backgroundColor: '#161f30',
                     border: '1px solid #26334d',
                     color: '#f8fafc',
-                    fontSize: '13px',
-                    fontWeight: 600,
+                    fontSize: '14px',
+                    fontWeight: 700,
                     cursor: 'pointer',
                   }}
                 >
@@ -2298,310 +2174,188 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           </div>
         )}
 
-        {/* Concise Visual Pre-Game Briefing Overlay */}
-        {!isJourneyStarted && (
-          <div
-            data-testid="scene-pregame-briefing"
-            style={{
-              position: 'absolute',
-              inset: 0,
-              zIndex: 25,
-              backgroundColor: 'rgba(9, 13, 22, 0.88)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '20px',
-              overflowY: 'auto',
-            }}
-          >
-            <div
-              style={{
-                width: '100%',
-                maxWidth: '520px',
-                backgroundColor: '#111726',
-                border: '1px solid #222d42',
-                borderRadius: '12px',
-                padding: '22px 20px',
-                textAlign: 'center',
-              }}
-            >
-              <div
-                style={{
-                  fontSize: '11.5px',
-                  color: accentHex,
-                  fontWeight: 800,
-                  marginBottom: '6px',
-                }}
-              >
-                {effectiveConfig.industryLabel} · {sceneDescriptor.sceneBadge} · {totalStages} CHẶNG
-              </div>
-              <h2
-                style={{
-                  margin: '0 0 14px 0',
-                  fontSize: '20px',
-                  fontWeight: 700,
-                  color: '#f8fafc',
-                }}
-              >
-                {game.title || effectiveConfig.environmentTitle}
-              </h2>
-
-              {/* 3 Concise Visual Control Cards */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(3, 1fr)',
-                  gap: '8px',
-                  marginBottom: '18px',
-                  textAlign: 'left',
-                }}
-              >
-                <div
-                  style={{
-                    backgroundColor: '#0b0f19',
-                    border: '1px solid #1e293b',
-                    borderRadius: '8px',
-                    padding: '10px',
-                  }}
-                >
-                  <div style={{ fontSize: '10.5px', fontWeight: 800, color: accentHex }}>
-                    1. DI CHUYỂN
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#cbd5e1', marginTop: '4px', lineHeight: 1.35 }}>
-                    Phím WASD / Mũi tên hoặc chạm trực tiếp lên màn chơi 2D
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    backgroundColor: '#0b0f19',
-                    border: '1px solid #1e293b',
-                    borderRadius: '8px',
-                    padding: '10px',
-                  }}
-                >
-                  <div style={{ fontSize: '10.5px', fontWeight: 800, color: '#38bdf8' }}>
-                    2. TƯƠNG TÁC
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#cbd5e1', marginTop: '4px', lineHeight: 1.35 }}>
-                    Né vật cản, thu thập vật phẩm (+10Đ) &amp; chạm mục tiêu (Space)
-                  </div>
-                </div>
-
-                <div
-                  style={{
-                    backgroundColor: '#0b0f19',
-                    border: '1px solid #1e293b',
-                    borderRadius: '8px',
-                    padding: '10px',
-                  }}
-                >
-                  <div style={{ fontSize: '10.5px', fontWeight: 800, color: '#3fc07a' }}>
-                    3. VƯỢT CHỐT
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#cbd5e1', marginTop: '4px', lineHeight: 1.35 }}>
-                    Trả lời nhanh câu hỏi tại chốt (phím 1-4) để mở khóa chặng
-                  </div>
-                </div>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (mode === 'LIVE_SESSION' && onStartSession) {
-                    onStartSession();
-                  } else {
-                    setPreviewStarted(true);
-                  }
-                }}
-                disabled={startingSession}
-                style={{
-                  width: '100%',
-                  height: '44px',
-                  borderRadius: '8px',
-                  border: 'none',
-                  backgroundColor: accentHex,
-                  color: '#090d16',
-                  fontSize: '15px',
-                  fontWeight: 800,
-                  cursor: startingSession ? 'not-allowed' : 'pointer',
-                  opacity: startingSession ? 0.6 : 1,
-                }}
-              >
-                {startingSession ? 'Đang khởi tạo màn chơi...' : 'Bắt đầu trải nghiệm'}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Bottom control bar removed per visual polish spec; touch & keyboard controls remain active on the game canvas */}
-
-        {/* ================= CHECKPOINT QUESTION MODAL (ROAD RUNNER) ================= */}
-        {activeModalOpen && activeQuestion && !isJourneyFinished && (
+        {/* ================= CHECKPOINT QUESTION MODAL ================= */}
+        {activeModalOpen && activeQuestion && (
           <div
             data-testid="runner-checkpoint-modal"
             style={{
               position: 'absolute',
               inset: 0,
-              zIndex: 40,
-              backgroundColor: 'rgba(9, 13, 22, 0.84)',
+              zIndex: 42,
+              backgroundColor: 'rgba(9, 13, 22, 0.88)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              padding: '14px',
+              padding: '16px',
               overflowY: 'auto',
             }}
           >
             <div
+              data-testid="ingame-challenge-popup"
+              data-question-type={activeQuestion.type}
               style={{
                 width: '100%',
-                maxWidth: '610px',
+                maxWidth: '680px',
                 backgroundColor: '#111726',
                 border: `1.5px solid ${accentHex}`,
-                borderRadius: '12px',
-                padding: '18px 20px',
+                borderRadius: '14px',
+                padding: '20px 22px',
                 color: '#f8fafc',
-                margin: 'auto',
+                boxShadow: '0 20px 50px rgba(0, 0, 0, 0.65)',
               }}
             >
-              {/* Modal Header */}
               <div
                 style={{
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   gap: '10px',
-                  paddingBottom: '12px',
-                  borderBottom: '1px solid #1e293b',
+                  marginBottom: '10px',
+                  flexWrap: 'wrap',
                 }}
               >
-                <div>
-                  <div style={{ fontSize: '11.5px', color: accentHex, fontWeight: 800 }}>
-                    CHỐT SÁT HẠCH #{activeStageIndex + 1}/{totalStages} ·{' '}
-                    {currentStageMeta?.zoneLabel || effectiveConfig.subEnvironment}
-                  </div>
-                  <h2
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  <span
                     style={{
-                      margin: '2px 0 0 0',
-                      fontSize: '16.5px',
-                      fontWeight: 700,
-                      color: '#f8fafc',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      color: accentHex,
+                      textTransform: 'uppercase',
                     }}
                   >
-                    {currentStageMeta?.checkpointTitle || `Câu hỏi chặng ${activeStageIndex + 1}`}
-                  </h2>
+                    CHECKPOINT {activeStageIndex + 1}/{totalStages} ·{' '}
+                    {effectiveConfig.stages[activeStageIndex]?.checkpointTitle ||
+                      `Trạm kiểm tra #${activeStageIndex + 1}`}
+                  </span>
+                  <span
+                    data-testid="checkpoint-question-type-badge"
+                    data-question-type={activeQuestion.type}
+                    style={{
+                      padding: '2px 8px',
+                      borderRadius: '12px',
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                      border: '1px solid rgba(56, 189, 248, 0.35)',
+                      color: '#38bdf8',
+                    }}
+                  >
+                    {activeQuestion.type === 'MULTIPLE_CHOICE' || activeQuestion.type === 'QUIZ'
+                      ? 'Trắc nghiệm 4 lựa chọn'
+                      : activeQuestion.type === 'QUICK_BUTTON' || activeQuestion.type === 'TRUE_FALSE'
+                        ? 'Bấm nhanh · Đúng / Sai'
+                        : activeQuestion.type === 'FILL_IN_THE_BLANK' || activeQuestion.type === 'TYPE_ANSWER'
+                          ? 'Điền vào chỗ trống'
+                          : activeQuestion.type === 'CROSSWORD'
+                            ? 'Giải Ô chữ'
+                            : activeQuestion.type}
+                  </span>
                 </div>
-
-                <div
-                  style={{
-                    padding: '5px 10px',
-                    borderRadius: '6px',
-                    backgroundColor: activeTimeRemaining <= 5 ? '#2c1a20' : '#161f30',
-                    border: `1px solid ${activeTimeRemaining <= 5 ? '#5c2632' : '#26334d'}`,
-                    color: activeTimeRemaining <= 5 ? '#e5566f' : '#f8fafc',
-                    fontSize: '13.5px',
-                    fontWeight: 800,
-                    fontVariantNumeric: 'tabular-nums',
-                  }}
-                >
-                  {activeTimeRemaining}s
-                </div>
+                <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
+                  Nhân vật đã dừng — Trả lời để mở cổng đi tiếp
+                </span>
               </div>
 
-              {/* Question Prompt */}
-              <div style={{ marginTop: '14px' }}>
-                <p
-                  style={{
-                    margin: 0,
-                    fontSize: '16px',
-                    fontWeight: 700,
-                    color: '#f8fafc',
-                    lineHeight: 1.45,
-                  }}
-                >
-                  {activeQuestion.question}
-                </p>
+              <div
+                data-testid="checkpoint-question-text"
+                style={{
+                  fontSize: '17px',
+                  fontWeight: 700,
+                  color: '#f8fafc',
+                  lineHeight: 1.45,
+                }}
+              >
+                {activeQuestion.question}
+              </div>
 
+              {/* Answer Input Area */}
+              <div>
                 {activeQuestion.type === 'SLIDER' && activeQuestion.sliderConfig ? (
                   <div style={{ marginTop: '14px' }}>
                     {(() => {
-                      const cfg = activeQuestion.sliderConfig!;
-                      const min = cfg.min;
-                      const max = cfg.max;
-                      const step = cfg.step > 0 ? cfg.step : 1;
-                      const unit = cfg.unit ? ` ${cfg.unit}` : '';
-                      const currentVal =
-                        textAnswer.trim() !== '' && Number.isFinite(Number(textAnswer))
-                          ? Number(textAnswer)
-                          : min + Math.round(((max - min) / 2) / step) * step;
+                      const { min, max, step } = activeQuestion.sliderConfig!;
+                      const unit = activeQuestion.sliderConfig!.unit || '';
+                      const safeStep = step > 0 ? step : 1;
+                      const currentVal = sliderValue !== null ? sliderValue : min;
                       const clampVal = (v: number) => {
-                        const snapped = min + Math.round((v - min) / step) * step;
-                        return Math.max(min, Math.min(max, Number(snapped.toFixed(6))));
+                        const snapped = min + Math.round((v - min) / safeStep) * safeStep;
+                        return Math.min(max, Math.max(min, Number(snapped.toFixed(6))));
                       };
                       return (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                          <div style={{ textAlign: 'center', fontSize: '20px', fontWeight: 900, color: accentHex }}>
-                            {currentVal}{unit}
+                        <div
+                          style={{
+                            padding: '14px 16px',
+                            borderRadius: '10px',
+                            backgroundColor: '#0b0f19',
+                            border: '1px solid #26334d',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '12px',
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              flexWrap: 'wrap',
+                              gap: '8px',
+                            }}
+                          >
+                            <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#94a3b8' }}>
+                              Kéo thanh trượt hoặc nhập số ({min}
+                              {unit} → {max}
+                              {unit}):
+                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <input
+                                type="number"
+                                min={min}
+                                max={max}
+                                step={safeStep}
+                                value={currentVal}
+                                disabled={Boolean(activeFeedback) || submittingAnswer}
+                                onChange={e => {
+                                  const parsed = Number(e.target.value);
+                                  if (Number.isFinite(parsed)) {
+                                    setSliderValue(clampVal(parsed));
+                                  }
+                                }}
+                                style={{
+                                  width: '100px',
+                                  height: '36px',
+                                  padding: '0 10px',
+                                  borderRadius: '8px',
+                                  backgroundColor: '#161f30',
+                                  border: `1.5px solid ${accentHex}`,
+                                  color: '#f8fafc',
+                                  fontSize: '15px',
+                                  fontWeight: 800,
+                                  textAlign: 'center',
+                                }}
+                              />
+                              {unit && (
+                                <span style={{ fontSize: '14px', fontWeight: 800, color: accentHex }}>
+                                  {unit}
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <button
-                              type="button"
-                              disabled={Boolean(activeFeedback) || submittingAnswer || currentVal <= min}
-                              onClick={() => setTextAnswer(String(clampVal(currentVal - step)))}
-                              style={{
-                                width: '36px',
-                                height: '36px',
-                                borderRadius: '6px',
-                                border: '1px solid #26334d',
-                                backgroundColor: '#161f30',
-                                color: '#f8fafc',
-                                fontWeight: 800,
-                                cursor:
-                                  Boolean(activeFeedback) || submittingAnswer || currentVal <= min
-                                    ? 'not-allowed'
-                                    : 'pointer',
-                              }}
-                              aria-label="Giảm 1 bước"
-                            >
-                              −
-                            </button>
-                            <input
-                              type="range"
-                              min={min}
-                              max={max}
-                              step={step}
-                              value={currentVal}
-                              disabled={Boolean(activeFeedback) || submittingAnswer}
-                              onChange={e => setTextAnswer(String(clampVal(Number(e.target.value))))}
-                              style={{ flex: 1, width: '100%', accentColor: accentHex }}
-                            />
-                            <button
-                              type="button"
-                              disabled={Boolean(activeFeedback) || submittingAnswer || currentVal >= max}
-                              onClick={() => setTextAnswer(String(clampVal(currentVal + step)))}
-                              style={{
-                                width: '36px',
-                                height: '36px',
-                                borderRadius: '6px',
-                                border: '1px solid #26334d',
-                                backgroundColor: '#161f30',
-                                color: '#f8fafc',
-                                fontWeight: 800,
-                                cursor:
-                                  Boolean(activeFeedback) || submittingAnswer || currentVal >= max
-                                    ? 'not-allowed'
-                                    : 'pointer',
-                              }}
-                              aria-label="Tăng 1 bước"
-                            >
-                              +
-                            </button>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#94a3b8', fontWeight: 700 }}>
-                            <span>Min: {min}{unit}</span>
-                            <span>Bước nhảy: {step}{unit}</span>
-                            <span>Max: {max}{unit}</span>
-                          </div>
+                          <input
+                            type="range"
+                            min={min}
+                            max={max}
+                            step={safeStep}
+                            value={currentVal}
+                            disabled={Boolean(activeFeedback) || submittingAnswer}
+                            onChange={e => setSliderValue(clampVal(Number(e.target.value)))}
+                            style={{
+                              width: '100%',
+                              accentColor: accentHex,
+                              cursor:
+                                Boolean(activeFeedback) || submittingAnswer ? 'default' : 'pointer',
+                            }}
+                          />
                           {!activeFeedback && (
                             <button
                               type="button"
@@ -2619,7 +2373,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                                 cursor: submittingAnswer ? 'not-allowed' : 'pointer',
                               }}
                             >
-                              Xác nhận giá trị {currentVal}{unit}
+                              Xác nhận giá trị {currentVal}
+                              {unit}
                             </button>
                           )}
                         </div>
@@ -2633,97 +2388,102 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8' }}>
                       Sắp xếp các bước theo đúng thứ tự từ trên xuống dưới:
                     </div>
-                    {(puzzleOrder.length > 0 ? puzzleOrder : activeQuestion.choices).map((item, idx, arr) => (
-                      <div
-                        key={`${idx}_${item}`}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '10px',
-                          padding: '10px 12px',
-                          borderRadius: '8px',
-                          backgroundColor: '#161f30',
-                          border: '1.5px solid #26334d',
-                          color: '#f8fafc',
-                        }}
-                      >
-                        <span
+                    {(puzzleOrder.length > 0 ? puzzleOrder : activeQuestion.choices).map(
+                      (item, idx, arr) => (
+                        <div
+                          key={`${idx}_${item}`}
                           style={{
-                            width: '26px',
-                            height: '26px',
-                            borderRadius: '6px',
-                            backgroundColor: '#0b0f19',
-                            color: accentHex,
                             display: 'flex',
                             alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '12px',
-                            fontWeight: 800,
-                            flexShrink: 0,
+                            gap: '10px',
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            backgroundColor: '#161f30',
+                            border: '1.5px solid #26334d',
+                            color: '#f8fafc',
                           }}
                         >
-                          {idx + 1}
-                        </span>
-                        <span style={{ flex: 1, fontSize: '13.5px', fontWeight: 600, lineHeight: 1.35 }}>
-                          {item}
-                        </span>
-                        <div style={{ display: 'flex', gap: '4px' }}>
-                          <button
-                            type="button"
-                            disabled={Boolean(activeFeedback) || submittingAnswer || idx === 0}
-                            onClick={() => handleMovePuzzleItem(idx, -1)}
-                            title="Di chuyển lên"
+                          <span
                             style={{
-                              width: '32px',
-                              height: '32px',
+                              width: '26px',
+                              height: '26px',
                               borderRadius: '6px',
-                              border: '1px solid #26334d',
                               backgroundColor: '#0b0f19',
-                              color: idx === 0 ? '#475569' : '#f8fafc',
+                              color: accentHex,
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '12px',
                               fontWeight: 800,
-                              cursor:
-                                Boolean(activeFeedback) || submittingAnswer || idx === 0
-                                  ? 'not-allowed'
-                                  : 'pointer',
+                              flexShrink: 0,
                             }}
                           >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            disabled={
-                              Boolean(activeFeedback) || submittingAnswer || idx === arr.length - 1
-                            }
-                            onClick={() => handleMovePuzzleItem(idx, 1)}
-                            title="Di chuyển xuống"
-                            style={{
-                              width: '32px',
-                              height: '32px',
-                              borderRadius: '6px',
-                              border: '1px solid #26334d',
-                              backgroundColor: '#0b0f19',
-                              color: idx === arr.length - 1 ? '#475569' : '#f8fafc',
-                              fontWeight: 800,
-                              cursor:
-                                Boolean(activeFeedback) || submittingAnswer || idx === arr.length - 1
-                                  ? 'not-allowed'
-                                  : 'pointer',
-                            }}
-                          >
-                            ↓
-                          </button>
+                            {idx + 1}
+                          </span>
+                          <span style={{ flex: 1, fontSize: '13.5px', fontWeight: 600 }}>
+                            {item}
+                          </span>
+                          <div style={{ display: 'flex', gap: '4px' }}>
+                            <button
+                              type="button"
+                              disabled={Boolean(activeFeedback) || submittingAnswer || idx === 0}
+                              onClick={() => handleMovePuzzleItem(idx, -1)}
+                              style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '6px',
+                                border: '1px solid #26334d',
+                                backgroundColor: '#0b0f19',
+                                color: idx === 0 ? '#475569' : '#f8fafc',
+                                fontWeight: 800,
+                                cursor:
+                                  Boolean(activeFeedback) || submittingAnswer || idx === 0
+                                    ? 'not-allowed'
+                                    : 'pointer',
+                              }}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              type="button"
+                              disabled={
+                                Boolean(activeFeedback) ||
+                                submittingAnswer ||
+                                idx === arr.length - 1
+                              }
+                              onClick={() => handleMovePuzzleItem(idx, 1)}
+                              style={{
+                                width: '32px',
+                                height: '32px',
+                                borderRadius: '6px',
+                                border: '1px solid #26334d',
+                                backgroundColor: '#0b0f19',
+                                color: idx === arr.length - 1 ? '#475569' : '#f8fafc',
+                                fontWeight: 800,
+                                cursor:
+                                  Boolean(activeFeedback) ||
+                                  submittingAnswer ||
+                                  idx === arr.length - 1
+                                    ? 'not-allowed'
+                                    : 'pointer',
+                              }}
+                            >
+                              ↓
+                            </button>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      )
+                    )}
                     {!activeFeedback && (
                       <button
                         type="button"
                         disabled={submittingAnswer}
                         onClick={() =>
                           handleAnswerSubmit(
-                            (puzzleOrder.length > 0 ? puzzleOrder : activeQuestion.choices || []).join(
-                              ' | '
-                            )
+                            (puzzleOrder.length > 0
+                              ? puzzleOrder
+                              : activeQuestion.choices || []
+                            ).join(' | ')
                           )
                         }
                         style={{
@@ -2743,8 +2503,217 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       </button>
                     )}
                   </div>
+                ) : activeQuestion.type === 'CROSSWORD' ? (
+                  (() => {
+                    const fullQ = activeQuestion as Partial<GameQuestion> & SanitizedQuestion;
+                    const expectedWord = normalizeCrosswordAnswerForRunner(
+                      fullQ.crosswordAnswer || fullQ.correctAnswer || ''
+                    );
+                    const wordLen =
+                      fullQ.crosswordWordLength && fullQ.crosswordWordLength > 0
+                        ? fullQ.crosswordWordLength
+                        : expectedWord.length;
+                    const typedNorm = normalizeCrosswordAnswerForRunner(textAnswer);
+                    const clueText =
+                      fullQ.crosswordClue && fullQ.crosswordClue.trim() !== activeQuestion.question.trim()
+                        ? fullQ.crosswordClue.trim()
+                        : '';
+
+                    return (
+                      <div
+                        data-testid="checkpoint-crossword-box"
+                        style={{
+                          marginTop: '14px',
+                          padding: '14px 16px',
+                          borderRadius: '10px',
+                          backgroundColor: '#0b0f19',
+                          border: '1px solid #26334d',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '12px',
+                        }}
+                      >
+                        {clueText && (
+                          <div
+                            data-testid="checkpoint-crossword-clue"
+                            style={{ fontSize: '13.5px', color: '#cbd5e1', lineHeight: 1.45 }}
+                          >
+                            <strong style={{ color: accentHex }}>Gợi ý ô chữ:</strong> {clueText}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8' }}>
+                            Từ khóa gồm {wordLen > 0 ? `${wordLen} chữ cái` : 'các chữ cái viết liền không dấu'}:
+                          </span>
+                        </div>
+                        {wordLen > 0 && wordLen <= 20 && (
+                          <div
+                            data-testid="checkpoint-crossword-slots"
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '6px',
+                            }}
+                          >
+                            {Array.from({ length: wordLen }).map((_, slotIdx) => {
+                              const ch = typedNorm[slotIdx] || '';
+                              return (
+                                <span
+                                  key={slotIdx}
+                                  data-testid={`checkpoint-crossword-slot-${slotIdx}`}
+                                  style={{
+                                    width: '34px',
+                                    height: '38px',
+                                    borderRadius: '6px',
+                                    backgroundColor: ch ? '#161f30' : '#090d16',
+                                    border: `1.5px solid ${ch ? accentHex : '#334155'}`,
+                                    color: '#f8fafc',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: '15px',
+                                    fontWeight: 900,
+                                    letterSpacing: '0.02em',
+                                  }}
+                                >
+                                  {ch || '_'}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                        <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+                          <input
+                            type="text"
+                            data-testid="checkpoint-crossword-input"
+                            value={textAnswer}
+                            disabled={Boolean(activeFeedback) || submittingAnswer}
+                            onChange={e => setTextAnswer(e.target.value.toUpperCase())}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter' && textAnswer.trim() && !activeFeedback && !submittingAnswer) {
+                                e.preventDefault();
+                                handleAnswerSubmit(normalizeCrosswordAnswerForRunner(textAnswer) || textAnswer.trim());
+                              }
+                            }}
+                            placeholder="Nhập từ khóa ô chữ (VD:ANTOAN)..."
+                            style={{
+                              flex: '1 1 220px',
+                              height: '42px',
+                              padding: '0 14px',
+                              borderRadius: '8px',
+                              backgroundColor: '#161f30',
+                              border: `1.5px solid ${accentHex}`,
+                              color: '#f8fafc',
+                              fontSize: '15px',
+                              fontWeight: 800,
+                              letterSpacing: '0.08em',
+                              textTransform: 'uppercase',
+                            }}
+                          />
+                          {!activeFeedback && (
+                            <button
+                              type="button"
+                              data-testid="checkpoint-submit-answer-btn"
+                              disabled={!textAnswer.trim() || submittingAnswer}
+                              onClick={() =>
+                                handleAnswerSubmit(
+                                  normalizeCrosswordAnswerForRunner(textAnswer) || textAnswer.trim()
+                                )
+                              }
+                              style={{
+                                height: '42px',
+                                padding: '0 20px',
+                                borderRadius: '8px',
+                                backgroundColor: accentHex,
+                                border: 'none',
+                                color: '#090d16',
+                                fontSize: '14px',
+                                fontWeight: 800,
+                                cursor:
+                                  !textAnswer.trim() || submittingAnswer ? 'not-allowed' : 'pointer',
+                                opacity: !textAnswer.trim() || submittingAnswer ? 0.5 : 1,
+                              }}
+                            >
+                              Giải Ô Chữ
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()
+                ) : (activeQuestion.type === 'QUICK_BUTTON' || activeQuestion.type === 'TRUE_FALSE') &&
+                  Array.isArray(activeQuestion.choices) &&
+                  activeQuestion.choices.length > 0 ? (
+                  <div
+                    data-testid="checkpoint-quick-button-group"
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(2, 1fr)',
+                      gap: '10px',
+                      marginTop: '14px',
+                    }}
+                  >
+                    {activeQuestion.choices.map((choice, cIdx) => {
+                      const isSelected = selectedChoice === choice;
+                      const isCorrectChoice =
+                        activeFeedback && choice === activeFeedback.correctAnswer;
+                      const isWrongSelected =
+                        activeFeedback && isSelected && !activeFeedback.isCorrect;
+
+                      let bg = '#161f30';
+                      let border = '#26334d';
+                      let textColor = '#f8fafc';
+
+                      if (isCorrectChoice) {
+                        bg = '#172a1d';
+                        border = '#3fc07a';
+                        textColor = '#3fc07a';
+                      } else if (isWrongSelected) {
+                        bg = '#2c1a20';
+                        border = '#e5566f';
+                        textColor = '#e5566f';
+                      } else if (isSelected) {
+                        bg = '#1e293b';
+                        border = accentHex;
+                      }
+
+                      return (
+                        <button
+                          key={`${cIdx}_${choice}`}
+                          type="button"
+                          data-testid={`checkpoint-choice-${cIdx}`}
+                          disabled={Boolean(activeFeedback) || submittingAnswer}
+                          onClick={() => {
+                            setSelectedChoice(choice);
+                            handleAnswerSubmit(choice);
+                          }}
+                          style={{
+                            textAlign: 'center',
+                            padding: '14px 16px',
+                            borderRadius: '10px',
+                            backgroundColor: bg,
+                            border: `2px solid ${border}`,
+                            color: textColor,
+                            fontSize: '15px',
+                            fontWeight: 800,
+                            cursor:
+                              Boolean(activeFeedback) || submittingAnswer ? 'default' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            minHeight: '52px',
+                          }}
+                        >
+                          <span>{cIdx === 0 ? '✓' : '✕'}</span>
+                          <span>{choice}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 ) : Array.isArray(activeQuestion.choices) && activeQuestion.choices.length > 0 ? (
                   <div
+                    data-testid="checkpoint-multiple-choice-group"
                     style={{
                       display: 'grid',
                       gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
@@ -2780,6 +2749,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                         <button
                           key={`${cIdx}_${choice}`}
                           type="button"
+                          data-testid={`checkpoint-choice-${cIdx}`}
                           disabled={Boolean(activeFeedback) || submittingAnswer}
                           onClick={() => {
                             setSelectedChoice(choice);
@@ -2795,9 +2765,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                             fontSize: '13.5px',
                             fontWeight: 600,
                             cursor:
-                              Boolean(activeFeedback) || submittingAnswer
-                                ? 'default'
-                                : 'pointer',
+                              Boolean(activeFeedback) || submittingAnswer ? 'default' : 'pointer',
                             display: 'flex',
                             alignItems: 'flex-start',
                             gap: '9px',
@@ -2812,11 +2780,10 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                               color: '#94a3b8',
                               fontSize: '11.5px',
                               fontWeight: 800,
-                              fontVariantNumeric: 'tabular-nums',
                               flexShrink: 0,
                             }}
                           >
-                            {cIdx + 1}
+                            {['A', 'B', 'C', 'D'][cIdx] || cIdx + 1}
                           </span>
                           <span style={{ flex: 1, lineHeight: 1.38 }}>{choice}</span>
                         </button>
@@ -2825,6 +2792,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   </div>
                 ) : (
                   <div
+                    data-testid="checkpoint-fill-blank-box"
                     style={{
                       marginTop: '14px',
                       display: 'flex',
@@ -2834,10 +2802,17 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   >
                     <input
                       type="text"
+                      data-testid="checkpoint-fill-blank-input"
                       value={textAnswer}
                       disabled={Boolean(activeFeedback) || submittingAnswer}
                       onChange={e => setTextAnswer(e.target.value)}
-                      placeholder="Nhập câu trả lời của bạn..."
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && textAnswer.trim() && !activeFeedback && !submittingAnswer) {
+                          e.preventDefault();
+                          handleAnswerSubmit(textAnswer.trim());
+                        }
+                      }}
+                      placeholder="Nhập từ khóa còn thiếu..."
                       style={{
                         flex: '1 1 220px',
                         height: '42px',
@@ -2852,6 +2827,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     {!activeFeedback && (
                       <button
                         type="button"
+                        data-testid="checkpoint-submit-answer-btn"
                         disabled={!textAnswer.trim() || submittingAnswer}
                         onClick={() => handleAnswerSubmit(textAnswer.trim())}
                         style={{
@@ -2878,6 +2854,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               {/* Feedback & Continue Button */}
               {activeFeedback && (
                 <div
+                  data-testid="checkpoint-feedback-panel"
                   style={{
                     marginTop: '14px',
                     padding: '12px 14px',
@@ -2918,6 +2895,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   </div>
                   <button
                     type="button"
+                    data-testid="checkpoint-continue-btn"
                     onClick={handleContinueJourney}
                     style={{
                       height: '38px',
@@ -2932,7 +2910,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     }}
                   >
                     {activeStageIndex + 1 < totalStages
-                      ? gameplayProfile.continueLabel
+                      ? 'Tiếp tục hành trình (Space)'
                       : 'Tiến về đích (Space)'}
                   </button>
                 </div>
@@ -3005,26 +2983,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       marginTop: '4px',
                     }}
                   >
-                    {(mode === 'LIVE_SESSION'
-                      ? (liveFinalResult?.totalScore ?? liveScore)
-                      : previewScore) + skillBonusScore}
-                  </div>
-                  <div
-                    data-testid="victory-score-breakdown"
-                    style={{
-                      fontSize: '11px',
-                      color: '#94a3b8',
-                      marginTop: '4px',
-                      lineHeight: 1.35,
-                    }}
-                  >
-                    Điểm câu hỏi (lưu báo cáo):{' '}
-                    <strong style={{ color: '#f8fafc' }}>
-                      {mode === 'LIVE_SESSION'
-                        ? (liveFinalResult?.totalScore ?? liveScore)
-                        : previewScore}
-                    </strong>
-                    {skillBonusScore > 0 ? ` · Thưởng thao tác: +${skillBonusScore}` : ''}
+                    {displayedTotalScore}
                   </div>
                 </div>
 
@@ -3039,16 +2998,16 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     }}
                   >
                     {mode === 'LIVE_SESSION'
-                      ? liveFinalResult?.correctAnswers || 0
+                      ? (effectiveFinalResult as PracticeFinalResult | null)?.correctCount ??
+                        effectiveFinalResult?.correctAnswers ??
+                        liveCorrectCount
                       : previewCorrectCount}
                     /{totalStages}
                   </div>
                 </div>
 
                 <div style={{ padding: '14px 16px' }}>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>
-                    {sceneDescriptor.clearedMetricLabel}
-                  </div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>Vật cản vượt qua</div>
                   <div
                     style={{
                       fontSize: '25px',
@@ -3065,6 +3024,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                 <button
                   type="button"
+                  data-testid="victory-restart-btn"
                   onClick={handleRestartPreview}
                   style={{
                     height: '40px',
@@ -3082,6 +3042,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 </button>
                 <button
                   type="button"
+                  data-testid="victory-exit-btn"
                   onClick={handleExitGame}
                   style={{
                     height: '40px',

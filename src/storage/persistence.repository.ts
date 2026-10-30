@@ -669,6 +669,15 @@ export class PersistenceRepository {
     return Number(row?.cnt || 0);
   }
 
+  public countGamesByAdventureAssetPrefix(urlPrefix: string): number {
+    if (!urlPrefix) return 0;
+    const db = getDatabase();
+    const row = db
+      .prepare('SELECT COUNT(*) as cnt FROM games WHERE settings_json LIKE ?')
+      .get(`%${urlPrefix}%`) as { cnt: number } | undefined;
+    return Number(row?.cnt || 0);
+  }
+
   public deleteGame(gameId: string): boolean {
     return runInTransaction((db) => {
       db.prepare('DELETE FROM game_questions WHERE game_id = ?').run(gameId);

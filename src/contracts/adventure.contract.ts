@@ -111,8 +111,142 @@ export const AdventureQuestionTypeEnum = z.enum([
   'MULTIPLE_CHOICE',
   'QUICK_BUTTON',
   'FILL_IN_THE_BLANK',
+  'CROSSWORD',
 ]);
 export type AdventureQuestionType = z.infer<typeof AdventureQuestionTypeEnum>;
+
+export const BaseDistributionQuestionTypeEnum = z.enum([
+  'MULTIPLE_CHOICE',
+  'QUICK_BUTTON',
+  'FILL_IN_THE_BLANK',
+  'CROSSWORD',
+]);
+export type BaseDistributionQuestionType = z.infer<typeof BaseDistributionQuestionTypeEnum>;
+
+export const AdventureQuestionDistributionSchema = z
+  .object({
+    MULTIPLE_CHOICE: z.number().int().min(0).max(100),
+    QUICK_BUTTON: z.number().int().min(0).max(100),
+    FILL_IN_THE_BLANK: z.number().int().min(0).max(100),
+    CROSSWORD: z.number().int().min(0).max(100),
+  })
+  .strict()
+  .refine(
+    data =>
+      data.MULTIPLE_CHOICE +
+        data.QUICK_BUTTON +
+        data.FILL_IN_THE_BLANK +
+        data.CROSSWORD ===
+      100,
+    {
+      message:
+        'Tổng tỷ lệ các loại câu hỏi trong game đi cảnh phải bằng chính xác 100%.',
+    }
+  );
+export type AdventureQuestionDistribution = z.infer<
+  typeof AdventureQuestionDistributionSchema
+>;
+
+export function normalizeToBaseDistributionType(
+  rawType: string
+): BaseDistributionQuestionType | null {
+  switch (rawType) {
+    case 'MULTIPLE_CHOICE':
+    case 'QUIZ':
+      return 'MULTIPLE_CHOICE';
+    case 'QUICK_BUTTON':
+    case 'TRUE_FALSE':
+      return 'QUICK_BUTTON';
+    case 'FILL_IN_THE_BLANK':
+    case 'TYPE_ANSWER':
+      return 'FILL_IN_THE_BLANK';
+    case 'CROSSWORD':
+      return 'CROSSWORD';
+    default:
+      return null;
+  }
+}
+
+export function buildDefaultQuestionDistributionForTypes(
+  questionTypes?: readonly string[]
+): AdventureQuestionDistribution {
+  const baseOrder: BaseDistributionQuestionType[] = [
+    'MULTIPLE_CHOICE',
+    'QUICK_BUTTON',
+    'FILL_IN_THE_BLANK',
+    'CROSSWORD',
+  ];
+  const selectedSet = new Set<BaseDistributionQuestionType>();
+  if (Array.isArray(questionTypes)) {
+    for (const t of questionTypes) {
+      const mapped = normalizeToBaseDistributionType(String(t));
+      if (mapped) {
+        selectedSet.add(mapped);
+      }
+    }
+  }
+  const activeTypes =
+    selectedSet.size > 0
+      ? baseOrder.filter(t => selectedSet.has(t))
+      : (['MULTIPLE_CHOICE', 'QUICK_BUTTON'] as BaseDistributionQuestionType[]);
+
+  const dist: AdventureQuestionDistribution = {
+    MULTIPLE_CHOICE: 0,
+    QUICK_BUTTON: 0,
+    FILL_IN_THE_BLANK: 0,
+    CROSSWORD: 0,
+  };
+
+  const count = activeTypes.length;
+  const basePct = Math.floor(100 / count);
+  const remainder = 100 - basePct * count;
+
+  activeTypes.forEach((t, idx) => {
+    dist[t] = basePct + (idx < remainder ? 1 : 0);
+  });
+
+  return dist;
+}
+
+export const AdventureAssetTypeEnum = z.enum(['BACKGROUND', 'CHARACTER', 'OBSTACLE']);
+export type AdventureAssetType = z.infer<typeof AdventureAssetTypeEnum>;
+
+export const AdventureAssetSourceEnum = z.enum([
+  'ANTIGRAVITY_BANANA_PACK',
+  'GEMINI_BANANA_RUNTIME',
+]);
+export type AdventureAssetSource = z.infer<typeof AdventureAssetSourceEnum>;
+
+export const AdventureAssetStatusEnum = z.enum([
+  'READY',
+  'ASSET_GENERATION_PENDING',
+  'ASSET_GENERATION_FAILED',
+  'LEGACY_UNVERIFIED',
+]);
+export type AdventureAssetStatus = z.infer<typeof AdventureAssetStatusEnum>;
+
+export const AdventureAssetMetadataSchema = z.object({
+  industryId: IndustryIdEnum,
+  assetType: AdventureAssetTypeEnum,
+  fileName: z.string().min(1).max(160),
+  url: z.string().startsWith('/adventure-assets/').max(300),
+  relativePath: z.string().min(1).max(300),
+  mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+  sizeBytes: z.number().int().positive(),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  source: AdventureAssetSourceEnum,
+  verified: z.boolean(),
+});
+export type AdventureAssetMetadata = z.infer<typeof AdventureAssetMetadataSchema>;
+
+export const AdventureBoundAssetsSchema = z.object({
+  background: AdventureAssetMetadataSchema,
+  character: AdventureAssetMetadataSchema,
+  obstacle: AdventureAssetMetadataSchema,
+});
+export type AdventureBoundAssets = z.infer<typeof AdventureBoundAssetsSchema>;
 
 export const AdventureConfigSchema = z.object({
   version: z.number().int().default(1),
@@ -183,6 +317,7 @@ export const AdventureConfigSchema = z.object({
     .min(1)
     .max(4)
     .default(['MULTIPLE_CHOICE', 'QUICK_BUTTON']),
+  questionDistribution: AdventureQuestionDistributionSchema.optional(),
   gameplayArchetype: GameplayArchetypeEnum.default('SCENARIO_DECISION_SIM'),
   controlScheme: ControlSchemeEnum.default('SCENARIO_CASE_DECISION'),
   questionTriggerMode: QuestionTriggerModeEnum.default('CASE_CONSULTATION'),
@@ -204,6 +339,12 @@ export const AdventureConfigSchema = z.object({
       'Hội đồng Đánh giá Cuối khóa',
     ]),
   stages: z.array(AdventureStageSchema).default([]),
+  assetStatus: AdventureAssetStatusEnum.optional(),
+  assetPackSource: AdventureAssetSourceEnum.nullable().optional(),
+  assets: AdventureBoundAssetsSchema.nullable().optional(),
+  assetError: z.string().trim().max(500).nullable().optional(),
+  assetErrorCode: z.string().trim().max(80).nullable().optional(),
+  assetUpdatedAt: z.string().trim().max(80).nullable().optional(),
 });
 export type AdventureConfig = z.infer<typeof AdventureConfigSchema>;
 
@@ -246,12 +387,45 @@ export const GenerateAdventureConfigInputSchema = z.object({
   speedMultiplier: z.number().min(0.6).max(1.6).optional(),
   reducedMotion: z.boolean().optional(),
   questionTypes: z.array(AdventureQuestionTypeEnum).min(1).max(4).optional(),
+  questionDistribution: AdventureQuestionDistributionSchema.optional(),
   gameplayArchetype: GameplayArchetypeEnum.optional(),
   controlScheme: ControlSchemeEnum.optional(),
   questionTriggerMode: QuestionTriggerModeEnum.optional(),
   winConditionSummary: z.string().trim().min(1).max(240).optional(),
   interactiveObjects: z.array(z.string().trim().min(1).max(100)).min(1).max(8).optional(),
   stages: z.array(AdventureStageSchema).optional(),
+  assetStatus: AdventureAssetStatusEnum.optional(),
+  assetPackSource: AdventureAssetSourceEnum.nullable().optional(),
+  assets: AdventureBoundAssetsSchema.nullable().optional(),
+  assetError: z.string().trim().max(500).nullable().optional(),
+  assetErrorCode: z.string().trim().max(80).nullable().optional(),
+  assetUpdatedAt: z.string().trim().max(80).nullable().optional(),
+}).superRefine((data, ctx) => {
+  if (data.questionDistribution && data.questionTypes && data.questionTypes.length > 0) {
+    const selectedBaseTypes = new Set<BaseDistributionQuestionType>();
+    for (const qt of data.questionTypes) {
+      const mapped = normalizeToBaseDistributionType(qt);
+      if (mapped) {
+        selectedBaseTypes.add(mapped);
+      }
+    }
+    const distKeys: BaseDistributionQuestionType[] = [
+      'MULTIPLE_CHOICE',
+      'QUICK_BUTTON',
+      'FILL_IN_THE_BLANK',
+      'CROSSWORD',
+    ];
+    for (const key of distKeys) {
+      const pct = data.questionDistribution[key] ?? 0;
+      if (pct > 0 && !selectedBaseTypes.has(key)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Loại câu hỏi "${key}" không được chọn trong questionTypes nên phải có tỷ lệ 0%.`,
+          path: ['questionDistribution', key],
+        });
+      }
+    }
+  }
 });
 export type GenerateAdventureConfigInput = z.infer<typeof GenerateAdventureConfigInputSchema>;
 
@@ -1236,6 +1410,7 @@ export function analyzeSourceContentForAdventure(
   options?: {
     preferredIndustryId?: IndustryId;
     customIndustryLabel?: string;
+    customSubEnvironment?: string;
     topicFocus?: string;
     questionCount?: number;
     questions?: GameQuestion[];
@@ -1244,6 +1419,7 @@ export function analyzeSourceContentForAdventure(
   const priorityText = [
     options?.topicFocus || '',
     options?.customIndustryLabel || '',
+    options?.customSubEnvironment || '',
     ...documents.map(d => d.title || ''),
   ]
     .join(' \n ')
@@ -1257,9 +1433,20 @@ export function analyzeSourceContentForAdventure(
     .join(' \n ')
     .toLowerCase();
 
-  let detectedIndustryId: IndustryId = options?.preferredIndustryId || 'EDUCATION_GENERAL';
+  const hasExplicitCustomLabel = Boolean(
+    options?.customIndustryLabel &&
+      options.customIndustryLabel.trim().length > 0 &&
+      !INDUSTRY_CATALOG.some(
+        c =>
+          c.industryId !== 'CUSTOM' &&
+          c.label.toLowerCase() === options.customIndustryLabel!.trim().toLowerCase()
+      )
+  );
+
+  let detectedIndustryId: IndustryId =
+    options?.preferredIndustryId || (hasExplicitCustomLabel ? 'CUSTOM' : 'EDUCATION_GENERAL');
   let contentMatchedIndustryId: IndustryId = 'EDUCATION_GENERAL';
-  const aiDetectedIndustry = !options?.preferredIndustryId;
+  const aiDetectedIndustry = !options?.preferredIndustryId && !hasExplicitCustomLabel;
   let bestScore = 0;
   let matchedTerms: string[] = [];
 
@@ -1281,12 +1468,12 @@ export function analyzeSourceContentForAdventure(
       matchedTerms = hits.slice(0, 5);
       bestScore = Math.max(bestScore, score);
     }
-    if (score > bestScore && !options?.preferredIndustryId) {
+    if (score > bestScore && !options?.preferredIndustryId && !hasExplicitCustomLabel) {
       bestScore = score;
       detectedIndustryId = item.industryId;
       contentMatchedIndustryId = item.industryId;
       matchedTerms = hits.slice(0, 5);
-    } else if (score > bestScore && options?.preferredIndustryId === 'CUSTOM') {
+    } else if (score > bestScore && (options?.preferredIndustryId === 'CUSTOM' || hasExplicitCustomLabel)) {
       bestScore = score;
       contentMatchedIndustryId = item.industryId;
       matchedTerms = hits.slice(0, 5);
@@ -1478,6 +1665,43 @@ export function analyzeSourceContentForAdventure(
   const industryLabel =
     options?.customIndustryLabel?.trim() || catalogEntry?.label || 'Đào tạo & Kiến thức';
 
+  const isCustomIndustry = detectedIndustryId === 'CUSTOM';
+  const resolvedSubEnvironment = isCustomIndustry
+    ? (
+        options?.customSubEnvironment?.trim() ||
+        options?.topicFocus?.trim() ||
+        `Trung tâm nghiên cứu & thực hành ${industryLabel}`
+      ).slice(0, 140)
+    : options?.customSubEnvironment?.trim()
+      ? options.customSubEnvironment.trim().slice(0, 140)
+      : preset.subEnvironment;
+
+  const resolvedEnvironmentTitle = isCustomIndustry
+    ? `${resolvedSubEnvironment} — ${industryLabel}`.slice(0, 120)
+    : preset.environmentTitle;
+  const resolvedEnvironmentSubtitle = isCustomIndustry
+    ? `Hành trình vượt chướng ngại vật thực tế trong lĩnh vực ${industryLabel} tại ${resolvedSubEnvironment}.`.slice(
+        0,
+        240
+      )
+    : preset.environmentSubtitle;
+  const resolvedAvatarLabel = isCustomIndustry
+    ? `Chuyên gia / Kỹ sư ${industryLabel}`.slice(0, 80)
+    : preset.avatarLabel;
+  const resolvedInteractiveObjects = isCustomIndustry
+    ? [
+        `Kiện linh kiện & thiết bị kỹ thuật ${industryLabel}`.slice(0, 100),
+        `Trạm kiểm định tiêu chuẩn ${industryLabel}`.slice(0, 100),
+        `Thiết bị chuyên dụng tại ${resolvedSubEnvironment}`.slice(0, 100),
+      ]
+    : preset.interactiveObjects;
+  const resolvedWinConditionSummary = isCustomIndustry
+    ? `Vượt qua các chướng ngại vật kỹ thuật và hoàn thành tất cả trạm kiểm tra chuyên môn ${industryLabel}.`.slice(
+        0,
+        240
+      )
+    : preset.winConditionSummary;
+
   const totalStages = Math.max(
     1,
     options?.questions ? options.questions.length : options?.questionCount || 5
@@ -1487,10 +1711,13 @@ export function analyzeSourceContentForAdventure(
   for (let i = 0; i < totalStages; i++) {
     const q = options?.questions?.[i];
     const sectionHint = q?.sourceReference?.section ? ` (${q.sourceReference.section})` : '';
-    const cpName =
-      preset.checkpointNames[i % preset.checkpointNames.length] +
-      (i >= preset.checkpointNames.length ? ` #${i + 1}` : '');
-    const zLabel = preset.zoneLabels[i % preset.zoneLabels.length];
+    const cpName = isCustomIndustry
+      ? `Trạm Kiểm Định ${industryLabel} #${i + 1}`
+      : preset.checkpointNames[i % preset.checkpointNames.length] +
+        (i >= preset.checkpointNames.length ? ` #${i + 1}` : '');
+    const zLabel = isCustomIndustry
+      ? `${resolvedSubEnvironment} - Phân khu ${i + 1}`
+      : preset.zoneLabels[i % preset.zoneLabels.length];
     stages.push({
       stageIndex: i,
       questionId: q?.id,
@@ -1503,29 +1730,30 @@ export function analyzeSourceContentForAdventure(
     });
   }
 
-  const docTitle = documents[0]?.title || options?.topicFocus || preset.environmentTitle;
+  const docTitle = documents[0]?.title || options?.topicFocus || resolvedEnvironmentTitle;
   const confidence = bestScore >= 6 ? 0.94 : bestScore >= 3 ? 0.86 : 0.75;
-  const reasoning =
-    matchedTerms.length > 0
-      ? `Phát hiện các thuật ngữ trọng tâm từ tài liệu nguồn (${matchedTerms.join(', ')}) nên đề xuất bối cảnh "${preset.subEnvironment}".`
-      : `Phân tích nội dung tài liệu "${docTitle}" để thiết lập lộ trình "${preset.subEnvironment}".`;
+  const reasoning = isCustomIndustry
+    ? `Thiết lập bối cảnh tùy chỉnh "${resolvedSubEnvironment}" cho ngành nghề "${industryLabel}" theo yêu cầu của người tạo game.`
+    : matchedTerms.length > 0
+      ? `Phát hiện các thuật ngữ trọng tâm từ tài liệu nguồn (${matchedTerms.join(', ')}) nên đề xuất bối cảnh "${resolvedSubEnvironment}".`
+      : `Phân tích nội dung tài liệu "${docTitle}" để thiết lập lộ trình "${resolvedSubEnvironment}".`;
 
   return AdventureConfigSchema.parse({
     version: 1,
     industryId: detectedIndustryId,
     industryLabel,
-    subEnvironment: preset.subEnvironment,
+    subEnvironment: resolvedSubEnvironment,
     learningObjective: `Chinh phục ${totalStages} trạm kiểm tra kiến thức thực tế từ "${docTitle.slice(0, 90)}"`,
     aiDetectedIndustry,
     aiConfidence: confidence,
     aiReasoning: reasoning,
     proposalConfirmed: true,
     themePresetId: preset.presetId,
-    environmentTitle: preset.environmentTitle,
-    environmentSubtitle: preset.environmentSubtitle,
+    environmentTitle: resolvedEnvironmentTitle,
+    environmentSubtitle: resolvedEnvironmentSubtitle,
     decorStyle: preset.decorStyle,
     avatarId: preset.avatarId,
-    avatarLabel: preset.avatarLabel,
+    avatarLabel: resolvedAvatarLabel,
     palette: preset.palette,
     obstacleTypes: preset.obstacleTypes,
     obstacleDensity: 'MEDIUM',
@@ -1534,8 +1762,8 @@ export function analyzeSourceContentForAdventure(
     gameplayArchetype: preset.gameplayArchetype,
     controlScheme: preset.controlScheme,
     questionTriggerMode: preset.questionTriggerMode,
-    winConditionSummary: preset.winConditionSummary,
-    interactiveObjects: preset.interactiveObjects,
+    winConditionSummary: resolvedWinConditionSummary,
+    interactiveObjects: resolvedInteractiveObjects,
     stages,
   });
 }
@@ -1632,12 +1860,55 @@ export function sanitizeAdventureConfig(
         )
       )
     : [];
-  const questionTypes: AdventureQuestionType[] =
+
+  const parsedCandidateDist = candidate.questionDistribution
+    ? AdventureQuestionDistributionSchema.safeParse(candidate.questionDistribution)
+    : null;
+  const parsedFallbackDist = fallback.questionDistribution
+    ? AdventureQuestionDistributionSchema.safeParse(fallback.questionDistribution)
+    : null;
+
+  const baseDistKeys: BaseDistributionQuestionType[] = [
+    'MULTIPLE_CHOICE',
+    'QUICK_BUTTON',
+    'FILL_IN_THE_BLANK',
+    'CROSSWORD',
+  ];
+
+  let questionTypes: AdventureQuestionType[] =
     validQuestionTypes.length > 0
       ? validQuestionTypes
-      : fallback.questionTypes && fallback.questionTypes.length > 0
-        ? fallback.questionTypes
-        : ['MULTIPLE_CHOICE', 'QUICK_BUTTON'];
+      : parsedCandidateDist?.success
+        ? baseDistKeys.filter(k => parsedCandidateDist.data[k] > 0)
+        : fallback.questionTypes && fallback.questionTypes.length > 0
+          ? fallback.questionTypes
+          : ['MULTIPLE_CHOICE', 'QUICK_BUTTON'];
+
+  if (questionTypes.length === 0) {
+    questionTypes = ['MULTIPLE_CHOICE', 'QUICK_BUTTON'];
+  }
+
+  const selectedBaseSet = new Set<BaseDistributionQuestionType>();
+  for (const qt of questionTypes) {
+    const mapped = normalizeToBaseDistributionType(qt);
+    if (mapped) selectedBaseSet.add(mapped);
+  }
+
+  let questionDistribution: AdventureQuestionDistribution;
+  if (
+    parsedCandidateDist?.success &&
+    baseDistKeys.every(k => parsedCandidateDist.data[k] === 0 || selectedBaseSet.has(k))
+  ) {
+    questionDistribution = parsedCandidateDist.data;
+  } else if (
+    parsedFallbackDist?.success &&
+    validQuestionTypes.length === 0 &&
+    baseDistKeys.every(k => parsedFallbackDist.data[k] === 0 || selectedBaseSet.has(k))
+  ) {
+    questionDistribution = parsedFallbackDist.data;
+  } else {
+    questionDistribution = buildDefaultQuestionDistributionForTypes(questionTypes);
+  }
 
   const targetCount = questions && questions.length > 0 ? questions.length : fallback.stages.length || 5;
   const rawStages = Array.isArray(candidate.stages) ? candidate.stages : [];
@@ -1710,13 +1981,17 @@ export function sanitizeAdventureConfig(
   const interactiveObjects =
     validInteractiveObjects.length > 0 && !hasLeakedMotoObjects
       ? validInteractiveObjects
-      : preset.interactiveObjects || fallback.interactiveObjects;
+      : industryId === 'CUSTOM' && fallback.interactiveObjects?.length > 0
+        ? fallback.interactiveObjects
+        : preset.interactiveObjects || fallback.interactiveObjects;
 
   const winConditionSummary =
     typeof candidate.winConditionSummary === 'string' &&
     candidate.winConditionSummary.trim().length > 0
       ? candidate.winConditionSummary.trim().slice(0, 240)
-      : preset.winConditionSummary || fallback.winConditionSummary;
+      : industryId === 'CUSTOM' && fallback.winConditionSummary
+        ? fallback.winConditionSummary
+        : preset.winConditionSummary || fallback.winConditionSummary;
 
   const candidateSubEnv =
     typeof candidate.subEnvironment === 'string' ? candidate.subEnvironment.trim() : '';
@@ -1724,8 +1999,56 @@ export function sanitizeAdventureConfig(
     presetId !== 'theme_moto_garage' &&
     (candidateSubEnv.includes('Bảo Dưỡng') || candidateSubEnv.includes('Gara'));
 
+  const rawAssetsCandidate = candidate.assets !== undefined ? candidate.assets : fallback.assets;
+  const parsedAssets = rawAssetsCandidate
+    ? AdventureBoundAssetsSchema.safeParse(rawAssetsCandidate)
+    : null;
+  const validSameIndustryAssets =
+    parsedAssets &&
+    parsedAssets.success &&
+    parsedAssets.data.background.industryId === industryId &&
+    parsedAssets.data.character.industryId === industryId &&
+    parsedAssets.data.obstacle.industryId === industryId
+      ? parsedAssets.data
+      : null;
+
+  const rawAssetStatus =
+    candidate.assetStatus !== undefined ? candidate.assetStatus : fallback.assetStatus;
+  const parsedAssetStatus = rawAssetStatus
+    ? AdventureAssetStatusEnum.safeParse(rawAssetStatus)
+    : null;
+  const assetStatus = parsedAssetStatus?.success ? parsedAssetStatus.data : undefined;
+
+  const rawAssetSource =
+    candidate.assetPackSource !== undefined ? candidate.assetPackSource : fallback.assetPackSource;
+  const parsedAssetSource = rawAssetSource
+    ? AdventureAssetSourceEnum.safeParse(rawAssetSource)
+    : null;
+  const assetPackSource = parsedAssetSource?.success ? parsedAssetSource.data : null;
+
+  const assetError =
+    typeof candidate.assetError === 'string'
+      ? candidate.assetError.trim().slice(0, 500)
+      : candidate.assetError === null
+        ? null
+        : fallback.assetError ?? undefined;
+
+  const assetErrorCode =
+    typeof candidate.assetErrorCode === 'string'
+      ? candidate.assetErrorCode.trim().slice(0, 80)
+      : candidate.assetErrorCode === null
+        ? null
+        : fallback.assetErrorCode ?? undefined;
+
+  const assetUpdatedAt =
+    typeof candidate.assetUpdatedAt === 'string'
+      ? candidate.assetUpdatedAt.trim().slice(0, 80)
+      : candidate.assetUpdatedAt === null
+        ? null
+        : fallback.assetUpdatedAt ?? undefined;
+
   return AdventureConfigSchema.parse({
-    version: 1,
+    version: typeof candidate.version === 'number' && candidate.version >= 1 ? candidate.version : fallback.version || 1,
     industryId,
     industryLabel:
       typeof candidate.industryLabel === 'string' && candidate.industryLabel.trim().length > 0
@@ -1734,7 +2057,9 @@ export function sanitizeAdventureConfig(
     subEnvironment:
       candidateSubEnv.length > 0 && !hasLeakedMotoSubEnv
         ? candidateSubEnv.slice(0, 140)
-        : preset.subEnvironment,
+        : industryId === 'CUSTOM' && fallback.subEnvironment
+          ? fallback.subEnvironment
+          : preset.subEnvironment,
     learningObjective:
       typeof candidate.learningObjective === 'string' &&
       candidate.learningObjective.trim().length > 0
@@ -1761,18 +2086,24 @@ export function sanitizeAdventureConfig(
       typeof candidate.environmentTitle === 'string' &&
       candidate.environmentTitle.trim().length > 0
         ? candidate.environmentTitle.trim().slice(0, 120)
-        : preset.environmentTitle,
+        : industryId === 'CUSTOM' && fallback.environmentTitle
+          ? fallback.environmentTitle
+          : preset.environmentTitle,
     environmentSubtitle:
       typeof candidate.environmentSubtitle === 'string' &&
       candidate.environmentSubtitle.trim().length > 0
         ? candidate.environmentSubtitle.trim().slice(0, 240)
-        : preset.environmentSubtitle,
+        : industryId === 'CUSTOM' && fallback.environmentSubtitle
+          ? fallback.environmentSubtitle
+          : preset.environmentSubtitle,
     decorStyle,
     avatarId,
     avatarLabel:
       typeof candidate.avatarLabel === 'string' && candidate.avatarLabel.trim().length > 0
         ? candidate.avatarLabel.trim().slice(0, 80)
-        : preset.avatarLabel,
+        : industryId === 'CUSTOM' && fallback.avatarLabel
+          ? fallback.avatarLabel
+          : preset.avatarLabel,
     palette,
     obstacleTypes,
     obstacleDensity:
@@ -1792,11 +2123,22 @@ export function sanitizeAdventureConfig(
         ? candidate.reducedMotion
         : fallback.reducedMotion,
     questionTypes,
+    questionDistribution,
     gameplayArchetype,
     controlScheme,
     questionTriggerMode,
     winConditionSummary,
     interactiveObjects,
     stages,
+    ...(assetStatus !== undefined ? { assetStatus } : {}),
+    ...(assetPackSource !== null ? { assetPackSource } : {}),
+    ...(validSameIndustryAssets !== null
+      ? { assets: validSameIndustryAssets }
+      : candidate.assets === null
+        ? { assets: null }
+        : {}),
+    ...(assetError !== undefined ? { assetError } : {}),
+    ...(assetErrorCode !== undefined ? { assetErrorCode } : {}),
+    ...(assetUpdatedAt !== undefined ? { assetUpdatedAt } : {}),
   });
 }

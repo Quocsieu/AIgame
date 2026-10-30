@@ -90,6 +90,35 @@ export interface AdventureStage {
   hintBanner?: string;
 }
 
+export type AdventureAssetType = 'BACKGROUND' | 'CHARACTER' | 'OBSTACLE';
+export type AdventureAssetSource = 'ANTIGRAVITY_BANANA_PACK' | 'GEMINI_BANANA_RUNTIME';
+export type AdventureAssetStatus =
+  | 'READY'
+  | 'ASSET_GENERATION_PENDING'
+  | 'ASSET_GENERATION_FAILED'
+  | 'LEGACY_UNVERIFIED';
+
+export interface AdventureAssetMetadata {
+  industryId: IndustryId;
+  assetType: AdventureAssetType;
+  fileName: string;
+  url: string;
+  relativePath: string;
+  mimeType: 'image/png' | 'image/jpeg' | 'image/webp';
+  sizeBytes: number;
+  width: number;
+  height: number;
+  sha256: string;
+  source: AdventureAssetSource;
+  verified: boolean;
+}
+
+export interface AdventureBoundAssets {
+  background: AdventureAssetMetadata;
+  character: AdventureAssetMetadata;
+  obstacle: AdventureAssetMetadata;
+}
+
 export interface AdventureConfig {
   version: number;
   industryId: IndustryId;
@@ -112,12 +141,19 @@ export interface AdventureConfig {
   speedMultiplier: number;
   reducedMotion: boolean;
   questionTypes?: QuestionType[];
+  questionDistribution?: MixedQuestionDistribution;
   gameplayArchetype?: GameplayArchetype;
   controlScheme?: ControlScheme;
   questionTriggerMode?: QuestionTriggerMode;
   winConditionSummary?: string;
   interactiveObjects?: string[];
   stages: AdventureStage[];
+  assetStatus?: AdventureAssetStatus;
+  assetPackSource?: AdventureAssetSource | null;
+  assets?: AdventureBoundAssets | null;
+  assetError?: string | null;
+  assetErrorCode?: string | null;
+  assetUpdatedAt?: string | null;
 }
 export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 export type ScoringMode = 'STANDARD' | 'SPEED_BONUS' | 'STREAK';
@@ -130,10 +166,90 @@ export interface MixedQuestionDistribution {
   CROSSWORD: number;
 }
 
+export type BaseDistributionQuestionType = keyof MixedQuestionDistribution;
+
+export const BASE_DISTRIBUTION_QUESTION_TYPES: BaseDistributionQuestionType[] = [
+  'MULTIPLE_CHOICE',
+  'QUICK_BUTTON',
+  'FILL_IN_THE_BLANK',
+  'CROSSWORD',
+];
+
+export function normalizeToBaseDistributionType(
+  rawType: string
+): BaseDistributionQuestionType | null {
+  switch (rawType) {
+    case 'MULTIPLE_CHOICE':
+    case 'QUIZ':
+      return 'MULTIPLE_CHOICE';
+    case 'QUICK_BUTTON':
+    case 'TRUE_FALSE':
+      return 'QUICK_BUTTON';
+    case 'FILL_IN_THE_BLANK':
+    case 'TYPE_ANSWER':
+      return 'FILL_IN_THE_BLANK';
+    case 'CROSSWORD':
+      return 'CROSSWORD';
+    default:
+      return null;
+  }
+}
+
+export function buildDefaultQuestionDistributionForTypes(
+  questionTypes?: readonly string[]
+): MixedQuestionDistribution {
+  const selectedSet = new Set<BaseDistributionQuestionType>();
+  if (Array.isArray(questionTypes)) {
+    for (const t of questionTypes) {
+      const mapped = normalizeToBaseDistributionType(String(t));
+      if (mapped) {
+        selectedSet.add(mapped);
+      }
+    }
+  }
+  const activeTypes =
+    selectedSet.size > 0
+      ? BASE_DISTRIBUTION_QUESTION_TYPES.filter(t => selectedSet.has(t))
+      : (['MULTIPLE_CHOICE', 'QUICK_BUTTON'] as BaseDistributionQuestionType[]);
+
+  const dist: MixedQuestionDistribution = {
+    MULTIPLE_CHOICE: 0,
+    QUICK_BUTTON: 0,
+    FILL_IN_THE_BLANK: 0,
+    CROSSWORD: 0,
+  };
+
+  const count = activeTypes.length;
+  const basePct = Math.floor(100 / count);
+  const remainder = 100 - basePct * count;
+
+  activeTypes.forEach((t, idx) => {
+    dist[t] = basePct + (idx < remainder ? 1 : 0);
+  });
+
+  return dist;
+}
+
 export function calculateMixedTypeCounts(
   totalCount: number,
   distribution?: MixedQuestionDistribution
 ): Record<QuestionType, number> {
+  const result: Record<QuestionType, number> = {
+    QUIZ: 0,
+    TRUE_FALSE: 0,
+    TYPE_ANSWER: 0,
+    PUZZLE: 0,
+    SLIDER: 0,
+    MULTIPLE_CHOICE: 0,
+    QUICK_BUTTON: 0,
+    FILL_IN_THE_BLANK: 0,
+    CROSSWORD: 0,
+  };
+
+  if (totalCount <= 0) {
+    return result;
+  }
+
   const dist = distribution || {
     MULTIPLE_CHOICE: 40,
     QUICK_BUTTON: 20,
@@ -149,38 +265,30 @@ export function calculateMixedTypeCounts(
   ];
 
   const rawCounts = types.map(type => {
-    const ratio = (dist[type] ?? 0) / 100;
+    const pct = Math.max(0, Number(dist[type] ?? 0));
+    const ratio = pct / 100;
     const exact = totalCount * ratio;
-    const floor = Math.floor(exact);
-    const remainder = exact - floor;
-    return { type, exact, floor, remainder };
+    const floor = pct > 0 ? Math.floor(exact) : 0;
+    const remainder = pct > 0 ? exact - floor : 0;
+    return { type, pct, exact, floor, remainder };
   });
 
   const allocated = rawCounts.reduce((sum, item) => sum + item.floor, 0);
   const deficit = totalCount - allocated;
 
-  rawCounts.sort((a, b) => {
-    if (Math.abs(b.remainder - a.remainder) > 1e-6) {
-      return b.remainder - a.remainder;
+  const positiveBuckets = rawCounts.filter(item => item.pct > 0);
+  if (positiveBuckets.length > 0 && deficit > 0) {
+    positiveBuckets.sort((a, b) => {
+      if (Math.abs(b.remainder - a.remainder) > 1e-6) {
+        return b.remainder - a.remainder;
+      }
+      return b.pct - a.pct;
+    });
+
+    for (let i = 0; i < deficit; i++) {
+      positiveBuckets[i % positiveBuckets.length].floor += 1;
     }
-    return (dist[b.type] ?? 0) - (dist[a.type] ?? 0);
-  });
-
-  for (let i = 0; i < deficit; i++) {
-    rawCounts[i % rawCounts.length].floor += 1;
   }
-
-  const result: Record<QuestionType, number> = {
-    QUIZ: 0,
-    TRUE_FALSE: 0,
-    TYPE_ANSWER: 0,
-    PUZZLE: 0,
-    SLIDER: 0,
-    MULTIPLE_CHOICE: 0,
-    QUICK_BUTTON: 0,
-    FILL_IN_THE_BLANK: 0,
-    CROSSWORD: 0,
-  };
 
   for (const item of rawCounts) {
     result[item.type] = item.floor;
@@ -270,6 +378,7 @@ export interface SanitizedQuestion {
   sliderConfig?: ClientSliderConfig;
   difficulty: Difficulty;
   crosswordClue?: string;
+  crosswordWordLength?: number;
   questionIndex: number;
   totalQuestions: number;
   timePerQuestion: number;

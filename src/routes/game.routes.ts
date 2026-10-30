@@ -16,6 +16,13 @@ import { gameStore, sessionStore } from '../game/game.store.js';
 import { gameDeleteRateLimiter, generateRateLimiter } from '../middleware/rateLimiter.js';
 import { rejectGuestOrPlayerWrite } from '../middleware/auth.middleware.js';
 import { roomStore } from '../multiplayer/room.store.js';
+import {
+  cleanupOrphanedAdventureGameAssets,
+  listVerifiedAdventureAssetPacks,
+  provisionAdventureAssetsForGame,
+  resolveAdventureAssetPack,
+  verifyAdventureGameAssets,
+} from '../services/adventure-asset-pack.service.js';
 import { aiImageService } from '../services/ai.image.service.js';
 import { aiQuestionService } from '../services/ai.question.service.js';
 import { authService } from '../services/auth.service.js';
@@ -234,9 +241,17 @@ gameRouter.post(
       }
 
       // 3 & 4 & 5. Build bounded AI input, generate, validate structured output
-      const gameSpecification = await aiQuestionService.generateGame(documents, requestData, {
+      const rawGameSpecification = await aiQuestionService.generateGame(documents, requestData, {
         userId: req.user?.userId ?? null,
       });
+
+      let gameSpecification = rawGameSpecification;
+      if (gameSpecification.gameType === 'ADVENTURE') {
+        const assetProvision = await provisionAdventureAssetsForGame(gameSpecification, {
+          userId: req.user?.userId ?? null,
+        });
+        gameSpecification = assetProvision.specification;
+      }
 
       // Save generated specification in store and SQLite persistence as draft (isPublic = false)
       gameStore.save(gameSpecification, Date.now(), req.user?.userId ?? null, false);
@@ -264,6 +279,7 @@ gameRouter.get(
         createSuccessResponse({
           industries: INDUSTRY_CATALOG,
           themePresets: ADVENTURE_THEME_PRESETS,
+          verifiedAssetPacks: listVerifiedAdventureAssetPacks(),
         })
       );
     } catch (err) {
@@ -455,6 +471,95 @@ async function handleUpdateGameSpecification(req: Request, res: Response, next: 
       },
     });
 
+    if (updatedSpec.gameType === 'ADVENTURE' && updatedSpec.settings.adventureConfig) {
+      const existingAdv = existing.settings?.adventureConfig;
+      const incomingAdv = settings?.adventureConfig;
+      const currentAdv = updatedSpec.settings.adventureConfig;
+      const isLegacyAdventure =
+        existingAdv?.assetStatus === undefined &&
+        (existingAdv?.version ?? 1) < 2 &&
+        incomingAdv?.assetStatus === undefined &&
+        currentAdv.industryId !== 'CUSTOM';
+
+      if (!isLegacyAdventure) {
+        const nowIso = new Date().toISOString();
+
+        // Never trust client-supplied asset metadata alone; prefer existing server-verified assets for the same industryId
+        if (
+          existingAdv?.assets &&
+          existingAdv.assets.background.industryId === currentAdv.industryId &&
+          existingAdv.assets.character.industryId === currentAdv.industryId &&
+          existingAdv.assets.obstacle.industryId === currentAdv.industryId
+        ) {
+          currentAdv.assets = existingAdv.assets;
+          currentAdv.assetPackSource = existingAdv.assetPackSource ?? existingAdv.assets.background.source;
+        }
+
+        let checkResult = verifyAdventureGameAssets(updatedSpec);
+
+        // If industry is one of the 8 pre-defined industries and not yet verified (e.g. user changed industryId), resolve from pack
+        if (!checkResult.verified && currentAdv.industryId !== 'CUSTOM') {
+          const packRes = resolveAdventureAssetPack(currentAdv.industryId);
+          if (packRes.verified && packRes.pack) {
+            currentAdv.version = Math.max(currentAdv.version || 1, 2);
+            currentAdv.assets = packRes.pack.assets;
+            currentAdv.assetPackSource = 'ANTIGRAVITY_BANANA_PACK';
+            currentAdv.assetStatus = 'READY';
+            currentAdv.assetError = null;
+            currentAdv.assetErrorCode = null;
+            currentAdv.assetUpdatedAt = nowIso;
+            checkResult = verifyAdventureGameAssets(updatedSpec);
+          } else {
+            checkResult = {
+              verified: false,
+              industryId: currentAdv.industryId,
+              assetStatus: 'ASSET_GENERATION_FAILED',
+              assets: null,
+              missingAssets: packRes.missingAssets,
+              errors: packRes.errors,
+              errorCode: 'ASSET_PACK_INTEGRITY_ERROR',
+            };
+          }
+        }
+
+        if (checkResult.verified && checkResult.assets) {
+          currentAdv.version = Math.max(currentAdv.version || 1, 2);
+          currentAdv.assets = checkResult.assets;
+          currentAdv.assetPackSource = checkResult.assets.background.source;
+          currentAdv.assetStatus = 'READY';
+          currentAdv.assetError = null;
+          currentAdv.assetErrorCode = null;
+          currentAdv.assetUpdatedAt = currentAdv.assetUpdatedAt || nowIso;
+        } else {
+          const errDetail =
+            checkResult.errors.join('; ') ||
+            existingAdv?.assetError ||
+            'Chưa có đủ 3 tài nguyên hình ảnh hợp lệ (background, character, obstacle).';
+          currentAdv.version = Math.max(currentAdv.version || 1, 2);
+          currentAdv.assets = null;
+          currentAdv.assetPackSource = null;
+          currentAdv.assetStatus = 'ASSET_GENERATION_FAILED';
+          currentAdv.assetError = errDetail.slice(0, 500);
+          currentAdv.assetErrorCode =
+            existingAdv?.assetErrorCode || checkResult.errorCode || 'ADVENTURE_ASSETS_INCOMPLETE';
+          currentAdv.assetUpdatedAt = nowIso;
+
+          // Always preserve the edited questions and draft data (isPublic = false) before rejecting completion/publish
+          const draftToPreserve = {
+            ...updatedSpec,
+            isPublic: false,
+          };
+          gameStore.save(draftToPreserve, Date.now(), ownerUserId, false);
+
+          throw new AppError(
+            'ADVENTURE_ASSETS_INCOMPLETE',
+            `Không thể hoàn tất lưu hoặc xuất bản game Adventure khi bộ 3 tài nguyên hình ảnh (background, character, obstacle) chưa hợp lệ hoặc chưa được tạo đầy đủ. Bộ câu hỏi nháp đã được giữ lại để bạn thử tạo ảnh lại. Chi tiết: ${currentAdv.assetError}`,
+            422
+          );
+        }
+      }
+    }
+
     gameStore.save(updatedSpec, Date.now(), ownerUserId, resolvedIsPublic);
 
     // If generateCover is requested, attempt cover generation gracefully without ever failing the save/publish flow
@@ -483,6 +588,143 @@ async function handleUpdateGameSpecification(req: Request, res: Response, next: 
 
 gameRouter.patch('/:gameId/questions', handleUpdateGameSpecification);
 gameRouter.patch('/:gameId', handleUpdateGameSpecification);
+
+async function handleRetryAdventureAssets(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    rejectGuestOrPlayerWrite(req, 'tạo lại tài nguyên hình ảnh Adventure');
+
+    const gameId = String(req.params.gameId || '');
+    const existing = gameStore.get(gameId);
+    if (!existing) {
+      throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+    }
+
+    const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+    const ownerUserId = existing.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+    const existingIsPublic = existing.isPublic ?? ownerInfo?.isPublic ?? false;
+
+    authService.assertResourceAccess({
+      resourceType: 'bộ câu hỏi',
+      ownerUserId,
+      currentUser: req.user,
+      mode: 'write',
+    });
+
+    if (existing.gameType !== 'ADVENTURE') {
+      throw new AppError(
+        'INVALID_REQUEST',
+        'Chỉ hỗ trợ tạo tài nguyên hình ảnh Adventure cho game thuộc thể loại ADVENTURE.',
+        400
+      );
+    }
+
+    const body = req.body || {};
+
+    let updatedQuestions = existing.questions;
+    let updatedTitle = existing.title;
+    let updatedDescription = existing.description;
+
+    if (Array.isArray(body.questions) && body.questions.length > 0) {
+      const parseResult = UpdateGameQuestionsRequestSchema.safeParse({
+        title: typeof body.title === 'string' ? body.title : existing.title,
+        description: typeof body.description === 'string' ? body.description : existing.description,
+        questions: body.questions,
+      });
+      if (parseResult.success) {
+        updatedQuestions = parseResult.data.questions;
+        if (parseResult.data.title) updatedTitle = parseResult.data.title;
+        if (parseResult.data.description && parseResult.data.description.length > 0) {
+          updatedDescription = parseResult.data.description;
+        }
+      }
+    } else {
+      if (typeof body.title === 'string' && body.title.trim().length > 0) {
+        updatedTitle = body.title.trim().slice(0, 200);
+      }
+      if (typeof body.description === 'string' && body.description.trim().length > 0) {
+        updatedDescription = body.description.trim().slice(0, 1000);
+      }
+    }
+
+    const baseAdv =
+      existing.settings?.adventureConfig ||
+      analyzeSourceContentForAdventure([], {
+        questionCount: updatedQuestions.length,
+        questions: updatedQuestions,
+      });
+
+    const nextAdvInput = {
+      ...baseAdv,
+      ...(typeof body.industryId === 'string' ? { industryId: body.industryId } : {}),
+      ...(typeof body.industryLabel === 'string' && body.industryLabel.trim()
+        ? { industryLabel: body.industryLabel.trim() }
+        : {}),
+      ...(typeof body.subEnvironment === 'string' && body.subEnvironment.trim()
+        ? { subEnvironment: body.subEnvironment.trim() }
+        : {}),
+    };
+
+    const sanitizedAdv = sanitizeAdventureConfig(nextAdvInput, baseAdv, updatedQuestions);
+    const candidateSpec = GameSpecificationSchema.parse({
+      ...existing,
+      ownerUserId,
+      title: updatedTitle,
+      description: updatedDescription,
+      questions: updatedQuestions,
+      settings: {
+        ...existing.settings,
+        questionCount: updatedQuestions.length,
+        adventureConfig: sanitizedAdv,
+      },
+    });
+
+    const forceRegenerate =
+      body.forceRegenerate !== undefined ? Boolean(body.forceRegenerate) : false;
+
+    const provisionResult = await provisionAdventureAssetsForGame(candidateSpec, {
+      userId: req.user?.userId ?? null,
+      forceRegenerate,
+    });
+
+    // Always persist updated specification (keeping all existing questions intact)
+    const nextIsPublic = provisionResult.verified ? existingIsPublic : false;
+    const savedSpec = {
+      ...provisionResult.specification,
+      ownerUserId,
+      isPublic: nextIsPublic,
+    };
+    gameStore.save(savedSpec, Date.now(), ownerUserId, nextIsPublic);
+
+    if (!provisionResult.verified) {
+      const statusCode = provisionResult.errorCode === 'AI_QUOTA_EXCEEDED' ? 429 : 422;
+      throw new AppError(
+        provisionResult.errorCode || 'ADVENTURE_ASSETS_INCOMPLETE',
+        provisionResult.errors.join('; ') ||
+          'Không thể tạo bộ tài nguyên hình ảnh Adventure. Bộ câu hỏi hiện tại vẫn được giữ nguyên.',
+        statusCode
+      );
+    }
+
+    res.status(200).json(createSuccessResponse(savedSpec));
+  } catch (err) {
+    next(err);
+  }
+}
+
+gameRouter.post(
+  '/:gameId/adventure-assets/retry',
+  generateRateLimiter.middleware,
+  handleRetryAdventureAssets
+);
+gameRouter.post(
+  '/:gameId/adventure-assets',
+  generateRateLimiter.middleware,
+  handleRetryAdventureAssets
+);
 
 /**
  * POST /api/games/:gameId/cover
@@ -630,6 +872,9 @@ gameRouter.delete(
           if (coverUrl) {
             aiImageService.cleanupOrphanedCoverImage(coverUrl);
           }
+          cleanupOrphanedAdventureGameAssets(gameId, process.cwd(), (urlPrefix) =>
+            persistenceRepo.countGamesByAdventureAssetPrefix(urlPrefix) > 0
+          );
           deletedCount++;
         } catch (err: any) {
           // Continue deleting other games if a single game deletion encounters an unexpected error
@@ -691,6 +936,9 @@ gameRouter.delete(
       if (coverUrl) {
         aiImageService.cleanupOrphanedCoverImage(coverUrl);
       }
+      cleanupOrphanedAdventureGameAssets(gameId, process.cwd(), (urlPrefix) =>
+        persistenceRepo.countGamesByAdventureAssetPrefix(urlPrefix) > 0
+      );
       res.status(200).json(
         createSuccessResponse({
           deleted: true,

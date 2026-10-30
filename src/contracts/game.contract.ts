@@ -61,10 +61,10 @@ export type GameType = z.infer<typeof GameTypeEnum>;
 
 /**
  * Danh sách loại game được phép tạo mới qua POST /api/games/generate:
- * - 5 dạng truyền thống: QUIZ (MULTIPLE_CHOICE), TRUE_FALSE (QUICK_BUTTON),
- *   TYPE_ANSWER (FILL_IN_THE_BLANK), PUZZLE, SLIDER
- * - Dạng giả lập tương tác: ADVENTURE
- * - Loại bỏ các dạng cũ không nằm trong danh sách tạo mới (CROSSWORD, MIXED).
+ * - Các dạng cơ sở: QUIZ (MULTIPLE_CHOICE), TRUE_FALSE (QUICK_BUTTON),
+ *   TYPE_ANSWER (FILL_IN_THE_BLANK), CROSSWORD, PUZZLE, SLIDER
+ * - Chế độ hỗn hợp: MIXED (phân bổ tỷ lệ 4 loại cơ sở: MULTIPLE_CHOICE, QUICK_BUTTON, FILL_IN_THE_BLANK, CROSSWORD)
+ * - Dạng giả lập đi cảnh tương tác: ADVENTURE
  */
 export const CreatableGameTypeEnum = z.enum([
   'QUIZ',
@@ -75,6 +75,8 @@ export const CreatableGameTypeEnum = z.enum([
   'MULTIPLE_CHOICE',
   'QUICK_BUTTON',
   'FILL_IN_THE_BLANK',
+  'CROSSWORD',
+  'MIXED',
   'ADVENTURE',
 ]);
 export type CreatableGameType = z.infer<typeof CreatableGameTypeEnum>;
@@ -518,17 +520,25 @@ export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => 
 });
 export type GameQuestion = z.infer<typeof GameQuestionSchema>;
 
-export const MixedQuestionDistributionSchema = z.object({
-  MULTIPLE_CHOICE: z.number().int().min(0).max(100).default(40),
-  QUICK_BUTTON: z.number().int().min(0).max(100).default(20),
-  FILL_IN_THE_BLANK: z.number().int().min(0).max(100).default(20),
-  CROSSWORD: z.number().int().min(0).max(100).default(20),
-}).refine(
-  (data) => (data.MULTIPLE_CHOICE ?? 0) + (data.QUICK_BUTTON ?? 0) + (data.FILL_IN_THE_BLANK ?? 0) + (data.CROSSWORD ?? 0) === 100,
-  {
-    message: 'Tổng tỷ lệ các loại câu hỏi cho chế độ MIXED phải bằng chính xác 100%.',
-  }
-);
+export const MixedQuestionDistributionSchema = z
+  .object({
+    MULTIPLE_CHOICE: z.number().int().min(0).max(100),
+    QUICK_BUTTON: z.number().int().min(0).max(100),
+    FILL_IN_THE_BLANK: z.number().int().min(0).max(100),
+    CROSSWORD: z.number().int().min(0).max(100),
+  })
+  .strict()
+  .refine(
+    (data) =>
+      (data.MULTIPLE_CHOICE ?? 0) +
+        (data.QUICK_BUTTON ?? 0) +
+        (data.FILL_IN_THE_BLANK ?? 0) +
+        (data.CROSSWORD ?? 0) ===
+      100,
+    {
+      message: 'Tổng tỷ lệ các loại câu hỏi cho chế độ MIXED phải bằng chính xác 100%.',
+    }
+  );
 export type MixedQuestionDistribution = z.infer<typeof MixedQuestionDistributionSchema>;
 
 export const GameSettingsSchema = z.object({

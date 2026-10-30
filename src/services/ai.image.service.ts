@@ -18,9 +18,25 @@ export interface GeneratedImagePayload {
   usageMetadata?: AiProviderUsageMetadata;
 }
 
+export interface ImageGenerationOptions {
+  aspectRatio?: '16:9' | '1:1' | '4:3';
+}
+
 export interface ImageModelProvider {
-  generateImage(prompt: string): Promise<GeneratedImagePayload>;
+  generateImage(prompt: string, options?: ImageGenerationOptions): Promise<GeneratedImagePayload>;
   getLastUsageMetadata?(): AiProviderUsageMetadata | null;
+}
+
+export function sanitizeAiErrorMessage(rawMessage: string, extraSecret?: string): string {
+  let msg = String(rawMessage || '');
+  if (extraSecret && extraSecret.trim().length >= 6) {
+    msg = msg.split(extraSecret.trim()).join('[REDACTED_API_KEY]');
+  }
+  msg = msg.replace(/AIza[A-Za-z0-9_-]{10,}/g, '[REDACTED_API_KEY]');
+  msg = msg.replace(/([?&]key=)[^&\s"']+/gi, '$1[REDACTED_API_KEY]');
+  msg = msg.replace(/(x-goog-api-key\s*[:=]\s*)[^\s"',;]+/gi, '$1[REDACTED_API_KEY]');
+  msg = msg.replace(/(Bearer\s+)[A-Za-z0-9._-]+/gi, '$1[REDACTED_TOKEN]');
+  return msg.slice(0, 480);
 }
 
 export interface GenerateGameCoverOptions {
@@ -91,11 +107,14 @@ export class GeminiImageModelProvider implements ImageModelProvider {
     return this.apiKey.length > 0;
   }
 
-  public async generateImage(prompt: string): Promise<GeneratedImagePayload> {
+  public async generateImage(
+    prompt: string,
+    options?: ImageGenerationOptions
+  ): Promise<GeneratedImagePayload> {
     if (!this.apiKey) {
       throw new AppError(
-        'AI_PROVIDER_ERROR',
-        'GEMINI_API_KEY is not configured for cover image generation.',
+        'AI_AUTH_ERROR',
+        'GEMINI_API_KEY is not configured for image generation.',
         502
       );
     }
@@ -105,17 +124,26 @@ export class GeminiImageModelProvider implements ImageModelProvider {
     );
 
     let lastError: unknown = null;
+    let quotaOrAuthError: AppError | null = null;
 
     for (const modelName of modelsToTry) {
       try {
-        return await this.callModelWithRetry(modelName, prompt);
+        return await this.callModelWithRetry(modelName, prompt, options);
       } catch (err) {
         lastError = err;
-        // If timeout, do not cascade to additional slow calls
-        if (err instanceof AppError && err.code === 'AI_TIMEOUT') {
-          throw err;
+        if (err instanceof AppError) {
+          if (err.code === 'AI_TIMEOUT' || err.code === 'AI_AUTH_ERROR') {
+            throw err;
+          }
+          if (err.code === 'AI_QUOTA_EXCEEDED' && !quotaOrAuthError) {
+            quotaOrAuthError = err;
+          }
         }
       }
+    }
+
+    if (quotaOrAuthError) {
+      throw quotaOrAuthError;
     }
 
     if (lastError instanceof AppError) {
@@ -124,21 +152,34 @@ export class GeminiImageModelProvider implements ImageModelProvider {
 
     throw new AppError(
       'AI_PROVIDER_ERROR',
-      `Gemini cover image generation failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+      sanitizeAiErrorMessage(
+        `Gemini cover image generation failed: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+        this.apiKey
+      ),
       502
     );
   }
 
-  private async callModelWithRetry(modelName: string, prompt: string): Promise<GeneratedImagePayload> {
+  private async callModelWithRetry(
+    modelName: string,
+    prompt: string,
+    options?: ImageGenerationOptions
+  ): Promise<GeneratedImagePayload> {
     const maxAttempts = 2; // 1 initial attempt + 1 bounded retry for transient failures
     let lastErr: unknown = null;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
-        return await this.invokeGenerateContent(modelName, prompt, attempt === 1);
+        return await this.invokeGenerateContent(modelName, prompt, attempt === 1, options);
       } catch (err) {
         lastErr = err;
-        if (err instanceof AppError && err.code === 'AI_TIMEOUT') {
+        if (
+          err instanceof AppError &&
+          (err.code === 'AI_TIMEOUT' ||
+            err.code === 'AI_QUOTA_EXCEEDED' ||
+            err.code === 'AI_AUTH_ERROR' ||
+            err.code === 'AI_MODEL_UNSUPPORTED')
+        ) {
           throw err;
         }
         // Only retry once on 5xx / transient or if first attempt used imageConfig that model rejected
@@ -154,7 +195,8 @@ export class GeminiImageModelProvider implements ImageModelProvider {
   private async invokeGenerateContent(
     modelName: string,
     prompt: string,
-    includeAspectRatioConfig: boolean
+    includeAspectRatioConfig: boolean,
+    options?: ImageGenerationOptions
   ): Promise<GeneratedImagePayload> {
     this.lastUsageMetadata = {
       provider: 'gemini',
@@ -177,7 +219,7 @@ export class GeminiImageModelProvider implements ImageModelProvider {
       };
       if (includeAspectRatioConfig) {
         generationConfig.imageConfig = {
-          aspectRatio: '16:9',
+          aspectRatio: options?.aspectRatio || '16:9',
         };
       }
 
@@ -200,9 +242,56 @@ export class GeminiImageModelProvider implements ImageModelProvider {
 
       if (!response.ok) {
         const status = response.status;
+        let detail = '';
+        try {
+          const errBody = (await response.json()) as any;
+          const rawMsg = errBody?.error?.message || errBody?.message || '';
+          if (typeof rawMsg === 'string' && rawMsg.trim()) {
+            detail = sanitizeAiErrorMessage(rawMsg.trim(), this.apiKey);
+          }
+        } catch {
+          // Ignore JSON parse failure on error body
+        }
+
+        if (status === 429) {
+          throw new AppError(
+            'AI_QUOTA_EXCEEDED',
+            sanitizeAiErrorMessage(
+              `Banana/Gemini Image API hết hạn mức hoặc bị giới hạn tần suất (HTTP 429) cho model ${modelName}${detail ? `: ${detail}` : '.'}`,
+              this.apiKey
+            ),
+            429
+          );
+        }
+
+        if (status === 401 || status === 403) {
+          throw new AppError(
+            'AI_AUTH_ERROR',
+            sanitizeAiErrorMessage(
+              `Banana/Gemini Image API từ chối xác thực (HTTP ${status}) cho model ${modelName}${detail ? `: ${detail}` : '.'}`,
+              this.apiKey
+            ),
+            502
+          );
+        }
+
+        if (status === 404) {
+          throw new AppError(
+            'AI_MODEL_UNSUPPORTED',
+            sanitizeAiErrorMessage(
+              `Model tạo ảnh ${modelName} không tồn tại hoặc không hỗ trợ generateContent (HTTP 404)${detail ? `: ${detail}` : '.'}`,
+              this.apiKey
+            ),
+            502
+          );
+        }
+
         throw new AppError(
           'AI_PROVIDER_ERROR',
-          `Gemini image API returned HTTP ${status} for model ${modelName}.`,
+          sanitizeAiErrorMessage(
+            `Gemini image API returned HTTP ${status} for model ${modelName}${detail ? `: ${detail}` : '.'}`,
+            this.apiKey
+          ),
           502
         );
       }
@@ -265,7 +354,10 @@ export class GeminiImageModelProvider implements ImageModelProvider {
       }
       throw new AppError(
         'AI_PROVIDER_ERROR',
-        `Failed to call Gemini image API: ${err instanceof Error ? err.message : String(err)}`,
+        sanitizeAiErrorMessage(
+          `Failed to call Gemini image API: ${err instanceof Error ? err.message : String(err)}`,
+          this.apiKey
+        ),
         502
       );
     } finally {

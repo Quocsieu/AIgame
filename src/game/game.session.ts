@@ -15,6 +15,7 @@ import {
   QuestionResult,
 } from './game.types.js';
 import { getHandler } from './handlers/index.js';
+import { normalizeCrosswordWord } from './handlers/crossword.handler.js';
 
 export class GameSession {
   public readonly sessionId: string;
@@ -130,6 +131,11 @@ export class GameSession {
         ? Math.min(this.specification.settings.timePerQuestion, rawRemainingSec)
         : rawRemainingSec;
 
+    const crosswordWordLength =
+      question.type === 'CROSSWORD'
+        ? normalizeCrosswordWord(question.crosswordAnswer || question.correctAnswer || '').length
+        : undefined;
+
     return {
       id: question.id,
       type: question.type,
@@ -138,6 +144,7 @@ export class GameSession {
       ...(sanitizedSliderConfig ? { sliderConfig: sanitizedSliderConfig } : {}),
       difficulty: question.difficulty,
       crosswordClue: question.crosswordClue,
+      ...(crosswordWordLength && crosswordWordLength > 0 ? { crosswordWordLength } : {}),
       questionIndex: this.currentQuestionIndex,
       totalQuestions: this.specification.questions.length,
       timePerQuestion: this.specification.settings.timePerQuestion,

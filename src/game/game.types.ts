@@ -37,6 +37,7 @@ export interface ClientQuestion {
   };
   difficulty: Difficulty;
   crosswordClue?: string;
+  crosswordWordLength?: number;
   questionIndex: number;
   totalQuestions: number;
   timePerQuestion: number;

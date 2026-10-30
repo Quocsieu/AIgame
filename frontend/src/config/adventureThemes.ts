@@ -1038,6 +1038,7 @@ export function applyPresetToAdventureConfig(
 
   const archetypeDetails = resolveGameplayArchetypeDetails(preset.presetId, preset.industryId);
 
+  const sameIndustry = current.industryId === preset.industryId;
   return {
     ...current,
     industryId: preset.industryId,
@@ -1056,6 +1057,7 @@ export function applyPresetToAdventureConfig(
     winConditionSummary: archetypeDetails.winConditionSummary,
     interactiveObjects: [...archetypeDetails.interactiveObjects],
     stages,
+    ...(sameIndustry ? {} : { assets: null, assetPackSource: null }),
   };
 }
 
@@ -1091,7 +1093,7 @@ export function syncAdventureStagesWithQuestions(
   const archetypeFallback = resolveGameplayArchetypeDetails(preset.presetId, base.industryId || preset.industryId);
   return {
     ...base,
-    version: 1, industryId: base.industryId || preset.industryId, industryLabel: base.industryLabel || INDUSTRY_CATALOG.find(item => item.industryId === (base.industryId || preset.industryId))?.label || 'Đào tạo & Kiến thức', subEnvironment: base.subEnvironment || preset.subEnvironment, learningObjective: base.learningObjective || preset.environmentSubtitle, aiDetectedIndustry: base.aiDetectedIndustry ?? true, aiConfidence: base.aiConfidence ?? 0.9, aiReasoning: base.aiReasoning || preset.environmentSubtitle, proposalConfirmed: base.proposalConfirmed ?? true, themePresetId: preset.presetId, environmentTitle: base.environmentTitle || preset.environmentTitle, environmentSubtitle: base.environmentSubtitle || preset.environmentSubtitle, decorStyle: base.decorStyle || preset.decorStyle, avatarId: base.avatarId || preset.avatarId, avatarLabel: base.avatarLabel || preset.avatarLabel, palette: base.palette || { ...preset.palette }, obstacleTypes: Array.isArray(base.obstacleTypes) && base.obstacleTypes.length > 0 ? base.obstacleTypes : [...preset.obstacleTypes], questionTypes: Array.isArray(base.questionTypes) && base.questionTypes.length > 0 ? base.questionTypes : ['MULTIPLE_CHOICE', 'QUICK_BUTTON'], gameplayArchetype: (base.gameplayArchetype && (base.industryId === 'CUSTOM' || (preset.presetId === base.themePresetId && base.gameplayArchetype === archetypeFallback.gameplayArchetype))) ? base.gameplayArchetype : archetypeFallback.gameplayArchetype,
+    version: base.version || 1, industryId: base.industryId || preset.industryId, industryLabel: base.industryLabel || INDUSTRY_CATALOG.find(item => item.industryId === (base.industryId || preset.industryId))?.label || 'Đào tạo & Kiến thức', subEnvironment: base.subEnvironment || preset.subEnvironment, learningObjective: base.learningObjective || preset.environmentSubtitle, aiDetectedIndustry: base.aiDetectedIndustry ?? true, aiConfidence: base.aiConfidence ?? 0.9, aiReasoning: base.aiReasoning || preset.environmentSubtitle, proposalConfirmed: base.proposalConfirmed ?? true, themePresetId: preset.presetId, environmentTitle: base.environmentTitle || preset.environmentTitle, environmentSubtitle: base.environmentSubtitle || preset.environmentSubtitle, decorStyle: base.decorStyle || preset.decorStyle, avatarId: base.avatarId || preset.avatarId, avatarLabel: base.avatarLabel || preset.avatarLabel, palette: base.palette || { ...preset.palette }, obstacleTypes: Array.isArray(base.obstacleTypes) && base.obstacleTypes.length > 0 ? base.obstacleTypes : [...preset.obstacleTypes], questionTypes: Array.isArray(base.questionTypes) && base.questionTypes.length > 0 ? base.questionTypes : ['MULTIPLE_CHOICE', 'QUICK_BUTTON'], gameplayArchetype: (base.gameplayArchetype && (base.industryId === 'CUSTOM' || (preset.presetId === base.themePresetId && base.gameplayArchetype === archetypeFallback.gameplayArchetype))) ? base.gameplayArchetype : archetypeFallback.gameplayArchetype,
     controlScheme: base.controlScheme || archetypeFallback.controlScheme,
     questionTriggerMode: base.questionTriggerMode || archetypeFallback.questionTriggerMode,
     winConditionSummary: base.winConditionSummary || archetypeFallback.winConditionSummary,

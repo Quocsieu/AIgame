@@ -43,19 +43,39 @@ export const SUPPORTED_GAME_TYPES: GameTypeOption[] = [
   },
   {
     id: 'FILL_IN_THE_BLANK',
-    title: 'Type Answer — Tự Nhập Đáp Án',
+    title: 'Type Answer — Điền Từ / Tự Nhập Đáp Án',
     subtitle: 'Người chơi tự gõ câu trả lời ngắn gọn mà không có gợi ý lựa chọn sẵn. Hỗ trợ nhiều biến thể đáp án hợp lệ.',
-    badge: 'Ưu tiên #3 • Type Answer',
+    badge: 'Ưu tiên #3 • Điền từ',
     badgeColor: 'var(--game-fill)',
     accentColor: 'var(--game-fill-hover)',
     icon: <BookOpenIcon size={24} style={{ color: 'var(--game-fill)' }} />,
     tags: ['Tự nhập đáp án', 'Ghi nhớ sâu', 'Độ chính xác'],
   },
   {
+    id: 'CROSSWORD',
+    title: 'Crossword — Ô Chữ Từ Khóa',
+    subtitle: 'Giải từ khóa chuyên ngành viết hoa không dấu dựa trên gợi ý ngữ cảnh và số lượng ký tự trực quan.',
+    badge: 'Cơ sở #4 • Ô chữ',
+    badgeColor: 'var(--game-cross)',
+    accentColor: 'var(--game-cross-hover)',
+    icon: <LayersIcon size={24} style={{ color: 'var(--game-cross)' }} />,
+    tags: ['Ô chữ từ khóa', 'Gợi ý thuật ngữ', 'Ký tự chuẩn'],
+  },
+  {
+    id: 'MIXED',
+    title: 'Hỗn Hợp (MIXED) — Phối Hợp 4 Loại Cơ Sở',
+    subtitle: 'Tùy chỉnh tỷ lệ phần trăm (%) chính xác cho 4 loại câu hỏi cơ sở: Trắc nghiệm, Bấm nhanh, Điền từ và Ô chữ.',
+    badge: 'Chế độ Hỗn hợp • 100%',
+    badgeColor: 'var(--game-mixed)',
+    accentColor: 'var(--game-mixed-hover)',
+    icon: <LayersIcon size={24} style={{ color: 'var(--game-mixed)' }} />,
+    tags: ['Phân bổ tỷ lệ %', '4 loại cơ sở', 'Đa dạng câu hỏi'],
+  },
+  {
     id: 'PUZZLE',
     title: 'Puzzle — Sắp Xếp Thứ Tự',
     subtitle: 'Sắp xếp các bước quy trình, sự kiện hoặc cấp độ theo đúng trình tự chuẩn từ tài liệu nguồn.',
-    badge: 'Ưu tiên #4 • Puzzle',
+    badge: 'Mở rộng • Puzzle',
     badgeColor: 'var(--game-cross)',
     accentColor: 'var(--game-cross-hover)',
     icon: <LayersIcon size={24} style={{ color: 'var(--game-cross)' }} />,
@@ -65,7 +85,7 @@ export const SUPPORTED_GAME_TYPES: GameTypeOption[] = [
     id: 'SLIDER',
     title: 'Slider — Thanh Trượt Giá Trị',
     subtitle: 'Kéo thanh trượt để chọn con số, tỷ lệ, mốc năm hoặc thông số định lượng với ngưỡng sai số linh hoạt.',
-    badge: 'Ưu tiên #5 • Slider',
+    badge: 'Mở rộng • Slider',
     badgeColor: 'var(--game-mixed)',
     accentColor: 'var(--game-mixed-hover)',
     icon: <CheckIcon size={24} style={{ color: 'var(--game-mixed)' }} />,
@@ -126,6 +146,7 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
               type="button"
               role="radio"
               aria-checked={isSelected}
+              data-testid={`game-type-option-${item.id}`}
               onClick={() => onSelectType(item.id)}
               style={{
                 display: 'inline-flex',
@@ -207,6 +228,7 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
             type="button"
             role="radio"
             aria-checked={isSelected}
+            data-testid={`game-type-option-${item.id}`}
             onClick={() => onSelectType(item.id)}
             style={{
               display: 'flex',

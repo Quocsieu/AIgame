@@ -289,6 +289,37 @@ export async function generateGame(params: {
   return data.data;
 }
 
+export async function retryAdventureAssetsApi(
+  gameId: string,
+  payload?: {
+    industryId?: IndustryId;
+    industryLabel?: string;
+    subEnvironment?: string;
+    title?: string;
+    description?: string;
+    questions?: GameQuestion[];
+    forceRegenerate?: boolean;
+  }
+): Promise<GameSpecification> {
+  const res = await fetch(
+    `${API_BASE_URL}/games/${encodeURIComponent(gameId)}/adventure-assets/retry`,
+    {
+      method: 'POST',
+      headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload || {}),
+    }
+  );
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(
+      data.error?.message || 'Không thể tạo bộ tài nguyên hình ảnh Adventure.'
+    );
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
 export async function fetchSavedGames(
   options:
     | number
