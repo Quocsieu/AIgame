@@ -32,14 +32,164 @@ interface SoloPlayerProps {
   gameId?: string;
   initialSpec?: GameSpecification | null;
   onLeave: () => void;
+  playtestMode?: boolean;
+}
+
+function normalizePlaytestToken(value: string): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function shufflePlaytestPuzzleChoices(choices: string[], seedStr: string): string[] {
+  const arr = [...choices];
+  if (arr.length <= 1) return arr;
+  let seed = 0;
+  for (let i = 0; i < seedStr.length; i++) {
+    seed = (seed * 31 + seedStr.charCodeAt(i)) >>> 0;
+  }
+  for (let i = arr.length - 1; i > 0; i--) {
+    seed = (seed * 1664525 + 1013904223) >>> 0;
+    const j = seed % (i + 1);
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+  const matchesOriginal = arr.every((item, idx) => item === choices[idx]);
+  if (matchesOriginal && arr.length > 1) {
+    const tmp = arr[0];
+    arr[0] = arr[1];
+    arr[1] = tmp;
+  }
+  return arr;
+}
+
+function buildPlaytestClientQuestion(
+  spec: GameSpecification,
+  index: number
+): SanitizedQuestion {
+  const q = spec.questions[index];
+  const effectiveType = q.type || spec.gameType;
+  const timePerQ = spec.settings?.timePerQuestion || 20;
+  const crosswordWordLength =
+    effectiveType === 'CROSSWORD'
+      ? (q.crosswordAnswer || q.correctAnswer || '').replace(/\s+/g, '').length
+      : undefined;
+  const clientChoices =
+    effectiveType === 'PUZZLE' && Array.isArray(q.choices)
+      ? shufflePlaytestPuzzleChoices(q.choices, `${q.id}_${index}`)
+      : Array.isArray(q.choices)
+        ? [...q.choices]
+        : undefined;
+
+  return {
+    id: q.id || `q_${index + 1}`,
+    question: q.question,
+    type: effectiveType as SanitizedQuestion['type'],
+    choices: clientChoices,
+    sliderConfig: q.sliderConfig ? { ...q.sliderConfig } : undefined,
+    difficulty: q.difficulty || 'MEDIUM',
+    crosswordClue: q.crosswordClue,
+    crosswordWordLength,
+    questionIndex: index,
+    totalQuestions: spec.questions.length,
+    timePerQuestion: timePerQ,
+    remainingTimeSeconds: timePerQ,
+  };
+}
+
+function evaluatePlaytestAnswer(
+  q: GameSpecification['questions'][number],
+  fallbackType: string,
+  submittedAnswer: string
+): boolean {
+  const effectiveType = q.type || fallbackType;
+  const trimmed = submittedAnswer.trim();
+  if (!trimmed) return false;
+
+  if (effectiveType === 'SLIDER' && q.sliderConfig) {
+    const num = Number(trimmed);
+    if (!Number.isFinite(num)) return false;
+    if (num < q.sliderConfig.min - 1e-9 || num > q.sliderConfig.max + 1e-9) {
+      return false;
+    }
+    const margin = Math.max(0, q.sliderConfig.tolerance ?? 0);
+    return Math.abs(num - q.sliderConfig.correctValue) <= margin + 1e-9;
+  }
+
+  if (effectiveType === 'PUZZLE') {
+    const submittedOrder = trimmed
+      .split('|')
+      .map(normalizePlaytestToken)
+      .filter(Boolean);
+    const expectedRaw =
+      q.correctAnswer && q.correctAnswer.includes('|')
+        ? q.correctAnswer.split('|')
+        : Array.isArray(q.choices)
+          ? q.choices
+          : [q.correctAnswer];
+    const expectedOrder = expectedRaw.map(normalizePlaytestToken).filter(Boolean);
+    if (submittedOrder.length !== expectedOrder.length || expectedOrder.length === 0) {
+      return false;
+    }
+    return submittedOrder.every((item, idx) => item === expectedOrder[idx]);
+  }
+
+  if (effectiveType === 'CROSSWORD') {
+    const expectedWord = (q.crosswordAnswer || q.correctAnswer || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, '');
+    const actualWord = trimmed.toLowerCase().replace(/\s+/g, '');
+    return Boolean(expectedWord) && actualWord === expectedWord;
+  }
+
+  const normalizedSubmitted = normalizePlaytestToken(trimmed);
+  const candidates = [q.correctAnswer, ...(q.acceptedAlternatives || [])]
+    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+    .map(normalizePlaytestToken);
+
+  return candidates.includes(normalizedSubmitted);
+}
+
+function calculatePlaytestPoints(
+  isCorrect: boolean,
+  scoringMode: string | undefined,
+  responseTimeMs: number,
+  timeLimitMs: number,
+  newStreak: number
+): number {
+  if (!isCorrect) return 0;
+  const BASE_POINTS = 100;
+  const MAX_SPEED_BONUS = 50;
+  const STREAK_STEP_BONUS = 20;
+  const MAX_STREAK_BONUS = 100;
+
+  const safeLimit = Math.max(1, timeLimitMs);
+  const clampedResponse = Math.min(Math.max(0, responseTimeMs), safeLimit);
+  const remainingRatio = (safeLimit - clampedResponse) / safeLimit;
+  const speedBonus = Math.round(remainingRatio * MAX_SPEED_BONUS);
+  const streakSteps = Math.max(0, newStreak - 1);
+  const streakBonus = Math.min(streakSteps * STREAK_STEP_BONUS, MAX_STREAK_BONUS);
+
+  if (scoringMode === 'SPEED_BONUS') {
+    return BASE_POINTS + speedBonus;
+  }
+  if (scoringMode === 'STREAK') {
+    return BASE_POINTS + speedBonus + streakBonus;
+  }
+  return BASE_POINTS;
 }
 
 export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   gameId,
   initialSpec,
   onLeave,
+  playtestMode = false,
 }) => {
   const toast = useToast();
+
 
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -98,10 +248,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const [timeLeft, setTimeLeft] = useState(20);
 
   const timerRef = useRef<number | null>(null);
+  const playtestQuestionIndexRef = useRef<number>(0);
+  const playtestQuestionStartedAtRef = useRef<number>(Date.now());
+  const playtestStartedAtRef = useRef<number>(Date.now());
+  const playtestMaxStreakRef = useRef<number>(0);
 
   const handleLeave = () => {
     const targetGameId = gameId || initialSpec?.gameId;
-    if (targetGameId) sessionStorage.removeItem(`active_solo_session_${targetGameId}`);
+    if (targetGameId && !playtestMode) sessionStorage.removeItem(`active_solo_session_${targetGameId}`);
     onLeave();
   };
 
@@ -150,6 +304,31 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     setPlayerWrongCount(0);
     submittingLockRef.current = false;
     answeredQuestionIdsRef.current.clear();
+    if (playtestMode) {
+      stopTimer();
+      const spec = initialSpec || loadedSpec;
+      if (!spec || !Array.isArray(spec.questions) || spec.questions.length === 0) {
+        setErrorMessage('Không tìm thấy câu hỏi để bắt đầu chế độ chơi thử.');
+        setIsLoading(false);
+        return;
+      }
+      setLoadedSpec(spec);
+      if (spec.gameType === 'ADVENTURE' && !isExplicitStart) {
+        setSessionId(null);
+        setIsLoading(false);
+        return;
+      }
+      playtestQuestionIndexRef.current = 0;
+      playtestStartedAtRef.current = Date.now();
+      playtestQuestionStartedAtRef.current = Date.now();
+      playtestMaxStreakRef.current = 0;
+      setSessionId('playtest-local-session');
+      const firstQ = buildPlaytestClientQuestion(spec, 0);
+      setCurrentQuestion(firstQ);
+      startCountdown(firstQ.timePerQuestion || 20);
+      setIsLoading(false);
+      return;
+    }
     stopTimer();
 
     const targetGameId = gameId || initialSpec?.gameId;
@@ -298,6 +477,72 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     setIsSubmitting(true);
     stopTimer();
 
+    if (playtestMode) {
+      try {
+        const spec = loadedSpec || initialSpec;
+        const rawQ =
+          spec?.questions[currentQuestion.questionIndex] ||
+          spec?.questions.find((item) => item.id === currentQuestion.id);
+        if (!spec || !rawQ) {
+          throw new Error('Không tìm thấy dữ liệu câu hỏi trong phiên chơi thử.');
+        }
+        const isCorrect = evaluatePlaytestAnswer(rawQ, spec.gameType, finalAnswer);
+        const timeLimitMs =
+          (currentQuestion.timePerQuestion || spec.settings?.timePerQuestion || 20) * 1000;
+        const responseTimeMs = Math.max(
+          0,
+          Math.min(timeLimitMs, Date.now() - playtestQuestionStartedAtRef.current)
+        );
+        const nextStreak = isCorrect ? playerStreak + 1 : 0;
+        if (nextStreak > playtestMaxStreakRef.current) {
+          playtestMaxStreakRef.current = nextStreak;
+        }
+        const pointsEarned = calculatePlaytestPoints(
+          isCorrect,
+          spec.settings?.scoringMode,
+          responseTimeMs,
+          timeLimitMs,
+          nextStreak
+        );
+        const nextScore = playerScore + pointsEarned;
+        const nextIndex = currentQuestion.questionIndex + 1;
+        const isLastQuestion = nextIndex >= spec.questions.length;
+        const effectiveType = rawQ.type || spec.gameType;
+        const displayCorrectAnswer =
+          effectiveType === 'CROSSWORD'
+            ? rawQ.crosswordAnswer || rawQ.correctAnswer
+            : effectiveType === 'SLIDER' && rawQ.sliderConfig
+              ? `${rawQ.sliderConfig.correctValue}${rawQ.sliderConfig.unit ? ` ${rawQ.sliderConfig.unit}` : ''}`
+              : rawQ.correctAnswer;
+
+        const localRes: PracticeQuestionResult = {
+          questionId: currentQuestion.id,
+          answer: finalAnswer,
+          isCorrect,
+          pointsEarned,
+          responseTimeMs,
+          answeredAt: new Date().toISOString(),
+          correctAnswer: displayCorrectAnswer,
+          explanation: rawQ.explanation,
+          sourceReference: rawQ.sourceReference,
+        };
+
+        answeredQuestionIdsRef.current.add(currentQuestion.id);
+        setQuestionFeedback(localRes);
+        setIsQuestionTimedOut(false);
+        setPlayerScore(nextScore);
+        setPlayerStreak(nextStreak);
+        setPlayerCorrectCount((prev) => prev + (isCorrect ? 1 : 0));
+        setPlayerWrongCount((prev) => prev + (isCorrect ? 0 : 1));
+      } finally {
+        submittingLockRef.current = false;
+        setIsSubmitting(false);
+      }
+      return;
+    }
+    setIsSubmitting(true);
+    stopTimer();
+
     try {
       const res = await submitPracticeAnswer(sessionId, {
         questionId: currentQuestion.id,
@@ -343,6 +588,52 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
     try {
       const wasTimedOut = isQuestionTimedOut && !questionFeedback;
+      if (playtestMode) {
+        const spec = loadedSpec || initialSpec;
+        const nextWrongCount = wasTimedOut ? playerWrongCount + 1 : playerWrongCount;
+        if (wasTimedOut) {
+          setPlayerStreak(0);
+          setPlayerWrongCount(nextWrongCount);
+        }
+        const nextIdx = playtestQuestionIndexRef.current + 1;
+        if (!spec || nextIdx >= spec.questions.length) {
+          const totalQ = spec?.questions.length || 1;
+          const accuracyPct = Math.round((playerCorrectCount / totalQ) * 100);
+          const durationSeconds = Math.max(
+            1,
+            Math.round((Date.now() - playtestStartedAtRef.current) / 1000)
+          );
+          const localFinal: PracticeFinalResult = {
+            sessionId: 'playtest-local-session',
+            gameId: spec?.gameId || 'playtest-game',
+            title: spec?.title || 'Chơi thử',
+            gameType: spec?.gameType || 'MIXED',
+            totalScore: playerScore,
+            score: playerScore,
+            maxPossibleScore: totalQ * 100,
+            maxStreak: playtestMaxStreakRef.current,
+            totalQuestions: totalQ,
+            correctAnswers: playerCorrectCount,
+            correctCount: playerCorrectCount,
+            wrongCount: nextWrongCount,
+            wrongAnswers: nextWrongCount,
+            accuracy: accuracyPct,
+            durationMs: durationSeconds * 1000,
+            finishedAt: new Date().toISOString(),
+            questionResults: [],
+          };
+          setFinalResult(localFinal);
+          setCurrentQuestion(null);
+          stopTimer();
+        } else {
+          playtestQuestionIndexRef.current = nextIdx;
+          playtestQuestionStartedAtRef.current = Date.now();
+          const nextQ = buildPlaytestClientQuestion(spec, nextIdx);
+          setCurrentQuestion(nextQ);
+          startCountdown(nextQ.timePerQuestion || 20);
+        }
+        return;
+      }
       const advanceRes = await advancePracticeSession(sessionId);
       if (wasTimedOut) {
         setPlayerStreak(0);
@@ -353,7 +644,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         setCurrentQuestion(null);
         stopTimer();
         const targetGameId = gameId || initialSpec?.gameId;
-        if (targetGameId) sessionStorage.removeItem(`active_solo_session_${targetGameId}`);
+        if (targetGameId && !playtestMode) sessionStorage.removeItem(`active_solo_session_${targetGameId}`);
       } else if (advanceRes.question) {
         setCurrentQuestion(advanceRes.question);
         const qTime = advanceRes.question.timePerQuestion || 20;
@@ -480,9 +771,72 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   }
 
   const activeGameSpec = loadedSpec || initialSpec;
+  const playtestBanner = playtestMode ? (
+    <div
+      data-testid="playtest-mode-banner"
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        flexWrap: 'wrap',
+        gap: '0.75rem',
+        padding: '0.65rem 1.15rem',
+        marginBottom: '1rem',
+        borderRadius: '14px',
+        backgroundColor: 'rgba(245, 158, 11, 0.12)',
+        border: '1.5px solid rgba(245, 158, 11, 0.38)',
+        color: 'var(--text-primary)',
+      }}
+    >
+      <div style={{ display: ' flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            padding: '0.2rem 0.6rem',
+            borderRadius: '999px',
+            backgroundColor: '#f59e0b',
+            color: '#0f172a',
+            fontSize: '0.72rem',
+            fontWeight: 900,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+          }}
+        >
+          CHẾ ĐỘ CHƠI THỬ
+        </span>
+        <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+          Trải nghiệm kiểm thử — Không ghi điểm, lịch sử hay thống kê thật
+        </span>
+      </div>
+      <button
+        type="button"
+        data-testid="exit-playtest-btn"
+        onClick={handleLeave}
+        style={{
+          minHeight: '36px',
+          padding: '0.35rem 0.9rem',
+          borderRadius: '10px',
+          border: '1.5px solid rgba(245, 158, 11, 0.5)',
+          backgroundColor: 'var(--bg-surface)',
+          color: 'var(--text-primary)',
+          fontSize: '0.82rem',
+          fontWeight: 800,
+          cursor: 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.35rem',
+        }}
+      >
+        <XMarkIcon size={15} />
+        <span>Thoát chơi thử</span>
+      </button>
+    </div>
+  ) : null;
   if (activeGameSpec && activeGameSpec.gameType === 'ADVENTURE') {
     return (
       <div className="w-full h-full">
+        {playtestBanner}
         <AdventureGameEngine
           key={activeGameSpec.gameId}
           game={activeGameSpec}
@@ -558,12 +912,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         </div>
 
         <h2 style={{ margin: '0 0 0.35rem 0', fontSize: '1.75rem', fontWeight: 900 }}>
-          Hoàn Thành Trận Đấu!
+          {playtestMode ? 'Hoàn Thành Chơi Thử!' : 'Hoàn Thành Trận Đấu!'}
         </h2>
         <p style={{ margin: '0 0 1.75rem 0', color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
           Bạn đã xuất sắc vượt qua tất cả các câu hỏi của bộ đề.
         </p>
 
+        {playtestBanner}
         {/* Score cards */}
         <div
           style={{
@@ -662,7 +1017,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               cursor: 'pointer',
             }}
           >
-            Rời Khỏi
+            {playtestMode ? 'Thoát chơi thử' : 'Rời Khỏi'}
           </button>
         </div>
       </div>
@@ -675,6 +1030,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   return (
     <div style={{ maxWidth: '820px', margin: '0 auto', padding: '1rem 1rem 3rem' }}>
       {/* Top Bar: Question Index, Score, Streak, Timer, Leave */}
+      {playtestBanner}
       <div
         style={{
           display: 'flex',
@@ -779,7 +1135,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             }}
           >
             <XMarkIcon size={16} />
-            <span>Thoát</span>
+            <span>{playtestMode ? 'Thoát chơi thử' : 'Thoát'}</span>
           </button>
         </div>
       </div>

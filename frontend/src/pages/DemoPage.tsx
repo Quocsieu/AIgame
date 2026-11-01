@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { GameModeSelectionModal } from '../components/GameModeSelectionModal.js';
+import { SoloPlayer } from '../components/SoloPlayer.js';
 
 import {
   applyPresetToAdventureConfig, buildDefaultAdventureConfig,
@@ -331,6 +332,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [ingestedSources, setIngestedSources] = useState<IngestedSource[]>([]);
   const [generatedSpec, setGeneratedSpec] = useState<GameSpecification | null>(null);
   const [editingQuestionIdx, setEditingQuestionIdx] = useState<number | null>(null);
+  const [editingQuestionDraft, setEditingQuestionDraft] = useState<GameQuestion | null>(null);
+  const [editingQuestionError, setEditingQuestionError] = useState<string | null>(null);
+  const [questionPage, setQuestionPage] = useState<number>(1);
+  const [isQuestionListCollapsed, setIsQuestionListCollapsed] = useState<boolean>(false);
+  const [saveStatus, setSaveStatus] = useState<'unsaved' | 'saving' | 'saved' | 'dirty' | 'error'>('unsaved');
+  const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
+  const [isPlaytestOpen, setIsPlaytestOpen] = useState<boolean>(false);
+  const [playtestSpec, setPlaytestSpec] = useState<GameSpecification | null>(null);
+  const QUESTIONS_PER_PAGE = 10;
 
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
 
@@ -424,6 +434,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         );
       }
       setEditingQuestionIdx(null);
+      setEditingQuestionDraft(null);
+      setEditingQuestionError(null);
+      setQuestionPage(1);
+      setIsQuestionListCollapsed(false);
+      setSaveStatus('saved');
+      setSaveErrorMessage(null);
+      setSavedForLater(true);
+      setIsPlaytestOpen(false);
+      setPlaytestSpec(null);
       setRoomCode('');
       setCurrentStep(4);
       setShowAdventureFullscreenPreview(false);
@@ -749,6 +768,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       }
       setCustomGameTitle(spec.title);
       setEditingQuestionIdx(null);
+      setEditingQuestionDraft(null);
+      setEditingQuestionError(null);
+      setQuestionPage(1);
+      setIsQuestionListCollapsed(false);
+      setSaveStatus('unsaved');
+      setSaveErrorMessage(null);
+      setSavedForLater(false);
+      setIsPlaytestOpen(false);
+      setPlaytestSpec(null);
       setRoomCode('');
       setIsModeModalOpen(false);
       toast.success(
@@ -1038,6 +1066,92 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   // Question Editor Handlers (Batch 6)
   // ==========================================
 
+  const cloneQuestionDraft = (q: GameQuestion): GameQuestion => ({
+    ...q,
+    choices: q.choices ? [...q.choices] : undefined,
+    sliderConfig: q.sliderConfig ? { ...q.sliderConfig } : undefined,
+    acceptedAlternatives: q.acceptedAlternatives ? [...q.acceptedAlternatives] : undefined,
+    sourceReference: { ...q.sourceReference },
+  });
+
+  const handleStartEditQuestion = (index: number) => {
+    if (!generatedSpec || !generatedSpec.questions[index]) return;
+    setEditingQuestionIdx(index);
+    setEditingQuestionDraft(cloneQuestionDraft(generatedSpec.questions[index]));
+    setEditingQuestionError(null);
+    const targetPage = Math.floor(index / QUESTIONS_PER_PAGE) + 1;
+    setQuestionPage(targetPage);
+  };
+
+  const handleCancelEditQuestion = () => {
+    setEditingQuestionIdx(null);
+    setEditingQuestionDraft(null);
+    setEditingQuestionError(null);
+  };
+
+  const handleUpdateQuestionDraft = (updater: (q: GameQuestion) => GameQuestion) => {
+    setEditingQuestionDraft((prev) => (prev ? updater(prev) : prev));
+    setEditingQuestionError(null);
+  };
+
+  const handleCommitQuestionEdit = (index: number): GameSpecification | null => {
+    if (!generatedSpec || !editingQuestionDraft) return null;
+    const candidate: GameQuestion = {
+      ...editingQuestionDraft,
+      question: editingQuestionDraft.question.trim(),
+      correctAnswer: editingQuestionDraft.correctAnswer.trim(),
+      ...(editingQuestionDraft.type === 'CROSSWORD'
+        ? {
+            crosswordClue: (editingQuestionDraft.crosswordClue || editingQuestionDraft.question).trim(),
+            crosswordAnswer: (editingQuestionDraft.crosswordAnswer || editingQuestionDraft.correctAnswer)
+              .trim()
+              .replace(/\s+/g, ''),
+            correctAnswer: (editingQuestionDraft.crosswordAnswer || editingQuestionDraft.correctAnswer)
+              .trim()
+              .replace(/\s+/g, ''),
+          }
+        : {}),
+    };
+
+    const validationErr = validateQuestionItem(candidate);
+    if (validationErr) {
+      setEditingQuestionError(validationErr);
+      toast.error(`Câu hỏi #${index + 1}: ${validationErr}`, 'Câu hỏi chưa hợp lệ');
+      return null;
+    }
+
+    const normCandidateKey = candidate.question.toLowerCase().replace(/\s+/g, ' ');
+    for (let i = 0; i < generatedSpec.questions.length; i++) {
+      if (i === index) continue;
+      const otherKey = generatedSpec.questions[i].question.trim().toLowerCase().replace(/\s+/g, ' ');
+      if (otherKey === normCandidateKey) {
+        const dupMsg = `Nội dung câu hỏi #${index + 1} bị trùng lặp với câu hỏi #${i + 1}.`;
+        setEditingQuestionError(dupMsg);
+        toast.error(dupMsg, 'Trùng lặp câu hỏi');
+        return null;
+      }
+    }
+
+    const nextQuestions = generatedSpec.questions.map((q, i) => (i === index ? candidate : q));
+    const updatedSpec: GameSpecification = {
+      ...generatedSpec,
+      questions: nextQuestions,
+      settings: {
+        ...generatedSpec.settings,
+        questionCount: nextQuestions.length,
+      },
+    };
+    setGeneratedSpec(updatedSpec);
+    setEditingQuestionIdx(null);
+    setEditingQuestionDraft(null);
+    setEditingQuestionError(null);
+    setSavedForLater(false);
+    setSaveStatus('dirty');
+    setSaveErrorMessage(null);
+    toast.success(`Đã cập nhật câu hỏi #${index + 1}. Nhấn "Lưu Game" để lưu vào hệ thống.`, 'Đã cập nhật câu hỏi');
+    return updatedSpec;
+  };
+
   const handleUpdateQuestion = (index: number, updater: (q: GameQuestion) => GameQuestion) => {
     if (!generatedSpec) return;
     const nextQuestions = generatedSpec.questions.map((q, i) => (i === index ? updater(q) : q));
@@ -1049,6 +1163,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         questionCount: nextQuestions.length,
       },
     });
+    setSavedForLater(false);
+    setSaveStatus('dirty');
   };
 
   const handleDeleteQuestion = (index: number) => {
@@ -1066,8 +1182,16 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         questionCount: nextQuestions.length,
       },
     });
+    const maxPagesAfterDelete = Math.max(1, Math.ceil(nextQuestions.length / QUESTIONS_PER_PAGE));
+    if (questionPage > maxPagesAfterDelete) {
+      setQuestionPage(maxPagesAfterDelete);
+    }
+    setSavedForLater(false);
+    setSaveStatus('dirty');
     if (editingQuestionIdx === index) {
       setEditingQuestionIdx(null);
+      setEditingQuestionDraft(null);
+      setEditingQuestionError(null);
     } else if (editingQuestionIdx !== null && editingQuestionIdx > index) {
       setEditingQuestionIdx(editingQuestionIdx - 1);
     }
@@ -1087,11 +1211,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       ...generatedSpec,
       questions: nextQuestions,
     });
+    setSavedForLater(false);
+    setSaveStatus('dirty');
 
     if (editingQuestionIdx === index) {
       setEditingQuestionIdx(targetIndex);
+      setQuestionPage(Math.floor(targetIndex / QUESTIONS_PER_PAGE) + 1);
     } else if (editingQuestionIdx === targetIndex) {
       setEditingQuestionIdx(index);
+      setQuestionPage(Math.floor(index / QUESTIONS_PER_PAGE) + 1);
     }
   };
 
@@ -1128,7 +1256,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         questionCount: nextQuestions.length,
       },
     });
-    setEditingQuestionIdx(index + 1);
+    const newIdx = index + 1;
+    setEditingQuestionIdx(newIdx);
+    setEditingQuestionDraft(cloneQuestionDraft(duplicated));
+    setEditingQuestionError(null);
+    setQuestionPage(Math.floor(newIdx / QUESTIONS_PER_PAGE) + 1);
+    setSavedForLater(false);
+    setSaveStatus('dirty');
   };
 
   const handleAddQuestion = () => {
@@ -1210,41 +1344,73 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         questionCount: nextQuestions.length,
       },
     });
-    setEditingQuestionIdx(nextQuestions.length - 1);
+    const addedIdx = nextQuestions.length - 1;
+    setIsQuestionListCollapsed(false);
+    setEditingQuestionIdx(addedIdx);
+    setEditingQuestionDraft(cloneQuestionDraft(newQuestion));
+    setEditingQuestionError(null);
+    setQuestionPage(Math.floor(addedIdx / QUESTIONS_PER_PAGE) + 1);
+    setSavedForLater(false);
+    setSaveStatus('dirty');
+  };
+
+  const resolveActiveSpecWithPendingDraft = (): GameSpecification | null => {
+    if (!generatedSpec) return null;
+    const effectiveTitle = customGameTitle.trim() || generatedSpec.title;
+    if (editingQuestionIdx !== null && editingQuestionDraft !== null) {
+      const committed = handleCommitQuestionEdit(editingQuestionIdx);
+      if (!committed) return null;
+      return {
+        ...committed,
+        title: effectiveTitle,
+      };
+    }
+    return {
+      ...generatedSpec,
+      title: effectiveTitle,
+    };
   };
 
   const handleSaveSpecEdits = async (publishFlag?: boolean): Promise<GameSpecification | null> => {
     if (isSavingSpec) return null;
-    if (!generatedSpec || !validateSpecBeforeLaunch(generatedSpec)) {
+    const specToSave = resolveActiveSpecWithPendingDraft();
+    if (!specToSave || !validateSpecBeforeLaunch(specToSave)) {
       return null;
     }
 
     const nextIsPublic =
-      publishFlag !== undefined ? publishFlag : (generatedSpec.isPublic ?? true);
+      publishFlag !== undefined ? publishFlag : (specToSave.isPublic ?? true);
 
     setIsSavingSpec(true);
+    setSaveStatus('saving');
+    setSaveErrorMessage(null);
     try {
-      const saved = await saveEditedQuestions(generatedSpec.gameId, {
-        title: generatedSpec.title,
-        description: generatedSpec.description,
-        questions: generatedSpec.questions,
+      const saved = await saveEditedQuestions(specToSave.gameId, {
+        title: specToSave.title,
+        description: specToSave.description,
+        questions: specToSave.questions,
         settings: {
           timePerQuestion,
-          ...(generatedSpec.gameType === 'ADVENTURE'
+          ...(specToSave.gameType === 'ADVENTURE'
             ? {
                 adventureConfig: syncAdventureStagesWithQuestions(
-                  generatedSpec.settings?.adventureConfig || adventureConfig,
-                  generatedSpec.questions
+                  specToSave.settings?.adventureConfig || adventureConfig,
+                  specToSave.questions
                 ),
               }
             : {}),
           scoringMode,
         },
         isPublic: nextIsPublic,
-        ...(publishFlag === true && !generatedSpec.coverImageUrl ? { generateCover: true } : {}),
+        ...(publishFlag === true && !specToSave.coverImageUrl ? { generateCover: true } : {}),
       });
       setGeneratedSpec(saved);
       setEditingQuestionIdx(null);
+      setEditingQuestionDraft(null);
+      setEditingQuestionError(null);
+      setSavedForLater(true);
+      setSaveStatus('saved');
+      setSaveErrorMessage(null);
       if (publishFlag === true) {
         toast.success(
           'Đã lưu và xuất bản game công khai thành công! Bạn có thể chia sẻ Link/QR hoặc mở phòng chơi ngay.',
@@ -1260,11 +1426,46 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       }
       return saved;
     } catch (err: any) {
-      toast.error(err.message || 'Không thể lưu chỉnh sửa câu hỏi.', 'Lỗi lưu');
+      const errMsg = err.message || 'Không thể lưu chỉnh sửa câu hỏi.';
+      setSaveStatus('error');
+      setSaveErrorMessage(errMsg);
+      toast.error(errMsg, 'Lỗi lưu');
       return null;
     } finally {
       setIsSavingSpec(false);
     }
+  };
+
+  const handleStartPlaytest = () => {
+    const specForPlaytest = resolveActiveSpecWithPendingDraft();
+    if (!specForPlaytest || !validateSpecBeforeLaunch(specForPlaytest)) {
+      return;
+    }
+    const snapshot: GameSpecification = {
+      ...specForPlaytest,
+      questions: specForPlaytest.questions.map(cloneQuestionDraft),
+      settings: {
+        ...specForPlaytest.settings,
+        questionCount: specForPlaytest.questions.length,
+        scoringMode,
+        timePerQuestion,
+        ...(specForPlaytest.gameType === 'ADVENTURE'
+          ? {
+              adventureConfig: syncAdventureStagesWithQuestions(
+                specForPlaytest.settings?.adventureConfig || adventureConfig,
+                specForPlaytest.questions
+              ),
+            }
+          : {}),
+      },
+    };
+    setPlaytestSpec(snapshot);
+    setIsPlaytestOpen(true);
+  };
+
+  const handleExitPlaytest = () => {
+    setIsPlaytestOpen(false);
+    setPlaytestSpec(null);
   };
 
   const [isRetryingAdventureAssets, setIsRetryingAdventureAssets] = useState(false);
@@ -1321,20 +1522,17 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
   const handlePublishAndUseNow = async () => {
     if (!generatedSpec) return;
-    if (!validateSpecBeforeLaunch(generatedSpec)) return;
     const saved = await handleSaveSpecEdits(true);
-    if (!saved && generatedSpec.gameType === 'ADVENTURE') {
+    if (!saved) {
       return;
     }
-    const target = saved || generatedSpec;
-    setModeModalSpec(target);
+    setModeModalSpec(saved);
     setIsModeModalOpen(true);
   };
 
   const handleSaveForLater = async () => {
     if (!generatedSpec) return;
-    if (!validateSpecBeforeLaunch(generatedSpec)) return;
-    const saved = await handleSaveSpecEdits(generatedSpec.isPublic ?? true);
+    const saved = await handleSaveSpecEdits(generatedSpec.isPublic);
     if (saved) {
       setSavedForLater(true);
     }
@@ -1854,7 +2052,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
               id="studio-game-title"
               type="text"
               value={customGameTitle}
-              onChange={(e) => setCustomGameTitle(e.target.value)}
+              onChange={(e) => {
+                const nextTitle = e.target.value;
+                setCustomGameTitle(nextTitle);
+                if (generatedSpec) {
+                  setGeneratedSpec((prev) => (prev ? { ...prev, title: nextTitle } : prev));
+                  setSavedForLater(false);
+                  setSaveStatus('dirty');
+                }
+              }}
               placeholder="Ví dụ: Đấu trường Lịch sử Thế giới 2026..."
               style={{
                 width: '100%',
@@ -2937,638 +3143,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           boxSizing: 'border-box',
         }}
       >
-          {showQuestionEditor && generatedSpec ? (
-            /* ======================================================== */
-            /* QUESTION WORKBENCH / EDITOR MODE                         */
-            /* ======================================================== */
-            <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-              {/* Toolbar Question Workbench */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  paddingBottom: '0.65rem',
-                  marginBottom: '0.65rem',
-                  borderBottom: '1px solid var(--border-subtle)',
-                  flexShrink: 0,
-                  flexWrap: 'wrap',
-                  gap: '0.4rem',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem' }}>
-                  <span style={{ fontSize: '0.88rem', fontWeight: 900, color: 'var(--text-primary)' }}>
-                    Soạn Thảo Câu Hỏi ({generatedSpec.questions.length})
-                  </span>
-                </div>
-                <div style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                  <button
-                    type="button"
-                    onClick={() => handleSaveSpecEdits()}
-                    disabled={isSavingSpec}
-                    style={{
-                      backgroundColor: 'var(--bg-input)',
-                      color: 'var(--accent-emerald)',
-                      border: '1px solid var(--border-strong)',
-                      borderRadius: '6px',
-                      padding: '0.35rem 0.65rem',
-                      fontSize: '0.78rem',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.25rem',
-                    }}
-                  >
-                    <CheckIcon size={13} />
-                    <span>{isSavingSpec ? 'Đang lưu...' : 'Lưu'}</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleAddQuestion}
-                    style={{
-                      backgroundColor: 'var(--bg-input)',
-                      color: 'var(--accent-sky)',
-                      border: '1px solid var(--border-strong)',
-                      borderRadius: '6px',
-                      padding: '0.35rem 0.65rem',
-                      fontSize: '0.78rem',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '0.25rem',
-                    }}
-                  >
-                    <PlusIcon size={13} />
-                    <span>Thêm</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setShowQuestionEditor(false)}
-                    style={{
-                      backgroundColor: 'transparent',
-                      color: 'var(--text-muted)',
-                      border: '1px solid var(--border-subtle)',
-                      borderRadius: '6px',
-                      padding: '0.35rem 0.55rem',
-                      fontSize: '0.78rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Đóng ✕
-                  </button>
-                </div>
-              </div>
-
-              {/* Scrollable Questions list */}
-              <div
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.65rem',
-                  flex: 1,
-                  overflowY: 'auto',
-                  paddingRight: '0.25rem',
-                }}
-              >
-                {generatedSpec.questions.map((q, idx) => {
-                  const isEditing = editingQuestionIdx === idx;
-
-                  return (
-                    <div
-                      key={q.id || idx}
-                      style={{
-                        backgroundColor: 'var(--bg-card)',
-                        borderRadius: '10px',
-                        padding: '0.85rem',
-                        border: '1px solid var(--border-subtle)',
-                        borderLeft: isEditing ? '3px solid var(--primary)' : '3px solid transparent',
-                      }}
-                    >
-                      {/* Header câu hỏi */}
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          gap: '0.4rem',
-                          marginBottom: '0.45rem',
-                          flexWrap: 'wrap',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                          <span style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--accent-sky)' }}>
-                            #{idx + 1}
-                          </span>
-                          <span
-                            style={{
-                              fontSize: '0.7rem',
-                              fontWeight: 800,
-                              padding: '0.1rem 0.4rem',
-                              borderRadius: '4px',
-                              backgroundColor: 'var(--bg-input)',
-                              color: 'var(--text-secondary)',
-                            }}
-                          >
-                            {formatGameTypeLabel(q.type)}
-                          </span>
-                        </div>
-
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                          <button
-                            type="button"
-                            onClick={() => handleMoveQuestion(idx, -1)}
-                            disabled={idx === 0}
-                            style={{
-                              padding: '0.2rem 0.4rem',
-                              borderRadius: '4px',
-                              border: '1px solid var(--border-subtle)',
-                              backgroundColor: 'transparent',
-                              color: idx === 0 ? 'var(--text-muted)' : 'var(--text-secondary)',
-                              fontSize: '0.72rem',
-                              cursor: idx === 0 ? 'not-allowed' : 'pointer',
-                            }}
-                          >
-                            ↑
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleMoveQuestion(idx, 1)}
-                            disabled={idx === generatedSpec.questions.length - 1}
-                            style={{
-                              padding: '0.2rem 0.4rem',
-                              borderRadius: '4px',
-                              border: '1px solid var(--border-subtle)',
-                              backgroundColor: 'transparent',
-                              color: idx === generatedSpec.questions.length - 1 ? 'var(--text-muted)' : 'var(--text-secondary)',
-                              fontSize: '0.72rem',
-                              cursor: idx === generatedSpec.questions.length - 1 ? 'not-allowed' : 'pointer',
-                            }}
-                          >
-                            ↓
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDuplicateQuestion(idx)}
-                            style={{
-                              padding: '0.2rem 0.45rem',
-                              borderRadius: '4px',
-                              border: '1px solid var(--border-subtle)',
-                              backgroundColor: 'transparent',
-                              color: 'var(--accent-sky)',
-                              fontSize: '0.72rem',
-                              cursor: 'pointer',
-                            }}
-                            title="Nhân bản"
-                          >
-                            <CopyIcon size={12} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteQuestion(idx)}
-                            disabled={generatedSpec.questions.length <= 1}
-                            style={{
-                              padding: '0.2rem 0.45rem',
-                              borderRadius: '4px',
-                              border: '1px solid var(--border-subtle)',
-                              backgroundColor: 'transparent',
-                              color: generatedSpec.questions.length <= 1 ? 'var(--text-muted)' : 'var(--accent-rose)',
-                              fontSize: '0.72rem',
-                              cursor: generatedSpec.questions.length <= 1 ? 'not-allowed' : 'pointer',
-                            }}
-                            title="Xóa"
-                          >
-                            <TrashIcon size={12} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setEditingQuestionIdx(isEditing ? null : idx)}
-                            style={{
-                              padding: '0.2rem 0.5rem',
-                              borderRadius: '4px',
-                              border: '1px solid var(--border-strong)',
-                              backgroundColor: isEditing ? 'var(--primary)' : 'var(--bg-input)',
-                              color: isEditing ? 'var(--primary-ink)' : 'var(--text-primary)',
-                              fontSize: '0.72rem',
-                              fontWeight: 700,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            {isEditing ? 'Đóng' : 'Sửa'}
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Nội dung câu hỏi (chế độ xem) */}
-                      {!isEditing && (
-                        <div>
-                          <div style={{ fontSize: '0.86rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.35rem' }}>
-                            {q.question}
-                          </div>
-                          {q.choices && q.choices.length > 0 && (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.3rem', marginBottom: '0.3rem' }}>
-                              {q.choices.map((c, cIdx) => {
-                                const isCorrect = stripOptionLetterPrefix(c) === stripOptionLetterPrefix(q.correctAnswer);
-                                return (
-                                  <span
-                                    key={cIdx}
-                                    style={{
-                                      fontSize: '0.75rem',
-                                      padding: '0.15rem 0.5rem',
-                                      borderRadius: '4px',
-                                      border: isCorrect ? '1px solid var(--accent-emerald)' : '1px solid var(--border-subtle)',
-                                      backgroundColor: isCorrect ? 'rgba(16, 185, 129, 0.12)' : 'var(--bg-input)',
-                                      color: isCorrect ? 'var(--accent-emerald)' : 'var(--text-secondary)',
-                                      fontWeight: isCorrect ? 800 : 600,
-                                    }}
-                                  >
-                                    {c}
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
-                          {q.type === 'SLIDER' && q.sliderConfig && (
-                            <div
-                              style={{
-                                display: 'flex',
-                                flexWrap: 'wrap',
-                                gap: '0.4rem',
-                                marginBottom: '0.35rem',
-                                fontSize: '0.75rem',
-                                color: 'var(--text-secondary)',
-                              }}
-                            >
-                              <span style={{ padding: '0.15rem 0.5rem', borderRadius: '4px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', fontWeight: 700 }}>
-                                Khoảng: {q.sliderConfig.min} → {q.sliderConfig.max} {q.sliderConfig.unit || ''}
-                              </span>
-                              <span style={{ padding: '0.15rem 0.5rem', borderRadius: '4px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', fontWeight: 700 }}>
-                                Bước nhảy: {q.sliderConfig.step}
-                              </span>
-                              <span style={{ padding: '0.15rem 0.5rem', borderRadius: '4px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', fontWeight: 700 }}>
-                                Sai số: ±{q.sliderConfig.tolerance} {q.sliderConfig.unit || ''}
-                              </span>
-                            </div>
-                          )}
-                          <div style={{ fontSize: '0.76rem', color: 'var(--accent-emerald)', fontWeight: 700 }}>
-                            Đáp án: {q.correctAnswer}
-                            {q.type === 'SLIDER' && q.sliderConfig?.unit ? ` ${q.sliderConfig.unit}` : ''}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Chế độ sửa câu hỏi */}
-                      {isEditing && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.4rem' }}>
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                              Nội dung câu hỏi:
-                            </label>
-                            <input
-                              type="text"
-                              value={q.question}
-                              onChange={(e) => handleUpdateQuestion(idx, (prev) => ({ ...prev, question: e.target.value }))}
-                              style={{
-                                width: '100%',
-                                backgroundColor: 'var(--bg-input)',
-                                border: '1px solid var(--border-strong)',
-                                borderRadius: '6px',
-                                padding: '0.4rem 0.6rem',
-                                color: 'var(--text-primary)',
-                                fontSize: '0.84rem',
-                                boxSizing: 'border-box',
-                              }}
-                            />
-                          </div>
-
-                          {(q.type === 'MULTIPLE_CHOICE' || q.type === 'QUIZ') && q.choices && (
-                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.35rem' }}>
-                              {q.choices.map((c, cIdx) => (
-                                <div key={cIdx} style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
-                                  <input
-                                    type="radio"
-                                    name={`correct_q_${idx}`}
-                                    checked={stripOptionLetterPrefix(c) === stripOptionLetterPrefix(q.correctAnswer)}
-                                    onChange={() => handleUpdateQuestion(idx, (prev) => ({ ...prev, correctAnswer: c }))}
-                                    style={{ cursor: 'pointer' }}
-                                  />
-                                  <input
-                                    type="text"
-                                    value={c}
-                                    onChange={(e) => {
-                                      const newChoices = [...(q.choices || [])];
-                                      newChoices[cIdx] = e.target.value;
-                                      handleUpdateQuestion(idx, (prev) => ({ ...prev, choices: newChoices }));
-                                    }}
-                                    style={{
-                                      flex: 1,
-                                      backgroundColor: 'var(--bg-input)',
-                                      border: '1px solid var(--border-strong)',
-                                      borderRadius: '6px',
-                                      padding: '0.35rem 0.5rem',
-                                      color: 'var(--text-primary)',
-                                      fontSize: '0.8rem',
-                                      boxSizing: 'border-box',
-                                    }}
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {(q.type === 'QUICK_BUTTON' || q.type === 'TRUE_FALSE') && (
-                            <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                              {(['Đúng', 'Sai'] as const).map((tfVal) => {
-                                const isSel = normalizeChoiceCompare(q.correctAnswer) === normalizeChoiceCompare(tfVal);
-                                return (
-                                  <button
-                                    key={tfVal}
-                                    type="button"
-                                    onClick={() =>
-                                      handleUpdateQuestion(idx, (prev) => ({
-                                        ...prev,
-                                        choices: ['Đúng', 'Sai'],
-                                        correctAnswer: tfVal,
-                                      }))
-                                    }
-                                    style={{
-                                      flex: 1,
-                                      padding: '0.4rem 0.65rem',
-                                      borderRadius: '6px',
-                                      border: isSel ? '2px solid var(--accent-emerald)' : '1px solid var(--border-strong)',
-                                      backgroundColor: isSel ? 'rgba(16, 185, 129, 0.14)' : 'var(--bg-input)',
-                                      color: isSel ? 'var(--accent-emerald)' : 'var(--text-primary)',
-                                      fontWeight: 800,
-                                      fontSize: '0.82rem',
-                                      cursor: 'pointer',
-                                    }}
-                                  >
-                                    {tfVal}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-
-                          {q.type === 'PUZZLE' && (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-                              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                                Thứ tự chuẩn của các mục (3 - 6 mục):
-                              </label>
-                              {(q.choices || []).map((item, itemIdx) => (
-                                <div key={itemIdx} style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
-                                  <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--accent-sky)', minWidth: '22px' }}>
-                                    #{itemIdx + 1}
-                                  </span>
-                                  <input
-                                    type="text"
-                                    value={item}
-                                    onChange={(e) => {
-                                      const nextItems = [...(q.choices || [])];
-                                      nextItems[itemIdx] = e.target.value;
-                                      handleUpdateQuestion(idx, (prev) => ({
-                                        ...prev,
-                                        choices: nextItems,
-                                        correctAnswer: nextItems.map(s => s.trim()).filter(Boolean).join(' | '),
-                                      }));
-                                    }}
-                                    style={{
-                                      flex: 1,
-                                      backgroundColor: 'var(--bg-input)',
-                                      border: '1px solid var(--border-strong)',
-                                      borderRadius: '6px',
-                                      padding: '0.35rem 0.5rem',
-                                      color: 'var(--text-primary)',
-                                      fontSize: '0.8rem',
-                                      boxSizing: 'border-box',
-                                    }}
-                                  />
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          {q.type === 'SLIDER' && (
-                            <div
-                              style={{
-                                display: 'grid',
-                                gridTemplateColumns: 'repeat(auto-fit, minmax(115px, 1fr))',
-                                gap: '0.45rem',
-                                padding: '0.55rem',
-                                borderRadius: '8px',
-                                backgroundColor: 'var(--bg-surface)',
-                                border: '1px solid var(--border-subtle)',
-                              }}
-                            >
-                              <div>
-                                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                                  Min:
-                                </label>
-                                <input
-                                  type="number"
-                                  step="any"
-                                  value={q.sliderConfig?.min ?? 0}
-                                  onChange={(e) => {
-                                    const minVal = Number(e.target.value);
-                                    handleUpdateQuestion(idx, (prev) => {
-                                      const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
-                                      return {
-                                        ...prev,
-                                        sliderConfig: { ...cfg, min: Number.isFinite(minVal) ? minVal : 0 },
-                                      };
-                                    });
-                                  }}
-                                  style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
-                                />
-                              </div>
-                              <div>
-                                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                                  Max:
-                                </label>
-                                <input
-                                  type="number"
-                                  step="any"
-                                  value={q.sliderConfig?.max ?? 100}
-                                  onChange={(e) => {
-                                    const maxVal = Number(e.target.value);
-                                    handleUpdateQuestion(idx, (prev) => {
-                                      const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
-                                      return {
-                                        ...prev,
-                                        sliderConfig: { ...cfg, max: Number.isFinite(maxVal) ? maxVal : 100 },
-                                      };
-                                    });
-                                  }}
-                                  style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
-                                />
-                              </div>
-                              <div>
-                                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                                  Bước nhảy (Step):
-                                </label>
-                                <input
-                                  type="number"
-                                  step="any"
-                                  min={0.0001}
-                                  value={q.sliderConfig?.step ?? 1}
-                                  onChange={(e) => {
-                                    const stepVal = Number(e.target.value);
-                                    handleUpdateQuestion(idx, (prev) => {
-                                      const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
-                                      return {
-                                        ...prev,
-                                        sliderConfig: { ...cfg, step: Number.isFinite(stepVal) && stepVal > 0 ? stepVal : 1 },
-                                      };
-                                    });
-                                  }}
-                                  style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
-                                />
-                              </div>
-                              <div>
-                                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: 'var(--accent-emerald)', marginBottom: '0.2rem' }}>
-                                  Giá trị đúng:
-                                </label>
-                                <input
-                                  type="number"
-                                  step="any"
-                                  value={q.sliderConfig?.correctValue ?? Number(q.correctAnswer || 0)}
-                                  onChange={(e) => {
-                                    const cv = Number(e.target.value);
-                                    const safeCv = Number.isFinite(cv) ? cv : 0;
-                                    handleUpdateQuestion(idx, (prev) => {
-                                      const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
-                                      return {
-                                        ...prev,
-                                        sliderConfig: { ...cfg, correctValue: safeCv },
-                                        correctAnswer: String(safeCv),
-                                      };
-                                    });
-                                  }}
-                                  style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--accent-emerald)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.8rem', boxSizing: 'border-box' }}
-                                />
-                              </div>
-                              <div>
-                                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                                  Sai số (±):
-                                </label>
-                                <input
-                                  type="number"
-                                  step="any"
-                                  min={0}
-                                  value={q.sliderConfig?.tolerance ?? 0}
-                                  onChange={(e) => {
-                                    const tolVal = Number(e.target.value);
-                                    handleUpdateQuestion(idx, (prev) => {
-                                      const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
-                                      return {
-                                        ...prev,
-                                        sliderConfig: { ...cfg, tolerance: Number.isFinite(tolVal) && tolVal >= 0 ? tolVal : 0 },
-                                      };
-                                    });
-                                  }}
-                                  style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
-                                />
-                              </div>
-                              <div>
-                                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                                  Đơn vị (Unit):
-                                </label>
-                                <input
-                                  type="text"
-                                  placeholder="%, năm, °C..."
-                                  value={q.sliderConfig?.unit || ''}
-                                  onChange={(e) => {
-                                    const unitVal = e.target.value;
-                                    handleUpdateQuestion(idx, (prev) => {
-                                      const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
-                                      return {
-                                        ...prev,
-                                        sliderConfig: { ...cfg, unit: unitVal },
-                                      };
-                                    });
-                                  }}
-                                  style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
-                                />
-                              </div>
-                            </div>
-                          )}
-
-                          {(q.type === 'FILL_IN_THE_BLANK' || q.type === 'TYPE_ANSWER' || q.type === 'CROSSWORD') && (
-                            <div>
-                              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                                Đáp án đúng:
-                              </label>
-                              <input
-                                type="text"
-                                value={q.correctAnswer}
-                                onChange={(e) => handleUpdateQuestion(idx, (prev) => ({ ...prev, correctAnswer: e.target.value }))}
-                                style={{
-                                  width: '100%',
-                                  backgroundColor: 'var(--bg-input)',
-                                  border: '1px solid var(--border-strong)',
-                                  borderRadius: '6px',
-                                  padding: '0.4rem 0.6rem',
-                                  color: 'var(--text-primary)',
-                                  fontSize: '0.84rem',
-                                  boxSizing: 'border-box',
-                                }}
-                              />
-                            </div>
-                          )}
-
-                          <div>
-                            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                              Giải thích:
-                            </label>
-                            <input
-                              type="text"
-                              value={q.explanation || ''}
-                              onChange={(e) => handleUpdateQuestion(idx, (prev) => ({ ...prev, explanation: e.target.value }))}
-                              style={{
-                                width: '100%',
-                                backgroundColor: 'var(--bg-input)',
-                                border: '1px solid var(--border-strong)',
-                                borderRadius: '6px',
-                                padding: '0.4rem 0.6rem',
-                                color: 'var(--text-primary)',
-                                fontSize: '0.84rem',
-                                boxSizing: 'border-box',
-                              }}
-                            />
-                          </div>
-
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.2rem' }}>
-                            <button
-                              type="button"
-                              onClick={() => setEditingQuestionIdx(null)}
-                              style={{
-                                backgroundColor: 'var(--primary)',
-                                color: 'var(--primary-ink)',
-                                border: 'none',
-                                borderRadius: '6px',
-                                padding: '0.35rem 0.75rem',
-                                fontWeight: 800,
-                                fontSize: '0.8rem',
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Xong
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            /* ======================================================== */
-            /* SETTINGS / CONFIGURATION & ACTION MODE                   */
-            /* ======================================================== */
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          {/* ======================================================== */}
+          {/* SETTINGS / CONFIGURATION & ACTION MODE                   */}
+          {/* ======================================================== */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
               {/* Header nhóm 2 */}
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span
@@ -3823,6 +3401,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
+                      flexWrap: 'wrap',
+                      gap: '0.5rem',
                       padding: '0.55rem 0.85rem',
                       borderRadius: '8px',
                       backgroundColor: 'rgba(16, 185, 129, 0.12)',
@@ -3833,12 +3413,68 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       <CheckIcon size={16} />
                       <span>Tạo Game Thành Công! Bộ câu hỏi đã sẵn sàng.</span>
                     </div>
-                    {savedForLater && (
-                      <span style={{ fontSize: '0.74rem', color: 'var(--accent-emerald)', fontWeight: 700 }}>
-                        Đã lưu Kho Game
-                      </span>
-                    )}
+                    <span
+                      data-testid="game-save-status-badge"
+                      style={{
+                        fontSize: '0.74rem',
+                        fontWeight: 800,
+                        padding: '0.2rem 0.6rem',
+                        borderRadius: '999px',
+                        backgroundColor:
+                          saveStatus === 'saved'
+                            ? 'rgba(16, 185, 129, 0.18)'
+                            : saveStatus === 'saving'
+                              ? 'rgba(56, 189, 248, 0.18)'
+                              : saveStatus === 'error'
+                                ? 'rgba(239, 68, 68, 0.18)'
+                                : 'rgba(245, 158, 11, 0.18)',
+                        color:
+                          saveStatus === 'saved'
+                            ? 'var(--accent-emerald)'
+                            : saveStatus === 'saving'
+                              ? 'var(--accent-sky)'
+                              : saveStatus === 'error'
+                                ? 'var(--accent-rose)'
+                                : '#f59e0b',
+                        border:
+                          saveStatus === 'saved'
+                            ? '1px solid rgba(16, 185, 129, 0.4)'
+                            : saveStatus === 'saving'
+                              ? '1px solid rgba(56, 189, 248, 0.4)'
+                              : saveStatus === 'error'
+                                ? '1px solid rgba(239, 68, 68, 0.4)'
+                                : '1px solid rgba(245, 158, 11, 0.4)',
+                      }}
+                    >
+                      {saveStatus === 'saving'
+                        ? 'Đang lưu...'
+                        : saveStatus === 'saved'
+                          ? 'Đã lưu'
+                          : saveStatus === 'dirty'
+                            ? 'Có thay đổi chưa lưu'
+                            : saveStatus === 'error'
+                              ? 'Lưu thất bại'
+                              : 'Chưa lưu'}
+                    </span>
                   </div>
+
+                  {saveStatus === 'error' && saveErrorMessage && (
+                    <div
+                      role="alert"
+                      data-testid="game-save-error-alert"
+                      style={{
+                        padding: '0.55rem 0.8rem',
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        border: '1px solid var(--accent-rose)',
+                        color: 'var(--accent-rose)',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                      }}
+                    >
+                      Lưu thất bại: {saveErrorMessage} (Dữ liệu câu hỏi đã chỉnh sửa vẫn được giữ nguyên trên màn hình).
+                    </div>
+                  )}
 
                   {/* Thông tin game chi tiết */}
                   <div>
@@ -4179,35 +3815,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     </div>
                   )}
 
-                  {/* Nhóm nút hành động: Phân biệt rõ giữa Tạo thành công và Bắt đầu chơi */}
+                  {/* Nhóm nút hành động: [Bắt đầu] [Lưu Game] [Chơi thử] */}
                   <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', paddingTop: '0.2rem' }}>
-                    {onNavigateToLibrary && (
-                      <button
-                        type="button"
-                        onClick={onNavigateToLibrary}
-                        style={{
-                          backgroundColor: 'var(--bg-input)',
-                          color: 'var(--text-primary)',
-                          border: '1px solid var(--border-strong)',
-                          borderRadius: '8px',
-                          padding: '0.55rem 0.85rem',
-                          fontSize: '0.82rem',
-                          fontWeight: 800,
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '0.35rem',
-                          minHeight: '38px',
-                          order: 2,
-                        }}
-                        title="Xem card game trong Kho Game"
-                      >
-                        <GamepadIcon size={14} />
-                        <span>Xem Trong Kho Game</span>
-                      </button>
-                    )}
                     <button
                       type="button"
+                      data-testid="start-or-host-game-btn"
                       onClick={handlePublishAndUseNow}
                       disabled={isSavingSpec}
                       style={{
@@ -4234,45 +3846,94 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => setShowQuestionEditor(!showQuestionEditor)}
+                      data-testid="save-game-btn"
+                      onClick={handleSaveForLater}
+                      disabled={isSavingSpec}
                       style={{
-                        backgroundColor: showQuestionEditor ? 'var(--primary-subtle)' : 'var(--bg-input)',
-                        color: showQuestionEditor ? 'var(--primary)' : 'var(--text-primary)',
-                        border: '1px solid var(--border-strong)',
+                        backgroundColor:
+                          saveStatus === 'dirty' || saveStatus === 'error'
+                            ? 'rgba(16, 185, 129, 0.14)'
+                            : 'var(--bg-input)',
+                        color:
+                          saveStatus === 'dirty' || saveStatus === 'error'
+                            ? 'var(--accent-emerald)'
+                            : 'var(--text-primary)',
+                        border:
+                          saveStatus === 'dirty' || saveStatus === 'error'
+                            ? '1.5px solid var(--accent-emerald)'
+                            : '1px solid var(--border-strong)',
                         borderRadius: '8px',
-                        padding: '0.55rem 0.85rem',
+                        padding: '0.55rem 0.9rem',
                         fontSize: '0.82rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
+                        fontWeight: 800,
+                        cursor: isSavingSpec ? 'not-allowed' : 'pointer',
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '0.35rem',
                         minHeight: '38px',
                       }}
+                      title="Lưu bộ câu hỏi vào cùng game hiện tại"
                     >
-                      <PencilIcon size={14} />
-                      <span>{showQuestionEditor ? 'Đóng Trình Soạn Thảo' : 'Xem & Sửa Câu Hỏi'}</span>
+                      <CheckIcon size={14} />
+                      <span>
+                        {isSavingSpec || saveStatus === 'saving'
+                          ? 'Đang lưu...'
+                          : saveStatus === 'dirty'
+                            ? 'Lưu cập nhật'
+                            : saveStatus === 'error'
+                              ? 'Lưu lại'
+                              : 'Lưu Game'}
+                      </span>
                     </button>
 
                     <button
                       type="button"
-                      onClick={handleSaveForLater}
+                      data-testid="playtest-game-btn"
+                      onClick={handleStartPlaytest}
                       disabled={isSavingSpec}
                       style={{
-                        backgroundColor: 'var(--bg-input)',
-                        color: 'var(--text-secondary)',
-                        border: '1px solid var(--border-strong)',
+                        backgroundColor: 'rgba(245, 158, 11, 0.14)',
+                        color: '#f59e0b',
+                        border: '1.5px solid rgba(245, 158, 11, 0.45)',
                         borderRadius: '8px',
-                        padding: '0.55rem 0.85rem',
+                        padding: '0.55rem 0.9rem',
                         fontSize: '0.82rem',
-                        fontWeight: 700,
+                        fontWeight: 800,
                         cursor: isSavingSpec ? 'not-allowed' : 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
                         minHeight: '38px',
                       }}
-                      title="Lưu vào Kho Game"
+                      title="Chơi thử toàn bộ game mà không ghi điểm hay thống kê thật"
                     >
-                      Lưu Vào Kho
+                      <GamepadIcon size={14} />
+                      <span>Chơi thử</span>
                     </button>
+
+                    {onNavigateToLibrary && (
+                      <button
+                        type="button"
+                        onClick={onNavigateToLibrary}
+                        style={{
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-primary)',
+                          border: '1px solid var(--border-strong)',
+                          borderRadius: '8px',
+                          padding: '0.55rem 0.85rem',
+                          fontSize: '0.82rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '0.35rem',
+                          minHeight: '38px',
+                        }}
+                        title="Xem card game trong Kho Game"
+                      >
+                        <span>Xem Trong Kho Game</span>
+                      </button>
+                    )}
 
                     <button
                       type="button"
@@ -4293,12 +3954,1005 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       Xuất JSON
                     </button>
                   </div>
+
+                  {/* ======================================================== */}
+                  {/* DANH SÁCH CÂU HỎI ĐÃ TẠO (NGAY DƯỚI CÁC NÚT CHỨC NĂNG)   */}
+                  {/* ======================================================== */}
+                  {(() => {
+                    const totalQuestionsCount = generatedSpec.questions.length;
+                    const totalPages = Math.max(1, Math.ceil(totalQuestionsCount / QUESTIONS_PER_PAGE));
+                    const safePage = Math.min(Math.max(1, questionPage), totalPages);
+                    const pageStartIdx = (safePage - 1) * QUESTIONS_PER_PAGE;
+                    const visibleQuestions = generatedSpec.questions.slice(
+                      pageStartIdx,
+                      pageStartIdx + QUESTIONS_PER_PAGE
+                    );
+
+                    return (
+                      <div
+                        data-testid="generated-questions-section"
+                        style={{
+                          marginTop: '0.25rem',
+                          paddingTop: '0.85rem',
+                          borderTop: '1px solid var(--border-subtle)',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.65rem',
+                        }}
+                      >
+                        {/* Header Danh sách câu hỏi */}
+                        <div
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            flexWrap: 'wrap',
+                            gap: '0.5rem',
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '0.9rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                              Danh sách câu hỏi ({totalQuestionsCount} câu)
+                            </span>
+                            <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                              ID: {generatedSpec.gameId}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                            <button
+                              type="button"
+                              data-testid="add-question-btn"
+                              onClick={handleAddQuestion}
+                              style={{
+                                backgroundColor: 'var(--bg-input)',
+                                color: 'var(--accent-sky)',
+                                border: '1px solid var(--border-strong)',
+                                borderRadius: '6px',
+                                padding: '0.35rem 0.65rem',
+                                fontSize: '0.76rem',
+                                fontWeight: 800,
+                                cursor: 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '0.25rem',
+                              }}
+                            >
+                              <PlusIcon size={13} />
+                              <span>Thêm câu hỏi</span>
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="toggle-question-list-btn"
+                              onClick={() => setIsQuestionListCollapsed((prev) => !prev)}
+                              style={{
+                                backgroundColor: 'var(--bg-input)',
+                                color: 'var(--text-secondary)',
+                                border: '1px solid var(--border-subtle)',
+                                borderRadius: '6px',
+                                padding: '0.35rem 0.65rem',
+                                fontSize: '0.76rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {isQuestionListCollapsed ? 'Mở rộng danh sách' : 'Thu gọn'}
+                            </button>
+                          </div>
+                        </div>
+
+                        {!isQuestionListCollapsed && (
+                          <>
+                            <div
+                              data-testid="generated-questions-list"
+                              style={{
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.65rem',
+                              }}
+                            >
+                              {visibleQuestions.map((q, localIdx) => {
+                                const idx = pageStartIdx + localIdx;
+                                const isEditing = editingQuestionIdx === idx && editingQuestionDraft !== null;
+                                const activeQ = isEditing && editingQuestionDraft ? editingQuestionDraft : q;
+                                const effectiveQType = activeQ.type || generatedSpec.gameType;
+
+                                return (
+                                  <div
+                                    key={q.id || idx}
+                                    data-testid={`question-item-${idx}`}
+                                    style={{
+                                      backgroundColor: 'var(--bg-surface)',
+                                      borderRadius: '10px',
+                                      padding: '0.85rem',
+                                      border: isEditing
+                                        ? '1.5px solid var(--primary)'
+                                        : '1px solid var(--border-subtle)',
+                                      borderLeft: isEditing
+                                        ? '4px solid var(--primary)'
+                                        : '3px solid var(--accent-emerald)',
+                                    }}
+                                  >
+                                    {/* Header từng câu hỏi */}
+                                    <div
+                                      style={{
+                                        display: 'flex',
+                                        justifyContent: 'space-between',
+                                        alignItems: 'center',
+                                        gap: '0.4rem',
+                                        marginBottom: '0.45rem',
+                                        flexWrap: 'wrap',
+                                      }}
+                                    >
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                                        <span
+                                          style={{
+                                            fontSize: '0.78rem',
+                                            fontWeight: 900,
+                                            color: 'var(--accent-sky)',
+                                          }}
+                                        >
+                                          Câu {idx + 1} (#{idx + 1})
+                                        </span>
+                                        <span
+                                          data-testid={`question-type-badge-${idx}`}
+                                          style={{
+                                            fontSize: '0.7rem',
+                                            fontWeight: 800,
+                                            padding: '0.12rem 0.45rem',
+                                            borderRadius: '4px',
+                                            backgroundColor: 'var(--bg-input)',
+                                            color: 'var(--text-secondary)',
+                                            border: '1px solid var(--border-subtle)',
+                                          }}
+                                        >
+                                          {formatGameTypeLabel(effectiveQType)}
+                                        </span>
+                                      </div>
+
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleMoveQuestion(idx, -1)}
+                                          disabled={idx === 0 || isEditing}
+                                          style={{
+                                            padding: '0.2rem 0.4rem',
+                                            borderRadius: '4px',
+                                            border: '1px solid var(--border-subtle)',
+                                            backgroundColor: 'transparent',
+                                            color: idx === 0 || isEditing ? 'var(--text-muted)' : 'var(--text-secondary)',
+                                            fontSize: '0.72rem',
+                                            cursor: idx === 0 || isEditing ? 'not-allowed' : 'pointer',
+                                          }}
+                                          title="Di chuyển lên"
+                                        >
+                                          ↑
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleMoveQuestion(idx, 1)}
+                                          disabled={idx === totalQuestionsCount - 1 || isEditing}
+                                          style={{
+                                            padding: '0.2rem 0.4rem',
+                                            borderRadius: '4px',
+                                            border: '1px solid var(--border-subtle)',
+                                            backgroundColor: 'transparent',
+                                            color:
+                                              idx === totalQuestionsCount - 1 || isEditing
+                                                ? 'var(--text-muted)'
+                                                : 'var(--text-secondary)',
+                                            fontSize: '0.72rem',
+                                            cursor:
+                                              idx === totalQuestionsCount - 1 || isEditing
+                                                ? 'not-allowed'
+                                                : 'pointer',
+                                          }}
+                                          title="Di chuyển xuống"
+                                        >
+                                          ↓
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDuplicateQuestion(idx)}
+                                          disabled={isEditing}
+                                          style={{
+                                            padding: '0.2rem 0.45rem',
+                                            borderRadius: '4px',
+                                            border: '1px solid var(--border-subtle)',
+                                            backgroundColor: 'transparent',
+                                            color: isEditing ? 'var(--text-muted)' : 'var(--accent-sky)',
+                                            fontSize: '0.72rem',
+                                            cursor: isEditing ? 'not-allowed' : 'pointer',
+                                          }}
+                                          title="Nhân bản câu hỏi"
+                                        >
+                                          <CopyIcon size={12} />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDeleteQuestion(idx)}
+                                          disabled={totalQuestionsCount <= 1 || isEditing}
+                                          style={{
+                                            padding: '0.2rem 0.45rem',
+                                            borderRadius: '4px',
+                                            border: '1px solid var(--border-subtle)',
+                                            backgroundColor: 'transparent',
+                                            color:
+                                              totalQuestionsCount <= 1 || isEditing
+                                                ? 'var(--text-muted)'
+                                                : 'var(--accent-rose)',
+                                            fontSize: '0.72rem',
+                                            cursor:
+                                              totalQuestionsCount <= 1 || isEditing
+                                                ? 'not-allowed'
+                                                : 'pointer',
+                                          }}
+                                          title="Xóa câu hỏi"
+                                        >
+                                          <TrashIcon size={12} />
+                                        </button>
+                                        {!isEditing && (
+                                          <button
+                                            type="button"
+                                            data-testid={`edit-question-btn-${idx}`}
+                                            onClick={() => handleStartEditQuestion(idx)}
+                                            style={{
+                                              padding: '0.22rem 0.55rem',
+                                              borderRadius: '5px',
+                                              border: '1px solid var(--border-strong)',
+                                              backgroundColor: 'var(--bg-input)',
+                                              color: 'var(--text-primary)',
+                                              fontSize: '0.74rem',
+                                              fontWeight: 800,
+                                              cursor: 'pointer',
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: '0.25rem',
+                                            }}
+                                          >
+                                            <PencilIcon size={12} />
+                                            <span>Chỉnh sửa</span>
+                                          </button>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* CHẾ ĐỘ XEM CÂU HỎI (PREVIEW) */}
+                                    {!isEditing && (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                        <div
+                                          data-testid={`question-text-${idx}`}
+                                          style={{
+                                            fontSize: '0.86rem',
+                                            fontWeight: 800,
+                                            color: 'var(--text-primary)',
+                                            lineHeight: 1.45,
+                                          }}
+                                        >
+                                          {q.question}
+                                        </div>
+
+                                        {effectiveQType === 'CROSSWORD' && q.crosswordClue && (
+                                          <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                                            Gợi ý ô chữ: <strong style={{ color: 'var(--text-primary)' }}>{q.crosswordClue}</strong>
+                                          </div>
+                                        )}
+
+                                        {(effectiveQType === 'MULTIPLE_CHOICE' ||
+                                          effectiveQType === 'QUIZ' ||
+                                          effectiveQType === 'QUICK_BUTTON' ||
+                                          effectiveQType === 'TRUE_FALSE' ||
+                                          effectiveQType === 'PUZZLE') &&
+                                          Array.isArray(q.choices) &&
+                                          q.choices.length > 0 && (
+                                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem', marginTop: '0.1rem' }}>
+                                              {q.choices.map((c, cIdx) => {
+                                                const isCorrect =
+                                                  effectiveQType === 'PUZZLE'
+                                                    ? false
+                                                    : stripOptionLetterPrefix(c) ===
+                                                        stripOptionLetterPrefix(q.correctAnswer) ||
+                                                      normalizeChoiceCompare(c) ===
+                                                        normalizeChoiceCompare(q.correctAnswer);
+                                                return (
+                                                  <span
+                                                    key={cIdx}
+                                                    style={{
+                                                      fontSize: '0.75rem',
+                                                      padding: '0.18rem 0.55rem',
+                                                      borderRadius: '5px',
+                                                      border: isCorrect
+                                                        ? '1px solid var(--accent-emerald)'
+                                                        : '1px solid var(--border-subtle)',
+                                                      backgroundColor: isCorrect
+                                                        ? 'rgba(16, 185, 129, 0.12)'
+                                                        : 'var(--bg-input)',
+                                                      color: isCorrect
+                                                        ? 'var(--accent-emerald)'
+                                                        : 'var(--text-secondary)',
+                                                      fontWeight: isCorrect ? 800 : 600,
+                                                    }}
+                                                  >
+                                                    {effectiveQType === 'PUZZLE' ? `#${cIdx + 1} ${c}` : c}
+                                                  </span>
+                                                );
+                                              })}
+                                            </div>
+                                          )}
+
+                                        {effectiveQType === 'SLIDER' && q.sliderConfig && (
+                                          <div
+                                            style={{
+                                              display: 'flex',
+                                              flexWrap: 'wrap',
+                                              gap: '0.4rem',
+                                              fontSize: '0.75rem',
+                                              color: 'var(--text-secondary)',
+                                            }}
+                                          >
+                                            <span style={{ padding: '0.15rem 0.5rem', borderRadius: '4px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', fontWeight: 700 }}>
+                                              Khoảng: {q.sliderConfig.min} → {q.sliderConfig.max} {q.sliderConfig.unit || ''}
+                                            </span>
+                                            <span style={{ padding: '0.15rem 0.5rem', borderRadius: '4px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', fontWeight: 700 }}>
+                                              Bước nhảy: {q.sliderConfig.step}
+                                            </span>
+                                            <span style={{ padding: '0.15rem 0.5rem', borderRadius: '4px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-subtle)', fontWeight: 700 }}>
+                                              Sai số: ±{q.sliderConfig.tolerance ?? 0} {q.sliderConfig.unit || ''}
+                                            </span>
+                                          </div>
+                                        )}
+
+                                        <div
+                                          data-testid={`question-answer-${idx}`}
+                                          style={{
+                                            fontSize: '0.76rem',
+                                            color: 'var(--accent-emerald)',
+                                            fontWeight: 800,
+                                          }}
+                                        >
+                                          {effectiveQType === 'CROSSWORD'
+                                            ? `Từ khóa đáp án: ${q.crosswordAnswer || q.correctAnswer} (${(q.crosswordAnswer || q.correctAnswer || '').replace(/\s+/g, '').length} chữ cái)`
+                                            : effectiveQType === 'FILL_IN_THE_BLANK' || effectiveQType === 'TYPE_ANSWER'
+                                              ? `Từ/cụm từ cần điền: ${q.correctAnswer}`
+                                              : `Đáp án đúng: ${q.correctAnswer}${effectiveQType === 'SLIDER' && q.sliderConfig?.unit ? ` ${q.sliderConfig.unit}` : ''}`}
+                                        </div>
+
+                                        {q.explanation && (
+                                          <div
+                                            data-testid={`question-explanation-${idx}`}
+                                            style={{
+                                              fontSize: '0.74rem',
+                                              color: 'var(--text-secondary)',
+                                              lineHeight: 1.4,
+                                            }}
+                                          >
+                                            Giải thích: {q.explanation}
+                                          </div>
+                                        )}
+                                      </div>
+                                    )}
+
+                                    {/* CHẾ ĐỘ CHỈNH SỬA INLINE (INLINE EDITOR) */}
+                                    {isEditing && editingQuestionDraft && (
+                                      <div
+                                        data-testid={`question-inline-editor-${idx}`}
+                                        style={{
+                                          display: 'flex',
+                                          flexDirection: 'column',
+                                          gap: '0.55rem',
+                                          marginTop: '0.45rem',
+                                        }}
+                                      >
+                                        {editingQuestionError && (
+                                          <div
+                                            role="alert"
+                                            data-testid="question-edit-error"
+                                            style={{
+                                              padding: '0.45rem 0.65rem',
+                                              borderRadius: '6px',
+                                              backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                                              border: '1px solid var(--accent-rose)',
+                                              color: 'var(--accent-rose)',
+                                              fontSize: '0.76rem',
+                                              fontWeight: 700,
+                                            }}
+                                          >
+                                            {editingQuestionError}
+                                          </div>
+                                        )}
+
+                                        <div>
+                                          <label
+                                            style={{
+                                              display: 'block',
+                                              fontSize: '0.75rem',
+                                              fontWeight: 700,
+                                              color: 'var(--text-secondary)',
+                                              marginBottom: '0.2rem',
+                                            }}
+                                          >
+                                            Nội dung câu hỏi:
+                                          </label>
+                                          <input
+                                            type="text"
+                                            data-testid={`edit-question-text-${idx}`}
+                                            value={editingQuestionDraft.question}
+                                            onChange={(e) =>
+                                              handleUpdateQuestionDraft((prev) => ({
+                                                ...prev,
+                                                question: e.target.value,
+                                              }))
+                                            }
+                                            style={{
+                                              width: '100%',
+                                              backgroundColor: 'var(--bg-input)',
+                                              border: '1px solid var(--border-strong)',
+                                              borderRadius: '6px',
+                                              padding: '0.4rem 0.6rem',
+                                              color: 'var(--text-primary)',
+                                              fontSize: '0.84rem',
+                                              boxSizing: 'border-box',
+                                            }}
+                                          />
+                                        </div>
+
+                                        {(effectiveQType === 'MULTIPLE_CHOICE' || effectiveQType === 'QUIZ') &&
+                                          editingQuestionDraft.choices && (
+                                            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.35rem' }}>
+                                              {editingQuestionDraft.choices.map((c, cIdx) => {
+                                                const isThisCorrect =
+                                                  stripOptionLetterPrefix(c) ===
+                                                    stripOptionLetterPrefix(editingQuestionDraft.correctAnswer) ||
+                                                  normalizeChoiceCompare(c) ===
+                                                    normalizeChoiceCompare(editingQuestionDraft.correctAnswer);
+                                                return (
+                                                  <div key={cIdx} style={{ display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+                                                    <input
+                                                      type="radio"
+                                                      name={`correct_q_${idx}`}
+                                                      data-testid={`edit-question-correct-radio-${idx}-${cIdx}`}
+                                                      checked={isThisCorrect}
+                                                      onChange={() =>
+                                                        handleUpdateQuestionDraft((prev) => ({
+                                                          ...prev,
+                                                          correctAnswer: c,
+                                                        }))
+                                                      }
+                                                      style={{ cursor: 'pointer' }}
+                                                    />
+                                                    <input
+                                                      type="text"
+                                                      data-testid={`edit-question-choice-${idx}-${cIdx}`}
+                                                      value={c}
+                                                      onChange={(e) => {
+                                                        const nextVal = e.target.value;
+                                                        handleUpdateQuestionDraft((prev) => {
+                                                          const newChoices = [...(prev.choices || [])];
+                                                          const oldChoice = newChoices[cIdx];
+                                                          newChoices[cIdx] = nextVal;
+                                                          const wasSelected =
+                                                            stripOptionLetterPrefix(oldChoice) ===
+                                                              stripOptionLetterPrefix(prev.correctAnswer) ||
+                                                            normalizeChoiceCompare(oldChoice) ===
+                                                              normalizeChoiceCompare(prev.correctAnswer);
+                                                          return {
+                                                            ...prev,
+                                                            choices: newChoices,
+                                                            correctAnswer: wasSelected ? nextVal : prev.correctAnswer,
+                                                          };
+                                                        });
+                                                      }}
+                                                      style={{
+                                                        flex: 1,
+                                                        backgroundColor: 'var(--bg-input)',
+                                                        border: '1px solid var(--border-strong)',
+                                                        borderRadius: '6px',
+                                                        padding: '0.35rem 0.5rem',
+                                                        color: 'var(--text-primary)',
+                                                        fontSize: '0.8rem',
+                                                        boxSizing: 'border-box',
+                                                      }}
+                                                    />
+                                                  </div>
+                                                );
+                                              })}
+                                            </div>
+                                          )}
+
+                                        {(effectiveQType === 'QUICK_BUTTON' || effectiveQType === 'TRUE_FALSE') && (
+                                          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                            {(['Đúng', 'Sai'] as const).map((tfVal) => {
+                                              const isSel =
+                                                normalizeChoiceCompare(editingQuestionDraft.correctAnswer) ===
+                                                normalizeChoiceCompare(tfVal);
+                                              return (
+                                                <button
+                                                  key={tfVal}
+                                                  type="button"
+                                                  data-testid={`edit-question-tf-${idx}-${tfVal}`}
+                                                  onClick={() =>
+                                                    handleUpdateQuestionDraft((prev) => ({
+                                                      ...prev,
+                                                      choices: ['Đúng', 'Sai'],
+                                                      correctAnswer: tfVal,
+                                                    }))
+                                                  }
+                                                  style={{
+                                                    flex: 1,
+                                                    padding: '0.4rem 0.65rem',
+                                                    borderRadius: '6px',
+                                                    border: isSel
+                                                      ? '2px solid var(--accent-emerald)'
+                                                      : '1px solid var(--border-strong)',
+                                                    backgroundColor: isSel
+                                                      ? 'rgba(16, 185, 129, 0.14)'
+                                                      : 'var(--bg-input)',
+                                                    color: isSel ? 'var(--accent-emerald)' : 'var(--text-primary)',
+                                                    fontWeight: 800,
+                                                    fontSize: '0.82rem',
+                                                    cursor: 'pointer',
+                                                  }}
+                                                >
+                                                  {tfVal}
+                                                </button>
+                                              );
+                                            })}
+                                          </div>
+                                        )}
+
+                                        {effectiveQType === 'PUZZLE' && (
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                                            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                                              Thứ tự chuẩn của các mục (3 - 6 mục):
+                                            </label>
+                                            {(editingQuestionDraft.choices || []).map((item, itemIdx) => (
+                                              <div key={itemIdx} style={{ display: 'flex', gap: '0.35rem', alignItems: 'center' }}>
+                                                <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--accent-sky)', minWidth: '22px' }}>
+                                                  #{itemIdx + 1}
+                                                </span>
+                                                <input
+                                                  type="text"
+                                                  value={item}
+                                                  onChange={(e) => {
+                                                    const nextVal = e.target.value;
+                                                    handleUpdateQuestionDraft((prev) => {
+                                                      const nextItems = [...(prev.choices || [])];
+                                                      nextItems[itemIdx] = nextVal;
+                                                      return {
+                                                        ...prev,
+                                                        choices: nextItems,
+                                                        correctAnswer: nextItems
+                                                          .map((s) => s.trim())
+                                                          .filter(Boolean)
+                                                          .join(' | '),
+                                                      };
+                                                    });
+                                                  }}
+                                                  style={{
+                                                    flex: 1,
+                                                    backgroundColor: 'var(--bg-input)',
+                                                    border: '1px solid var(--border-strong)',
+                                                    borderRadius: '6px',
+                                                    padding: '0.35rem 0.5rem',
+                                                    color: 'var(--text-primary)',
+                                                    fontSize: '0.8rem',
+                                                    boxSizing: 'border-box',
+                                                  }}
+                                                />
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+
+                                        {effectiveQType === 'SLIDER' && (
+                                          <div
+                                            style={{
+                                              display: 'grid',
+                                              gridTemplateColumns: 'repeat(auto-fit, minmax(115px, 1fr))',
+                                              gap: '0.45rem',
+                                              padding: '0.55rem',
+                                              borderRadius: '8px',
+                                              backgroundColor: 'var(--bg-card)',
+                                              border: '1px solid var(--border-subtle)',
+                                            }}
+                                          >
+                                            <div>
+                                              <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                                Min:
+                                              </label>
+                                              <input
+                                                type="number"
+                                                step="any"
+                                                value={editingQuestionDraft.sliderConfig?.min ?? 0}
+                                                onChange={(e) => {
+                                                  const minVal = Number(e.target.value);
+                                                  handleUpdateQuestionDraft((prev) => {
+                                                    const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                                    return {
+                                                      ...prev,
+                                                      sliderConfig: { ...cfg, min: Number.isFinite(minVal) ? minVal : 0 },
+                                                    };
+                                                  });
+                                                }}
+                                                style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                                              />
+                                            </div>
+                                            <div>
+                                              <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                                Max:
+                                              </label>
+                                              <input
+                                                type="number"
+                                                step="any"
+                                                value={editingQuestionDraft.sliderConfig?.max ?? 100}
+                                                onChange={(e) => {
+                                                  const maxVal = Number(e.target.value);
+                                                  handleUpdateQuestionDraft((prev) => {
+                                                    const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                                    return {
+                                                      ...prev,
+                                                      sliderConfig: { ...cfg, max: Number.isFinite(maxVal) ? maxVal : 100 },
+                                                    };
+                                                  });
+                                                }}
+                                                style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                                              />
+                                            </div>
+                                            <div>
+                                              <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                                Bước nhảy (Step):
+                                              </label>
+                                              <input
+                                                type="number"
+                                                step="any"
+                                                min={0.0001}
+                                                value={editingQuestionDraft.sliderConfig?.step ?? 1}
+                                                onChange={(e) => {
+                                                  const stepVal = Number(e.target.value);
+                                                  handleUpdateQuestionDraft((prev) => {
+                                                    const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                                    return {
+                                                      ...prev,
+                                                      sliderConfig: { ...cfg, step: Number.isFinite(stepVal) && stepVal > 0 ? stepVal : 1 },
+                                                    };
+                                                  });
+                                                }}
+                                                style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                                              />
+                                            </div>
+                                            <div>
+                                              <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 800, color: 'var(--accent-emerald)', marginBottom: '0.2rem' }}>
+                                                Giá trị đúng:
+                                              </label>
+                                              <input
+                                                type="number"
+                                                step="any"
+                                                value={editingQuestionDraft.sliderConfig?.correctValue ?? Number(editingQuestionDraft.correctAnswer || 0)}
+                                                onChange={(e) => {
+                                                  const cv = Number(e.target.value);
+                                                  const safeCv = Number.isFinite(cv) ? cv : 0;
+                                                  handleUpdateQuestionDraft((prev) => {
+                                                    const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                                    return {
+                                                      ...prev,
+                                                      sliderConfig: { ...cfg, correctValue: safeCv },
+                                                      correctAnswer: String(safeCv),
+                                                    };
+                                                  });
+                                                }}
+                                                style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--accent-emerald)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontWeight: 800, fontSize: '0.8rem', boxSizing: 'border-box' }}
+                                              />
+                                            </div>
+                                            <div>
+                                              <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                                Sai số (±):
+                                              </label>
+                                              <input
+                                                type="number"
+                                                step="any"
+                                                min={0}
+                                                value={editingQuestionDraft.sliderConfig?.tolerance ?? 0}
+                                                onChange={(e) => {
+                                                  const tolVal = Number(e.target.value);
+                                                  handleUpdateQuestionDraft((prev) => {
+                                                    const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                                    return {
+                                                      ...prev,
+                                                      sliderConfig: { ...cfg, tolerance: Number.isFinite(tolVal) && tolVal >= 0 ? tolVal : 0 },
+                                                    };
+                                                  });
+                                                }}
+                                                style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                                              />
+                                            </div>
+                                            <div>
+                                              <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                                Đơn vị (Unit):
+                                              </label>
+                                              <input
+                                                type="text"
+                                                placeholder="%, năm, °C..."
+                                                value={editingQuestionDraft.sliderConfig?.unit || ''}
+                                                onChange={(e) => {
+                                                  const unitVal = e.target.value;
+                                                  handleUpdateQuestionDraft((prev) => {
+                                                    const cfg = prev.sliderConfig || { min: 0, max: 100, step: 1, correctValue: 50, tolerance: 0 };
+                                                    return {
+                                                      ...prev,
+                                                      sliderConfig: { ...cfg, unit: unitVal },
+                                                    };
+                                                  });
+                                                }}
+                                                style={{ width: '100%', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-strong)', borderRadius: '6px', padding: '0.35rem 0.5rem', color: 'var(--text-primary)', fontSize: '0.8rem', boxSizing: 'border-box' }}
+                                              />
+                                            </div>
+                                          </div>
+                                        )}
+
+                                        {effectiveQType === 'CROSSWORD' && (
+                                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.45rem' }}>
+                                            <div>
+                                              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                                Gợi ý ô chữ (Clue):
+                                              </label>
+                                              <input
+                                                type="text"
+                                                data-testid={`edit-crossword-clue-${idx}`}
+                                                value={editingQuestionDraft.crosswordClue ?? editingQuestionDraft.question}
+                                                onChange={(e) =>
+                                                  handleUpdateQuestionDraft((prev) => ({
+                                                    ...prev,
+                                                    crosswordClue: e.target.value,
+                                                  }))
+                                                }
+                                                style={{
+                                                  width: '100%',
+                                                  backgroundColor: 'var(--bg-input)',
+                                                  border: '1px solid var(--border-strong)',
+                                                  borderRadius: '6px',
+                                                  padding: '0.4rem 0.6rem',
+                                                  color: 'var(--text-primary)',
+                                                  fontSize: '0.82rem',
+                                                  boxSizing: 'border-box',
+                                                }}
+                                              />
+                                            </div>
+                                            <div>
+                                              <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                                Từ khóa đáp án:
+                                              </label>
+                                              <input
+                                                type="text"
+                                                data-testid={`edit-question-answer-${idx}`}
+                                                value={editingQuestionDraft.crosswordAnswer ?? editingQuestionDraft.correctAnswer}
+                                                onChange={(e) =>
+                                                  handleUpdateQuestionDraft((prev) => ({
+                                                    ...prev,
+                                                    crosswordAnswer: e.target.value,
+                                                    correctAnswer: e.target.value,
+                                                  }))
+                                                }
+                                                style={{
+                                                  width: '100%',
+                                                  backgroundColor: 'var(--bg-input)',
+                                                  border: '1px solid var(--border-strong)',
+                                                  borderRadius: '6px',
+                                                  padding: '0.4rem 0.6rem',
+                                                  color: 'var(--text-primary)',
+                                                  fontSize: '0.82rem',
+                                                  boxSizing: 'border-box',
+                                                }}
+                                              />
+                                            </div>
+                                          </div>
+                                        )}
+
+                                        {(effectiveQType === 'FILL_IN_THE_BLANK' || effectiveQType === 'TYPE_ANSWER') && (
+                                          <div>
+                                            <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                              Từ/cụm từ cần điền (Đáp án đúng):
+                                            </label>
+                                            <input
+                                              type="text"
+                                              data-testid={`edit-question-answer-${idx}`}
+                                              value={editingQuestionDraft.correctAnswer}
+                                              onChange={(e) =>
+                                                handleUpdateQuestionDraft((prev) => ({
+                                                  ...prev,
+                                                  correctAnswer: e.target.value,
+                                                }))
+                                              }
+                                              style={{
+                                                width: '100%',
+                                                backgroundColor: 'var(--bg-input)',
+                                                border: '1px solid var(--border-strong)',
+                                                borderRadius: '6px',
+                                                padding: '0.4rem 0.6rem',
+                                                color: 'var(--text-primary)',
+                                                fontSize: '0.84rem',
+                                                boxSizing: 'border-box',
+                                              }}
+                                            />
+                                          </div>
+                                        )}
+
+                                        <div>
+                                          <label style={{ display: 'block', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                                            Giải thích đáp án:
+                                          </label>
+                                          <input
+                                            type="text"
+                                            data-testid={`edit-question-explanation-${idx}`}
+                                            value={editingQuestionDraft.explanation || ''}
+                                            onChange={(e) =>
+                                              handleUpdateQuestionDraft((prev) => ({
+                                                ...prev,
+                                                explanation: e.target.value,
+                                              }))
+                                            }
+                                            style={{
+                                              width: '100%',
+                                              backgroundColor: 'var(--bg-input)',
+                                              border: '1px solid var(--border-strong)',
+                                              borderRadius: '6px',
+                                              padding: '0.4rem 0.6rem',
+                                              color: 'var(--text-primary)',
+                                              fontSize: '0.84rem',
+                                              boxSizing: 'border-box',
+                                            }}
+                                          />
+                                        </div>
+
+                                        <div
+                                          style={{
+                                            display: 'flex',
+                                            justifyContent: 'flex-end',
+                                            gap: '0.45rem',
+                                            marginTop: '0.2rem',
+                                          }}
+                                        >
+                                          <button
+                                            type="button"
+                                            data-testid={`cancel-question-edit-btn-${idx}`}
+                                            onClick={handleCancelEditQuestion}
+                                            style={{
+                                              backgroundColor: 'var(--bg-input)',
+                                              color: 'var(--text-secondary)',
+                                              border: '1px solid var(--border-strong)',
+                                              borderRadius: '6px',
+                                              padding: '0.35rem 0.75rem',
+                                              fontWeight: 700,
+                                              fontSize: '0.8rem',
+                                              cursor: 'pointer',
+                                            }}
+                                          >
+                                            Hủy
+                                          </button>
+                                          <button
+                                            type="button"
+                                            data-testid={`save-question-edit-btn-${idx}`}
+                                            onClick={() => handleCommitQuestionEdit(idx)}
+                                            style={{
+                                              backgroundColor: 'var(--primary)',
+                                              color: 'var(--primary-ink)',
+                                              border: 'none',
+                                              borderRadius: '6px',
+                                              padding: '0.35rem 0.85rem',
+                                              fontWeight: 800,
+                                              fontSize: '0.8rem',
+                                              cursor: 'pointer',
+                                            }}
+                                          >
+                                            Lưu thay đổi
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Thanh phân trang danh sách câu hỏi */}
+                            {totalQuestionsCount > 0 && (
+                              <div
+                                data-testid="question-pagination-bar"
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  flexWrap: 'wrap',
+                                  gap: '0.5rem',
+                                  paddingTop: '0.45rem',
+                                  borderTop: '1px solid var(--border-subtle)',
+                                }}
+                              >
+                                <span style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                                  Hiển thị câu {pageStartIdx + 1}–{Math.min(pageStartIdx + QUESTIONS_PER_PAGE, totalQuestionsCount)} / {totalQuestionsCount}
+                                </span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                  <button
+                                    type="button"
+                                    data-testid="question-page-prev-btn"
+                                    disabled={safePage <= 1}
+                                    onClick={() => setQuestionPage(Math.max(1, safePage - 1))}
+                                    style={{
+                                      padding: '0.3rem 0.65rem',
+                                      borderRadius: '6px',
+                                      border: '1px solid var(--border-strong)',
+                                      backgroundColor: 'var(--bg-input)',
+                                      color: safePage <= 1 ? 'var(--text-muted)' : 'var(--text-primary)',
+                                      fontSize: '0.76rem',
+                                      fontWeight: 800,
+                                      cursor: safePage <= 1 ? 'not-allowed' : 'pointer',
+                                    }}
+                                  >
+                                    Trước
+                                  </button>
+                                  <span
+                                    data-testid="question-page-indicator"
+                                    style={{
+                                      fontSize: '0.78rem',
+                                      fontWeight: 800,
+                                      color: 'var(--text-primary)',
+                                      padding: '0 0.35rem',
+                                    }}
+                                  >
+                                    Trang {safePage} / {totalPages}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    data-testid="question-page-next-btn"
+                                    disabled={safePage >= totalPages}
+                                    onClick={() => setQuestionPage(Math.min(totalPages, safePage + 1))}
+                                    style={{
+                                      padding: '0.3rem 0.65rem',
+                                      borderRadius: '6px',
+                                      border: '1px solid var(--border-strong)',
+                                      backgroundColor: 'var(--bg-input)',
+                                      color: safePage >= totalPages ? 'var(--text-muted)' : 'var(--text-primary)',
+                                      fontSize: '0.76rem',
+                                      fontWeight: 800,
+                                      cursor: safePage >= totalPages ? 'not-allowed' : 'pointer',
+                                    }}
+                                  >
+                                    Tiếp
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
-            </div>
-          )}
+          </div>
         </div>
       </div>
+
+      {/* CHẾ ĐỘ CHƠI THỬ (PLAYTEST OVERLAY — 100% TÁCH BIỆT DỮ LIỆU THẬT) */}
+      {isPlaytestOpen && playtestSpec && (
+        <div
+          data-testid="playtest-overlay"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1200,
+            backgroundColor: 'var(--bg-app, #0f172a)',
+            overflowY: 'auto',
+            padding: '1rem',
+            boxSizing: 'border-box',
+          }}
+        >
+          <SoloPlayer
+            key={`playtest_${playtestSpec.gameId}`}
+            initialSpec={playtestSpec}
+            playtestMode={true}
+            onLeave={handleExitPlaytest}
+          />
+        </div>
+      )}
       {/* MODAL CHỌN CHẾ ĐỘ CHƠI (CHƠI ĐƠN VS MULTIPLAYER) */}
       <GameModeSelectionModal
         isOpen={isModeModalOpen}
