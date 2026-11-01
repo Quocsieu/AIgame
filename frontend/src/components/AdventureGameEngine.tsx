@@ -816,6 +816,8 @@ export interface AdventureGameEngineProps {
   onRestartLiveSession?: () => Promise<void> | void;
   onExit: () => void;
   onOpenConfigTab?: () => void;
+  isPlaytest?: boolean;
+  onCheckpointModalChange?: (isOpen: boolean, stageIndex: number) => void;
 }
 
 export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
@@ -828,6 +830,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   currentQuestion,
   currentQuestionIndex = 0,
   totalQuestions,
+  timeRemaining,
   liveScore = 0,
   liveCorrectCount = 0,
   questionFeedback = null,
@@ -844,6 +847,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   onRestartSession,
   onRestartLiveSession,
   onExit,
+  isPlaytest = false,
+  onCheckpointModalChange,
 }) => {
   const effectiveOnStartSession = onStartSession || onStartLiveSession;
   const effectiveOnSubmitAnswer = onSubmitAnswer || onSubmitLiveAnswer;
@@ -989,19 +994,6 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     };
   }, [resolvedAssets, effectiveConfig.industryLabel]);
 
-  // Lock underlying page scroll while full-viewport Adventure engine is mounted
-  useEffect(() => {
-    if (typeof document === 'undefined') return;
-    const prevBodyOverflow = document.body.style.overflow;
-    const prevHtmlOverflow = document.documentElement.style.overflow;
-    document.body.style.overflow = 'hidden';
-    document.documentElement.style.overflow = 'hidden';
-    return () => {
-      document.body.style.overflow = prevBodyOverflow;
-      document.documentElement.style.overflow = prevHtmlOverflow;
-    };
-  }, []);
-
   // Gameplay states
   const [isJourneyStarted, setIsJourneyStarted] = useState<boolean>(() => Boolean(sessionStarted));
   const [isPaused, setIsPaused] = useState<boolean>(false);
@@ -1114,6 +1106,16 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   const isJourneyFinished =
     mode === 'LIVE_SESSION' ? Boolean(isSessionFinished || effectiveFinalResult) : previewFinished;
   const activeModalOpen = checkpointModalOpen && !isJourneyFinished;
+
+  useEffect(() => {
+    onCheckpointModalChange?.(activeModalOpen, activeStageIndex);
+  }, [activeModalOpen, activeStageIndex, onCheckpointModalChange]);
+
+  useEffect(() => {
+    if (isJourneyFinished) {
+      setJourneyProgressPercent(100);
+    }
+  }, [isJourneyFinished]);
 
   // Reset question input controls when activeQuestion changes
   useEffect(() => {
@@ -1232,6 +1234,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             fullQ.explanation ||
             'Đã đối chiếu đáp án tại trạm kiểm tra theo nội dung nguồn.',
         });
+      } catch (err) {
+        submittedStageIndicesRef.current.delete(activeStageIndex);
+        throw err;
       } finally {
         submittingStageLockRef.current = false;
       }
@@ -1670,6 +1675,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         height: '100dvh',
         zIndex: 50,
         overflow: 'hidden',
+        overscrollBehavior: 'contain',
         backgroundColor: '#090d16',
         fontFamily: 'var(--font-sans, "Be Vietnam Pro", system-ui, sans-serif)',
         userSelect: 'none',
@@ -1800,9 +1806,31 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             display: 'flex',
             alignItems: 'center',
             gap: '8px',
+            flexWrap: 'wrap',
             pointerEvents: 'auto',
           }}
         >
+          {isPlaytest && (
+            <div
+              data-testid="playtest-mode-banner"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                height: '38px',
+                padding: '0 12px',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(245, 158, 11, 0.18)',
+                border: '1.5px solid rgba(245, 158, 11, 0.5)',
+                color: '#fbbf24',
+                fontSize: '11.5px',
+                fontWeight: 900,
+                letterSpacing: '0.03em',
+              }}
+            >
+              <span>CHẾ ĐỘ CHƠI THỬ</span>
+            </div>
+          )}
           {isJourneyStarted && !isJourneyFinished && assetLoadStatus === 'READY' && (
             <button
               type="button"
@@ -1821,6 +1849,26 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               }}
             >
               {isPaused ? 'Tiếp tục' : 'Tạm dừng'}
+            </button>
+          )}
+          {isPlaytest && (
+            <button
+              type="button"
+              data-testid="exit-playtest-btn"
+              onClick={handleExitGame}
+              style={{
+                height: '38px',
+                padding: '0 14px',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                border: '1.5px solid rgba(245, 158, 11, 0.55)',
+                color: '#fde68a',
+                fontSize: '12.5px',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              Thoát chơi thử
             </button>
           )}
           <button
@@ -2251,9 +2299,31 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                             : activeQuestion.type}
                   </span>
                 </div>
-                <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
-                  Nhân vật đã dừng — Trả lời để mở cổng đi tiếp
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  {mode === 'LIVE_SESSION' && typeof timeRemaining === 'number' && !activeFeedback && (
+                    <span
+                      data-testid="checkpoint-timer-badge"
+                      style={{
+                        padding: '2px 9px',
+                        borderRadius: '999px',
+                        fontSize: '12px',
+                        fontWeight: 900,
+                        backgroundColor:
+                          timeRemaining <= 5
+                            ? 'rgba(239, 68, 68, 0.2)'
+                            : 'rgba(245, 158, 11, 0.18)',
+                        border: `1px solid ${timeRemaining <= 5 ? '#ef4444' : '#f59e0b'}`,
+                        color: timeRemaining <= 5 ? '#fca5a5' : '#fde68a',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      ⏱ {timeRemaining}s
+                    </span>
+                  )}
+                  <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
+                    Nhân vật đã dừng — Trả lời để mở cổng đi tiếp
+                  </span>
+                </div>
               </div>
 
               <div

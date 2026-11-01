@@ -42,6 +42,35 @@ function normalizePlaytestToken(value: string): string {
     .replace(/\s+/g, ' ');
 }
 
+function stripPlaytestOptionPrefix(value: string): string {
+  return String(value ?? '')
+    .trim()
+    .replace(/^[A-Da-d1-4][\.\)\:\-]\s*/, '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, ' ');
+}
+
+function normalizePlaytestCrosswordAscii(value: string): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+}
+
+function normalizePlaytestTrueFalsePolarity(value: string): 'TRUE' | 'FALSE' | null {
+  const clean = stripPlaytestOptionPrefix(value);
+  if (['đúng', 'dung', 'true', 'yes', 'có', 'co', 'chính xác', 'chinh xac', '1'].includes(clean)) {
+    return 'TRUE';
+  }
+  if (['sai', 'false', 'no', 'không', 'khong', 'không đúng', 'khong dung', '0'].includes(clean)) {
+    return 'FALSE';
+  }
+  return null;
+}
+
 function shufflePlaytestPuzzleChoices(choices: string[], seedStr: string): string[] {
   const arr = [...choices];
   if (arr.length <= 1) return arr;
@@ -137,20 +166,71 @@ function evaluatePlaytestAnswer(
   }
 
   if (effectiveType === 'CROSSWORD') {
-    const expectedWord = (q.crosswordAnswer || q.correctAnswer || '')
-      .trim()
-      .toLowerCase()
-      .replace(/\s+/g, '');
-    const actualWord = trimmed.toLowerCase().replace(/\s+/g, '');
-    return Boolean(expectedWord) && actualWord === expectedWord;
+    const rawTarget = q.crosswordAnswer || q.correctAnswer || '';
+    const acceptedWords = rawTarget
+      .split(/[|;]/)
+      .map((part) => normalizePlaytestCrosswordAscii(part))
+      .filter(Boolean);
+    const actualNorm = normalizePlaytestCrosswordAscii(trimmed);
+    if (actualNorm.length === 0) return false;
+    if (acceptedWords.includes(actualNorm)) return true;
+    const expectedRaw = rawTarget.trim().toLowerCase().replace(/\s+/g, '');
+    const actualRaw = trimmed.toLowerCase().replace(/\s+/g, '');
+    return Boolean(expectedRaw) && actualRaw === expectedRaw;
+  }
+
+  if (effectiveType === 'QUICK_BUTTON' || effectiveType === 'TRUE_FALSE') {
+    const normSub = normalizePlaytestToken(trimmed);
+    const strippedSub = stripPlaytestOptionPrefix(trimmed);
+    const normCorrect = normalizePlaytestToken(q.correctAnswer);
+    const strippedCorrect = stripPlaytestOptionPrefix(q.correctAnswer);
+    if (normSub === normCorrect || (strippedSub && strippedSub === strippedCorrect)) {
+      return true;
+    }
+    const subPol = normalizePlaytestTrueFalsePolarity(trimmed);
+    const corrPol = normalizePlaytestTrueFalsePolarity(q.correctAnswer);
+    if (subPol && corrPol) {
+      return subPol === corrPol;
+    }
+  }
+
+  if (effectiveType === 'MULTIPLE_CHOICE' || effectiveType === 'QUIZ') {
+    const normSub = normalizePlaytestToken(trimmed);
+    const strippedSub = stripPlaytestOptionPrefix(trimmed);
+    const normCorrect = normalizePlaytestToken(q.correctAnswer);
+    const strippedCorrect = stripPlaytestOptionPrefix(q.correctAnswer);
+    if (normSub === normCorrect || (strippedSub && strippedSub === strippedCorrect)) {
+      return true;
+    }
+    if (Array.isArray(q.choices) && q.choices.length > 0) {
+      const upperKey = q.correctAnswer.trim().toUpperCase();
+      const letterIdx = ['A', 'B', 'C', 'D'].indexOf(upperKey);
+      if (letterIdx >= 0 && letterIdx < q.choices.length) {
+        const targetChoice = q.choices[letterIdx];
+        if (
+          normalizePlaytestToken(targetChoice) === normSub ||
+          stripPlaytestOptionPrefix(targetChoice) === strippedSub
+        ) {
+          return true;
+        }
+      }
+    }
   }
 
   const normalizedSubmitted = normalizePlaytestToken(trimmed);
-  const candidates = [q.correctAnswer, ...(q.acceptedAlternatives || [])]
-    .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-    .map(normalizePlaytestToken);
+  const strippedSubmitted = stripPlaytestOptionPrefix(trimmed);
+  const rawCandidates = [
+    ...(q.correctAnswer ? q.correctAnswer.split(/[|;]/) : []),
+    q.correctAnswer,
+    ...(q.acceptedAlternatives || []),
+  ].filter((item): item is string => typeof item === 'string' && item.trim().length > 0);
+  const candidates = rawCandidates.map(normalizePlaytestToken);
+  const strippedCandidates = rawCandidates.map(stripPlaytestOptionPrefix);
 
-  return candidates.includes(normalizedSubmitted);
+  return (
+    candidates.includes(normalizedSubmitted) ||
+    (Boolean(strippedSubmitted) && strippedCandidates.includes(strippedSubmitted))
+  );
 }
 
 function calculatePlaytestPoints(
@@ -325,7 +405,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       setSessionId('playtest-local-session');
       const firstQ = buildPlaytestClientQuestion(spec, 0);
       setCurrentQuestion(firstQ);
-      startCountdown(firstQ.timePerQuestion || 20);
+      if (spec.gameType === 'ADVENTURE') {
+        setTimeLeft(firstQ.timePerQuestion || 20);
+        setIsQuestionTimedOut(false);
+      } else {
+        startCountdown(firstQ.timePerQuestion || 20);
+      }
       setIsLoading(false);
       return;
     }
@@ -464,8 +549,79 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     };
   }, [gameId, initialSpec]);
 
+  const handleAdventureCheckpointModalChange = React.useCallback(
+    (isOpen: boolean) => {
+      const spec = loadedSpec || initialSpec;
+      if (spec?.gameType !== 'ADVENTURE') return;
+      if (isOpen) {
+        if (!questionFeedback) {
+          playtestQuestionStartedAtRef.current = Date.now();
+          setIsQuestionTimedOut(false);
+          const qTime =
+            currentQuestion?.timePerQuestion || spec.settings?.timePerQuestion || 20;
+          startCountdown(qTime);
+        }
+      } else {
+        stopTimer();
+      }
+    },
+    [loadedSpec, initialSpec, questionFeedback, currentQuestion?.timePerQuestion]
+  );
+
+  // Tự động tạo phản hồi hết giờ tại trạm kiểm tra trong Adventure Playtest để không bao giờ bị kẹt modal
+  useEffect(() => {
+    const spec = loadedSpec || initialSpec;
+    if (
+      !playtestMode ||
+      spec?.gameType !== 'ADVENTURE' ||
+      !isQuestionTimedOut ||
+      !currentQuestion ||
+      questionFeedback
+    ) {
+      return;
+    }
+    const rawQ =
+      spec.questions[currentQuestion.questionIndex] ||
+      spec.questions.find((item) => item.id === currentQuestion.id);
+    if (!rawQ) return;
+    const effectiveType = rawQ.type || spec.gameType;
+    const displayCorrectAnswer =
+      effectiveType === 'CROSSWORD'
+        ? rawQ.crosswordAnswer || rawQ.correctAnswer
+        : effectiveType === 'SLIDER' && rawQ.sliderConfig
+          ? `${rawQ.sliderConfig.correctValue}${rawQ.sliderConfig.unit ? ` ${rawQ.sliderConfig.unit}` : ''}`
+          : rawQ.correctAnswer;
+    const timeoutRes: PracticeQuestionResult = {
+      questionId: currentQuestion.id,
+      answer: '',
+      isCorrect: false,
+      pointsEarned: 0,
+      responseTimeMs: (currentQuestion.timePerQuestion || spec.settings?.timePerQuestion || 20) * 1000,
+      answeredAt: new Date().toISOString(),
+      correctAnswer: displayCorrectAnswer,
+      explanation:
+        rawQ.explanation ||
+        'Đã hết thời gian trả lời tại trạm kiểm tra (+0 điểm). Hãy nhấn Tiếp tục hành trình để mở cổng đi tiếp.',
+      sourceReference: rawQ.sourceReference,
+    };
+    answeredQuestionIdsRef.current.add(currentQuestion.id);
+    setQuestionFeedback(timeoutRes);
+    setIsQuestionTimedOut(false);
+    setPlayerStreak(0);
+    setPlayerWrongCount((prev) => prev + 1);
+  }, [playtestMode, loadedSpec, initialSpec, isQuestionTimedOut, currentQuestion, questionFeedback]);
+
   const handleSubmitAnswer = async (answerVal?: string) => {
-    if (!sessionId || !currentQuestion || questionFeedback || isQuestionTimedOut || isSubmitting || submittingLockRef.current || answeredQuestionIdsRef.current.has(currentQuestion.id)) return;
+    if (
+      !sessionId ||
+      !currentQuestion ||
+      questionFeedback ||
+      (!playtestMode && isQuestionTimedOut) ||
+      isSubmitting ||
+      submittingLockRef.current ||
+      answeredQuestionIdsRef.current.has(currentQuestion.id)
+    )
+      return;
 
     const finalAnswer = (answerVal !== undefined ? answerVal : (selectedChoice || textAnswerInput)).trim();
     if (!finalAnswer) {
@@ -630,7 +786,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           playtestQuestionStartedAtRef.current = Date.now();
           const nextQ = buildPlaytestClientQuestion(spec, nextIdx);
           setCurrentQuestion(nextQ);
-          startCountdown(nextQ.timePerQuestion || 20);
+          if (spec.gameType === 'ADVENTURE') {
+            stopTimer();
+            setTimeLeft(nextQ.timePerQuestion || 20);
+            setIsQuestionTimedOut(false);
+          } else {
+            startCountdown(nextQ.timePerQuestion || 20);
+          }
         }
         return;
       }
@@ -836,7 +998,6 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   if (activeGameSpec && activeGameSpec.gameType === 'ADVENTURE') {
     return (
       <div className="w-full h-full">
-        {playtestBanner}
         <AdventureGameEngine
           key={activeGameSpec.gameId}
           game={activeGameSpec}
@@ -861,6 +1022,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           finalResult={finalResult}
           onRestartSession={() => initializeSession('RESTART')}
           onExit={handleLeave}
+          isPlaytest={playtestMode}
+          onCheckpointModalChange={handleAdventureCheckpointModalChange}
         />
       </div>
     );
@@ -1410,7 +1573,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 <button
                   type="button"
                   disabled={isSubmitting}
-                  onClick={() => handleSubmitAnswer('Đúng')}
+                  onClick={() =>
+                    handleSubmitAnswer(currentQuestion.choices?.[0] || 'Đúng')
+                  }
                   className="k-btn k-btn-green"
                   style={{
                     minHeight: '74px',
@@ -1426,12 +1591,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                   }}
                 >
                   <CheckIcon size={26} />
-                  <span>ĐÚNG</span>
+                  <span>{currentQuestion.choices?.[0] || 'ĐÚNG'}</span>
                 </button>
                 <button
                   type="button"
                   disabled={isSubmitting}
-                  onClick={() => handleSubmitAnswer('Sai')}
+                  onClick={() =>
+                    handleSubmitAnswer(currentQuestion.choices?.[1] || 'Sai')
+                  }
                   className="k-btn k-btn-red"
                   style={{
                     minHeight: '74px',
@@ -1447,7 +1614,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                   }}
                 >
                   <XMarkIcon size={26} />
-                  <span>SAI</span>
+                  <span>{currentQuestion.choices?.[1] || 'SAI'}</span>
                 </button>
               </div>
             )}
@@ -1774,14 +1941,109 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                   e.preventDefault();
                   handleSubmitAnswer();
                 }}
-                style={{ maxWidth: '520px', margin: '0 auto' }}
+                style={{ maxWidth: '560px', margin: '0 auto' }}
               >
+                {currentQuestion.type === 'CROSSWORD' && (
+                  <div
+                    data-testid="solo-crossword-box"
+                    style={{
+                      marginBottom: '1rem',
+                      padding: '0.9rem 1rem',
+                      borderRadius: '14px',
+                      backgroundColor: 'var(--bg-input)',
+                      border: '1.5px solid var(--border-subtle)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      gap: '0.65rem',
+                    }}
+                  >
+                    {currentQuestion.crosswordClue &&
+                      currentQuestion.crosswordClue.trim() !== currentQuestion.question.trim() && (
+                        <div
+                          style={{
+                            fontSize: '0.92rem',
+                            color: 'var(--text-secondary)',
+                            fontWeight: 700,
+                            lineHeight: 1.45,
+                          }}
+                        >
+                          <strong style={{ color: 'var(--primary)' }}>Gợi ý ô chữ:</strong>{' '}
+                          {currentQuestion.crosswordClue}
+                        </div>
+                      )}
+                    {typeof currentQuestion.crosswordWordLength === 'number' &&
+                      currentQuestion.crosswordWordLength > 0 &&
+                      currentQuestion.crosswordWordLength <= 24 && (
+                        <>
+                          <div
+                            style={{
+                              fontSize: '0.8rem',
+                              fontWeight: 800,
+                              color: 'var(--text-muted)',
+                            }}
+                          >
+                            Từ khóa gồm {currentQuestion.crosswordWordLength} chữ cái:
+                          </div>
+                          <div
+                            data-testid="solo-crossword-slots"
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              justifyContent: 'center',
+                              gap: '0.4rem',
+                            }}
+                          >
+                            {Array.from({ length: currentQuestion.crosswordWordLength }).map(
+                              (_, slotIdx) => {
+                                const typedNorm = normalizePlaytestCrosswordAscii(textAnswerInput);
+                                const ch = typedNorm[slotIdx] || '';
+                                return (
+                                  <span
+                                    key={slotIdx}
+                                    style={{
+                                      width: '36px',
+                                      height: '40px',
+                                      borderRadius: '8px',
+                                      backgroundColor: 'var(--bg-surface)',
+                                      border: `2px solid ${
+                                        ch ? 'var(--primary)' : 'var(--border-strong)'
+                                      }`,
+                                      color: 'var(--text-primary)',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      fontSize: '1rem',
+                                      fontWeight: 900,
+                                    }}
+                                  >
+                                    {ch || '_'}
+                                  </span>
+                                );
+                              }
+                            )}
+                          </div>
+                        </>
+                      )}
+                  </div>
+                )}
                 <div style={{ display: 'flex', gap: '0.65rem' }}>
                   <input
                     type="text"
+                    data-testid="solo-text-answer-input"
                     value={textAnswerInput}
-                    onChange={(e) => setTextAnswerInput(e.target.value)}
-                    placeholder="Nhập câu trả lời của bạn..."
+                    onChange={(e) =>
+                      setTextAnswerInput(
+                        currentQuestion.type === 'CROSSWORD'
+                          ? e.target.value.toUpperCase()
+                          : e.target.value
+                      )
+                    }
+                    placeholder={
+                      currentQuestion.type === 'CROSSWORD'
+                        ? 'Nhập từ khóa ô chữ (VD: ANTOAN)...'
+                        : 'Nhập câu trả lời của bạn...'
+                    }
                     disabled={isSubmitting}
                     autoFocus
                     style={{
@@ -1799,6 +2061,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                   />
                   <button
                     type="submit"
+                    data-testid="solo-submit-answer-btn"
                     disabled={isSubmitting || !textAnswerInput.trim()}
                     style={{
                       minHeight: '48px',
@@ -1813,7 +2076,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                       opacity: isSubmitting || !textAnswerInput.trim() ? 0.6 : 1,
                     }}
                   >
-                    Gửi
+                    {currentQuestion.type === 'CROSSWORD' ? 'Giải Ô Chữ' : 'Gửi'}
                   </button>
                 </div>
               </form>

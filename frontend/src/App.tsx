@@ -329,7 +329,6 @@ export const AppContent: React.FC = () => {
   };
 
   const handleNavigateToCreate = (type?: GameType, sourceTab?: 'URL' | 'FILE' | 'TOPIC') => {
-    setSelectedSavedSpec(null);
     setSelectedSourceTab(sourceTab);
     if (type) {
       setSelectedGameType(type);
@@ -654,6 +653,7 @@ export const AppContent: React.FC = () => {
                 }}
                 onNavigateToSoloPresentation={handleNavigateToSoloPresentation}
                 initialSpec={selectedSavedSpec}
+                onCurrentSpecChange={setSelectedSavedSpec}
                 initialGameType={selectedGameType}
                 initialSourceTab={selectedSourceTab}
                 onNavigateToLibrary={() => handleNavigateToLibrary()}

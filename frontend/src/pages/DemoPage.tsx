@@ -76,6 +76,7 @@ interface DemoPageProps {
   onNavigateToSoloPlay?: (spec: GameSpecification) => void;
   onNavigateToSoloPresentation?: (spec: GameSpecification) => void;
   initialSpec?: GameSpecification | null;
+  onCurrentSpecChange?: (spec: GameSpecification | null) => void;
   autoStartSoloPlay?: boolean;
   onExitSoloPlay?: () => void;
   onNavigateToLibrary?: () => void;
@@ -83,6 +84,60 @@ interface DemoPageProps {
   initialSourceTab?: 'URL' | 'FILE' | 'TOPIC';
   onBackToHome?: () => void;
 }
+
+const CREATOR_CURRENT_SESSION_KEY = 'ai_game_creator_current_session_v1';
+
+interface CreatorSessionSnapshot {
+  spec: GameSpecification;
+  saveStatus: 'unsaved' | 'saved' | 'dirty';
+  savedForLater: boolean;
+  customGameTitle: string;
+}
+
+const readCreatorSessionSnapshot = (): CreatorSessionSnapshot | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.sessionStorage.getItem(CREATOR_CURRENT_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (
+      parsed &&
+      parsed.spec &&
+      typeof parsed.spec.gameId === 'string' &&
+      Array.isArray(parsed.spec.questions) &&
+      parsed.spec.questions.length > 0
+    ) {
+      return {
+        spec: parsed.spec as GameSpecification,
+        saveStatus:
+          parsed.saveStatus === 'saved' || parsed.saveStatus === 'dirty'
+            ? parsed.saveStatus
+            : 'unsaved',
+        savedForLater: Boolean(parsed.savedForLater),
+        customGameTitle:
+          typeof parsed.customGameTitle === 'string' && parsed.customGameTitle.trim().length > 0
+            ? parsed.customGameTitle
+            : parsed.spec.title || '',
+      };
+    }
+  } catch {
+    // Ignore sessionStorage read errors
+  }
+  return null;
+};
+
+const writeCreatorSessionSnapshot = (snapshot: CreatorSessionSnapshot | null): void => {
+  if (typeof window === 'undefined') return;
+  try {
+    if (!snapshot) {
+      window.sessionStorage.removeItem(CREATOR_CURRENT_SESSION_KEY);
+    } else {
+      window.sessionStorage.setItem(CREATOR_CURRENT_SESSION_KEY, JSON.stringify(snapshot));
+    }
+  } catch {
+    // Ignore sessionStorage quota/write errors
+  }
+};
 
 const MAX_URLS = 5;
 const MAX_FILES = 5;
@@ -285,6 +340,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   onNavigateToSoloPlay,
   onNavigateToSoloPresentation,
   initialSpec,
+  onCurrentSpecChange,
   autoStartSoloPlay,
   onExitSoloPlay,
   onNavigateToLibrary,
@@ -293,6 +349,26 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   onBackToHome,
 }) => {
   const toast = useToast();
+  const initialSessionSnapRef = useRef<CreatorSessionSnapshot | null>(readCreatorSessionSnapshot());
+  const effectiveBootSpec: GameSpecification | null =
+    initialSpec &&
+    initialSessionSnapRef.current &&
+    initialSessionSnapRef.current.spec.gameId === initialSpec.gameId
+      ? initialSessionSnapRef.current.spec
+      : initialSpec || initialSessionSnapRef.current?.spec || null;
+  const effectiveBootSaveStatus: 'unsaved' | 'saved' | 'dirty' =
+    initialSpec &&
+    (!initialSessionSnapRef.current ||
+      initialSessionSnapRef.current.spec.gameId !== initialSpec.gameId)
+      ? 'saved'
+      : initialSessionSnapRef.current?.saveStatus || (initialSpec ? 'saved' : 'unsaved');
+  const effectiveBootSavedForLater: boolean =
+    initialSpec &&
+    (!initialSessionSnapRef.current ||
+      initialSessionSnapRef.current.spec.gameId !== initialSpec.gameId)
+      ? true
+      : Boolean(initialSessionSnapRef.current?.savedForLater || initialSpec);
+  const syncedGameIdRef = useRef<string | null>(effectiveBootSpec?.gameId || null);
 
   // Multi-source state (Batch 4 & Batch 8)
   const [urls, setUrls] = useState<string[]>(['']);
@@ -306,10 +382,19 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   }, [initialSourceTab]);
 
   // Tên game bắt buộc
-  const [customGameTitle, setCustomGameTitle] = useState('');
+  const [customGameTitle, setCustomGameTitle] = useState(
+    () =>
+      (effectiveBootSpec
+        ? initialSessionSnapRef.current?.spec.gameId === effectiveBootSpec.gameId
+          ? initialSessionSnapRef.current.customGameTitle
+          : effectiveBootSpec.title
+        : '') || ''
+  );
 
   // AI configuration state (Batch 4 & Batch 5)
-  const [gameType, setGameType] = useState<GameType>(initialGameType || 'MULTIPLE_CHOICE');
+  const [gameType, setGameType] = useState<GameType>(
+    () => initialGameType || effectiveBootSpec?.gameType || 'MULTIPLE_CHOICE'
+  );
 
   useEffect(() => {
     if (initialGameType) {
@@ -317,32 +402,46 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }
   }, [initialGameType]);
   const [difficulty, setDifficulty] = useState<Difficulty>('MEDIUM');
-  const [scoringMode, setScoringMode] = useState<ScoringMode>('STANDARD');
-  const [questionCount, setQuestionCount] = useState(5);
-  const [timePerQuestion, setTimePerQuestion] = useState(20);
+  const [scoringMode, setScoringMode] = useState<ScoringMode>(
+    () => effectiveBootSpec?.settings?.scoringMode || 'STANDARD'
+  );
+  const [questionCount, setQuestionCount] = useState(
+    () => effectiveBootSpec?.questions?.length || 5
+  );
+  const [timePerQuestion, setTimePerQuestion] = useState(
+    () => effectiveBootSpec?.settings?.timePerQuestion || 20
+  );
   const [topicFocus, setTopicFocus] = useState('');
   const [selectedSections, setSelectedSections] = useState<string[]>([]);
-  const [mixedDistribution, setMixedDistribution] = useState<MixedQuestionDistribution>({
-    MULTIPLE_CHOICE: 40,
-    QUICK_BUTTON: 20,
-    FILL_IN_THE_BLANK: 20,
-    CROSSWORD: 20,
-  });
+  const [mixedDistribution, setMixedDistribution] = useState<MixedQuestionDistribution>(() =>
+    effectiveBootSpec?.settings?.mixedDistribution || {
+      MULTIPLE_CHOICE: 40,
+      QUICK_BUTTON: 20,
+      FILL_IN_THE_BLANK: 20,
+      CROSSWORD: 20,
+    }
+  );
 
   const [ingestedSources, setIngestedSources] = useState<IngestedSource[]>([]);
-  const [generatedSpec, setGeneratedSpec] = useState<GameSpecification | null>(null);
+  const [generatedSpec, setGeneratedSpec] = useState<GameSpecification | null>(
+    () => effectiveBootSpec
+  );
   const [editingQuestionIdx, setEditingQuestionIdx] = useState<number | null>(null);
   const [editingQuestionDraft, setEditingQuestionDraft] = useState<GameQuestion | null>(null);
   const [editingQuestionError, setEditingQuestionError] = useState<string | null>(null);
   const [questionPage, setQuestionPage] = useState<number>(1);
   const [isQuestionListCollapsed, setIsQuestionListCollapsed] = useState<boolean>(false);
-  const [saveStatus, setSaveStatus] = useState<'unsaved' | 'saving' | 'saved' | 'dirty' | 'error'>('unsaved');
+  const [saveStatus, setSaveStatus] = useState<'unsaved' | 'saving' | 'saved' | 'dirty' | 'error'>(
+    () => effectiveBootSaveStatus
+  );
   const [saveErrorMessage, setSaveErrorMessage] = useState<string | null>(null);
   const [isPlaytestOpen, setIsPlaytestOpen] = useState<boolean>(false);
   const [playtestSpec, setPlaytestSpec] = useState<GameSpecification | null>(null);
   const QUESTIONS_PER_PAGE = 10;
 
-  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(1);
+  const [currentStep, setCurrentStep] = useState<1 | 2 | 3 | 4 | 5>(() =>
+    effectiveBootSpec ? 4 : 1
+  );
 
   const [roomCode, setRoomCode] = useState('');
   const [hostToken, setHostToken] = useState('');
@@ -364,26 +463,35 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   // the9bit Creator Studio UX enhancements (Gate 3.2 & 3.3)
   const [isAdvancedSettingsOpen, setIsAdvancedSettingsOpen] = useState(false);
   const [showQuestionEditor, setShowQuestionEditor] = useState(false);
-  const [savedForLater, setSavedForLater] = useState(false);
+  const [savedForLater, setSavedForLater] = useState(() => effectiveBootSavedForLater);
   const [adventureIndustryMode, setAdventureIndustryMode] = useState<'AI_DETECT' | IndustryId>('AI_DETECT');
   const [customIndustryName, setCustomIndustryName] = useState<string>('');
   const [customSubEnvironment, setCustomSubEnvironment] = useState<string>('');
   const [adventureConfig, setAdventureConfig] = useState<AdventureConfig>(() =>
-    buildDefaultAdventureConfig('theme_edu_campus', 5)
+    effectiveBootSpec?.settings?.adventureConfig
+      ? syncAdventureStagesWithQuestions(
+          effectiveBootSpec.settings.adventureConfig,
+          effectiveBootSpec.questions
+        )
+      : buildDefaultAdventureConfig('theme_edu_campus', 5)
   );
   const [isReanalyzingAdventure, setIsReanalyzingAdventure] = useState<boolean>(false);
   const [showAdventureFullscreenPreview, setShowAdventureFullscreenPreview] = useState<boolean>(false);
-  const [adventureQuestionTypes, setAdventureQuestionTypes] = useState<QuestionType[]>([
-    'MULTIPLE_CHOICE',
-    'QUICK_BUTTON',
-  ]);
+  const [adventureQuestionTypes, setAdventureQuestionTypes] = useState<QuestionType[]>(() =>
+    Array.isArray(effectiveBootSpec?.settings?.adventureConfig?.questionTypes) &&
+    effectiveBootSpec!.settings.adventureConfig!.questionTypes.length > 0
+      ? effectiveBootSpec!.settings.adventureConfig!.questionTypes
+      : ['MULTIPLE_CHOICE', 'QUICK_BUTTON']
+  );
   const [adventureQuestionDistribution, setAdventureQuestionDistribution] =
-    useState<MixedQuestionDistribution>({
-      MULTIPLE_CHOICE: 50,
-      QUICK_BUTTON: 50,
-      FILL_IN_THE_BLANK: 0,
-      CROSSWORD: 0,
-    });
+    useState<MixedQuestionDistribution>(() =>
+      effectiveBootSpec?.settings?.adventureConfig?.questionDistribution || {
+        MULTIPLE_CHOICE: 50,
+        QUICK_BUTTON: 50,
+        FILL_IN_THE_BLANK: 0,
+        CROSSWORD: 0,
+      }
+    );
 
   const toggleAdventureQuestionType = (qType: QuestionType) => {
     setAdventureQuestionTypes(prev => {
@@ -403,7 +511,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   };
 
   useEffect(() => {
-    if (initialSpec) {
+    if (initialSpec && initialSpec.gameId !== syncedGameIdRef.current) {
+      syncedGameIdRef.current = initialSpec.gameId;
       setGeneratedSpec(initialSpec);
       setCustomGameTitle(initialSpec.title || '');
       setGameType(initialSpec.gameType);
@@ -446,8 +555,31 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       setRoomCode('');
       setCurrentStep(4);
       setShowAdventureFullscreenPreview(false);
+      writeCreatorSessionSnapshot({
+        spec: initialSpec,
+        saveStatus: 'saved',
+        savedForLater: true,
+        customGameTitle: initialSpec.title || '',
+      });
     }
   }, [initialSpec]);
+
+  // Đồng bộ game vừa tạo / chỉnh sửa trong phiên hiện tại vào sessionStorage và parent state
+  useEffect(() => {
+    if (!generatedSpec) return;
+    syncedGameIdRef.current = generatedSpec.gameId;
+    const persistedStatus: 'unsaved' | 'saved' | 'dirty' =
+      saveStatus === 'saved' ? 'saved' : saveStatus === 'dirty' ? 'dirty' : 'unsaved';
+    writeCreatorSessionSnapshot({
+      spec: generatedSpec,
+      saveStatus: persistedStatus,
+      savedForLater,
+      customGameTitle: customGameTitle.trim() || generatedSpec.title || '',
+    });
+    if (onCurrentSpecChange && initialSpec !== generatedSpec) {
+      onCurrentSpecChange(generatedSpec);
+    }
+  }, [generatedSpec, saveStatus, savedForLater, customGameTitle]);
 
   // Available section/page titles from ingested documents
   const availableSections = React.useMemo(() => {
@@ -760,6 +892,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       });
 
       toast.removeToast(toastId);
+      syncedGameIdRef.current = spec.gameId;
       setGeneratedSpec(spec);
       if (spec.settings?.adventureConfig) {
         setAdventureConfig(
@@ -779,6 +912,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       setPlaytestSpec(null);
       setRoomCode('');
       setIsModeModalOpen(false);
+      writeCreatorSessionSnapshot({
+        spec,
+        saveStatus: 'unsaved',
+        savedForLater: false,
+        customGameTitle: spec.title,
+      });
+      onCurrentSpecChange?.(spec);
       toast.success(
         spec.questions.length < questionCount
           ? `Đã tạo thành công "${spec.title}" với ${spec.questions.length}/${questionCount} câu hỏi hợp lệ trích xuất từ nguồn thực tế (không tự nhân bản câu giả).`
@@ -988,14 +1128,23 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       const q = spec.questions[i];
       const err = validateQuestionItem(q);
       if (err) {
+        setIsQuestionListCollapsed(false);
         setEditingQuestionIdx(i);
+        setEditingQuestionDraft(cloneQuestionDraft(q));
+        setEditingQuestionError(err);
+        setQuestionPage(Math.floor(i / QUESTIONS_PER_PAGE) + 1);
         toast.error(`Câu hỏi #${i + 1}: ${err}`, 'Câu hỏi chưa hợp lệ');
         return false;
       }
       const normKey = q.question.trim().toLowerCase().replace(/\s+/g, ' ');
       if (seenQuestions.has(normKey)) {
+        const dupMsg = `Câu hỏi #${i + 1} bị trùng nội dung với một câu hỏi trước đó.`;
+        setIsQuestionListCollapsed(false);
         setEditingQuestionIdx(i);
-        toast.error(`Câu hỏi #${i + 1} bị trùng nội dung với một câu hỏi trước đó.`, 'Trùng lặp câu hỏi');
+        setEditingQuestionDraft(cloneQuestionDraft(q));
+        setEditingQuestionError(dupMsg);
+        setQuestionPage(Math.floor(i / QUESTIONS_PER_PAGE) + 1);
+        toast.error(dupMsg, 'Trùng lặp câu hỏi');
         return false;
       }
       seenQuestions.add(normKey);
@@ -1094,24 +1243,25 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     setEditingQuestionError(null);
   };
 
-  const handleCommitQuestionEdit = (index: number): GameSpecification | null => {
+  const normalizeDraftQuestionCandidate = (draft: GameQuestion): GameQuestion => ({
+    ...draft,
+    question: draft.question.trim(),
+    correctAnswer: draft.correctAnswer.trim(),
+    ...(draft.type === 'CROSSWORD'
+      ? {
+          crosswordClue: (draft.crosswordClue || draft.question).trim(),
+          crosswordAnswer: (draft.crosswordAnswer || draft.correctAnswer).trim().replace(/\s+/g, ''),
+          correctAnswer: (draft.crosswordAnswer || draft.correctAnswer).trim().replace(/\s+/g, ''),
+        }
+      : {}),
+  });
+
+  const handleCommitQuestionEdit = (
+    index: number,
+    options?: { silent?: boolean }
+  ): GameSpecification | null => {
     if (!generatedSpec || !editingQuestionDraft) return null;
-    const candidate: GameQuestion = {
-      ...editingQuestionDraft,
-      question: editingQuestionDraft.question.trim(),
-      correctAnswer: editingQuestionDraft.correctAnswer.trim(),
-      ...(editingQuestionDraft.type === 'CROSSWORD'
-        ? {
-            crosswordClue: (editingQuestionDraft.crosswordClue || editingQuestionDraft.question).trim(),
-            crosswordAnswer: (editingQuestionDraft.crosswordAnswer || editingQuestionDraft.correctAnswer)
-              .trim()
-              .replace(/\s+/g, ''),
-            correctAnswer: (editingQuestionDraft.crosswordAnswer || editingQuestionDraft.correctAnswer)
-              .trim()
-              .replace(/\s+/g, ''),
-          }
-        : {}),
-    };
+    const candidate = normalizeDraftQuestionCandidate(editingQuestionDraft);
 
     const validationErr = validateQuestionItem(candidate);
     if (validationErr) {
@@ -1139,6 +1289,14 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       settings: {
         ...generatedSpec.settings,
         questionCount: nextQuestions.length,
+        ...(generatedSpec.gameType === 'ADVENTURE'
+          ? {
+              adventureConfig: syncAdventureStagesWithQuestions(
+                generatedSpec.settings?.adventureConfig || adventureConfig,
+                nextQuestions
+              ),
+            }
+          : {}),
       },
     };
     setGeneratedSpec(updatedSpec);
@@ -1148,7 +1306,12 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     setSavedForLater(false);
     setSaveStatus('dirty');
     setSaveErrorMessage(null);
-    toast.success(`Đã cập nhật câu hỏi #${index + 1}. Nhấn "Lưu Game" để lưu vào hệ thống.`, 'Đã cập nhật câu hỏi');
+    if (!options?.silent) {
+      toast.success(
+        `Đã cập nhật câu hỏi #${index + 1}. Nhấn "Lưu Game" để lưu vào hệ thống.`,
+        'Đã cập nhật câu hỏi'
+      );
+    }
     return updatedSpec;
   };
 
@@ -1358,7 +1521,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     if (!generatedSpec) return null;
     const effectiveTitle = customGameTitle.trim() || generatedSpec.title;
     if (editingQuestionIdx !== null && editingQuestionDraft !== null) {
-      const committed = handleCommitQuestionEdit(editingQuestionIdx);
+      const committed = handleCommitQuestionEdit(editingQuestionIdx, { silent: true });
       if (!committed) return null;
       return {
         ...committed,
@@ -1380,6 +1543,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
     const nextIsPublic =
       publishFlag !== undefined ? publishFlag : (specToSave.isPublic ?? true);
+    const syncedAdvCfg =
+      specToSave.gameType === 'ADVENTURE'
+        ? syncAdventureStagesWithQuestions(
+            specToSave.settings?.adventureConfig || adventureConfig,
+            specToSave.questions
+          )
+        : undefined;
 
     setIsSavingSpec(true);
     setSaveStatus('saving');
@@ -1391,26 +1561,46 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         questions: specToSave.questions,
         settings: {
           timePerQuestion,
-          ...(specToSave.gameType === 'ADVENTURE'
-            ? {
-                adventureConfig: syncAdventureStagesWithQuestions(
-                  specToSave.settings?.adventureConfig || adventureConfig,
-                  specToSave.questions
-                ),
-              }
-            : {}),
+          ...(syncedAdvCfg ? { adventureConfig: syncedAdvCfg } : {}),
           scoringMode,
         },
         isPublic: nextIsPublic,
         ...(publishFlag === true && !specToSave.coverImageUrl ? { generateCover: true } : {}),
       });
-      setGeneratedSpec(saved);
+      const finalSaved: GameSpecification =
+        saved.gameType === 'ADVENTURE' && syncedAdvCfg && !saved.settings?.adventureConfig
+          ? {
+              ...saved,
+              settings: {
+                ...saved.settings,
+                adventureConfig: syncedAdvCfg,
+              },
+            }
+          : saved;
+      syncedGameIdRef.current = finalSaved.gameId;
+      setGeneratedSpec(finalSaved);
+      if (finalSaved.settings?.adventureConfig) {
+        setAdventureConfig(
+          syncAdventureStagesWithQuestions(
+            finalSaved.settings.adventureConfig,
+            finalSaved.questions
+          )
+        );
+      }
+      setCustomGameTitle(finalSaved.title || specToSave.title);
       setEditingQuestionIdx(null);
       setEditingQuestionDraft(null);
       setEditingQuestionError(null);
       setSavedForLater(true);
       setSaveStatus('saved');
       setSaveErrorMessage(null);
+      writeCreatorSessionSnapshot({
+        spec: finalSaved,
+        saveStatus: 'saved',
+        savedForLater: true,
+        customGameTitle: finalSaved.title || specToSave.title,
+      });
+      onCurrentSpecChange?.(finalSaved);
       if (publishFlag === true) {
         toast.success(
           'Đã lưu và xuất bản game công khai thành công! Bạn có thể chia sẻ Link/QR hoặc mở phòng chơi ngay.',
@@ -1424,7 +1614,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       } else {
         toast.success('Đã lưu bộ câu hỏi vào cơ sở dữ liệu thành công!', 'Đã lưu');
       }
-      return saved;
+      return finalSaved;
     } catch (err: any) {
       const errMsg = err.message || 'Không thể lưu chỉnh sửa câu hỏi.';
       setSaveStatus('error');
@@ -1437,8 +1627,30 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   };
 
   const handleStartPlaytest = () => {
-    const specForPlaytest = resolveActiveSpecWithPendingDraft();
-    if (!specForPlaytest || !validateSpecBeforeLaunch(specForPlaytest)) {
+    if (!generatedSpec) {
+      toast.error('Vui lòng tạo bộ câu hỏi trước.', 'Chưa có bộ câu hỏi');
+      return;
+    }
+    const effectiveTitle = customGameTitle.trim() || generatedSpec.title;
+    let questionsForPlaytest = generatedSpec.questions.map(cloneQuestionDraft);
+    if (editingQuestionIdx !== null && editingQuestionDraft !== null) {
+      const candidate = normalizeDraftQuestionCandidate(editingQuestionDraft);
+      const validationErr = validateQuestionItem(candidate);
+      if (validationErr) {
+        setEditingQuestionError(validationErr);
+        toast.error(`Câu hỏi #${editingQuestionIdx + 1}: ${validationErr}`, 'Câu hỏi chưa hợp lệ');
+        return;
+      }
+      questionsForPlaytest = questionsForPlaytest.map((q, idx) =>
+        idx === editingQuestionIdx ? cloneQuestionDraft(candidate) : q
+      );
+    }
+    const specForPlaytest: GameSpecification = {
+      ...generatedSpec,
+      title: effectiveTitle,
+      questions: questionsForPlaytest,
+    };
+    if (!validateSpecBeforeLaunch(specForPlaytest)) {
       return;
     }
     const snapshot: GameSpecification = {
@@ -4938,9 +5150,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           style={{
             position: 'fixed',
             inset: 0,
-            zIndex: 1200,
-            backgroundColor: 'var(--bg-app, #0f172a)',
+            zIndex: 1300,
+            backgroundColor: 'var(--bg-body, #0f172a)',
+            color: 'var(--text-primary)',
             overflowY: 'auto',
+            overscrollBehavior: 'contain',
             padding: '1rem',
             boxSizing: 'border-box',
           }}
