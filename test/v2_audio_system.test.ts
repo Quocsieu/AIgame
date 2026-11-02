@@ -13,6 +13,7 @@ import { GameAudioConfigSchema, GameSpecification } from '../src/contracts/game.
 import { gameStore } from '../src/game/game.store.js';
 import { MultiplayerWebSocketServer } from '../src/multiplayer/room.websocket.js';
 import { authService } from '../src/services/auth.service.js';
+import { persistenceRepo } from '../src/storage/persistence.repository.js';
 import { initDatabase } from '../src/storage/sqlite.db.js';
 import {
   DEFAULT_AUDIO_CONFIG,
@@ -611,6 +612,12 @@ async function runAudioSystemVerification() {
       ],
     };
     gameStore.save(sampleSpec, Date.now(), btcAuth.user.userId, true);
+    const seededExamParticipants = persistenceRepo.upsertParticipants(
+      testGameId,
+      [{ fullName: 'Thí sinh Kiểm thử Âm thanh', departmentUnit: 'Phòng QA' }],
+      true
+    );
+    const seededExamParticipant = seededExamParticipants[0];
 
     // =========================================================================
     // PHASE D3: REAL CHROMIUM BROWSER E2E (DESKTOP 1440x900 & MOBILE 390x844)
@@ -652,8 +659,8 @@ async function runAudioSystemVerification() {
         };
       })()`);
 
-      assert.equal(firstClickResult.beforeText, '🔊 Nghe thử', 'Trạng thái ban đầu của nút phải là 🔊 Nghe thử');
-      assert.equal(firstClickResult.afterText, '⏹ Dừng nghe', 'Sau khi click lần đầu phải đổi sang ⏹ Dừng nghe');
+      assert.equal(firstClickResult.beforeText, '🔊 Nghe thử bộ âm thanh', 'Trạng thái ban đầu của nút phải là 🔊 Nghe thử bộ âm thanh');
+      assert.equal(firstClickResult.afterText, '🔊 Đang phát nghe thử', 'Sau khi click lần đầu phải đổi sang 🔊 Đang phát nghe thử');
       assert.equal(firstClickResult.ariaPressed, 'true');
       assert.ok(firstClickResult.diag, 'window.__aiGameSoundManager phải tồn tại');
       assert.equal(firstClickResult.diag.isPreviewing, true, 'isPreviewing phải bằng true');
@@ -667,35 +674,37 @@ async function runAudioSystemVerification() {
         `Gain phát thực tế phải > 0.05 (trước khi sửa là 0.0006 bị chặn), nhận: ${firstClickResult.diag.lastGainValue}`
       );
       console.log(
-        `✓ [D3.1] Click "Nghe thử" lần đầu thành công: AudioContext=${firstClickResult.diag.contextState}, oscillatorsStarted=${firstClickResult.diag.oscillatorsStartedCount}, gain=${firstClickResult.diag.lastGainValue}, freq=${firstClickResult.diag.lastToneFrequency}Hz`
+        `✓ [D3.1] Click "Nghe thử bộ âm thanh" lần đầu thành công: AudioContext=${firstClickResult.diag.contextState}, oscillatorsStarted=${firstClickResult.diag.oscillatorsStartedCount}, gain=${firstClickResult.diag.lastGainValue}, freq=${firstClickResult.diag.lastToneFrequency}Hz`
       );
 
-      // 2. Đổi sang từng preset khi đang Nghe thử -> phải tự động chuyển sang preset mới, không chồng âm thanh
+      // 2. Đổi sang từng bộ âm thanh chủ đề (sound pack) khi đang Nghe thử -> tự động chuyển sang pack mới, không chồng âm thanh, và không còn select V2 trùng lặp
       const presetSwitchResult = await page.eval(`(async () => {
-        const select = document.querySelector('[data-testid="audio-preset-select"]');
+        const legacyPresetSelect = document.querySelector('[data-testid="audio-preset-select"]');
+        const select = document.querySelector('[data-testid="sound-pack-select"]');
         const sm = window.__aiGameSoundManager;
         const nativeSelectSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
-        const switchPreset = async (val) => {
+        const switchPack = async (val) => {
           nativeSelectSetter.call(select, val);
           select.dispatchEvent(new Event('change', { bubbles: true }));
           await new Promise((r) => setTimeout(r, 60));
           return sm.getDiagnostics();
         };
-        const examDiag = await switchPreset('EXAM_FOCUS');
-        const advDiag = await switchPreset('ADVENTURE_QUEST');
-        const corpDiag = await switchPreset('CORPORATE_CALM');
-        return { examDiag, advDiag, corpDiag };
+        const examDiag = await switchPack('CLASSROOM_QUIZ');
+        const advDiag = await switchPack('ADVENTURE_QUEST');
+        const corpDiag = await switchPack('CORPORATE_TRAINING');
+        return { hasLegacyPresetSelect: Boolean(legacyPresetSelect), examDiag, advDiag, corpDiag };
       })()`);
 
+      assert.equal(presetSwitchResult.hasLegacyPresetSelect, false, 'Cụm select V2 trùng lặp (audio-preset-select) phải bị xóa hoàn toàn khỏi DOM');
       assert.equal(presetSwitchResult.examDiag.activePresetId, 'EXAM_FOCUS');
-      assert.equal(presetSwitchResult.examDiag.lastToneFrequency, 220, 'EXAM_FOCUS phải phát 220Hz');
+      assert.equal(presetSwitchResult.examDiag.lastToneFrequency, 220, 'CLASSROOM_QUIZ (EXAM_FOCUS) phải phát 220Hz');
       assert.equal(presetSwitchResult.advDiag.activePresetId, 'ADVENTURE_QUEST');
       assert.equal(presetSwitchResult.advDiag.lastToneFrequency, 293.66, 'ADVENTURE_QUEST phải phát 293.66Hz');
       assert.equal(presetSwitchResult.corpDiag.activePresetId, 'CORPORATE_CALM');
-      assert.equal(presetSwitchResult.corpDiag.lastToneFrequency, 261.63, 'CORPORATE_CALM phải phát 261.63Hz');
-      console.log('✓ [D3.2] Đổi preset trực tiếp khi đang Nghe thử hoạt động chính xác cho mọi preset');
+      assert.equal(presetSwitchResult.corpDiag.lastToneFrequency, 261.63, 'CORPORATE_TRAINING (CORPORATE_CALM) phải phát 261.63Hz');
+      console.log('✓ [D3.2] Đổi Bộ âm thanh chủ đề trực tiếp khi đang Nghe thử hoạt động chính xác cho mọi sound pack');
 
-      // 3. Click liên tiếp 5 lần vào nút Nghe thử / Dừng nghe -> không bị chồng âm thanh hoặc lệch state
+      // 3. Click liên tiếp 5 lần vào nút Nghe thử / Dừng -> không bị chồng âm thanh hoặc lệch state
       const rapidClicksResult = await page.eval(`(async () => {
         const btn = document.querySelector('[data-testid="audio-preview-btn"]');
         const sm = window.__aiGameSoundManager;
@@ -711,7 +720,7 @@ async function runAudioSystemVerification() {
       })()`);
       // Đang phát (true) -> 5 lần click (lẻ) -> phải dừng (false)
       assert.equal(rapidClicksResult.diag.isPreviewing, false, 'Sau số lần click lẻ từ trạng thái đang phát, preview phải dừng hoàn toàn');
-      assert.equal(rapidClicksResult.btnText, '🔊 Nghe thử');
+      assert.equal(rapidClicksResult.btnText, '🔊 Nghe thử bộ âm thanh');
 
       // Bấm lại để bật preview và kiểm tra Mute/Unmute + Volume slider ngay trên Trang Tạo Game
       const creatorMuteVolResult = await page.eval(`(async () => {
@@ -758,7 +767,7 @@ async function runAudioSystemVerification() {
       assert.equal(playtestAudioCheck.hasPlaytestOverlay, true);
       assert.equal(playtestAudioCheck.diag.isPreviewing, false, 'Khi mở Playtest, chế độ isPreviewing phải tắt');
       assert.equal(playtestAudioCheck.diag.isPlayingBgm, true, 'Nhạc nền phiên Playtest phải đang chạy');
-      assert.equal(playtestAudioCheck.creatorPreviewBtnText, '🔊 Nghe thử', 'Nút Nghe thử bên dưới phải về trạng thái 🔊 Nghe thử');
+      assert.equal(playtestAudioCheck.creatorPreviewBtnText, '🔊 Nghe thử bộ âm thanh', 'Nút Nghe thử bên dưới phải về trạng thái 🔊 Nghe thử bộ âm thanh');
 
       // Mở trình sửa câu hỏi trực tiếp trong Playtest -> kiểm tra timer tạm dừng -> lưu & đóng lại -> thoát Playtest
       await page.eval(`document.querySelector('[data-testid="playtest-inline-edit-btn"]').click()`);
@@ -774,6 +783,13 @@ async function runAudioSystemVerification() {
       console.log('✓ [D3.4] Chuyển sang Playtest, tạm dừng khi mở Inline Editor và dọn dẹp âm thanh khi thoát hoạt động chuẩn xác');
 
       // 5. Kiểm tra Chế độ Thi (Exam Mode) trong SoloPlayer: Không lộ đáp án đúng/sai qua âm thanh!
+      await page.eval(`(() => {
+        sessionStorage.setItem(${JSON.stringify(`solo_roster_identity_${testGameId}`)}, JSON.stringify({
+          participantId: ${JSON.stringify(seededExamParticipant.participantId)},
+          displayName: ${JSON.stringify(seededExamParticipant.fullName)},
+          departmentUnit: ${JSON.stringify(seededExamParticipant.departmentUnit || '')}
+        }));
+      })()`);
       await page.goto(`${baseUrl}/?play=${encodeURIComponent(testGameId)}`);
       await sleep(900);
       // Câu 1: Chọn đáp án SAI ('XMLHttpRequest') -> trong Exam Mode chưa công bố đáp án, chỉ được phát 'recorded' (không được phát 'wrong')!

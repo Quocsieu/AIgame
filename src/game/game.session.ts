@@ -490,12 +490,6 @@ export class GameSession {
       this.state = 'QUESTION_ACTIVE';
       this.startQuestionTimerForIndex(nextIndex);
 
-      try {
-        this.persistSessionState();
-      } catch {
-        // Graceful fallback if SQLite is unavailable in isolated unit tests
-      }
-
       return {
         nextQuestionAvailable: true,
         finished: false,
@@ -525,6 +519,52 @@ export class GameSession {
     }
     const result = this.getResult();
     this.persistSessionState(result);
+    return result;
+  }
+
+  /**
+   * Auto-submits an active session when BTC closes the exam.
+   * Preserves all already-recorded answers and marks any remaining unanswered questions as timedOut (0 points).
+   * Idempotent: if already FINISHED or ABANDONED, returns existing result without double-scoring.
+   */
+  public autoSubmitOnExamClose(closedAtIso?: string): GameResult {
+    if (this.state === 'FINISHED' || this.state === 'ABANDONED') {
+      return this.getResult();
+    }
+    const nowIso = closedAtIso || new Date().toISOString();
+    if (!this.startedAt) {
+      this.startedAt = nowIso;
+    }
+
+    for (let idx = 0; idx < this.specification.questions.length; idx++) {
+      const q = this.specification.questions[idx];
+      if (q && !this.answeredQuestionIds.has(q.id)) {
+        this.wrongCount++;
+        this.currentStreak = 0;
+        this.answeredQuestionIds.add(q.id);
+        this.questionResults.push({
+          questionId: q.id,
+          answer: '',
+          isCorrect: false,
+          pointsEarned: 0,
+          responseTimeMs: 0,
+          answeredAt: nowIso,
+          correctAnswer: q.correctAnswer,
+          explanation: q.explanation,
+          sourceReference: q.sourceReference,
+          timedOut: true,
+        });
+      }
+    }
+
+    this.state = 'FINISHED';
+    this.finishedAt = nowIso;
+    const result = this.getResult();
+    try {
+      this.persistSessionState(result);
+    } catch {
+      // Graceful fallback in isolated unit tests
+    }
     return result;
   }
 
@@ -559,7 +599,10 @@ export class GameSession {
       finishedAt: this.finishedAt,
     });
 
-    if (this.attemptId || this.participantId || this.displayName) {
+    if (
+      (this.attemptId || this.participantId || this.displayName) &&
+      (this.questionResults.length > 0 || this.state === 'FINISHED' || this.state === 'ABANDONED')
+    ) {
       const attemptState =
         this.state === 'FINISHED'
           ? 'FINISHED'

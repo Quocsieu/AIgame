@@ -18,6 +18,10 @@ export const sessionRouter = Router();
 
 function resolveGameExamState(gameId: string, fallbackSpec?: any, currentUser?: any): {
   sessionMode: 'PLAY' | 'EXAM';
+  examStatus: 'OPEN' | 'CLOSING' | 'CLOSED';
+  examOpenAt: string | null;
+  examCloseAt: string | null;
+  examClosedAt: string | null;
   answersPublished: boolean;
   canRevealAnswers: boolean;
   autoAdvanceMs: number;
@@ -28,6 +32,21 @@ function resolveGameExamState(gameId: string, fallbackSpec?: any, currentUser?: 
   const ownerUserId = liveSpec?.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
   const sessionMode: 'PLAY' | 'EXAM' =
     liveSpec?.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+  const rawExamStatus = liveSpec?.settings?.examStatus;
+  const examStatus: 'OPEN' | 'CLOSING' | 'CLOSED' =
+    rawExamStatus === 'CLOSED' || rawExamStatus === 'CLOSING' ? rawExamStatus : 'OPEN';
+  const examOpenAt =
+    typeof liveSpec?.settings?.examOpenAt === 'string' && liveSpec.settings.examOpenAt.trim()
+      ? liveSpec.settings.examOpenAt.trim()
+      : null;
+  const examCloseAt =
+    typeof liveSpec?.settings?.examCloseAt === 'string' && liveSpec.settings.examCloseAt.trim()
+      ? liveSpec.settings.examCloseAt.trim()
+      : null;
+  const examClosedAt =
+    typeof liveSpec?.settings?.examClosedAt === 'string' && liveSpec.settings.examClosedAt.trim()
+      ? liveSpec.settings.examClosedAt.trim()
+      : null;
   const answersPublished = Boolean(liveSpec?.settings?.answersPublished);
   const isOwnerOrAdmin =
     Boolean(currentUser?.role === 'ADMIN') ||
@@ -47,6 +66,10 @@ function resolveGameExamState(gameId: string, fallbackSpec?: any, currentUser?: 
 
   return {
     sessionMode,
+    examStatus,
+    examOpenAt,
+    examCloseAt,
+    examClosedAt,
     answersPublished,
     canRevealAnswers,
     autoAdvanceMs,
@@ -59,6 +82,7 @@ function sanitizeGameResultForClient(
   result: GameResult,
   examState: {
     sessionMode: 'PLAY' | 'EXAM';
+    examStatus?: 'OPEN' | 'CLOSING' | 'CLOSED';
     answersPublished: boolean;
     canRevealAnswers: boolean;
     passThresholdPercent: number;
@@ -79,6 +103,7 @@ function sanitizeGameResultForClient(
     return {
       ...result,
       sessionMode: examState.sessionMode,
+      examStatus: examState.examStatus || 'OPEN',
       answersPublished: examState.answersPublished,
       evaluation,
     };
@@ -87,6 +112,7 @@ function sanitizeGameResultForClient(
   return {
     ...result,
     sessionMode: examState.sessionMode,
+    examStatus: examState.examStatus || 'OPEN',
     answersPublished: examState.answersPublished,
     evaluation,
     questionResults: (result.questionResults || []).map(qr => ({
@@ -122,6 +148,8 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
       publicPlay,
       participantId,
       participantName,
+      playerName,
+      displayName,
       departmentUnit,
       employeeCode,
       lockToken,
@@ -156,8 +184,61 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
     const rosterMode = effectiveSpec?.settings?.rosterMode || 'FREE_TEXT';
     const sessionMode: 'PLAY' | 'EXAM' =
       effectiveSpec?.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+    const examStatus = effectiveSpec?.settings?.examStatus || 'OPEN';
 
-    // Check if roster is preconfigured and has participants
+    // V3 Stage 4 & 5: Enforce examStatus and examOpenAt / examCloseAt window on backend clock
+    if (examStatus === 'CLOSED' || examStatus === 'CLOSING') {
+      throw new AppError(
+        'EXAM_CLOSED',
+        'Đợt thi này đã kết thúc, không thể bắt đầu lượt thi mới.',
+        403
+      );
+    }
+
+    const examOpenAtStr = effectiveSpec?.settings?.examOpenAt;
+    if (typeof examOpenAtStr === 'string' && examOpenAtStr.trim()) {
+      const openAtMs = Date.parse(examOpenAtStr.trim());
+      if (!Number.isNaN(openAtMs) && Date.now() < openAtMs) {
+        throw new AppError(
+          'EXAM_NOT_OPEN_YET',
+          'Đợt thi chưa đến giờ mở. Vui lòng quay lại khi đợt thi bắt đầu.',
+          403
+        );
+      }
+    }
+
+    const examCloseAtStr = effectiveSpec?.settings?.examCloseAt;
+    if (typeof examCloseAtStr === 'string' && examCloseAtStr.trim()) {
+      const closeAtMs = Date.parse(examCloseAtStr.trim());
+      if (!Number.isNaN(closeAtMs) && Date.now() > closeAtMs) {
+        throw new AppError(
+          'EXAM_CLOSED',
+          'Đợt thi đã hết thời gian mở, không thể bắt đầu lượt thi mới.',
+          403
+        );
+      }
+    }
+
+    // V3 Stage 4: In EXAM mode, participant roster is mandatory and participantId must be selected
+    if (sessionMode === 'EXAM' && storedSpec) {
+      const rosterCheck = persistenceRepo.listParticipants(gameId, { limit: 1 });
+      if (rosterCheck.total === 0) {
+        throw new AppError(
+          'EXAM_ROSTER_REQUIRED',
+          'Chế độ Thi cá nhân bắt buộc phải cấu hình danh sách thí sinh trước khi mở đợt thi.',
+          400
+        );
+      }
+      if (!participantId) {
+        throw new AppError(
+          'PARTICIPANT_REQUIRED',
+          'Ở chế độ Thi cá nhân, thí sinh bắt buộc phải chọn tên trong danh sách và xác nhận danh tính trước khi bắt đầu.',
+          400
+        );
+      }
+    }
+
+    // Check if roster is preconfigured and has participants in PLAY mode
     if (rosterMode === 'PRECONFIGURED' && publicPlay && !participantId) {
       const rosterCheck = persistenceRepo.listParticipants(gameId, { limit: 1 });
       if (rosterCheck.total > 0) {
@@ -177,9 +258,32 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
       req.user?.userId ||
       `ptok_${crypto.randomUUID()}`;
 
-    let resolvedParticipantName = participantName?.trim() || req.user?.displayName || null;
+    let resolvedParticipantName =
+      participantName?.trim() ||
+      playerName?.trim() ||
+      displayName?.trim() ||
+      req.user?.displayName ||
+      null;
     let resolvedDepartment = departmentUnit?.trim() || null;
     let resolvedEmployeeCode = employeeCode?.trim() || null;
+
+    // V3 Stage 3B: In Solo Play without participantId, require a valid player name if publicPlay is active or name fields were provided
+    const hasExplicitNameField =
+      req.body?.displayName !== undefined ||
+      req.body?.playerName !== undefined ||
+      req.body?.participantName !== undefined;
+    if (
+      sessionMode === 'PLAY' &&
+      !participantId &&
+      (publicPlay || hasExplicitNameField) &&
+      (!resolvedParticipantName || resolvedParticipantName.length < 2)
+    ) {
+      throw new AppError(
+        'PLAYER_NAME_REQUIRED',
+        'Vui lòng nhập họ và tên hợp lệ (tối thiểu 2 ký tự) trước khi bắt đầu chơi.',
+        400
+      );
+    }
 
     if (participantId) {
       const claim = persistenceRepo.claimParticipantSlot({
@@ -354,7 +458,18 @@ sessionRouter.get('/:sessionId', (req: Request, res: Response, next: NextFunctio
       mode: 'read',
     });
 
-    res.status(200).json(createSuccessResponse(session.getSummary()));
+    const examState = resolveGameExamState(
+      session.specification.gameId,
+      session.specification,
+      req.user
+    );
+    res.status(200).json(
+      createSuccessResponse({
+        ...session.getSummary(),
+        examStatus: examState.examStatus,
+        examClosedAt: examState.examClosedAt,
+      })
+    );
   } catch (err) {
     next(err);
   }
@@ -462,6 +577,18 @@ sessionRouter.post('/:sessionId/answer', (req: Request, res: Response, next: Nex
       session.specification,
       req.user
     );
+
+    if (
+      examState.examStatus === 'CLOSED' ||
+      examState.examStatus === 'CLOSING' ||
+      session.state === 'FINISHED'
+    ) {
+      throw new AppError(
+        'EXAM_CLOSED',
+        'Đợt thi đã kết thúc. Bài làm của bạn đã được hệ thống tự động thu và chấm điểm.',
+        403
+      );
+    }
 
     if (timedOut || answer === '__TIMEOUT__') {
       const timeoutResult = gameEngine.recordTimeout(sessionId, questionId);

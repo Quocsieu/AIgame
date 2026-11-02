@@ -23,6 +23,7 @@ import { gameStore, sessionStore } from '../game/game.store.js';
 import { gameDeleteRateLimiter, generateRateLimiter } from '../middleware/rateLimiter.js';
 import { rejectGuestOrPlayerWrite } from '../middleware/auth.middleware.js';
 import { roomStore } from '../multiplayer/room.store.js';
+import { multiplayerWsServer } from '../multiplayer/room.websocket.js';
 import {
   cleanupOrphanedAdventureGameAssets,
   listVerifiedAdventureAssetPacks,
@@ -40,6 +41,7 @@ import {
 } from '../services/export.service.js';
 import { quotaService } from '../services/quota.service.js';
 import { persistenceRepo } from '../storage/persistence.repository.js';
+import { runInTransaction } from '../storage/sqlite.db.js';
 import { sourceStore } from '../storage/source.store.js';
 import { AppError, createSuccessResponse } from '../utils/errors.js';
 import { sessionRouter } from './game.session.routes.js';
@@ -172,106 +174,250 @@ function hasCreatorOrHostManagementAccess(
   return false;
 }
 
+export interface ParsedParticipantDraft {
+  participantId?: string;
+  fullName: string;
+  departmentUnit: string | null;
+  employeeCode?: string;
+  contactInfo?: string;
+}
+
+export interface InvalidParticipantRow {
+  rowNumber: number;
+  rawText: string;
+  reason: string;
+}
+
+export interface RosterParseDiagnosticsResult {
+  totalRows: number;
+  validCount: number;
+  duplicateCount: number;
+  duplicateNames: string[];
+  invalidRows: InvalidParticipantRow[];
+  participants: ParsedParticipantDraft[];
+}
+
+function normalizeNameForDupCheck(name: string): string {
+  return String(name || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/\s+/g, ' ');
+}
+
+function isHeaderRowLabel(cell0: string): boolean {
+  const firstLower = cell0.trim().toLowerCase();
+  return (
+    firstLower === 'stt' ||
+    firstLower === 'họ và tên' ||
+    firstLower === 'họ tên' ||
+    firstLower === 'ho va ten' ||
+    firstLower === 'ho ten' ||
+    firstLower === 'full name' ||
+    firstLower === 'fullname' ||
+    firstLower === 'tên thí sinh' ||
+    firstLower === 'tên người chơi' ||
+    firstLower === 'name'
+  );
+}
+
+function validateAndClassifyParticipantCells(
+  cells: string[],
+  rowNumber: number,
+  rawText: string,
+  hasSttColumn: boolean | null = null
+): { valid?: ParsedParticipantDraft; invalid?: InvalidParticipantRow } {
+  const trimmedCells = cells.map(c => String(c ?? '').trim().replace(/^["']|["']$/g, '').trim());
+  const nonEmptyCells = trimmedCells.filter(Boolean);
+  if (nonEmptyCells.length === 0) {
+    return {};
+  }
+
+  let fullName = '';
+  let departmentUnit: string | null = null;
+  let employeeCode: string | undefined;
+  let contactInfo: string | undefined;
+
+  const shouldShiftStt =
+    hasSttColumn === true ||
+    (hasSttColumn === null && /^\d+$/.test(trimmedCells[0]) && trimmedCells.length >= 2);
+
+  if (shouldShiftStt && trimmedCells.length >= 2) {
+    fullName = trimmedCells[1] || '';
+    departmentUnit = trimmedCells[2] || null;
+    employeeCode = trimmedCells[3] || undefined;
+    contactInfo = trimmedCells[4] || undefined;
+  } else {
+    fullName = trimmedCells[0] || '';
+    departmentUnit = trimmedCells[1] || null;
+    employeeCode = trimmedCells[2] || undefined;
+    contactInfo = trimmedCells[3] || undefined;
+  }
+
+  const cleanName = fullName.replace(/\s+/g, ' ').trim();
+  if (!cleanName) {
+    return {
+      invalid: {
+        rowNumber,
+        rawText: rawText.slice(0, 160),
+        reason: 'Thiếu họ và tên người tham gia ở cột đầu tiên.',
+      },
+    };
+  }
+  if (cleanName.length < 2) {
+    return {
+      invalid: {
+        rowNumber,
+        rawText: rawText.slice(0, 160),
+        reason: `Họ và tên "${cleanName}" quá ngắn (cần tối thiểu 2 ký tự).`,
+      },
+    };
+  }
+  if (!/\p{L}/u.test(cleanName)) {
+    return {
+      invalid: {
+        rowNumber,
+        rawText: rawText.slice(0, 160),
+        reason: `Họ và tên "${cleanName}" không hợp lệ (phải chứa ký tự chữ cái).`,
+      },
+    };
+  }
+
+  return {
+    valid: {
+      fullName: cleanName.slice(0, 120),
+      departmentUnit: departmentUnit ? departmentUnit.slice(0, 120) : null,
+      ...(employeeCode ? { employeeCode: employeeCode.slice(0, 80) } : {}),
+      ...(contactInfo ? { contactInfo: contactInfo.slice(0, 160) } : {}),
+    },
+  };
+}
+
 /**
- * Parses roster participants from multiline text, CSV, or XLSX buffer.
+ * Parses roster participants from multiline text, CSV, or XLSX buffer with full validation & duplicate diagnostics.
  */
-function parseParticipantsFromBufferOrText(options: {
+export function parseParticipantsWithDiagnostics(options: {
   rawText?: string;
   fileBuffer?: Buffer;
   fileName?: string;
-}): Array<{ fullName: string; departmentUnit: string | null }> {
-  const results: Array<{ fullName: string; departmentUnit: string | null }> = [];
+}): RosterParseDiagnosticsResult {
+  const participants: ParsedParticipantDraft[] = [];
+  const invalidRows: InvalidParticipantRow[] = [];
+  let totalRows = 0;
 
   if (options.fileBuffer && options.fileBuffer.length > 0) {
     const ext = path.extname(options.fileName || '').toLowerCase();
-    if (ext === '.xlsx' || ext === '.xls' || ext === '.csv') {
-      const workbook = XLSX.read(options.fileBuffer, { type: 'buffer' });
+    if (ext === '.xlsx' || ext === '.xls') {
+      const xlsxLib: typeof XLSX = (XLSX as any).default ?? XLSX;
+      const workbook = xlsxLib.read(options.fileBuffer, { type: 'buffer', codepage: 65001 });
       const firstSheetName = workbook.SheetNames[0];
       if (firstSheetName) {
         const sheet = workbook.Sheets[firstSheetName];
-        const rows = XLSX.utils.sheet_to_json< unknown[] >(sheet, { header: 1, defval: '' });
+        const rows = xlsxLib.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: '' });
+        let hasSttColumn: boolean | null = null;
         for (let i = 0; i < rows.length; i++) {
           const row = rows[i];
           if (!Array.isArray(row) || row.length === 0) continue;
-          const cells = row.map(c => String(c ?? '').trim()).filter(Boolean);
-          if (cells.length === 0) continue;
+          const rawCells = row.map(c => String(c ?? '').trim());
+          if (rawCells.every(c => !c)) continue;
 
-          // Skip obvious header row on row 0
-          const firstLower = cells[0].toLowerCase();
-          if (
-            i === 0 &&
-            (firstLower === 'stt' ||
-              firstLower === 'họ và tên' ||
-              firstLower === 'họ tên' ||
-              firstLower === 'full name' ||
-              firstLower === 'fullname' ||
-              firstLower === 'tên thí sinh')
-          ) {
+          const firstNonEmpty = rawCells.find(Boolean) || '';
+          if (i === 0 && isHeaderRowLabel(firstNonEmpty)) {
+            hasSttColumn = firstNonEmpty.trim().toLowerCase() === 'stt';
             continue;
           }
 
-          // If column 0 is numeric STT, take column 1 as fullName and column 2 as departmentUnit
-          if (/^\d+$/.test(cells[0]) && cells.length >= 2) {
-            results.push({
-              fullName: cells[1],
-              departmentUnit: cells[2] || null,
-            });
-          } else {
-            results.push({
-              fullName: cells[0],
-              departmentUnit: cells[1] || null,
-            });
+          totalRows++;
+          const rawLine = rawCells.filter(Boolean).join(' | ');
+          const classified = validateAndClassifyParticipantCells(
+            rawCells,
+            i + 1,
+            rawLine,
+            hasSttColumn
+          );
+          if (classified.valid) {
+            participants.push(classified.valid);
+          } else if (classified.invalid) {
+            invalidRows.push(classified.invalid);
           }
         }
       }
     } else {
       const text = options.fileBuffer.toString('utf-8');
-      return parseParticipantsFromBufferOrText({ rawText: text });
+      return parseParticipantsWithDiagnostics({ rawText: text, fileName: options.fileName });
     }
   }
 
   if (typeof options.rawText === 'string' && options.rawText.trim().length > 0) {
-    const lines = options.rawText
-      .replace(/^\uFEFF/, '')
-      .split(/\r?\n/)
-      .map(l => l.trim())
-      .filter(Boolean);
+    const rawLines = options.rawText.replace(/^\uFEFF/, '').split(/\r?\n/);
+    let seenNonEmptyLine = false;
+    let hasSttColumn: boolean | null = null;
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i].trim();
+      if (!line) continue;
+
       const parts = line
         .split(/[|\t;,]/)
-        .map(p => p.trim().replace(/^["']|["']$/g, ''))
-        .filter(Boolean);
-      if (parts.length === 0) continue;
+        .map(p => p.trim().replace(/^["']|["']$/g, '').trim());
+      if (parts.every(p => !p)) continue;
 
-      const firstLower = parts[0].toLowerCase();
-      if (
-        i === 0 &&
-        (firstLower === 'stt' ||
-          firstLower === 'họ và tên' ||
-          firstLower === 'họ tên' ||
-          firstLower === 'full name' ||
-          firstLower === 'fullname')
-      ) {
+      const firstNonEmpty = parts.find(Boolean) || '';
+      if (!seenNonEmptyLine && isHeaderRowLabel(firstNonEmpty)) {
+        seenNonEmptyLine = true;
+        hasSttColumn = firstNonEmpty.trim().toLowerCase() === 'stt';
         continue;
       }
+      seenNonEmptyLine = true;
 
-      if (/^\d+$/.test(parts[0]) && parts.length >= 2) {
-        results.push({
-          fullName: parts[1],
-          departmentUnit: parts[2] || null,
-        });
-      } else {
-        results.push({
-          fullName: parts[0],
-          departmentUnit: parts[1] || null,
-        });
+      totalRows++;
+      const classified = validateAndClassifyParticipantCells(parts, i + 1, line, hasSttColumn);
+      if (classified.valid) {
+        participants.push(classified.valid);
+      } else if (classified.invalid) {
+        invalidRows.push(classified.invalid);
       }
     }
   }
 
-  return results;
+  const nameCounts = new Map<string, number>();
+  const duplicateNameDisplayMap = new Map<string, string>();
+  for (const p of participants) {
+    const norm = normalizeNameForDupCheck(p.fullName);
+    if (!norm) continue;
+    nameCounts.set(norm, (nameCounts.get(norm) || 0) + 1);
+    if (!duplicateNameDisplayMap.has(norm)) {
+      duplicateNameDisplayMap.set(norm, p.fullName);
+    }
+  }
+
+  let duplicateCount = 0;
+  const duplicateNames: string[] = [];
+  for (const [norm, count] of nameCounts.entries()) {
+    if (count > 1) {
+      duplicateCount += count - 1;
+      duplicateNames.push(duplicateNameDisplayMap.get(norm) || norm);
+    }
+  }
+
+  return {
+    totalRows,
+    validCount: participants.length,
+    duplicateCount,
+    duplicateNames,
+    invalidRows,
+    participants,
+  };
+}
+
+function parseParticipantsFromBufferOrText(options: {
+  rawText?: string;
+  fileBuffer?: Buffer;
+  fileName?: string;
+}): ParsedParticipantDraft[] {
+  return parseParticipantsWithDiagnostics(options).participants;
 }
 
 export interface GameActiveStatus {
@@ -494,6 +640,52 @@ gameRouter.get(
   }
 );
 
+/**
+ * POST /api/games/participants/parse
+ * Parses and validates a roster file (.xlsx, .xls, .csv) or multiline text for preview in the Creator UI
+ * before or after generating a game.
+ */
+gameRouter.post(
+  '/participants/parse',
+  rosterFileUpload.single('file'),
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      rejectGuestOrPlayerWrite(req, 'phân tích danh sách người tham gia');
+
+      let fileBuffer: Buffer | undefined = req.file?.buffer;
+      let fileName: string = req.file?.originalname || req.body?.fileName || 'roster.csv';
+      if (!fileBuffer && typeof req.body?.fileBase64 === 'string' && req.body.fileBase64.trim()) {
+        const rawB64 = req.body.fileBase64.replace(/^data:[^;]+;base64,/, '');
+        fileBuffer = Buffer.from(rawB64, 'base64');
+      }
+
+      const rawText = typeof req.body?.rawText === 'string' ? req.body.rawText : undefined;
+      if ((!fileBuffer || fileBuffer.length === 0) && (!rawText || !rawText.trim())) {
+        throw new AppError(
+          'INVALID_REQUEST',
+          'Vui lòng chọn tệp danh sách (.xlsx, .csv) hoặc nhập dữ liệu văn bản cần phân tích.',
+          400
+        );
+      }
+
+      const diagnostics = parseParticipantsWithDiagnostics({
+        rawText,
+        fileBuffer,
+        fileName,
+      });
+
+      res.status(200).json(
+        createSuccessResponse({
+          fileName,
+          ...diagnostics,
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
 gameRouter.post(
   '/generate',
   generateRateLimiter.middleware,
@@ -509,6 +701,19 @@ gameRouter.post(
       }
 
       const requestData = parseResult.data;
+
+      // V3 Task B: If requireRoster is set for EXAM mode, block generation when roster is empty
+      if (
+        requestData.sessionMode === 'EXAM' &&
+        requestData.requireRoster === true &&
+        (!Array.isArray(requestData.participants) || requestData.participants.length === 0)
+      ) {
+        throw new AppError(
+          'EXAM_ROSTER_REQUIRED',
+          'Chế độ Thi nghiêm túc bắt buộc phải có danh sách thí sinh hợp lệ trước khi tạo đợt thi.',
+          400
+        );
+      }
 
       // 2. Retrieve normalized source content from sources passback or store fallback
       const sourceIds: string[] = Array.from(
@@ -609,12 +814,39 @@ gameRouter.post(
             : true;
 
       // Save generated specification in store and SQLite persistence (public by default for newly created games)
+      const incomingParticipants = Array.isArray(requestData.participants)
+        ? requestData.participants.filter(p => p && typeof p.fullName === 'string' && p.fullName.trim().length > 0)
+        : [];
+      if (incomingParticipants.length > 0 && (!gameSpecification.settings.rosterMode || gameSpecification.settings.rosterMode === 'FREE_TEXT')) {
+        gameSpecification = {
+          ...gameSpecification,
+          settings: {
+            ...gameSpecification.settings,
+            rosterMode: 'PRECONFIGURED',
+          },
+        };
+      }
+
       gameStore.save(
         { ...gameSpecification, isPublic: resolvedIsPublic },
         Date.now(),
         req.user?.userId ?? null,
         resolvedIsPublic
       );
+
+      if (incomingParticipants.length > 0) {
+        persistenceRepo.upsertParticipants(
+          gameSpecification.gameId,
+          incomingParticipants.map(item => ({
+            participantId: item.participantId,
+            fullName: item.fullName,
+            departmentUnit: item.departmentUnit || undefined,
+            employeeCode: item.employeeCode || undefined,
+            contactInfo: item.contactInfo || item.email || undefined,
+          })),
+          true
+        );
+      }
 
       // 6. Return validated GameSpecification
       const savedSpec = gameStore.get(gameSpecification.gameId) || {
@@ -783,7 +1015,31 @@ async function handleUpdateGameSpecification(req: Request, res: Response, next: 
       throw new AppError('INVALID_REQUEST', `Question validation failed: ${issues}`, 400);
     }
 
-    const { title, description, questions, settings, isPublic, coverImageUrl, generateCover } = parseResult.data;
+    const {
+      title,
+      description,
+      questions,
+      settings,
+      isPublic,
+      coverImageUrl,
+      generateCover,
+      participants,
+      requireRoster,
+    } = parseResult.data;
+
+    const effectiveSessionMode = settings?.sessionMode ?? existing.settings?.sessionMode ?? 'PLAY';
+    if (effectiveSessionMode === 'EXAM' && requireRoster === true) {
+      const incomingCount = Array.isArray(participants)
+        ? participants.filter(p => p && typeof p.fullName === 'string' && p.fullName.trim().length > 0).length
+        : persistenceRepo.listParticipants(gameId, { limit: 1 }).total;
+      if (incomingCount === 0) {
+        throw new AppError(
+          'EXAM_ROSTER_REQUIRED',
+          'Chế độ Thi nghiêm túc bắt buộc phải có danh sách thí sinh hợp lệ trước khi lưu hoặc mở đợt thi.',
+          400
+        );
+      }
+    }
 
     // Ensure all edited questions match the game's type (including canonical/legacy aliases) unless gameType is MIXED or ADVENTURE
     if (existing.gameType !== 'MIXED' && existing.gameType !== 'ADVENTURE') {
@@ -969,7 +1225,35 @@ async function handleUpdateGameSpecification(req: Request, res: Response, next: 
       }
     }
 
+    if (Array.isArray(participants)) {
+      const validParticipants = participants.filter(
+        p => p && typeof p.fullName === 'string' && p.fullName.trim().length > 0
+      );
+      if (
+        validParticipants.length > 0 &&
+        (!updatedSpec.settings.rosterMode || updatedSpec.settings.rosterMode === 'FREE_TEXT')
+      ) {
+        updatedSpec.settings.rosterMode = 'PRECONFIGURED';
+      } else if (validParticipants.length === 0 && updatedSpec.settings.sessionMode !== 'EXAM') {
+        updatedSpec.settings.rosterMode = 'FREE_TEXT';
+      }
+    }
+
     gameStore.save(updatedSpec, Date.now(), ownerUserId, resolvedIsPublic);
+
+    if (Array.isArray(participants)) {
+      persistenceRepo.upsertParticipants(
+        gameId,
+        participants.map(item => ({
+          participantId: item.participantId,
+          fullName: item.fullName,
+          departmentUnit: item.departmentUnit || undefined,
+          employeeCode: item.employeeCode || undefined,
+          contactInfo: item.contactInfo || item.email || undefined,
+        })),
+        true
+      );
+    }
 
     // If generateCover is requested, attempt cover generation gracefully without ever failing the save/publish flow
     if (generateCover) {
@@ -1277,12 +1561,16 @@ gameRouter.get(
       });
       const list = result.participants;
       const rosterMode = spec.settings?.rosterMode || 'FREE_TEXT';
+      const sessionMode = spec.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+      const examStatus = spec.settings?.examStatus || 'OPEN';
 
       if (isManager && String(req.query.mode || '').toLowerCase() !== 'public') {
         res.status(200).json(
           createSuccessResponse({
             gameId,
             rosterMode,
+            sessionMode,
+            examStatus,
             total: result.total,
             departments: result.departments,
             participants: list,
@@ -1296,12 +1584,19 @@ gameRouter.get(
         const isLocked = Boolean(p.activeSessionId || p.activeRoomCode);
         const canJoin = p.usedAttempts < p.allowedAttempts || isLocked;
         return {
+          id: p.participantId,
           participantId: p.participantId,
           fullName: p.fullName,
           departmentUnit: p.departmentUnit,
+          employeeCode: p.employeeCode,
           status: p.status,
+          lockStatus: isLocked ? 'LOCKED' : 'AVAILABLE',
           isLocked,
           canJoin,
+          canStartAttempt: canJoin,
+          usedAttempts: p.usedAttempts,
+          allowedAttempts: p.allowedAttempts,
+          retakeGrantedCount: p.retakeGrantedCount,
         };
       });
 
@@ -1309,6 +1604,8 @@ gameRouter.get(
         createSuccessResponse({
           gameId,
           rosterMode,
+          sessionMode,
+          examStatus,
           total: safeParticipants.length,
           departments: result.departments,
           participants: safeParticipants,
@@ -1350,15 +1647,24 @@ gameRouter.post(
         });
       }
 
-      const incomingItems: Array<{ fullName: string; departmentUnit?: string | null }> = [];
+      const incomingItems: ParsedParticipantDraft[] = [];
 
       if (Array.isArray(req.body?.participants)) {
         for (const item of req.body.participants) {
           if (item && typeof item.fullName === 'string' && item.fullName.trim()) {
             incomingItems.push({
+              participantId: typeof item.participantId === 'string' ? item.participantId.trim() : undefined,
               fullName: item.fullName.trim(),
               departmentUnit:
                 typeof item.departmentUnit === 'string' ? item.departmentUnit.trim() : null,
+              employeeCode:
+                typeof item.employeeCode === 'string' ? item.employeeCode.trim() : undefined,
+              contactInfo:
+                typeof item.contactInfo === 'string'
+                  ? item.contactInfo.trim()
+                  : typeof item.email === 'string'
+                    ? item.email.trim()
+                    : undefined,
             });
           }
         }
@@ -1369,6 +1675,10 @@ gameRouter.post(
           fullName: req.body.fullName.trim(),
           departmentUnit:
             typeof req.body?.departmentUnit === 'string' ? req.body.departmentUnit.trim() : null,
+          employeeCode:
+            typeof req.body?.employeeCode === 'string' ? req.body.employeeCode.trim() : undefined,
+          contactInfo:
+            typeof req.body?.contactInfo === 'string' ? req.body.contactInfo.trim() : undefined,
         });
       }
 
@@ -1391,8 +1701,11 @@ gameRouter.post(
       const savedParticipants = persistenceRepo.upsertParticipants(
         gameId,
         incomingItems.map((item) => ({
+          participantId: item.participantId,
           fullName: item.fullName,
           departmentUnit: item.departmentUnit || undefined,
+          employeeCode: item.employeeCode || undefined,
+          contactInfo: item.contactInfo || undefined,
         })),
         replaceAll
       );
@@ -1682,6 +1995,210 @@ gameRouter.post(
             correctAnswer: q.correctAnswer,
             explanation: q.explanation,
           })),
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * POST /api/games/:gameId/close-exam
+ * V3 Stage 5: BTC explicitly closes an active exam and immediately auto-submits all in-progress Solo sessions & Multiplayer rooms.
+ * - Blocks new attempts and new answers immediately.
+ * - Auto-grades all completed questions and marks unanswered questions as timedOut / 0 points.
+ * - Does NOT automatically publish correct answers (answersPublished remains unchanged until BTC clicks publish-answers).
+ * - Idempotent when called repeatedly on an already closed exam.
+ */
+gameRouter.post(
+  '/:gameId/close-exam',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const gameId = String(req.params.gameId || '');
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+      const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
+
+      if (!hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+        rejectGuestOrPlayerWrite(req, 'kết thúc đợt thi');
+        authService.assertResourceAccess({
+          resourceType: 'đợt thi',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      }
+
+      const activeSessions = sessionStore.getActiveSessionsForGame(gameId);
+      const activeRooms = roomStore.getActiveRoomsForGame(gameId);
+
+      // Idempotent fast-path if already CLOSED and no straggling sessions/rooms exist
+      if (
+        spec.settings?.examStatus === 'CLOSED' &&
+        activeSessions.length === 0 &&
+        activeRooms.length === 0
+      ) {
+        res.status(200).json(
+          createSuccessResponse({
+            gameId,
+            alreadyClosed: true,
+            examStatus: 'CLOSED',
+            examClosedAt: spec.settings?.examClosedAt || new Date().toISOString(),
+            answersPublished: Boolean(spec.settings?.answersPublished),
+            autoSubmittedSoloCount: 0,
+            autoSubmittedRoomPlayersCount: 0,
+            dbFinalizedCount: 0,
+            totalAutoSubmitted: 0,
+            closedRoomCodes: [],
+          })
+        );
+        return;
+      }
+
+      const closedAtIso = new Date().toISOString();
+
+      // Step 1: Transition examStatus -> CLOSING immediately to block new sessions and late answers
+      const closingSpec: GameSpecification = {
+        ...spec,
+        settings: {
+          ...spec.settings,
+          examStatus: 'CLOSING',
+        },
+      };
+      gameStore.save(closingSpec, Date.now(), ownerUserId, isPublic);
+
+      let autoSubmittedSoloCount = 0;
+      let autoSubmittedRoomPlayersCount = 0;
+      let dbFinalizedCount = 0;
+      const closedRoomCodes: string[] = [];
+
+      try {
+        // Step 2: Auto-submit all active Solo sessions in memory inside a single SQLite transaction
+        if (activeSessions.length > 0) {
+          runInTransaction(() => {
+            for (const s of activeSessions) {
+              try {
+                s.autoSubmitOnExamClose(closedAtIso);
+                autoSubmittedSoloCount++;
+              } catch (err) {
+                console.error(`[CloseExam] Failed to auto-submit solo session ${s.sessionId}:`, err);
+              }
+            }
+          });
+        }
+
+        // Step 3: Force-finish all active Multiplayer rooms and notify connected WebSocket clients
+        for (const room of activeRooms) {
+          try {
+            const leaderboard = room.forceFinishOnExamClose(closedAtIso);
+            autoSubmittedRoomPlayersCount += leaderboard.length;
+            closedRoomCodes.push(room.roomCode);
+            multiplayerWsServer.broadcastExamClosedForRoom(room, leaderboard, closedAtIso);
+          } catch (err) {
+            console.error(`[CloseExam] Failed to force-finish room ${room.roomCode}:`, err);
+          }
+        }
+
+        // Step 4: Finalize any remaining IN_PROGRESS rows in SQLite (e.g. orphaned sessions)
+        const passThresholdPercent =
+          typeof spec.settings?.passThresholdPercent === 'number'
+            ? spec.settings.passThresholdPercent
+            : 50;
+        const totalQuestions = Math.max(1, spec.questions.length);
+        const maxPossibleScore = spec.questions.reduce(
+          (sum, q) => sum + ((q as any).points ?? 100) + (spec.settings?.scoringMode === 'SPEED_BONUS' ? 50 : 0),
+          0
+        );
+        dbFinalizedCount = persistenceRepo.finalizeRemainingInProgressAttemptsOnExamClose({
+          gameId,
+          closedAtIso,
+          passThresholdPercent,
+          totalQuestions,
+          maxPossibleScore,
+        });
+      } finally {
+        // Step 5: Always transition examStatus -> CLOSED while preserving answersPublished
+        const closedSpec: GameSpecification = {
+          ...spec,
+          settings: {
+            ...spec.settings,
+            examStatus: 'CLOSED',
+            examClosedAt: closedAtIso,
+          },
+        };
+        gameStore.save(closedSpec, Date.now(), ownerUserId, isPublic);
+      }
+
+      res.status(200).json(
+        createSuccessResponse({
+          gameId,
+          alreadyClosed: false,
+          examStatus: 'CLOSED',
+          examClosedAt: closedAtIso,
+          answersPublished: Boolean(spec.settings?.answersPublished),
+          autoSubmittedSoloCount,
+          autoSubmittedRoomPlayersCount,
+          dbFinalizedCount,
+          totalAutoSubmitted:
+            autoSubmittedSoloCount + autoSubmittedRoomPlayersCount + dbFinalizedCount,
+          closedRoomCodes,
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * POST /api/games/:gameId/reopen-exam
+ * Allows BTC / Admin to reopen a previously closed exam window.
+ */
+gameRouter.post(
+  '/:gameId/reopen-exam',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const gameId = String(req.params.gameId || '');
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+      const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
+
+      if (!hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+        rejectGuestOrPlayerWrite(req, 'mở lại đợt thi');
+        authService.assertResourceAccess({
+          resourceType: 'đợt thi',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      }
+
+      const reopenedSpec: GameSpecification = {
+        ...spec,
+        settings: {
+          ...spec.settings,
+          examStatus: 'OPEN',
+          examClosedAt: null,
+        },
+      };
+      gameStore.save(reopenedSpec, Date.now(), ownerUserId, isPublic);
+
+      res.status(200).json(
+        createSuccessResponse({
+          gameId,
+          examStatus: 'OPEN',
+          examClosedAt: null,
         })
       );
     } catch (err) {

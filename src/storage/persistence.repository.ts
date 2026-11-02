@@ -1311,10 +1311,6 @@ export class PersistenceRepository {
     const nowIso = new Date().toISOString();
 
     return runInTransaction(db => {
-      if (replaceAll) {
-        db.prepare('DELETE FROM game_participants WHERE game_id = ?').run(gameId);
-      }
-
       const insertStmt = db.prepare(
         `INSERT INTO game_participants (
           participant_id, game_id, full_name, normalized_name,
@@ -1328,25 +1324,77 @@ export class PersistenceRepository {
           department_unit = excluded.department_unit,
           employee_code = excluded.employee_code,
           contact_info = excluded.contact_info,
-          allowed_attempts = excluded.allowed_attempts,
+          allowed_attempts = CASE
+            WHEN game_participants.allowed_attempts > excluded.allowed_attempts
+              THEN game_participants.allowed_attempts
+            ELSE excluded.allowed_attempts
+          END,
           updated_at = excluded.updated_at`
       );
+
+      // When replaceAll=true and items lack explicit participantId, match existing rows 1-to-1 in order
+      // by (normalized_name, department_unit, employee_code) without merging duplicate names.
+      const existingRows = replaceAll
+        ? (db
+            .prepare(
+              'SELECT participant_id, normalized_name, department_unit, employee_code FROM game_participants WHERE game_id = ? ORDER BY created_at ASC'
+            )
+            .all(gameId) as Array<{
+            participant_id: string;
+            normalized_name: string;
+            department_unit: string;
+            employee_code: string;
+          }>)
+        : [];
+      const usedExistingPids = new Set<string>();
+      const keptPids: string[] = [];
 
       for (const raw of items) {
         const cleanName = String(raw.fullName || '').trim().replace(/\s+/g, ' ').slice(0, 120);
         if (!cleanName) continue;
 
-        const pid =
-          raw.participantId && raw.participantId.trim()
-            ? raw.participantId.trim()
-            : `ptp_${crypto.randomUUID()}`;
         const normName = this.normalizeParticipantName(cleanName);
         const dept = String(raw.departmentUnit || '').trim().slice(0, 120);
         const empCode = String(raw.employeeCode || '').trim().slice(0, 80);
         const contact = String(raw.contactInfo || '').trim().slice(0, 160);
         const allowed = Math.max(1, Math.min(50, Math.floor(Number(raw.allowedAttempts) || 1)));
 
+        let pid = raw.participantId && raw.participantId.trim() ? raw.participantId.trim() : '';
+        if (pid && usedExistingPids.has(pid)) {
+          // Never reuse the same participantId twice in the same batch (e.g. duplicate names)
+          pid = '';
+        }
+        if (!pid && replaceAll && existingRows.length > 0) {
+          const matched = existingRows.find(
+            r =>
+              !usedExistingPids.has(r.participant_id) &&
+              r.normalized_name === normName &&
+              String(r.department_unit || '') === dept &&
+              (empCode === '' || String(r.employee_code || '') === empCode)
+          );
+          if (matched) {
+            pid = matched.participant_id;
+          }
+        }
+        if (!pid) {
+          pid = `ptp_${crypto.randomUUID()}`;
+        }
+
+        usedExistingPids.add(pid);
+        keptPids.push(pid);
+
         insertStmt.run(pid, gameId, cleanName, normName, dept, empCode, contact, allowed, nowIso, nowIso);
+      }
+
+      if (replaceAll) {
+        if (keptPids.length === 0) {
+          db.prepare('DELETE FROM game_participants WHERE game_id = ?').run(gameId);
+        } else {
+          const placeholders = keptPids.map(() => '?').join(', ');
+          db.prepare(
+            `DELETE FROM game_participants WHERE game_id = ? AND participant_id NOT IN (${placeholders})`
+          ).run(gameId, ...keptPids);
+        }
       }
 
       const allRows = db
@@ -1948,6 +1996,108 @@ export class PersistenceRepository {
         .get(params.gameId, params.participantId) as Record<string, any>;
 
       return this.mapParticipantRow(updated, true);
+    });
+  }
+
+  /**
+   * Transactionally finalizes any remaining IN_PROGRESS attempts and participant locks in SQLite
+   * when BTC closes the exam. Preserves any recorded answers/scores and releases all locks.
+   */
+  public finalizeRemainingInProgressAttemptsOnExamClose(params: {
+    gameId: string;
+    passThresholdPercent: number;
+    totalQuestions: number;
+    maxPossibleScore: number;
+    closedAtIso: string;
+  }): number {
+    return runInTransaction(db => {
+      const inProgressAttempts = db
+        .prepare(
+          "SELECT * FROM game_participant_attempts WHERE game_id = ? AND state = 'IN_PROGRESS'"
+        )
+        .all(params.gameId) as Record<string, any>[];
+
+      let finalizedCount = 0;
+      const threshold = Math.max(0, Math.min(100, Number(params.passThresholdPercent) || 50));
+
+      for (const att of inProgressAttempts) {
+        const safeTotal = Math.max(1, Number(att.total_questions || params.totalQuestions || 1));
+        const safeCorrect = Math.max(0, Math.min(safeTotal, Number(att.correct_answers || 0)));
+        const accuracy = Math.round((safeCorrect / safeTotal) * 100);
+        const score = Math.max(0, Number(att.score || 0));
+        const maxScore = Math.max(score, Number(att.max_possible_score || params.maxPossibleScore || 0));
+        const isPassed = accuracy >= threshold ? 1 : 0;
+
+        db.prepare(
+          `UPDATE game_participant_attempts
+           SET state = 'FINISHED',
+               accuracy_percent = ?,
+               max_possible_score = ?,
+               is_passed = ?,
+               finished_at = COALESCE(finished_at, ?),
+               updated_at = ?
+           WHERE attempt_id = ?`
+        ).run(accuracy, maxScore, isPassed, params.closedAtIso, params.closedAtIso, att.attempt_id);
+        finalizedCount++;
+
+        const pid = att.participant_id ? String(att.participant_id) : null;
+        if (pid) {
+          const pRow = db
+            .prepare('SELECT * FROM game_participants WHERE game_id = ? AND participant_id = ?')
+            .get(params.gameId, pid) as Record<string, any> | undefined;
+          if (pRow) {
+            const nextUsed = Number(pRow.used_attempts || 0) + 1;
+            const prevBest =
+              pRow.best_score !== null && pRow.best_score !== undefined
+                ? Number(pRow.best_score)
+                : null;
+            const nextBest = prevBest === null ? score : Math.max(prevBest, score);
+
+            db.prepare(
+              `UPDATE game_participants
+               SET used_attempts = ?,
+                   status = 'COMPLETED',
+                   active_session_id = NULL,
+                   active_room_code = NULL,
+                   active_lock_token = NULL,
+                   active_locked_at = NULL,
+                   best_score = ?,
+                   latest_score = ?,
+                   latest_correct_answers = ?,
+                   latest_total_questions = ?,
+                   latest_accuracy_percent = ?,
+                   latest_is_passed = ?,
+                   updated_at = ?
+               WHERE game_id = ? AND participant_id = ?`
+            ).run(
+              nextUsed,
+              nextBest,
+              score,
+              safeCorrect,
+              safeTotal,
+              accuracy,
+              isPassed,
+              params.closedAtIso,
+              params.gameId,
+              pid
+            );
+          }
+        }
+      }
+
+      // Also unlock any participant row still stuck in IN_PROGRESS without an attempt row
+      db.prepare(
+        `UPDATE game_participants
+         SET status = CASE WHEN used_attempts > 0 THEN 'COMPLETED' ELSE 'PENDING' END,
+             active_session_id = NULL,
+             active_room_code = NULL,
+             active_lock_token = NULL,
+             active_locked_at = NULL,
+             updated_at = ?
+         WHERE game_id = ? AND (status = 'IN_PROGRESS' OR active_session_id IS NOT NULL OR active_room_code IS NOT NULL)`
+      ).run(params.closedAtIso, params.gameId);
+
+      return finalizedCount;
     });
   }
 

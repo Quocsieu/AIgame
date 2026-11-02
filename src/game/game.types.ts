@@ -73,6 +73,7 @@ export interface GameResult {
   title: string;
   gameType: GameType;
   sessionMode?: 'PLAY' | 'EXAM';
+  examStatus?: 'OPEN' | 'CLOSING' | 'CLOSED';
   answersPublished?: boolean;
   totalQuestions: number;
   correctCount: number;
@@ -98,6 +99,7 @@ export interface GameSessionSummary {
   gameId: string;
   state: GameSessionState;
   sessionMode?: 'PLAY' | 'EXAM';
+  examStatus?: 'OPEN' | 'CLOSING' | 'CLOSED';
   currentQuestionIndex: number;
   totalQuestions: number;
   score: number;
@@ -122,6 +124,8 @@ export const CreateSessionRequestSchema = z.object({
   publicPlay: z.boolean().optional(),
   participantId: z.string().trim().min(1).optional(),
   participantName: z.string().trim().max(120).optional(),
+  playerName: z.string().trim().max(120).optional(),
+  displayName: z.string().trim().max(120).optional(),
   departmentUnit: z.string().trim().max(120).optional(),
   employeeCode: z.string().trim().max(80).optional(),
   lockToken: z.string().trim().max(200).optional(),

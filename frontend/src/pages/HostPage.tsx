@@ -6,6 +6,7 @@ import {
   closeMultiplayerRoom,
   downloadGameScoreboardExport,
   grantParticipantRetakeApi,
+  closeGameExamApi,
 } from '../services/api.js';
 import { soundManager } from '../services/audio.js';
 import {
@@ -224,9 +225,14 @@ export const HostPage: React.FC<HostPageProps> = ({
     });
 
     client.on('game.started', () => {
+      soundManager.playStart();
       soundManager.startBackgroundMusic();
       setViewState('question');
       toast.success('Chủ phòng đã kích hoạt bắt đầu trò chơi!', 'Bắt đầu');
+    });
+
+    client.on('exam.closed', () => {
+      toast.info('Đợt thi đã kết thúc — Hệ thống đã tự động thu bài của toàn bộ thí sinh.', 'Đã thu bài');
     });
 
     client.on('question.started', (msg: any) => {
@@ -379,6 +385,19 @@ export const HostPage: React.FC<HostPageProps> = ({
       toast.success(`Đã cấp thêm 1 lượt thi lại cho "${displayName}"!`, 'Cấp quyền thi lại');
     } catch (err: any) {
       toast.error(err.message || 'Không thể cấp quyền thi lại.', 'Lỗi');
+    }
+  };
+
+  const handleHostCloseExam = async () => {
+    if (!activeGameId) return;
+    try {
+      const res = await closeGameExamApi(activeGameId, hostToken || undefined);
+      toast.success(
+        `Đã kết thúc đợt thi! Tự động nộp bài cho ${res.totalAutoSubmitted} thí sinh.`,
+        'Kết thúc đợt thi'
+      );
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể kết thúc đợt thi.', 'Lỗi');
     }
   };
 
@@ -598,6 +617,27 @@ export const HostPage: React.FC<HostPageProps> = ({
               >
                 {isAudioMuted ? '🔇 Bật nhạc' : '🔊 Tắt nhạc'}
               </button>
+
+              {sessionMode === 'EXAM' && activeGameId && (
+                <button
+                  type="button"
+                  data-testid="host-close-exam-btn"
+                  onClick={handleHostCloseExam}
+                  style={{
+                    backgroundColor: 'rgba(244, 63, 94, 0.16)',
+                    color: 'var(--accent-rose)',
+                    border: '1px solid var(--accent-rose)',
+                    borderRadius: '10px',
+                    padding: '0.65rem 1.05rem',
+                    fontWeight: 800,
+                    fontSize: '0.88rem',
+                    cursor: 'pointer',
+                    minHeight: '44px',
+                  }}
+                >
+                  Kết thúc đợt thi &amp; Thu bài
+                </button>
+              )}
 
               <button
                 type="button"

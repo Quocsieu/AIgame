@@ -1,62 +1,250 @@
-import type { AudioPresetId, GameAudioConfig } from '../types/index.js';
+import type {
+  AudioPresetId,
+  GameAudioConfig,
+  SfxCueType,
+  SoundPackId,
+} from '../types/index.js';
 
 export const DEFAULT_AUDIO_CONFIG: GameAudioConfig = {
   enabled: true,
+  bgmEnabled: true,
   presetId: 'ENERGETIC_ARENA',
+  soundPackId: 'ARCADE_FUN',
   customAudioUrl: null,
   customAudioName: null,
   customAudioFileName: null,
   customAudioMimeType: null,
   customAudioSizeBytes: null,
+  customSfxOverrides: {},
   volume: 0.7,
   countdownSoundEnabled: true,
   countdownTriggerSeconds: 5,
   sfxEnabled: true,
 };
 
+export interface SoundPackDefinition {
+  id: SoundPackId;
+  packId: SoundPackId;
+  presetId: AudioPresetId;
+  folder: string;
+  label: string;
+  description: string;
+  cues: Record<SfxCueType, string>;
+}
+
+export const SOUND_PACK_CATALOG: SoundPackDefinition[] = [
+  {
+    id: 'ARCADE_FUN',
+    packId: 'ARCADE_FUN',
+    presetId: 'ENERGETIC_ARENA',
+    folder: 'arcade_fun',
+    label: 'Vui nhộn / Arcade (Sôi động)',
+    description: 'Tiết tấu nhanh, hiệu ứng tươi sáng, sôi động cho game thi đua.',
+    cues: {
+      correct: '/audio/packs/arcade_fun/correct.wav',
+      wrong: '/audio/packs/arcade_fun/wrong.wav',
+      timeout: '/audio/packs/arcade_fun/timeout.wav',
+      countdown: '/audio/packs/arcade_fun/countdown.wav',
+      start: '/audio/packs/arcade_fun/start.wav',
+      finish: '/audio/packs/arcade_fun/finish.wav',
+      top3: '/audio/packs/arcade_fun/top3.wav',
+    },
+  },
+  {
+    id: 'CLASSROOM_QUIZ',
+    packId: 'CLASSROOM_QUIZ',
+    presetId: 'EXAM_FOCUS',
+    folder: 'classroom_quiz',
+    label: 'Học đường / Classroom Quiz (Thân thiện)',
+    description: 'Chuông chime rõ ràng, thân thiện, khích lệ học tập và kiểm tra.',
+    cues: {
+      correct: '/audio/packs/classroom_quiz/correct.wav',
+      wrong: '/audio/packs/classroom_quiz/wrong.wav',
+      timeout: '/audio/packs/classroom_quiz/timeout.wav',
+      countdown: '/audio/packs/classroom_quiz/countdown.wav',
+      start: '/audio/packs/classroom_quiz/start.wav',
+      finish: '/audio/packs/classroom_quiz/finish.wav',
+      top3: '/audio/packs/classroom_quiz/top3.wav',
+    },
+  },
+  {
+    id: 'ADVENTURE_QUEST',
+    packId: 'ADVENTURE_QUEST',
+    presetId: 'ADVENTURE_QUEST',
+    folder: 'adventure_quest',
+    label: 'Phiêu lưu / Adventure Quest (Kịch tính)',
+    description: 'Âm hưởng kèn đồng & hành trình vượt chướng ngại vật kịch tính.',
+    cues: {
+      correct: '/audio/packs/adventure_quest/correct.wav',
+      wrong: '/audio/packs/adventure_quest/wrong.wav',
+      timeout: '/audio/packs/adventure_quest/timeout.wav',
+      countdown: '/audio/packs/adventure_quest/countdown.wav',
+      start: '/audio/packs/adventure_quest/start.wav',
+      finish: '/audio/packs/adventure_quest/finish.wav',
+      top3: '/audio/packs/adventure_quest/top3.wav',
+    },
+  },
+  {
+    id: 'CORPORATE_TRAINING',
+    packId: 'CORPORATE_TRAINING',
+    presetId: 'CORPORATE_CALM',
+    folder: 'corporate_training',
+    label: 'Đào tạo Doanh nghiệp / Corporate Training',
+    description: 'Âm sắc piano ấm áp, gọn gàng, lịch sự và chuyên nghiệp.',
+    cues: {
+      correct: '/audio/packs/corporate_training/correct.wav',
+      wrong: '/audio/packs/corporate_training/wrong.wav',
+      timeout: '/audio/packs/corporate_training/timeout.wav',
+      countdown: '/audio/packs/corporate_training/countdown.wav',
+      start: '/audio/packs/corporate_training/start.wav',
+      finish: '/audio/packs/corporate_training/finish.wav',
+      top3: '/audio/packs/corporate_training/top3.wav',
+    },
+  },
+];
+
+export const SFX_CUE_CATALOG: Array<{
+  cue: SfxCueType;
+  label: string;
+  shortLabel: string;
+  description: string;
+}> = [
+  {
+    cue: 'correct',
+    label: 'Trả lời đúng',
+    shortLabel: 'Đúng',
+    description: 'Chime/Fanfare tích cực khi chọn đúng đáp án',
+  },
+  {
+    cue: 'wrong',
+    label: 'Trả lời sai',
+    shortLabel: 'Sai',
+    description: 'Âm báo trầm rõ ràng nhưng không chói gắt',
+  },
+  {
+    cue: 'timeout',
+    label: 'Hết giờ câu hỏi',
+    shortLabel: 'Hết giờ',
+    description: 'Tín hiệu kết thúc thời gian làm câu hỏi',
+  },
+  {
+    cue: 'countdown',
+    label: 'Đếm ngược giây cuối',
+    shortLabel: 'Đếm ngược',
+    description: 'Nhịp tick những giây cuối cùng của câu hỏi',
+  },
+  {
+    cue: 'start',
+    label: 'Bắt đầu câu hỏi / vòng chơi',
+    shortLabel: 'Bắt đầu',
+    description: 'Hiệu ứng mở màn câu hỏi hoặc bắt đầu trận đấu',
+  },
+  {
+    cue: 'finish',
+    label: 'Hoàn thành màn chơi',
+    shortLabel: 'Hoàn thành',
+    description: 'Giai điệu tổng kết khi hoàn thành toàn bộ bài',
+  },
+  {
+    cue: 'top3',
+    label: 'Vinh danh Top 3 / Kết quả',
+    shortLabel: 'Top 3',
+    description: 'Fanfare vinh danh bảng vàng Top 3 chung cuộc',
+  },
+];
+
 export const AUDIO_PRESET_CATALOG: Array<{
   id: AudioPresetId;
   presetId: AudioPresetId;
+  soundPackId: SoundPackId;
   label: string;
   description: string;
 }> = [
   {
     id: 'ENERGETIC_ARENA',
     presetId: 'ENERGETIC_ARENA',
-    label: 'Sôi động Đấu trường (Quiz / Live)',
-    description: 'Nhịp điệu hào hứng, phù hợp cho game tương tác và thi đua.',
+    soundPackId: 'ARCADE_FUN',
+    label: 'Vui nhộn / Arcade — Sôi động Đấu trường',
+    description: 'Tiết tấu nhanh, hiệu ứng tươi sáng, sôi động cho game tương tác và thi đua.',
   },
   {
     id: 'EXAM_FOCUS',
     presetId: 'EXAM_FOCUS',
-    label: 'Tập trung Phòng thi (Exam Focus)',
-    description: 'Âm thanh nhẹ nhàng, giảm xao nhãng cho kỳ thi nghiêm túc.',
+    soundPackId: 'CLASSROOM_QUIZ',
+    label: 'Học đường / Classroom Quiz — Tập trung Phòng thi',
+    description: 'Âm thanh rõ ràng, thân thiện, giảm xao nhãng cho lớp học & kỳ thi.',
   },
   {
     id: 'ADVENTURE_QUEST',
     presetId: 'ADVENTURE_QUEST',
-    label: 'Hành trình Phiêu lưu (Adventure 2D)',
-    description: 'Giai điệu phiêu lưu nhịp nhàng cho chế độ vượt chướng ngại vật.',
+    soundPackId: 'ADVENTURE_QUEST',
+    label: 'Phiêu lưu / Adventure Quest — Hành trình 2D',
+    description: 'Giai điệu phiêu lưu kịch tính cho chế độ vượt chướng ngại vật.',
   },
   {
     id: 'CORPORATE_CALM',
     presetId: 'CORPORATE_CALM',
-    label: 'Đào tạo Doanh nghiệp (Corporate Calm)',
-    description: 'Nhạc nền êm dịu, chuyên nghiệp cho các buổi đào tạo nội bộ.',
+    soundPackId: 'CORPORATE_TRAINING',
+    label: 'Đào tạo Doanh nghiệp / Corporate Training',
+    description: 'Nhạc nền và hiệu ứng gọn gàng, lịch sự, chuyên nghiệp cho doanh nghiệp.',
   },
   {
     id: 'CUSTOM',
     presetId: 'CUSTOM',
+    soundPackId: 'ARCADE_FUN',
     label: 'Nhạc tải lên từ máy (.mp3 / .wav / .ogg)',
     description: 'Sử dụng tệp âm thanh riêng của Ban Tổ Chức (tối đa 10 MB).',
   },
   {
     id: 'NONE',
     presetId: 'NONE',
+    soundPackId: 'NONE',
     label: 'Tắt nhạc nền',
     description: 'Không phát nhạc nền, chỉ giữ hiệu ứng âm thanh khi cần.',
   },
 ];
+
+export function resolveSoundPackDefinition(
+  soundPackOrPreset?: SoundPackId | AudioPresetId | string | Partial<GameAudioConfig> | null
+): SoundPackDefinition {
+  const raw =
+    soundPackOrPreset && typeof soundPackOrPreset === 'object'
+      ? soundPackOrPreset.soundPackId || soundPackOrPreset.presetId || ''
+      : soundPackOrPreset || '';
+  const key = String(raw).toUpperCase();
+  if (key === 'CLASSROOM_QUIZ' || key === 'EXAM_FOCUS') {
+    return SOUND_PACK_CATALOG[1];
+  }
+  if (key === 'ADVENTURE_QUEST') {
+    return SOUND_PACK_CATALOG[2];
+  }
+  if (key === 'CORPORATE_TRAINING' || key === 'CORPORATE_CALM') {
+    return SOUND_PACK_CATALOG[3];
+  }
+  return SOUND_PACK_CATALOG[0];
+}
+
+export function mapSoundPackToPresetId(packId: SoundPackId | AudioPresetId): AudioPresetId {
+  switch (packId) {
+    case 'ARCADE_FUN':
+    case 'ENERGETIC_ARENA':
+      return 'ENERGETIC_ARENA';
+    case 'CLASSROOM_QUIZ':
+    case 'EXAM_FOCUS':
+      return 'EXAM_FOCUS';
+    case 'ADVENTURE_QUEST':
+      return 'ADVENTURE_QUEST';
+    case 'CORPORATE_TRAINING':
+    case 'CORPORATE_CALM':
+      return 'CORPORATE_CALM';
+    case 'CUSTOM':
+      return 'CUSTOM';
+    case 'NONE':
+      return 'NONE';
+    default:
+      return 'ENERGETIC_ARENA';
+  }
+}
 
 export interface AudioPreviewCallbacks {
   onError?: (message: string) => void;
@@ -67,15 +255,18 @@ export interface AudioDiagnosticsSnapshot {
   contextState: string;
   isPlayingBgm: boolean;
   isPreviewing: boolean;
+  isBgmDucked: boolean;
   muted: boolean;
   volume: number;
   volumeNormalized: number;
   activePresetId: AudioPresetId;
+  activeSoundPackId: SoundPackId;
   oscillatorsStartedCount: number;
   activeOscillatorCount: number;
   lastGainValue: number;
   lastToneFrequency: number;
   lastSfxPlayed: string | null;
+  lastSfxAssetUrl: string | null;
   customAudioPlaying: boolean;
   customAudioSrc: string | null;
   lastError: string | null;
@@ -95,16 +286,173 @@ export function normalizeVolumeToPercent(rawVolume: unknown, fallbackPercent: nu
   return Math.max(0, Math.min(100, Math.round(num)));
 }
 
+interface PackCueNote {
+  freq: number;
+  dur: number;
+  wave: OscillatorType;
+  gain: number;
+  delay: number;
+}
+
+const PACK_SYNTH_PATTERNS: Record<string, Record<SfxCueType, PackCueNote[]>> = {
+  ARCADE_FUN: {
+    correct: [
+      { freq: 523.25, dur: 0.12, wave: 'triangle', gain: 0.25, delay: 0 },
+      { freq: 659.25, dur: 0.13, wave: 'triangle', gain: 0.26, delay: 0.08 },
+      { freq: 783.99, dur: 0.14, wave: 'triangle', gain: 0.28, delay: 0.16 },
+      { freq: 1046.5, dur: 0.22, wave: 'triangle', gain: 0.3, delay: 0.24 },
+    ],
+    wrong: [
+      { freq: 311.13, dur: 0.18, wave: 'sawtooth', gain: 0.22, delay: 0 },
+      { freq: 233.08, dur: 0.26, wave: 'sawtooth', gain: 0.24, delay: 0.15 },
+    ],
+    timeout: [
+      { freq: 440.0, dur: 0.12, wave: 'sine', gain: 0.23, delay: 0 },
+      { freq: 392.0, dur: 0.12, wave: 'sine', gain: 0.23, delay: 0.12 },
+      { freq: 311.13, dur: 0.24, wave: 'triangle', gain: 0.25, delay: 0.24 },
+    ],
+    countdown: [
+      { freq: 880.0, dur: 0.12, wave: 'sine', gain: 0.24, delay: 0 },
+    ],
+    start: [
+      { freq: 392.0, dur: 0.12, wave: 'triangle', gain: 0.24, delay: 0 },
+      { freq: 523.25, dur: 0.12, wave: 'triangle', gain: 0.26, delay: 0.1 },
+      { freq: 659.25, dur: 0.22, wave: 'triangle', gain: 0.28, delay: 0.2 },
+    ],
+    finish: [
+      { freq: 523.25, dur: 0.12, wave: 'triangle', gain: 0.25, delay: 0 },
+      { freq: 659.25, dur: 0.12, wave: 'triangle', gain: 0.26, delay: 0.1 },
+      { freq: 783.99, dur: 0.14, wave: 'triangle', gain: 0.28, delay: 0.2 },
+      { freq: 1046.5, dur: 0.32, wave: 'triangle', gain: 0.32, delay: 0.32 },
+    ],
+    top3: [
+      { freq: 523.25, dur: 0.12, wave: 'triangle', gain: 0.26, delay: 0 },
+      { freq: 523.25, dur: 0.1, wave: 'triangle', gain: 0.26, delay: 0.13 },
+      { freq: 659.25, dur: 0.18, wave: 'triangle', gain: 0.28, delay: 0.25 },
+      { freq: 783.99, dur: 0.22, wave: 'triangle', gain: 0.3, delay: 0.44 },
+      { freq: 1046.5, dur: 0.35, wave: 'triangle', gain: 0.34, delay: 0.66 },
+    ],
+  },
+  CLASSROOM_QUIZ: {
+    correct: [
+      { freq: 587.33, dur: 0.15, wave: 'sine', gain: 0.26, delay: 0 },
+      { freq: 880.0, dur: 0.26, wave: 'sine', gain: 0.28, delay: 0.12 },
+    ],
+    wrong: [
+      { freq: 349.23, dur: 0.16, wave: 'triangle', gain: 0.22, delay: 0 },
+      { freq: 293.66, dur: 0.24, wave: 'triangle', gain: 0.22, delay: 0.14 },
+    ],
+    timeout: [
+      { freq: 493.88, dur: 0.14, wave: 'sine', gain: 0.22, delay: 0 },
+      { freq: 392.0, dur: 0.26, wave: 'sine', gain: 0.24, delay: 0.14 },
+    ],
+    countdown: [
+      { freq: 740.0, dur: 0.11, wave: 'sine', gain: 0.22, delay: 0 },
+    ],
+    start: [
+      { freq: 440.0, dur: 0.13, wave: 'sine', gain: 0.24, delay: 0 },
+      { freq: 554.37, dur: 0.13, wave: 'sine', gain: 0.25, delay: 0.11 },
+      { freq: 659.25, dur: 0.2, wave: 'sine', gain: 0.27, delay: 0.22 },
+    ],
+    finish: [
+      { freq: 440.0, dur: 0.13, wave: 'sine', gain: 0.24, delay: 0 },
+      { freq: 554.37, dur: 0.13, wave: 'sine', gain: 0.26, delay: 0.12 },
+      { freq: 659.25, dur: 0.14, wave: 'sine', gain: 0.27, delay: 0.24 },
+      { freq: 880.0, dur: 0.28, wave: 'sine', gain: 0.3, delay: 0.36 },
+    ],
+    top3: [
+      { freq: 587.33, dur: 0.14, wave: 'sine', gain: 0.26, delay: 0 },
+      { freq: 739.99, dur: 0.14, wave: 'sine', gain: 0.28, delay: 0.14 },
+      { freq: 880.0, dur: 0.18, wave: 'sine', gain: 0.3, delay: 0.28 },
+      { freq: 1174.66, dur: 0.32, wave: 'sine', gain: 0.32, delay: 0.46 },
+    ],
+  },
+  ADVENTURE_QUEST: {
+    correct: [
+      { freq: 440.0, dur: 0.12, wave: 'triangle', gain: 0.26, delay: 0 },
+      { freq: 554.37, dur: 0.12, wave: 'triangle', gain: 0.27, delay: 0.1 },
+      { freq: 659.25, dur: 0.14, wave: 'triangle', gain: 0.28, delay: 0.2 },
+      { freq: 880.0, dur: 0.22, wave: 'triangle', gain: 0.3, delay: 0.3 },
+    ],
+    wrong: [
+      { freq: 261.63, dur: 0.18, wave: 'sawtooth', gain: 0.23, delay: 0 },
+      { freq: 196.0, dur: 0.26, wave: 'sawtooth', gain: 0.25, delay: 0.16 },
+    ],
+    timeout: [
+      { freq: 392.0, dur: 0.14, wave: 'triangle', gain: 0.24, delay: 0 },
+      { freq: 329.63, dur: 0.14, wave: 'triangle', gain: 0.24, delay: 0.14 },
+      { freq: 246.94, dur: 0.24, wave: 'sawtooth', gain: 0.26, delay: 0.28 },
+    ],
+    countdown: [
+      { freq: 659.25, dur: 0.13, wave: 'triangle', gain: 0.25, delay: 0 },
+    ],
+    start: [
+      { freq: 293.66, dur: 0.14, wave: 'triangle', gain: 0.25, delay: 0 },
+      { freq: 440.0, dur: 0.14, wave: 'triangle', gain: 0.27, delay: 0.13 },
+      { freq: 587.33, dur: 0.24, wave: 'triangle', gain: 0.3, delay: 0.26 },
+    ],
+    finish: [
+      { freq: 392.0, dur: 0.14, wave: 'triangle', gain: 0.26, delay: 0 },
+      { freq: 493.88, dur: 0.14, wave: 'triangle', gain: 0.27, delay: 0.12 },
+      { freq: 587.33, dur: 0.15, wave: 'triangle', gain: 0.29, delay: 0.24 },
+      { freq: 783.99, dur: 0.34, wave: 'triangle', gain: 0.32, delay: 0.38 },
+    ],
+    top3: [
+      { freq: 440.0, dur: 0.14, wave: 'triangle', gain: 0.27, delay: 0 },
+      { freq: 554.37, dur: 0.14, wave: 'triangle', gain: 0.28, delay: 0.14 },
+      { freq: 659.25, dur: 0.16, wave: 'triangle', gain: 0.3, delay: 0.28 },
+      { freq: 880.0, dur: 0.2, wave: 'triangle', gain: 0.32, delay: 0.44 },
+      { freq: 1108.73, dur: 0.36, wave: 'triangle', gain: 0.34, delay: 0.64 },
+    ],
+  },
+  CORPORATE_TRAINING: {
+    correct: [
+      { freq: 523.25, dur: 0.14, wave: 'sine', gain: 0.24, delay: 0 },
+      { freq: 783.99, dur: 0.24, wave: 'sine', gain: 0.26, delay: 0.11 },
+    ],
+    wrong: [
+      { freq: 329.63, dur: 0.15, wave: 'sine', gain: 0.21, delay: 0 },
+      { freq: 261.63, dur: 0.22, wave: 'sine', gain: 0.22, delay: 0.13 },
+    ],
+    timeout: [
+      { freq: 440.0, dur: 0.14, wave: 'sine', gain: 0.22, delay: 0 },
+      { freq: 349.23, dur: 0.24, wave: 'sine', gain: 0.23, delay: 0.13 },
+    ],
+    countdown: [
+      { freq: 659.25, dur: 0.1, wave: 'sine', gain: 0.21, delay: 0 },
+    ],
+    start: [
+      { freq: 392.0, dur: 0.14, wave: 'sine', gain: 0.23, delay: 0 },
+      { freq: 523.25, dur: 0.24, wave: 'sine', gain: 0.26, delay: 0.12 },
+    ],
+    finish: [
+      { freq: 523.25, dur: 0.14, wave: 'sine', gain: 0.24, delay: 0 },
+      { freq: 659.25, dur: 0.14, wave: 'sine', gain: 0.26, delay: 0.13 },
+      { freq: 783.99, dur: 0.3, wave: 'sine', gain: 0.28, delay: 0.26 },
+    ],
+    top3: [
+      { freq: 523.25, dur: 0.14, wave: 'sine', gain: 0.25, delay: 0 },
+      { freq: 659.25, dur: 0.14, wave: 'sine', gain: 0.26, delay: 0.13 },
+      { freq: 783.99, dur: 0.16, wave: 'sine', gain: 0.28, delay: 0.26 },
+      { freq: 1046.5, dur: 0.32, wave: 'sine', gain: 0.3, delay: 0.42 },
+    ],
+  },
+};
+
 class GameAudioManager {
   private ctx: AudioContext | null = null;
   private bgmLoopInterval: number | null = null;
   private customAudioEl: HTMLAudioElement | null = null;
+  private activeSfxAudioElements: Map<string, HTMLAudioElement> = new Map();
+  private duckTimeoutId: number | null = null;
+  private isBgmDucked: boolean = false;
   private isPlayingBgm: boolean = false;
   private isPreviewing: boolean = false;
   private muted: boolean = false;
   private volume: number = 70; // 0..100 integer percentage
   private currentConfig: GameAudioConfig = { ...DEFAULT_AUDIO_CONFIG };
   private lastCountdownSecondPlayed: number | null = null;
+  private lastCuePlayedAtMap: Map<string, number> = new Map();
   private stepIndex: number = 0;
   private previewCallbacks: AudioPreviewCallbacks | null = null;
   private listeners: Set<() => void> = new Set();
@@ -116,6 +464,7 @@ class GameAudioManager {
   private lastGainValue: number = 0;
   private lastToneFrequency: number = 0;
   private lastSfxPlayed: string | null = null;
+  private lastSfxAssetUrl: string | null = null;
   private lastError: string | null = null;
 
   constructor() {
@@ -125,7 +474,6 @@ class GameAudioManager {
       const savedVol = localStorage.getItem(STORAGE_VOLUME_KEY);
       if (savedVol !== null) {
         const parsed = Number(savedVol);
-        // Recover from previous 0..1 rounding bug where 0.5 was saved as "1"
         if (parsed === 1) {
           this.volume = 70;
           localStorage.setItem(STORAGE_VOLUME_KEY, '70');
@@ -215,20 +563,30 @@ class GameAudioManager {
     return this.isPreviewing;
   }
 
+  public getActiveSoundPack(): SoundPackDefinition {
+    return resolveSoundPackDefinition(
+      this.currentConfig.soundPackId || this.currentConfig.presetId
+    );
+  }
+
   public getDiagnostics(): AudioDiagnosticsSnapshot {
+    const activePack = this.getActiveSoundPack();
     return {
       contextState: this.ctx ? this.ctx.state : 'uninitialized',
       isPlayingBgm: this.isPlayingBgm,
       isPreviewing: this.isPreviewing,
+      isBgmDucked: this.isBgmDucked,
       muted: this.muted,
       volume: this.volume,
       volumeNormalized: this.getVolumeNormalized(),
       activePresetId: this.currentConfig.presetId,
+      activeSoundPackId: activePack.packId,
       oscillatorsStartedCount: this.oscillatorsStartedCount,
       activeOscillatorCount: this.activeOscillatorCount,
       lastGainValue: Number(this.lastGainValue.toFixed(4)),
       lastToneFrequency: Number(this.lastToneFrequency.toFixed(2)),
       lastSfxPlayed: this.lastSfxPlayed,
+      lastSfxAssetUrl: this.lastSfxAssetUrl,
       customAudioPlaying: Boolean(this.customAudioEl && !this.customAudioEl.paused),
       customAudioSrc: this.customAudioEl ? this.customAudioEl.src : null,
       lastError: this.lastError,
@@ -241,12 +599,18 @@ class GameAudioManager {
         ? normalizeVolumeToPercent(partialConfig.volume, this.volume)
         : this.volume;
     this.volume = nextVolPercent;
-    this.currentConfig = {
+    const merged: GameAudioConfig = {
       ...DEFAULT_AUDIO_CONFIG,
       ...this.currentConfig,
       ...(partialConfig || {}),
       volume: Number((nextVolPercent / 100).toFixed(2)),
     };
+    if (partialConfig?.soundPackId && !partialConfig?.presetId) {
+      merged.presetId = mapSoundPackToPresetId(partialConfig.soundPackId);
+    } else if (partialConfig?.presetId && !partialConfig?.soundPackId) {
+      merged.soundPackId = resolveSoundPackDefinition(partialConfig.presetId).packId;
+    }
+    this.currentConfig = merged;
     this.notifyListeners();
   }
 
@@ -262,7 +626,9 @@ class GameAudioManager {
     return this.previewAudio(config, callbacks);
   }
 
-  public playSfx(type: 'correct' | 'wrong' | 'timeout' | 'recorded' | 'finish'): void {
+  public playSfx(
+    type: 'correct' | 'wrong' | 'timeout' | 'recorded' | 'finish' | 'start' | 'top3' | 'countdown'
+  ): void {
     switch (type) {
       case 'correct':
         this.playCorrect();
@@ -276,8 +642,17 @@ class GameAudioManager {
       case 'recorded':
         this.playAnswerRecorded();
         break;
+      case 'start':
+        this.playStart();
+        break;
       case 'finish':
         this.playVictory();
+        break;
+      case 'top3':
+        this.playTop3Celebration();
+        break;
+      case 'countdown':
+        this.playCueFromActivePack('countdown');
         break;
     }
   }
@@ -289,6 +664,9 @@ class GameAudioManager {
     } catch {}
     if (this.customAudioEl) {
       this.customAudioEl.muted = this.muted;
+    }
+    for (const el of this.activeSfxAudioElements.values()) {
+      el.muted = this.muted;
     }
     if (this.muted) {
       this.stopBgmInternal();
@@ -317,14 +695,36 @@ class GameAudioManager {
       localStorage.setItem(STORAGE_VOLUME_KEY, String(clamped));
     } catch {}
     if (this.customAudioEl) {
-      this.customAudioEl.volume = clamped / 100;
+      const duckFactor = this.isBgmDucked ? 0.28 : 1.0;
+      this.customAudioEl.volume = Math.max(0, Math.min(1, (clamped / 100) * duckFactor));
     }
     this.notifyListeners();
   }
 
-  private getEffectiveGain(multiplier: number = 1): number {
+  private duckBgmTemporarily(durationMs: number = 650): void {
+    if (!this.isPlayingBgm) return;
+    this.isBgmDucked = true;
+    if (this.customAudioEl) {
+      this.customAudioEl.volume = Math.max(0, Math.min(1, (this.volume / 100) * 0.28));
+    }
+    if (this.duckTimeoutId !== null && typeof window !== 'undefined') {
+      window.clearTimeout(this.duckTimeoutId);
+    }
+    if (typeof window !== 'undefined') {
+      this.duckTimeoutId = window.setTimeout(() => {
+        this.isBgmDucked = false;
+        this.duckTimeoutId = null;
+        if (this.customAudioEl) {
+          this.customAudioEl.volume = Math.max(0, Math.min(1, this.volume / 100));
+        }
+      }, durationMs);
+    }
+  }
+
+  private getEffectiveGain(multiplier: number = 1, isBgmTone: boolean = false): number {
     if (this.muted || !this.currentConfig.enabled || this.volume <= 0) return 0;
-    return Math.min(1, Math.max(0, (this.volume / 100) * multiplier));
+    const duckFactor = isBgmTone && this.isBgmDucked ? 0.28 : 1.0;
+    return Math.min(1, Math.max(0, (this.volume / 100) * multiplier * duckFactor));
   }
 
   private playTone(
@@ -332,10 +732,11 @@ class GameAudioManager {
     durationSec: number,
     type: OscillatorType = 'sine',
     gainMultiplier: number = 0.18,
-    delaySec: number = 0
+    delaySec: number = 0,
+    isBgmTone: boolean = false
   ): boolean {
     const ctx = this.ensureContext();
-    const gainVal = this.getEffectiveGain(gainMultiplier);
+    const gainVal = this.getEffectiveGain(gainMultiplier, isBgmTone);
     if (gainVal <= 0.001 || !ctx) return false;
 
     try {
@@ -374,6 +775,132 @@ class GameAudioManager {
     }
   }
 
+  private playWavAssetFile(assetUrl: string, cueKey: string): void {
+    if (typeof window === 'undefined' || typeof Audio === 'undefined' || this.muted || this.volume <= 0) {
+      return;
+    }
+    try {
+      // Stop any previous instance of the same cue so identical SFX never overlap
+      const existing = this.activeSfxAudioElements.get(cueKey);
+      if (existing) {
+        try {
+          existing.pause();
+          existing.currentTime = 0;
+        } catch {}
+      }
+
+      const audio = new Audio(assetUrl);
+      audio.volume = Math.max(0, Math.min(1, this.volume / 100));
+      audio.muted = this.muted;
+      this.activeSfxAudioElements.set(cueKey, audio);
+      this.lastSfxAssetUrl = assetUrl;
+
+      audio.onended = () => {
+        if (this.activeSfxAudioElements.get(cueKey) === audio) {
+          this.activeSfxAudioElements.delete(cueKey);
+        }
+      };
+
+      const p = audio.play();
+      if (p && typeof p.catch === 'function') {
+        p.catch(() => {
+          // Synthesized multi-harmonic Web Audio layer already provides guaranteed audible output
+        });
+      }
+    } catch {
+      // Ignore HTMLAudioElement errors when running in isolated headless environments
+    }
+  }
+
+  public resolveCueAssetUrl(cue: SfxCueType, configOverride?: Partial<GameAudioConfig>): string {
+    const cfg = { ...this.currentConfig, ...(configOverride || {}) };
+    const customOverride = cfg.customSfxOverrides?.[cue] as any;
+    const customUrl = customOverride?.url || customOverride?.audioUrl;
+    if (customOverride && typeof customUrl === 'string' && customUrl.trim()) {
+      return customUrl.trim();
+    }
+    const pack = resolveSoundPackDefinition(cfg.soundPackId || cfg.presetId);
+    return pack.cues[cue] || SOUND_PACK_CATALOG[0].cues[cue];
+  }
+
+  private playCueFromActivePack(
+    cue: SfxCueType,
+    configOverride?: Partial<GameAudioConfig>,
+    forcePlayForPreview: boolean = false
+  ): boolean {
+    const cfg = { ...this.currentConfig, ...(configOverride || {}) };
+    if (!forcePlayForPreview) {
+      if (this.muted || !cfg.enabled || cfg.sfxEnabled === false || this.volume <= 0) {
+        return false;
+      }
+      // Deduplicate rapid identical SFX triggers within 90ms (e.g. WS reconnect duplicate packets)
+      const nowMs = Date.now();
+      const prevAt = this.lastCuePlayedAtMap.get(cue) || 0;
+      if (nowMs - prevAt < 90) {
+        return false;
+      }
+      this.lastCuePlayedAtMap.set(cue, nowMs);
+    }
+
+    const pack = resolveSoundPackDefinition(cfg.soundPackId || cfg.presetId);
+    const assetUrl = this.resolveCueAssetUrl(cue, cfg);
+    this.lastSfxPlayed = cue;
+    this.lastSfxAssetUrl = assetUrl;
+
+    // Duck BGM briefly so the SFX stands out clearly
+    const duckMs = cue === 'top3' || cue === 'finish' ? 950 : 520;
+    this.duckBgmTemporarily(duckMs);
+
+    // Play real WAV/custom asset file
+    this.playWavAssetFile(assetUrl, cue);
+
+    // Also trigger multi-harmonic Web Audio notes for zero-latency response & telemetry
+    const packNotes =
+      PACK_SYNTH_PATTERNS[pack.packId]?.[cue] || PACK_SYNTH_PATTERNS.ARCADE_FUN[cue];
+    let startedAny = false;
+    for (const n of packNotes) {
+      const ok = this.playTone(n.freq, n.dur, n.wave, n.gain, n.delay, false);
+      if (ok) startedAny = true;
+    }
+    return startedAny;
+  }
+
+  /**
+   * Previews a single SFX cue (correct, wrong, timeout, countdown, start, finish, top3)
+   * when BTC clicks the individual cue preview button in the Sound Pack configurator.
+   */
+  public previewSfxCue(
+    cue: SfxCueType,
+    configOverride?: Partial<GameAudioConfig>,
+    callbacks?: AudioPreviewCallbacks
+  ): boolean {
+    if (this.muted) {
+      this.muted = false;
+      try {
+        localStorage.setItem(STORAGE_MUTED_KEY, 'false');
+      } catch {}
+    }
+    const rawVol =
+      configOverride?.volume !== undefined
+        ? normalizeVolumeToPercent(configOverride.volume, 70)
+        : this.volume;
+    const effectiveVol = rawVol <= 0 ? 70 : rawVol;
+    this.volume = effectiveVol;
+    this.configure({
+      ...(configOverride || {}),
+      enabled: true,
+      sfxEnabled: true,
+      volume: Number((effectiveVol / 100).toFixed(2)),
+    });
+    this.ensureContext();
+    const ok = this.playCueFromActivePack(cue, this.currentConfig, true);
+    if (!ok && callbacks?.onError) {
+      callbacks.onError('Không thể phát hiệu ứng âm thanh. Vui lòng kiểm tra thiết bị âm thanh.');
+    }
+    this.notifyListeners();
+    return ok;
+  }
+
   /**
    * Starts or updates background music for a game session or preview.
    * Ensures any previous loop or HTMLAudioElement is stopped first so tracks never overlap.
@@ -395,16 +922,24 @@ class GameAudioManager {
           : 70;
     this.volume = resolvedVolPercent;
 
-    this.currentConfig = {
+    const merged: GameAudioConfig = {
       ...DEFAULT_AUDIO_CONFIG,
       ...(partialConfig || {}),
       volume: Number((resolvedVolPercent / 100).toFixed(2)),
     };
+    if (partialConfig?.soundPackId && !partialConfig?.presetId) {
+      merged.presetId = mapSoundPackToPresetId(partialConfig.soundPackId);
+    } else if (partialConfig?.presetId && !partialConfig?.soundPackId) {
+      merged.soundPackId = resolveSoundPackDefinition(partialConfig.presetId).packId;
+    }
+    this.currentConfig = merged;
 
-    if (
-      !this.currentConfig.enabled ||
-      this.currentConfig.presetId === 'NONE'
-    ) {
+    const bgmAllowed =
+      this.currentConfig.enabled &&
+      this.currentConfig.bgmEnabled !== false &&
+      this.currentConfig.presetId !== 'NONE';
+
+    if (!bgmAllowed) {
       this.isPlayingBgm = false;
       this.isPreviewing = false;
       this.previewCallbacks?.onStateChange?.(false);
@@ -443,7 +978,6 @@ class GameAudioManager {
     config: Partial<GameAudioConfig>,
     callbacks?: AudioPreviewCallbacks
   ): boolean {
-    // When user explicitly clicks "Nghe thử", unmute if muted and ensure volume >= 10%
     if (this.muted) {
       this.muted = false;
       try {
@@ -456,6 +990,7 @@ class GameAudioManager {
       {
         ...config,
         enabled: config.presetId !== 'NONE',
+        bgmEnabled: config.presetId !== 'NONE',
         volume: Number((effectiveVol / 100).toFixed(2)),
       },
       true,
@@ -471,9 +1006,11 @@ class GameAudioManager {
 
   private startBgmLoop(config: GameAudioConfig): void {
     this.stopBgmInternal();
-    if (this.muted || !config.enabled || config.presetId === 'NONE') return;
+    if (this.muted || !config.enabled || config.bgmEnabled === false || config.presetId === 'NONE') {
+      return;
+    }
 
-    if (config.presetId === 'CUSTOM') {
+    if (config.presetId === 'CUSTOM' || (config.customAudioUrl && config.customAudioUrl.trim())) {
       if (!config.customAudioUrl) {
         this.lastError = 'Chưa có đường dẫn tệp âm thanh tải lên.';
         return;
@@ -529,7 +1066,6 @@ class GameAudioManager {
       return;
     }
 
-    // Built-in synthesized BGM loop with distinct melodic patterns and clearly audible gain
     this.stepIndex = 0;
     const notesByPreset: Record<
       string,
@@ -541,7 +1077,19 @@ class GameAudioManager {
         wave: 'triangle',
         gain: 0.18,
       },
+      ARCADE_FUN: {
+        notes: [261.63, 329.63, 392.0, 523.25, 392.0, 329.63, 293.66, 349.23],
+        tempoMs: 420,
+        wave: 'triangle',
+        gain: 0.18,
+      },
       EXAM_FOCUS: {
+        notes: [220.0, 277.18, 329.63, 277.18, 196.0, 246.94, 293.66, 246.94],
+        tempoMs: 880,
+        wave: 'sine',
+        gain: 0.14,
+      },
+      CLASSROOM_QUIZ: {
         notes: [220.0, 277.18, 329.63, 277.18, 196.0, 246.94, 293.66, 246.94],
         tempoMs: 880,
         wave: 'sine',
@@ -559,6 +1107,12 @@ class GameAudioManager {
         wave: 'sine',
         gain: 0.15,
       },
+      CORPORATE_TRAINING: {
+        notes: [261.63, 329.63, 392.0, 493.88, 440.0, 392.0, 329.63, 293.66],
+        tempoMs: 680,
+        wave: 'sine',
+        gain: 0.15,
+      },
     };
 
     const preset = notesByPreset[config.presetId] || notesByPreset.ENERGETIC_ARENA;
@@ -566,7 +1120,7 @@ class GameAudioManager {
       if (!this.isPlayingBgm || this.muted || !this.currentConfig.enabled) return;
       const note = preset.notes[this.stepIndex % preset.notes.length];
       this.stepIndex++;
-      this.playTone(note, (preset.tempoMs / 1000) * 0.82, preset.wave, preset.gain, 0);
+      this.playTone(note, (preset.tempoMs / 1000) * 0.82, preset.wave, preset.gain, 0, true);
     };
 
     playStep();
@@ -594,16 +1148,28 @@ class GameAudioManager {
   }
 
   /**
-   * Stops all background music and resets countdown state (called on unmount/exit/finish).
+   * Stops all background music and active SFX elements (called on unmount/exit/finish).
    */
   public stopAll(): void {
     const wasPreviewing = this.isPreviewing;
     const cb = this.previewCallbacks;
     this.isPlayingBgm = false;
     this.isPreviewing = false;
+    this.isBgmDucked = false;
     this.previewCallbacks = null;
     this.lastCountdownSecondPlayed = null;
+    if (this.duckTimeoutId !== null && typeof window !== 'undefined') {
+      window.clearTimeout(this.duckTimeoutId);
+      this.duckTimeoutId = null;
+    }
     this.stopBgmInternal();
+    for (const el of this.activeSfxAudioElements.values()) {
+      try {
+        el.pause();
+        el.currentTime = 0;
+      } catch {}
+    }
+    this.activeSfxAudioElements.clear();
     if (wasPreviewing) {
       cb?.onStateChange?.(false);
     }
@@ -622,44 +1188,42 @@ class GameAudioManager {
     if (sec > 0 && sec <= triggerSec && this.lastCountdownSecondPlayed !== sec) {
       this.lastCountdownSecondPlayed = sec;
       this.lastSfxPlayed = `countdown:${sec}`;
+      const assetUrl = this.resolveCueAssetUrl('countdown', cfg);
+      this.playWavAssetFile(assetUrl, 'countdown');
       const pitch = sec <= 2 ? 880 : 660;
-      this.playTone(pitch, 0.12, 'sine', 0.24, 0);
+      this.playTone(pitch, 0.12, 'sine', 0.24, 0, false);
     }
   }
 
+  public playStart(): void {
+    this.playCueFromActivePack('start');
+  }
+
   public playCorrect(): void {
-    if (this.currentConfig.sfxEnabled === false) return;
-    this.lastSfxPlayed = 'correct';
-    this.playTone(523.25, 0.12, 'triangle', 0.26, 0);
-    this.playTone(659.25, 0.18, 'triangle', 0.28, 0.1);
+    this.playCueFromActivePack('correct');
   }
 
   public playWrong(): void {
-    if (this.currentConfig.sfxEnabled === false) return;
-    this.lastSfxPlayed = 'wrong';
-    this.playTone(246.94, 0.16, 'sawtooth', 0.22, 0);
-    this.playTone(196.0, 0.22, 'sawtooth', 0.22, 0.12);
+    this.playCueFromActivePack('wrong');
   }
 
   public playTimeout(): void {
-    if (this.currentConfig.sfxEnabled === false) return;
-    this.lastSfxPlayed = 'timeout';
-    this.playTone(329.63, 0.14, 'sine', 0.24, 0);
-    this.playTone(261.63, 0.24, 'sine', 0.24, 0.12);
+    this.playCueFromActivePack('timeout');
   }
 
   public playAnswerRecorded(): void {
-    if (this.currentConfig.sfxEnabled === false) return;
+    if (this.currentConfig.sfxEnabled === false || this.muted || !this.currentConfig.enabled) return;
     this.lastSfxPlayed = 'recorded';
-    this.playTone(440.0, 0.11, 'sine', 0.24, 0);
+    this.duckBgmTemporarily(320);
+    this.playTone(440.0, 0.11, 'sine', 0.24, 0, false);
   }
 
   public playVictory(): void {
-    if (this.currentConfig.sfxEnabled === false) return;
-    this.lastSfxPlayed = 'finish';
-    this.playTone(523.25, 0.12, 'triangle', 0.26, 0);
-    this.playTone(659.25, 0.12, 'triangle', 0.26, 0.11);
-    this.playTone(783.99, 0.25, 'triangle', 0.3, 0.22);
+    this.playCueFromActivePack('finish');
+  }
+
+  public playTop3Celebration(): void {
+    this.playCueFromActivePack('top3');
   }
 }
 

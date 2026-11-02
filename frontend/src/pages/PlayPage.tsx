@@ -112,6 +112,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   // V2 Session Mode, Exam Redaction & Audio Controls
   const [sessionMode, setSessionMode] = useState<SessionMode>('PLAY');
   const [answersPublished, setAnswersPublished] = useState<boolean>(false);
+  const [examClosedByBtc, setExamClosedByBtc] = useState<boolean>(false);
   const [publishedAnswersList, setPublishedAnswersList] = useState<
     Array<{ id: string; question: string; correctAnswer: string; explanation?: string }>
   >([]);
@@ -289,9 +290,18 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
     });
 
     client.on('game.started', () => {
+      soundManager.playStart();
       soundManager.startBackgroundMusic();
       setScreen('question');
       toast.info('Trò chơi đã bắt đầu! Chúc bạn thi đấu đạt kết quả cao nhất!', 'Bắt đầu');
+    });
+
+    client.on('exam.closed', () => {
+      setExamClosedByBtc(true);
+      toast.warning(
+        'Đợt thi đã kết thúc — Hệ thống đã tự động ghi nhận kết quả của bạn.',
+        'Đợt thi kết thúc'
+      );
     });
 
     client.on('question.started', (msg: any) => {
@@ -386,16 +396,23 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       }
       setLeaderboard(msg.leaderboard || []);
       const myId = playerIdRef.current;
+      let myRank: number | null = null;
       if (msg.leaderboard && myId) {
         const me = msg.leaderboard.find((e: LeaderboardEntry) => e.playerId === myId);
         if (me) {
           setPlayerScore(me.score);
           setFinalRank(me.rank);
+          myRank = me.rank;
         }
       }
       if (!hasPlayedFinishSfxRef.current) {
         hasPlayedFinishSfxRef.current = true;
-        soundManager.playSfx('finish');
+        const effectiveMode = msg.sessionMode || sessionMode;
+        if (effectiveMode === 'PLAY' && myRank !== null && myRank >= 1 && myRank <= 3) {
+          soundManager.playTop3Celebration();
+        } else {
+          soundManager.playSfx('finish');
+        }
       }
       setScreen('finish');
       toast.success('Trò chơi đã kết thúc! Xem kết quả chung cuộc của bạn bên dưới.', 'Kết thúc');
@@ -1864,6 +1881,24 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           <h2 style={{ color: '#facc15', fontSize: '2rem', margin: '0 0 0.5rem 0', fontWeight: 900 }}>
             Trận Đấu Kết Thúc!
           </h2>
+
+          {examClosedByBtc && (
+            <div
+              data-testid="play-exam-closed-banner"
+              style={{
+                backgroundColor: 'rgba(245, 158, 11, 0.14)',
+                border: '1.5px solid var(--accent-amber)',
+                borderRadius: '12px',
+                padding: '0.75rem 1rem',
+                margin: '0.75rem 0',
+                color: 'var(--accent-amber)',
+                fontWeight: 800,
+                fontSize: '0.9rem',
+              }}
+            >
+              Đợt thi đã kết thúc — Hệ thống đã tự động ghi nhận kết quả của bạn.
+            </div>
+          )}
 
           <div
             data-testid="play-finish-evaluation"

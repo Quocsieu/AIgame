@@ -249,6 +249,14 @@ export async function generateGame(params: {
   officialAttemptPolicy?: OfficialAttemptPolicy;
   rosterMode?: RosterMode;
   audioConfig?: Partial<GameAudioConfig>;
+  participants?: Array<{
+    participantId?: string;
+    fullName: string;
+    departmentUnit?: string | null;
+    employeeCode?: string;
+    contactInfo?: string;
+  }>;
+  requireRoster?: boolean;
   topicFocus?: string;
   sectionFilter?: string[];
   title?: string;
@@ -552,6 +560,14 @@ export async function saveEditedQuestions(
         isPublic?: boolean;
         coverImageUrl?: string | null;
         generateCover?: boolean;
+        participants?: Array<{
+          participantId?: string;
+          fullName: string;
+          departmentUnit?: string | null;
+          employeeCode?: string;
+          contactInfo?: string;
+        }>;
+        requireRoster?: boolean;
       }
 ): Promise<GameSpecification> {
   const payload = Array.isArray(params) ? { questions: params } : params;
@@ -796,6 +812,8 @@ export async function fetchGameParticipantsApi(
 ): Promise<{
   gameId: string;
   rosterMode: RosterMode;
+  sessionMode?: SessionMode;
+  examStatus?: 'OPEN' | 'CLOSING' | 'CLOSED';
   total: number;
   departments?: string[];
   participants: ParticipantRosterItem[];
@@ -828,10 +846,70 @@ export async function fetchGameParticipantsApi(
   return data.data;
 }
 
+export interface RosterParsePreviewResult {
+  fileName: string;
+  totalRows: number;
+  validCount: number;
+  duplicateCount: number;
+  duplicateNames: string[];
+  invalidRows: Array<{
+    rowNumber: number;
+    rawText: string;
+    reason: string;
+  }>;
+  participants: Array<{
+    participantId?: string;
+    fullName: string;
+    departmentUnit: string | null;
+    employeeCode?: string;
+    contactInfo?: string;
+  }>;
+}
+
+export async function parseRosterFileApi(
+  paramsOrFile:
+    | File
+    | {
+        file?: File;
+        rawText?: string;
+        fileName?: string;
+      }
+): Promise<RosterParsePreviewResult> {
+  const params = paramsOrFile instanceof File ? { file: paramsOrFile } : paramsOrFile;
+  let res: Response;
+  if (params.file) {
+    const formData = new FormData();
+    formData.append('file', params.file);
+    if (params.rawText) formData.append('rawText', params.rawText);
+    res = await fetch(`${API_BASE_URL}/games/participants/parse`, {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: formData,
+    });
+  } else {
+    res = await fetch(`${API_BASE_URL}/games/participants/parse`, {
+      method: 'POST',
+      headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({
+        rawText: params.rawText || '',
+        fileName: params.fileName || 'manual.txt',
+      }),
+    });
+  }
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể phân tích danh sách người tham gia.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
 export async function upsertGameParticipantsApi(
   gameId: string,
   params: {
     participants?: Array<{
+      participantId?: string;
       fullName: string;
       departmentUnit?: string | null;
       employeeCode?: string;
@@ -984,6 +1062,65 @@ export async function publishExamAnswersApi(
   const data = await res.json();
   if (!data.success) {
     const err = new Error(data.error?.message || 'Không thể công bố đáp án bài thi.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function closeGameExamApi(
+  gameId: string,
+  hostToken?: string
+): Promise<{
+  gameId: string;
+  alreadyClosed: boolean;
+  examStatus: 'CLOSED';
+  examClosedAt: string;
+  answersPublished: boolean;
+  autoSubmittedSoloCount: number;
+  autoSubmittedRoomPlayersCount: number;
+  dbFinalizedCount: number;
+  totalAutoSubmitted: number;
+  closedRoomCodes: string[];
+}> {
+  const extraHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (hostToken) {
+    extraHeaders['x-host-token'] = hostToken;
+  }
+  const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/close-exam`, {
+    method: 'POST',
+    headers: buildAuthHeaders(extraHeaders),
+    body: JSON.stringify(hostToken ? { hostToken } : {}),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể kết thúc đợt thi.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function reopenGameExamApi(
+  gameId: string,
+  hostToken?: string
+): Promise<{
+  gameId: string;
+  examStatus: 'OPEN';
+  examClosedAt: null;
+}> {
+  const extraHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (hostToken) {
+    extraHeaders['x-host-token'] = hostToken;
+  }
+  const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/reopen-exam`, {
+    method: 'POST',
+    headers: buildAuthHeaders(extraHeaders),
+    body: JSON.stringify(hostToken ? { hostToken } : {}),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể mở lại đợt thi.');
     (err as any).code = data.error?.code;
     throw err;
   }
@@ -1220,6 +1357,9 @@ export async function fetchPracticeSessionSummary(sessionId: string): Promise<{
   sessionId: string;
   gameId: string;
   state: string;
+  sessionMode?: SessionMode;
+  examStatus?: 'OPEN' | 'CLOSING' | 'CLOSED';
+  examClosedAt?: string | null;
   currentQuestionIndex: number;
   totalQuestions: number;
   score: number;

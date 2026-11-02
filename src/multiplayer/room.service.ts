@@ -194,10 +194,18 @@ export class MultiplayerRoom {
     }
 
     const rosterMode = this.getRosterMode();
-    if (rosterMode === 'PRECONFIGURED' && !requestedParticipantId) {
+    const sessionMode = this.getSessionMode();
+    if ((rosterMode === 'PRECONFIGURED' || sessionMode === 'EXAM') && !requestedParticipantId) {
       try {
         const rosterCheck = persistenceRepo.listParticipants(this.gameId, { limit: 1 });
-        if (rosterCheck.total > 0) {
+        if (sessionMode === 'EXAM' && rosterCheck.total === 0) {
+          throw new AppError(
+            'EXAM_ROSTER_REQUIRED',
+            'Phòng thi bắt buộc phải có danh sách thí sinh từ Ban Tổ Chức trước khi tham gia.',
+            400
+          );
+        }
+        if (rosterCheck.total > 0 || sessionMode === 'EXAM') {
           throw new AppError(
             'PARTICIPANT_REQUIRED',
             'Phòng này yêu cầu chọn tên từ danh sách người tham gia của Ban Tổ Chức.',
@@ -679,6 +687,52 @@ export class MultiplayerRoom {
     this.state = 'FINISHED';
     this.updatedAt = Date.now();
     this.finishedAtIso = new Date().toISOString();
+    const finalLeaderboard = this.getLeaderboard();
+    this.persistHistory(finalLeaderboard);
+    return finalLeaderboard;
+  }
+
+  /**
+   * Auto-submits and finishes the room when BTC closes the exam.
+   * Marks any unanswered questions for each player as timedOut (0 points) and persists all attempts.
+   */
+  public forceFinishOnExamClose(closedAtIso?: string): LeaderboardEntry[] {
+    if (this.state === 'FINISHED' || this.state === 'CLOSED') {
+      return this.getLeaderboard();
+    }
+    if (this.timerHandle) {
+      clearTimeout(this.timerHandle);
+      this.timerHandle = null;
+    }
+
+    const nowMs = Date.now();
+    const nowIso = closedAtIso || new Date(nowMs).toISOString();
+    if (!this.startedAtIso) {
+      this.startedAtIso = nowIso;
+    }
+
+    for (const player of this.players.values()) {
+      for (const q of this.gameSpecification.questions) {
+        if (!player.answeredQuestionIds.has(q.id)) {
+          player.wrongCount++;
+          player.currentStreak = 0;
+          player.answeredQuestionIds.add(q.id);
+          player.questionResults.set(q.id, {
+            questionId: q.id,
+            answer: '',
+            isCorrect: false,
+            pointsEarned: 0,
+            responseTimeMs: 0,
+            answeredAt: nowMs,
+            timedOut: true,
+          });
+        }
+      }
+    }
+
+    this.state = 'FINISHED';
+    this.updatedAt = nowMs;
+    this.finishedAtIso = nowIso;
     const finalLeaderboard = this.getLeaderboard();
     this.persistHistory(finalLeaderboard);
     return finalLeaderboard;

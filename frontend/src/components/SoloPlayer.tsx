@@ -72,6 +72,16 @@ function normalizePlaytestCrosswordAscii(value: string): string {
     .replace(/[^A-Z0-9]/g, '');
 }
 
+function normalizeVietnameseSearch(value: string): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function normalizePlaytestTrueFalsePolarity(value: string): 'TRUE' | 'FALSE' | null {
   const clean = stripPlaytestOptionPrefix(value);
   if (['đúng', 'dung', 'true', 'yes', 'có', 'co', 'chính xác', 'chinh xac', '1'].includes(clean)) {
@@ -302,15 +312,20 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const [audioMuted, setAudioMuted] = useState<boolean>(() => soundManager.isMuted());
   const [audioVolume, setAudioVolume] = useState<number>(() => soundManager.getVolume());
 
-  // Roster Gate state (for Solo live sessions when game has PRECONFIGURED / HYBRID roster)
+  // Roster Gate & Free-Text Gate state (V2/V3)
   const [rosterGateOpen, setRosterGateOpen] = useState<boolean>(false);
   const [rosterItems, setRosterItems] = useState<ParticipantRosterItem[]>([]);
   const [rosterSearch, setRosterSearch] = useState<string>('');
+  const [rosterHighlightIndex, setRosterHighlightIndex] = useState<number>(0);
   const [selectedParticipantId, setSelectedParticipantId] = useState<string>('');
   const [confirmingIdentity, setConfirmingIdentity] = useState<boolean>(false);
   const [hybridFreeTextMode, setHybridFreeTextMode] = useState<boolean>(false);
   const [freeTextPlayerName, setFreeTextPlayerName] = useState<string>('');
   const [freeTextDepartment, setFreeTextDepartment] = useState<string>('');
+  const [freeNameGateOpen, setFreeNameGateOpen] = useState<boolean>(false);
+  const [freeNameError, setFreeNameError] = useState<string | null>(null);
+  const [examNoRosterBlocked, setExamNoRosterBlocked] = useState<boolean>(false);
+  const [examClosedByBtc, setExamClosedByBtc] = useState<boolean>(false);
   const confirmedIdentityRef = useRef<{
     participantId?: string;
     playerName?: string;
@@ -606,23 +621,48 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       }
     }
 
-    // Check if game requires Roster Gate (PRECONFIGURED or HYBRID) before creating session
+    // Check Roster / Free-Text Name / Exam requirements before creating session
     if (targetGameId && !confirmedIdentityRef.current) {
       try {
         const rosterRes = await fetchGameParticipantsApi(targetGameId, { mode: 'public' });
         const mode = rosterRes.rosterMode || resolvedSpec?.settings?.rosterMode || 'FREE_TEXT';
+        const effectiveSessionMode =
+          rosterRes.sessionMode || resolvedSpec?.settings?.sessionMode || 'PLAY';
+        const effectiveExamStatus =
+          rosterRes.examStatus || resolvedSpec?.settings?.examStatus || 'OPEN';
+        const hasRosterList =
+          Array.isArray(rosterRes.participants) && rosterRes.participants.length > 0;
+
+        if (effectiveExamStatus === 'CLOSED' || effectiveExamStatus === 'CLOSING') {
+          setErrorMessage('Đợt thi này đã kết thúc, không thể bắt đầu lượt thi mới.');
+          setIsLoading(false);
+          return;
+        }
+
+        if (effectiveSessionMode === 'EXAM' && !hasRosterList) {
+          setExamNoRosterBlocked(true);
+          setIsLoading(false);
+          return;
+        }
+
         if (
-          (mode === 'PRECONFIGURED' || mode === 'HYBRID') &&
-          Array.isArray(rosterRes.participants) &&
-          rosterRes.participants.length > 0
+          hasRosterList &&
+          (effectiveSessionMode === 'EXAM' || mode === 'PRECONFIGURED' || mode === 'HYBRID')
         ) {
           setRosterItems(rosterRes.participants);
           setRosterGateOpen(true);
           setIsLoading(false);
           return;
         }
+
+        // V3 Stage 3: Solo Play without Roster -> Require Free-Text Name before Question 1
+        if (effectiveSessionMode === 'PLAY' && !hasRosterList && Boolean(gameId)) {
+          setFreeNameGateOpen(true);
+          setIsLoading(false);
+          return;
+        }
       } catch {
-        // Proceed without roster gate if endpoint not applicable
+        // Proceed if endpoint not applicable
       }
     }
 
@@ -673,6 +713,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         sessionStorage.setItem(sessionKey, activeSessionId);
       }
       soundManager.startSessionAudio(resolvedSpec?.settings?.audioConfig);
+      soundManager.playStart();
       const startRes = await startPracticeSession(activeSessionId);
       setCurrentQuestion(startRes.question);
       const questionTime =
@@ -696,6 +737,48 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       soundManager.stopAll();
     };
   }, [gameId, initialSpec]);
+
+  // V3 Stage 5: Poll session status during active Solo Exam to detect BTC Close Exam & auto-submit immediately
+  useEffect(() => {
+    if (playtestMode || !sessionId || finalResult) return;
+    const spec = loadedSpec || initialSpec;
+    if (spec?.settings?.sessionMode !== 'EXAM') return;
+
+    const interval = window.setInterval(async () => {
+      try {
+        const summary = await fetchPracticeSessionSummary(sessionId);
+        if (
+          summary.state === 'FINISHED' ||
+          summary.examStatus === 'CLOSED' ||
+          summary.examStatus === 'CLOSING'
+        ) {
+          window.clearInterval(interval);
+          stopTimer();
+          clearAutoAdvanceTimer();
+          setExamClosedByBtc(true);
+          const res = await fetchPracticeResult(sessionId);
+          soundManager.stopAll();
+          soundManager.playVictory();
+          setFinalResult(res);
+          setCurrentQuestion(null);
+          const targetGameId = gameId || initialSpec?.gameId;
+          if (targetGameId) {
+            sessionStorage.removeItem(`active_solo_session_${targetGameId}`);
+          }
+          toast.info(
+            'Đợt thi đã kết thúc theo quyết định của Ban Tổ Chức. Bài làm đã được tự động ghi nhận.',
+            'Đợt thi đã kết thúc'
+          );
+        }
+      } catch {
+        // Ignore transient network errors
+      }
+    }, 2000);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [playtestMode, sessionId, finalResult, loadedSpec, initialSpec, gameId]);
 
   const handleAdventureCheckpointModalChange = React.useCallback(
     (isOpen: boolean) => {
@@ -917,7 +1000,24 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       setPlayerCorrectCount((prev) => prev + (res.isCorrect ? 1 : 0));
       setPlayerWrongCount((prev) => prev + (res.isCorrect ? 0 : 1));
     } catch (err: any) {
-      if (err.message?.includes('abandoned') || err.message?.includes('đã bị kết thúc')) {
+      if (err.code === 'EXAM_CLOSED' || err.message?.includes('Đợt thi đã kết thúc')) {
+        stopTimer();
+        clearAutoAdvanceTimer();
+        setExamClosedByBtc(true);
+        try {
+          const res = await fetchPracticeResult(sessionId);
+          soundManager.stopAll();
+          soundManager.playVictory();
+          setFinalResult(res);
+          setCurrentQuestion(null);
+        } catch {
+          // ignore
+        }
+        toast.info(
+          'Đợt thi đã kết thúc. Hệ thống đã tự động ghi nhận kết quả các câu bạn đã hoàn thành.',
+          'Đợt thi đã kết thúc'
+        );
+      } else if (err.message?.includes('abandoned') || err.message?.includes('đã bị kết thúc')) {
         toast.warning('Phiên luyện tập này đã được kết thúc bởi người tạo. Đang chuyển hướng...', 'Phiên đã đóng');
         setTimeout(() => handleLeave(), 1500);
       } else if (
@@ -1438,18 +1538,242 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     </div>
   ) : null;
 
+  // V3 Stage 4: EXAM mode blocked when no participant roster is configured
+  if (examNoRosterBlocked && !playtestMode) {
+    return (
+      <div
+        data-testid="solo-exam-no-roster-error"
+        style={{
+          maxWidth: '560px',
+          margin: '2.5rem auto',
+          padding: '2.25rem 2rem',
+          backgroundColor: 'var(--bg-surface)',
+          border: '1.5px solid rgba(239, 68, 68, 0.45)',
+          borderRadius: '20px',
+          boxShadow: 'var(--shadow-lg)',
+          textAlign: 'center',
+        }}
+      >
+        <div
+          style={{
+            width: '56px',
+            height: '56px',
+            borderRadius: '16px',
+            backgroundColor: 'rgba(239, 68, 68, 0.14)',
+            color: 'var(--accent-rose)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '1rem',
+          }}
+        >
+          <XMarkIcon size={28} />
+        </div>
+        <h2 style={{ margin: '0 0 0.5rem 0', fontSize: '1.35rem', fontWeight: 900 }}>
+          Đợt Thi Chưa Có Danh Sách Thí Sinh
+        </h2>
+        <p style={{ margin: '0 0 1.5rem 0', color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: 1.5 }}>
+          Ở chế độ Thi cá nhân, Ban Tổ Chức bắt buộc phải cấu hình danh sách thí sinh trước khi mở đợt thi. Không cho phép thí sinh tự nhập tên tự do.
+        </p>
+        <button
+          type="button"
+          onClick={handleLeave}
+          style={{
+            minHeight: '44px',
+            padding: '0.65rem 1.5rem',
+            borderRadius: '10px',
+            border: '1.5px solid var(--border-strong)',
+            backgroundColor: 'var(--bg-input)',
+            color: 'var(--text-primary)',
+            fontWeight: 800,
+            cursor: 'pointer',
+          }}
+        >
+          Quay lại
+        </button>
+      </div>
+    );
+  }
+
+  // V3 Stage 3: Free-Text Name Gate for Solo PLAY mode without a participant roster
+  if (freeNameGateOpen && !playtestMode) {
+    const handleStartFreeNameSolo = (e: React.FormEvent) => {
+      e.preventDefault();
+      const cleanName = freeTextPlayerName.replace(/\s+/g, ' ').trim();
+      if (!cleanName) {
+        setFreeNameError('Vui lòng nhập tên của bạn (không được để trống hoặc chỉ chứa khoảng trắng).');
+        toast.warning('Vui lòng nhập tên của bạn trước khi bắt đầu chơi.', 'Thiếu tên người chơi');
+        return;
+      }
+      if (cleanName.length > 80) {
+        setFreeNameError('Tên người chơi không được vượt quá 80 ký tự.');
+        return;
+      }
+      setFreeNameError(null);
+      const targetGameId = gameId || initialSpec?.gameId;
+      const identityKey = targetGameId ? `solo_roster_identity_${targetGameId}` : null;
+      const ident = {
+        playerName: cleanName,
+        departmentUnit: freeTextDepartment.trim() || undefined,
+      };
+      confirmedIdentityRef.current = ident;
+      if (identityKey) sessionStorage.setItem(identityKey, JSON.stringify(ident));
+      setFreeNameGateOpen(false);
+      initializeSession(true);
+    };
+
+    return (
+      <div
+        data-testid="solo-free-name-gate"
+        style={{
+          maxWidth: '520px',
+          margin: '2.5rem auto',
+          padding: '2rem',
+          backgroundColor: 'var(--bg-surface)',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: '20px',
+          boxShadow: 'var(--shadow-lg)',
+        }}
+      >
+        <h2 style={{ margin: '0 0 0.4rem 0', fontSize: '1.4rem', fontWeight: 900 }}>
+          Nhập Tên Người Chơi
+        </h2>
+        <p style={{ margin: '0 0 1.25rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+          {activeGameSpec?.title || 'Chơi cá nhân'} — Nhập tên của bạn để bắt đầu thử thách và lưu kết quả.
+        </p>
+        <form onSubmit={handleStartFreeNameSolo} style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          <div>
+            <label
+              htmlFor="solo-free-name-input"
+              style={{ display: 'block', fontSize: '0.85rem', fontWeight: 800, marginBottom: '0.35rem' }}
+            >
+              Họ và tên / Biệt danh <span style={{ color: 'var(--accent-rose)' }}>*</span>
+            </label>
+            <input
+              id="solo-free-name-input"
+              type="text"
+              data-testid="solo-free-name-input"
+              maxLength={80}
+              placeholder="VD: Nguyễn Minh Anh"
+              value={freeTextPlayerName}
+              onChange={(e) => {
+                setFreeTextPlayerName(e.target.value);
+                if (freeNameError) setFreeNameError(null);
+              }}
+              style={{
+                width: '100%',
+                padding: '0.75rem 1rem',
+                borderRadius: '10px',
+                border: '1.5px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontWeight: 700,
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="solo-free-dept-input"
+              style={{ display: 'block', fontSize: '0.85rem', fontWeight: 800, marginBottom: '0.35rem' }}
+            >
+              Đơn vị / Lớp / Phòng ban (tùy chọn)
+            </label>
+            <input
+              id="solo-free-dept-input"
+              type="text"
+              data-testid="solo-free-dept-input"
+              maxLength={80}
+              placeholder="VD: Phòng Kỹ Thuật"
+              value={freeTextDepartment}
+              onChange={(e) => setFreeTextDepartment(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '0.7rem 1rem',
+                borderRadius: '10px',
+                border: '1px solid var(--border-subtle)',
+                backgroundColor: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontWeight: 600,
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          {freeNameError && (
+            <div
+              data-testid="solo-free-name-error"
+              style={{
+                padding: '0.6rem 0.85rem',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                color: 'var(--accent-rose)',
+                fontSize: '0.82rem',
+                fontWeight: 700,
+              }}
+            >
+              {freeNameError}
+            </div>
+          )}
+          <button
+            type="submit"
+            data-testid="solo-free-start-btn"
+            style={{
+              minHeight: '46px',
+              borderRadius: '12px',
+              border: 'none',
+              backgroundColor: 'var(--primary)',
+              color: '#ffffff',
+              fontWeight: 800,
+              fontSize: '0.98rem',
+              cursor: 'pointer',
+              marginTop: '0.25rem',
+            }}
+          >
+            Bắt đầu chơi
+          </button>
+          <button
+            type="button"
+            onClick={handleLeave}
+            style={{
+              minHeight: '42px',
+              borderRadius: '10px',
+              border: '1px solid var(--border-strong)',
+              backgroundColor: 'var(--bg-surface)',
+              color: 'var(--text-secondary)',
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            Quay lại
+          </button>
+        </form>
+      </div>
+    );
+  }
+
   // ROSTER GATE SCREEN (Solo Live Mode with PRECONFIGURED / HYBRID Roster)
   if (rosterGateOpen && !playtestMode) {
-    const rosterMode = activeGameSpec?.settings?.rosterMode || 'PRECONFIGURED';
+    const rosterMode = isExamMode
+      ? 'PRECONFIGURED'
+      : activeGameSpec?.settings?.rosterMode || 'PRECONFIGURED';
+    const duplicateNameCounts = new Map<string, number>();
+    for (const item of rosterItems) {
+      const k = normalizeVietnameseSearch(item.fullName);
+      duplicateNameCounts.set(k, (duplicateNameCounts.get(k) || 0) + 1);
+    }
+    const normSearch = normalizeVietnameseSearch(rosterSearch);
     const filteredRoster = rosterItems.filter((item) => {
-      const q = rosterSearch.trim().toLowerCase();
-      if (!q) return true;
-      return (
-        item.fullName.toLowerCase().includes(q) ||
-        (item.departmentUnit || '').toLowerCase().includes(q) ||
-        (item.employeeCode || '').toLowerCase().includes(q)
+      if (!normSearch) return true;
+      const hay = normalizeVietnameseSearch(
+        `${item.fullName} ${item.departmentUnit || ''} ${item.employeeCode || ''}`
       );
+      return hay.includes(normSearch);
     });
+    const safeHighlight = Math.max(
+      0,
+      Math.min(rosterHighlightIndex, Math.max(0, filteredRoster.length - 1))
+    );
     const selectedParticipant =
       rosterItems.find((p) => (p.id || p.participantId) === selectedParticipantId) || null;
 
@@ -1598,12 +1922,55 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           </div>
         ) : (
           <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.35rem' }}>
+              <span style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-secondary)' }}>
+                Hiển thị {filteredRoster.length}/{rosterItems.length} người tham gia
+              </span>
+              <span style={{ fontSize: '0.72rem', fontWeight: 600, color: 'var(--text-muted)' }}>
+                ↑↓ Di chuyển • Enter Chọn • Esc Xóa tìm kiếm
+              </span>
+            </div>
             <input
               type="text"
               data-testid="roster-search-input"
-              placeholder="Tìm nhanh theo họ tên, mã nhân viên hoặc đơn vị..."
+              placeholder="Gõ tên không dấu/có dấu, mã nhân viên hoặc đơn vị..."
               value={rosterSearch}
-              onChange={(e) => setRosterSearch(e.target.value)}
+              onChange={(e) => {
+                setRosterSearch(e.target.value);
+                setRosterHighlightIndex(0);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  setRosterHighlightIndex((prev) =>
+                    filteredRoster.length > 0 ? (prev + 1) % filteredRoster.length : 0
+                  );
+                } else if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  setRosterHighlightIndex((prev) =>
+                    filteredRoster.length > 0
+                      ? (prev - 1 + filteredRoster.length) % filteredRoster.length
+                      : 0
+                  );
+                } else if (e.key === 'Enter') {
+                  const target = filteredRoster[safeHighlight];
+                  if (target) {
+                    e.preventDefault();
+                    const pid = target.id || target.participantId;
+                    setSelectedParticipantId(pid);
+                    setConfirmingIdentity(true);
+                  }
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  if (rosterSearch) {
+                    setRosterSearch('');
+                    setRosterHighlightIndex(0);
+                  } else {
+                    setSelectedParticipantId('');
+                    setConfirmingIdentity(false);
+                  }
+                }
+              }}
               style={{
                 width: '100%',
                 padding: '0.7rem 1rem',
@@ -1613,10 +1980,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 color: 'var(--text-primary)',
                 fontWeight: 700,
                 marginBottom: '0.85rem',
+                boxSizing: 'border-box',
               }}
             />
 
             <div
+              role="listbox"
+              aria-label="Danh sách thí sinh"
+              data-testid="solo-roster-dropdown-list"
               style={{
                 maxHeight: '260px',
                 overflowY: 'auto',
@@ -1626,78 +1997,121 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 marginBottom: '1.25rem',
               }}
             >
-              {filteredRoster.map((p) => {
-                const pid = p.id || p.participantId;
-                const retakesGranted = p.retakesGranted ?? Math.max(0, (p.allowedAttempts ?? 1) - 1);
-                const attemptsUsed = p.attemptsUsed ?? p.usedAttempts ?? 0;
-                const canRetake = p.canStartAttempt ?? (retakesGranted > 0 && attemptsUsed <= retakesGranted);
-                const isBlocked =
-                  p.isLocked &&
-                  !canRetake &&
-                  (p.lockStatus === 'IN_PROGRESS' ||
-                    (isExamMode && p.lockStatus === 'COMPLETED'));
-                const isSelected = selectedParticipantId === pid;
-                return (
-                  <button
-                    key={pid}
-                    type="button"
-                    data-testid={`roster-participant-option-${pid}`}
-                    disabled={isBlocked}
-                    onClick={() => {
-                      setSelectedParticipantId(pid);
-                      setConfirmingIdentity(true);
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      padding: '0.75rem 1rem',
-                      borderRadius: '12px',
-                      border: `1.5px solid ${
-                        isSelected ? 'var(--primary)' : 'var(--border-subtle)'
-                      }`,
-                      backgroundColor: isSelected
-                        ? 'var(--primary-subtle)'
-                        : 'var(--bg-input)',
-                      color: 'var(--text-primary)',
-                      textAlign: 'left',
-                      cursor: isBlocked ? 'not-allowed' : 'pointer',
-                      opacity: isBlocked ? 0.55 : 1,
-                    }}
-                  >
-                    <div>
-                      <div style={{ fontWeight: 800, fontSize: '0.95rem' }}>{p.fullName}</div>
-                      {p.departmentUnit && (
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                          Đơn vị: {p.departmentUnit}
-                        </div>
-                      )}
-                    </div>
-                    <span
+              {filteredRoster.length === 0 ? (
+                <div
+                  data-testid="solo-roster-empty-search"
+                  style={{
+                    padding: '1rem',
+                    textAlign: 'center',
+                    fontSize: '0.85rem',
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  Không tìm thấy thí sinh phù hợp với từ khóa "{rosterSearch}".
+                </div>
+              ) : (
+                filteredRoster.map((p, idx) => {
+                  const pid = p.id || p.participantId;
+                  const retakesGranted = p.retakesGranted ?? Math.max(0, (p.allowedAttempts ?? 1) - 1);
+                  const attemptsUsed = p.attemptsUsed ?? p.usedAttempts ?? 0;
+                  const canRetake = p.canStartAttempt ?? (retakesGranted > 0 && attemptsUsed <= retakesGranted);
+                  const isBlocked =
+                    p.isLocked &&
+                    !canRetake &&
+                    (p.lockStatus === 'IN_PROGRESS' ||
+                      (isExamMode && p.lockStatus === 'COMPLETED'));
+                  const isSelected = selectedParticipantId === pid;
+                  const isHighlighted = idx === safeHighlight;
+                  const isDuplicateName =
+                    (duplicateNameCounts.get(normalizeVietnameseSearch(p.fullName)) || 0) > 1;
+                  return (
+                    <button
+                      key={pid}
+                      type="button"
+                      role="option"
+                      aria-selected={isSelected}
+                      data-testid={`roster-participant-option-${pid}`}
+                      disabled={isBlocked}
+                      onMouseEnter={() => setRosterHighlightIndex(idx)}
+                      onClick={() => {
+                        setSelectedParticipantId(pid);
+                        setConfirmingIdentity(true);
+                      }}
                       style={{
-                        fontSize: '0.75rem',
-                        fontWeight: 800,
-                        padding: '0.2rem 0.6rem',
-                        borderRadius: '999px',
-                        backgroundColor: isBlocked
-                          ? 'rgba(239, 68, 68, 0.15)'
-                          : canRetake
-                            ? 'rgba(56, 189, 248, 0.15)'
-                            : 'rgba(16, 185, 129, 0.15)',
-                        color: isBlocked ? '#ef4444' : canRetake ? '#0284c7' : '#10b981',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '0.75rem 1rem',
+                        borderRadius: '12px',
+                        border: `1.5px solid ${
+                          isSelected
+                            ? 'var(--primary)'
+                            : isHighlighted
+                              ? 'var(--accent-sky)'
+                              : 'var(--border-subtle)'
+                        }`,
+                        backgroundColor: isSelected
+                          ? 'var(--primary-subtle)'
+                          : isHighlighted
+                            ? 'rgba(56, 189, 248, 0.08)'
+                            : 'var(--bg-input)',
+                        color: 'var(--text-primary)',
+                        textAlign: 'left',
+                        cursor: isBlocked ? 'not-allowed' : 'pointer',
+                        opacity: isBlocked ? 0.55 : 1,
                       }}
                     >
-                      {p.lockStatus === 'IN_PROGRESS'
-                        ? 'Đang thi'
-                        : canRetake
-                          ? 'Được cấp thi lại'
-                          : isBlocked
-                            ? 'Đã hoàn thành'
-                            : 'Sẵn sàng'}
-                    </span>
-                  </button>
-                );
-              })}
+                      <div>
+                        <div style={{ fontWeight: 800, fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                          <span>{p.fullName}</span>
+                          {isDuplicateName && (
+                            <span
+                              data-testid={`solo-duplicate-badge-${pid}`}
+                              style={{
+                                fontSize: '0.7rem',
+                                padding: '0.1rem 0.45rem',
+                                borderRadius: '6px',
+                                backgroundColor: 'rgba(56, 189, 248, 0.16)',
+                                color: 'var(--accent-sky)',
+                                fontWeight: 800,
+                              }}
+                            >
+                              {p.departmentUnit || p.employeeCode || `ID: ${pid.slice(-4)}`}
+                            </span>
+                          )}
+                        </div>
+                        {p.departmentUnit && (
+                          <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                            Đơn vị: {p.departmentUnit}
+                          </div>
+                        )}
+                      </div>
+                      <span
+                        style={{
+                          fontSize: '0.75rem',
+                          fontWeight: 800,
+                          padding: '0.2rem 0.6rem',
+                          borderRadius: '999px',
+                          backgroundColor: isBlocked
+                            ? 'rgba(239, 68, 68, 0.15)'
+                            : canRetake
+                              ? 'rgba(56, 189, 248, 0.15)'
+                              : 'rgba(16, 185, 129, 0.15)',
+                          color: isBlocked ? '#ef4444' : canRetake ? '#0284c7' : '#10b981',
+                        }}
+                      >
+                        {p.lockStatus === 'IN_PROGRESS'
+                          ? 'Đang thi'
+                          : canRetake
+                            ? 'Được cấp thi lại'
+                            : isBlocked
+                              ? 'Đã hoàn thành'
+                              : 'Sẵn sàng'}
+                      </span>
+                    </button>
+                  );
+                })
+              )}
             </div>
 
             {confirmingIdentity && selectedParticipant && (
@@ -2080,6 +2494,24 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           {activeGameSpec?.title || finalResult.title}
         </p>
 
+        {(examClosedByBtc || (finalResult as any)?.examStatus === 'CLOSED') && (
+          <div
+            data-testid="solo-exam-closed-banner"
+            style={{
+              padding: '0.8rem 1rem',
+              borderRadius: '14px',
+              backgroundColor: 'rgba(245, 158, 11, 0.14)',
+              border: '1.5px solid rgba(245, 158, 11, 0.45)',
+              color: 'var(--text-primary)',
+              fontSize: '0.86rem',
+              fontWeight: 800,
+              marginBottom: '1rem',
+            }}
+          >
+            Đợt thi đã kết thúc — Hệ thống đã tự động ghi nhận và chấm điểm các câu bạn đã hoàn thành.
+          </div>
+        )}
+
         {playtestBanner}
 
         {/* Unified 4-Tier Evaluation Card */}
@@ -2181,9 +2613,10 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
         {/* Buttons */}
         <div style={{ display: 'flex', gap: '0.85rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-          {(!isExamMode || playtestMode) && (
+          {(!isExamMode || playtestMode) && activeGameSpec?.settings?.allowReplay !== false && (
             <button
               type="button"
+              data-testid="solo-replay-btn"
               onClick={() => initializeSession('RESTART')}
               style={{
                 minHeight: '48px',

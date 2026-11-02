@@ -396,8 +396,14 @@ export function getCurrentDatabasePath(): string {
   return currentDbPath || resolveDefaultDatabasePath();
 }
 
+let transactionDepth = 0;
+
 export function runInTransaction<T>(fn: (db: DatabaseSync) => T, immediate: boolean = true): T {
   const db = getDatabase();
+  if (transactionDepth > 0) {
+    return fn(db);
+  }
+  transactionDepth++;
   db.exec(immediate ? 'BEGIN IMMEDIATE' : 'BEGIN');
   try {
     const result = fn(db);
@@ -415,5 +421,7 @@ export function runInTransaction<T>(fn: (db: DatabaseSync) => T, immediate: bool
       `Database transaction failed: ${err instanceof Error ? err.message : String(err)}`,
       500
     );
+  } finally {
+    transactionDepth--;
   }
 }

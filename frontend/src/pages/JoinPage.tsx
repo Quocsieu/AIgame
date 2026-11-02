@@ -17,6 +17,16 @@ interface JoinPageProps {
   onJoin: (roomCode: string, displayName: string) => void;
 }
 
+function normalizeVietnameseSearch(value: string): string {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[đĐ]/g, 'd')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin }) => {
   const toast = useToast();
 
@@ -37,10 +47,11 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
   const [pasteInput, setPasteInput] = useState('');
   const [showPasteSection, setShowPasteSection] = useState(false);
 
-  // V2 Roster Gate State
+  // V2/V3 Roster Gate State
   const [rosterMode, setRosterMode] = useState<RosterMode>('FREE_TEXT');
   const [rosterParticipants, setRosterParticipants] = useState<PublicParticipantItem[]>([]);
   const [rosterSearch, setRosterSearch] = useState('');
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(0);
   const [selectedParticipant, setSelectedParticipant] = useState<PublicParticipantItem | null>(null);
   const [departmentInput, setDepartmentInput] = useState(() => {
     try {
@@ -213,21 +224,28 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
   const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanCode = roomCode.trim().toUpperCase();
+    const isExamRoom = verifiedLobby?.sessionMode === 'EXAM';
+    const hasRosterList = rosterParticipants.length > 0;
     const isPreconfigured =
-      (rosterMode === 'PRECONFIGURED' || (rosterMode === 'HYBRID' && selectedParticipant)) &&
-      rosterParticipants.length > 0;
+      (isExamRoom || rosterMode === 'PRECONFIGURED' || (rosterMode === 'HYBRID' && selectedParticipant)) &&
+      hasRosterList;
 
     if (!cleanCode) {
       toast.error('Chưa có mã phòng chơi. Vui lòng nhập mã PIN trước.', 'Thiếu mã PIN');
       return;
     }
 
-    if (rosterMode === 'PRECONFIGURED' && rosterParticipants.length > 0 && !selectedParticipant) {
-      toast.error('Vui lòng chọn tên của bạn từ danh sách thí sinh BTC.', 'Chưa chọn thí sinh');
+    if (isExamRoom && !hasRosterList) {
+      toast.error('Phòng thi ở chế độ THI bắt buộc phải có danh sách thí sinh từ Ban Tổ Chức.', 'Chưa có danh sách thí sinh');
       return;
     }
 
-    if (isPreconfigured && selectedParticipant && !confirmedIdentity) {
+    if ((isExamRoom || rosterMode === 'PRECONFIGURED' || hasRosterList) && rosterMode !== 'FREE_TEXT' && !selectedParticipant) {
+      toast.error('Vui lòng chọn tên của bạn từ danh sách người tham gia.', 'Chưa chọn tên');
+      return;
+    }
+
+    if ((isPreconfigured || selectedParticipant) && !confirmedIdentity) {
       toast.warning('Vui lòng tích chọn xác nhận "Đây là tôi" trước khi vào phòng.', 'Xác nhận danh tính');
       return;
     }
@@ -375,137 +393,286 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
               </div>
             </div>
 
-            {/* Chọn thí sinh từ danh sách BTC hoặc nhập tên */}
-            {(rosterMode === 'PRECONFIGURED' || rosterMode === 'HYBRID') && rosterParticipants.length > 0 && (
+            {/* Cảnh báo nếu phòng THI chưa có danh sách thí sinh */}
+            {verifiedLobby?.sessionMode === 'EXAM' && rosterParticipants.length === 0 && (
               <div
-                data-testid="join-roster-gate"
+                data-testid="join-exam-no-roster-error"
                 style={{
                   marginBottom: '1.25rem',
-                  padding: '0.9rem',
+                  padding: '0.9rem 1rem',
                   borderRadius: '14px',
-                  backgroundColor: 'var(--bg-input)',
-                  border: '1.5px solid var(--border-strong)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '0.6rem',
+                  backgroundColor: 'rgba(244, 63, 94, 0.12)',
+                  border: '1.5px solid rgba(244, 63, 94, 0.4)',
+                  color: 'var(--accent-rose)',
+                  fontSize: '0.84rem',
+                  fontWeight: 700,
                 }}
               >
-                <label style={{ fontSize: '0.84rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                  Chọn tên của bạn trong danh sách thí sinh BTC:
-                </label>
-                <input
-                  type="text"
-                  data-testid="join-roster-search-input"
-                  value={rosterSearch}
-                  onChange={(e) => setRosterSearch(e.target.value)}
-                  placeholder="Tìm theo Họ tên, Đơn vị hoặc Mã NV..."
-                  style={{
-                    width: '100%',
-                    padding: '0.55rem 0.75rem',
-                    borderRadius: '8px',
-                    border: '1px solid var(--border-subtle)',
-                    backgroundColor: 'var(--bg-surface)',
-                    color: 'var(--text-primary)',
-                    fontSize: '0.84rem',
-                    boxSizing: 'border-box',
-                  }}
-                />
-                <div
-                  style={{
-                    maxHeight: '160px',
-                    overflowY: 'auto',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '0.35rem',
-                  }}
-                >
-                  {rosterParticipants
-                    .filter((p) => {
-                      const q = rosterSearch.trim().toLowerCase();
-                      if (!q) return true;
-                      return (
-                        p.fullName.toLowerCase().includes(q) ||
-                        (p.departmentUnit || '').toLowerCase().includes(q) ||
-                        (p.employeeCode || '').toLowerCase().includes(q)
-                      );
-                    })
-                    .map((p) => {
-                      const isSel = selectedParticipant?.participantId === p.participantId;
-                      return (
-                        <button
-                          key={p.participantId}
-                          type="button"
-                          data-testid={`join-roster-item-${p.participantId}`}
-                          disabled={!p.canStartAttempt}
-                          onClick={() => {
-                            setSelectedParticipant(p);
-                            setDisplayName(p.fullName);
-                            setDepartmentInput(p.departmentUnit || '');
-                            setConfirmedIdentity(false);
-                          }}
-                          style={{
-                            textAlign: 'left',
-                            padding: '0.5rem 0.65rem',
-                            borderRadius: '8px',
-                            border: isSel ? '2px solid var(--accent-emerald)' : '1px solid var(--border-subtle)',
-                            backgroundColor: isSel ? 'rgba(16, 185, 129, 0.14)' : 'var(--bg-surface)',
-                            color: 'var(--text-primary)',
-                            cursor: p.canStartAttempt ? 'pointer' : 'not-allowed',
-                            opacity: p.canStartAttempt ? 1 : 0.55,
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                            gap: '0.4rem',
-                          }}
-                        >
-                          <div>
-                            <div style={{ fontSize: '0.84rem', fontWeight: 800 }}>{p.fullName}</div>
-                            <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
-                              {p.departmentUnit || 'Thí sinh'} {p.employeeCode ? `• ${p.employeeCode}` : ''}
-                            </div>
-                          </div>
-                          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: p.canStartAttempt ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
-                            {p.canStartAttempt ? 'Sẵn sàng' : 'Đã hết lượt'}
-                          </span>
-                        </button>
-                      );
-                    })}
-                </div>
-
-                {selectedParticipant && (
-                  <label
-                    data-testid="join-confirm-identity-label"
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.5rem',
-                      padding: '0.5rem 0.65rem',
-                      borderRadius: '8px',
-                      backgroundColor: 'rgba(16, 185, 129, 0.12)',
-                      border: '1px solid rgba(16, 185, 129, 0.35)',
-                      fontSize: '0.8rem',
-                      fontWeight: 800,
-                      color: 'var(--accent-emerald)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      data-testid="join-confirm-identity-checkbox"
-                      checked={confirmedIdentity}
-                      onChange={(e) => setConfirmedIdentity(e.target.checked)}
-                    />
-                    <span>
-                      Đây là tôi: {selectedParticipant.fullName}
-                      {selectedParticipant.departmentUnit ? ` (${selectedParticipant.departmentUnit})` : ''}
-                    </span>
-                  </label>
-                )}
+                Phòng này ở chế độ THI nhưng Ban Tổ Chức chưa cấu hình danh sách thí sinh. Vui lòng liên hệ BTC để bổ sung danh sách trước khi vào thi.
               </div>
             )}
 
-            {/* Ô nhập Nickname (ẩn khi bắt buộc chọn từ danh sách PRECONFIGURED) */}
-            {(rosterMode !== 'PRECONFIGURED' || rosterParticipants.length === 0) && (
+            {/* Chọn thí sinh từ danh sách BTC hoặc nhập tên */}
+            {(rosterMode === 'PRECONFIGURED' || rosterMode === 'HYBRID' || verifiedLobby?.sessionMode === 'EXAM') && rosterParticipants.length > 0 && (() => {
+              const savedMyPid = (() => {
+                try {
+                  return sessionStorage.getItem('active_player_participant_id') || '';
+                } catch {
+                  return '';
+                }
+              })();
+              const duplicateNameCounts = new Map<string, number>();
+              for (const item of rosterParticipants) {
+                const key = normalizeVietnameseSearch(item.fullName);
+                duplicateNameCounts.set(key, (duplicateNameCounts.get(key) || 0) + 1);
+              }
+              const normQuery = normalizeVietnameseSearch(rosterSearch);
+              const filteredParticipants = rosterParticipants.filter((p) => {
+                if (!normQuery) return true;
+                const haystack = normalizeVietnameseSearch(
+                  `${p.fullName} ${p.departmentUnit || ''} ${p.employeeCode || ''}`
+                );
+                return haystack.includes(normQuery);
+              });
+              const safeHighlight = Math.max(
+                0,
+                Math.min(highlightedIndex, Math.max(0, filteredParticipants.length - 1))
+              );
+
+              return (
+                <div
+                  data-testid="join-roster-gate"
+                  style={{
+                    marginBottom: '1.25rem',
+                    padding: '0.9rem',
+                    borderRadius: '14px',
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1.5px solid var(--border-strong)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.6rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem' }}>
+                    <label style={{ fontSize: '0.84rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                      Chọn tên của bạn trong danh sách ({filteredParticipants.length}/{rosterParticipants.length}):
+                    </label>
+                    <span style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>
+                      ↑↓ Chọn • Enter Xác nhận
+                    </span>
+                  </div>
+                  <input
+                    type="text"
+                    data-testid="join-roster-search-input"
+                    value={rosterSearch}
+                    onChange={(e) => {
+                      setRosterSearch(e.target.value);
+                      setHighlightedIndex(0);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowDown') {
+                        e.preventDefault();
+                        setHighlightedIndex((prev) =>
+                          filteredParticipants.length > 0
+                            ? (prev + 1) % filteredParticipants.length
+                            : 0
+                        );
+                      } else if (e.key === 'ArrowUp') {
+                        e.preventDefault();
+                        setHighlightedIndex((prev) =>
+                          filteredParticipants.length > 0
+                            ? (prev - 1 + filteredParticipants.length) % filteredParticipants.length
+                            : 0
+                        );
+                      } else if (e.key === 'Enter') {
+                        const target = filteredParticipants[safeHighlight];
+                        if (target) {
+                          e.preventDefault();
+                          const isOwnSlot = Boolean(savedMyPid && savedMyPid === target.participantId);
+                          const isSelectable =
+                            Boolean(target.canStartAttempt ?? target.canJoin ?? true) &&
+                            (!target.isLocked || isOwnSlot);
+                          if (isSelectable) {
+                            setSelectedParticipant(target);
+                            setDisplayName(target.fullName);
+                            setDepartmentInput(target.departmentUnit || '');
+                            setConfirmedIdentity(false);
+                          }
+                        }
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        if (rosterSearch) {
+                          setRosterSearch('');
+                          setHighlightedIndex(0);
+                        } else {
+                          setSelectedParticipant(null);
+                          setConfirmedIdentity(false);
+                        }
+                      }
+                    }}
+                    placeholder="Gõ tên không dấu/có dấu, phòng ban hoặc mã NV..."
+                    style={{
+                      width: '100%',
+                      padding: '0.55rem 0.75rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-subtle)',
+                      backgroundColor: 'var(--bg-surface)',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.84rem',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <div
+                    role="listbox"
+                    aria-label="Danh sách người tham gia"
+                    data-testid="join-roster-dropdown-list"
+                    style={{
+                      maxHeight: '190px',
+                      overflowY: 'auto',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '0.35rem',
+                    }}
+                  >
+                    {filteredParticipants.length === 0 ? (
+                      <div
+                        data-testid="join-roster-empty-search"
+                        style={{
+                          padding: '0.85rem',
+                          textAlign: 'center',
+                          fontSize: '0.8rem',
+                          color: 'var(--text-secondary)',
+                        }}
+                      >
+                        Không tìm thấy người chơi phù hợp với từ khóa "{rosterSearch}".
+                      </div>
+                    ) : (
+                      filteredParticipants.map((p, idx) => {
+                        const isSel = selectedParticipant?.participantId === p.participantId;
+                        const isHighlighted = idx === safeHighlight;
+                        const isOwnSlot = Boolean(savedMyPid && savedMyPid === p.participantId);
+                        const isLockedByOther = Boolean(p.isLocked && !isOwnSlot);
+                        const hasRemainingAttempts = Boolean(p.canStartAttempt ?? p.canJoin ?? true);
+                        const isSelectable = hasRemainingAttempts && !isLockedByOther;
+                        const isDuplicateName =
+                          (duplicateNameCounts.get(normalizeVietnameseSearch(p.fullName)) || 0) > 1;
+
+                        let statusBadgeText = 'Sẵn sàng';
+                        let statusBadgeColor = 'var(--accent-emerald)';
+                        if (isLockedByOther) {
+                          statusBadgeText = 'Đang tham gia';
+                          statusBadgeColor = '#f59e0b';
+                        } else if (!hasRemainingAttempts) {
+                          statusBadgeText = 'Đã hoàn thành';
+                          statusBadgeColor = 'var(--accent-rose)';
+                        }
+
+                        return (
+                          <button
+                            key={p.participantId}
+                            type="button"
+                            role="option"
+                            aria-selected={isSel}
+                            data-testid={`join-roster-item-${p.participantId}`}
+                            disabled={!isSelectable}
+                            onMouseEnter={() => setHighlightedIndex(idx)}
+                            onClick={() => {
+                              if (!isSelectable) return;
+                              setSelectedParticipant(p);
+                              setDisplayName(p.fullName);
+                              setDepartmentInput(p.departmentUnit || '');
+                              setConfirmedIdentity(false);
+                            }}
+                            style={{
+                              textAlign: 'left',
+                              padding: '0.5rem 0.65rem',
+                              borderRadius: '8px',
+                              border: isSel
+                                ? '2px solid var(--accent-emerald)'
+                                : isHighlighted
+                                  ? '1.5px solid var(--accent-sky)'
+                                  : '1px solid var(--border-subtle)',
+                              backgroundColor: isSel
+                                ? 'rgba(16, 185, 129, 0.14)'
+                                : isHighlighted
+                                  ? 'rgba(56, 189, 248, 0.1)'
+                                  : 'var(--bg-surface)',
+                              color: 'var(--text-primary)',
+                              cursor: isSelectable ? 'pointer' : 'not-allowed',
+                              opacity: isSelectable ? 1 : 0.55,
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              gap: '0.4rem',
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontSize: '0.84rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                                <span>{p.fullName}</span>
+                                {isDuplicateName && (
+                                  <span
+                                    data-testid={`join-duplicate-badge-${p.participantId}`}
+                                    style={{
+                                      fontSize: '0.68rem',
+                                      padding: '0.1rem 0.4rem',
+                                      borderRadius: '6px',
+                                      backgroundColor: 'rgba(56, 189, 248, 0.16)',
+                                      color: 'var(--accent-sky)',
+                                      fontWeight: 800,
+                                    }}
+                                  >
+                                    {p.departmentUnit || p.employeeCode || `ID: ${p.participantId.slice(-4)}`}
+                                  </span>
+                                )}
+                              </div>
+                              <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                                {p.departmentUnit || 'Thí sinh'} {p.employeeCode ? `• ${p.employeeCode}` : ''}
+                              </div>
+                            </div>
+                            <span style={{ fontSize: '0.72rem', fontWeight: 800, color: statusBadgeColor, whiteSpace: 'nowrap' }}>
+                              {statusBadgeText}
+                            </span>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  {selectedParticipant && (
+                    <label
+                      data-testid="join-confirm-identity-label"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        padding: '0.5rem 0.65rem',
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                        border: '1px solid rgba(16, 185, 129, 0.35)',
+                        fontSize: '0.8rem',
+                        fontWeight: 800,
+                        color: 'var(--accent-emerald)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        data-testid="join-confirm-identity-checkbox"
+                        checked={confirmedIdentity}
+                        onChange={(e) => setConfirmedIdentity(e.target.checked)}
+                      />
+                      <span>
+                        Đây là tôi: {selectedParticipant.fullName}
+                        {selectedParticipant.departmentUnit ? ` (${selectedParticipant.departmentUnit})` : ''}
+                      </span>
+                    </label>
+                  )}
+                </div>
+              );
+            })()}
+
+            {/* Ô nhập Nickname (ẩn khi bắt buộc chọn từ danh sách PRECONFIGURED hoặc ở chế độ EXAM) */}
+            {verifiedLobby?.sessionMode !== 'EXAM' && (rosterMode !== 'PRECONFIGURED' || rosterParticipants.length === 0) && (
               <div style={{ marginBottom: '1.25rem' }}>
                 <label
                   htmlFor="join-player-name"

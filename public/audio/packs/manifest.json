@@ -1,0 +1,232 @@
+{
+  "version": "3.0.0",
+  "generatedAt": "2026-11-02T08:06:13.579Z",
+  "license": "CC0-1.0 (Public Domain - Original Multi-Harmonic Acoustic Instrument Synthesis for AI Game Platform V3)",
+  "note": "All 28 WAV files are 22050Hz 16-bit PCM mono multi-harmonic musical instrument cues (synth, bell chime, brass fanfare, warm piano). No oscillator-simulated human voices or fake crowd applause are used.",
+  "packs": {
+    "ARCADE_FUN": {
+      "packId": "ARCADE_FUN",
+      "folder": "arcade_fun",
+      "label": "Vui nhộn / Arcade (Sôi động)",
+      "cues": {
+        "correct": {
+          "cue": "correct",
+          "url": "/audio/packs/arcade_fun/correct.wav",
+          "sizeBytes": 22976,
+          "durationSec": 0.52,
+          "sha256": "aae2865be0edd81b282d0871c1d134b840d3664121337ff62c89af324abe8d24"
+        },
+        "wrong": {
+          "cue": "wrong",
+          "url": "/audio/packs/arcade_fun/wrong.wav",
+          "sizeBytes": 21212,
+          "durationSec": 0.48,
+          "sha256": "1195fa521efb96c3308a805da165ebd7a7d61954eba72263a3a7e523d3847b7d"
+        },
+        "timeout": {
+          "cue": "timeout",
+          "url": "/audio/packs/arcade_fun/timeout.wav",
+          "sizeBytes": 24740,
+          "durationSec": 0.56,
+          "sha256": "c74fe872ee68601d2679306e2221be878912cc374ea1174f5229d19145916c69"
+        },
+        "countdown": {
+          "cue": "countdown",
+          "url": "/audio/packs/arcade_fun/countdown.wav",
+          "sizeBytes": 7982,
+          "durationSec": 0.18,
+          "sha256": "e1a942e75c263736c51cda587c11c68b91e97d3dd7ee928cfcf5ec857d67753f"
+        },
+        "start": {
+          "cue": "start",
+          "url": "/audio/packs/arcade_fun/start.wav",
+          "sizeBytes": 24298,
+          "durationSec": 0.55,
+          "sha256": "0ce2cb221d36c4a1dd9d30b79f3290688702a2d8ed3af6716d369d3dbee47214"
+        },
+        "finish": {
+          "cue": "finish",
+          "url": "/audio/packs/arcade_fun/finish.wav",
+          "sizeBytes": 37528,
+          "durationSec": 0.85,
+          "sha256": "de840a1e1370be27639a91fcdcbfed63753dca3e9c20ec70a501865fc4f613ba"
+        },
+        "top3": {
+          "cue": "top3",
+          "url": "/audio/packs/arcade_fun/top3.wav",
+          "sizeBytes": 46348,
+          "durationSec": 1.05,
+          "sha256": "5601680536165684ccabf427e18d30cc8d30e85cc44ecad67f332058bcb53452"
+        }
+      }
+    },
+    "CLASSROOM_QUIZ": {
+      "packId": "CLASSROOM_QUIZ",
+      "folder": "classroom_quiz",
+      "label": "Học đường / Classroom Quiz (Thân thiện)",
+      "cues": {
+        "correct": {
+          "cue": "correct",
+          "url": "/audio/packs/classroom_quiz/correct.wav",
+          "sizeBytes": 21212,
+          "durationSec": 0.48,
+          "sha256": "1a5b4bfb2e40e3ee23d620f512303b9169145e333f986045776fde3105d40b8e"
+        },
+        "wrong": {
+          "cue": "wrong",
+          "url": "/audio/packs/classroom_quiz/wrong.wav",
+          "sizeBytes": 19448,
+          "durationSec": 0.44,
+          "sha256": "c94dad2469df5804a252330f9d1b5dc232dd2db607dcb804f286924d7ce49031"
+        },
+        "timeout": {
+          "cue": "timeout",
+          "url": "/audio/packs/classroom_quiz/timeout.wav",
+          "sizeBytes": 22094,
+          "durationSec": 0.5,
+          "sha256": "f0e3d2acaafb162a9b6f8c0ea8462793b0bad5c7f36cf5ab1b92966bc5b4b5b7"
+        },
+        "countdown": {
+          "cue": "countdown",
+          "url": "/audio/packs/classroom_quiz/countdown.wav",
+          "sizeBytes": 7100,
+          "durationSec": 0.16,
+          "sha256": "98b9390ef0bb348533be6e56137fa018e50dcfb51256fa42cb58953ff0bef5f9"
+        },
+        "start": {
+          "cue": "start",
+          "url": "/audio/packs/classroom_quiz/start.wav",
+          "sizeBytes": 22094,
+          "durationSec": 0.5,
+          "sha256": "aa6ee89065cf213501d367b67a99a3d3c867f4e20e3eb97988689f8749210d61"
+        },
+        "finish": {
+          "cue": "finish",
+          "url": "/audio/packs/classroom_quiz/finish.wav",
+          "sizeBytes": 34442,
+          "durationSec": 0.78,
+          "sha256": "62cd25a92eed04b9dd81f13ed862a053dee05aa7724dde689bf8bc8cf8782f5c"
+        },
+        "top3": {
+          "cue": "top3",
+          "url": "/audio/packs/classroom_quiz/top3.wav",
+          "sizeBytes": 41938,
+          "durationSec": 0.95,
+          "sha256": "b213aca7fe610b7292b3f5b97db51313150581d2701f91c12a37af2e027ddaf6"
+        }
+      }
+    },
+    "ADVENTURE_QUEST": {
+      "packId": "ADVENTURE_QUEST",
+      "folder": "adventure_quest",
+      "label": "Phiêu lưu / Adventure Quest (Kịch tính)",
+      "cues": {
+        "correct": {
+          "cue": "correct",
+          "url": "/audio/packs/adventure_quest/correct.wav",
+          "sizeBytes": 23858,
+          "durationSec": 0.54,
+          "sha256": "4736f88ccde0600e79adbab5d66f3d4a3b94d5171b48e87df07a20559b7bf465"
+        },
+        "wrong": {
+          "cue": "wrong",
+          "url": "/audio/packs/adventure_quest/wrong.wav",
+          "sizeBytes": 22094,
+          "durationSec": 0.5,
+          "sha256": "d055c3f124e72a6c30069ed1e102e62783f04c6d1b646b2ebf3855a5da26e978"
+        },
+        "timeout": {
+          "cue": "timeout",
+          "url": "/audio/packs/adventure_quest/timeout.wav",
+          "sizeBytes": 25622,
+          "durationSec": 0.58,
+          "sha256": "ad810512748728c090cb56a95a4bc79192dde4cd0917b19664cbc018188e24ad"
+        },
+        "countdown": {
+          "cue": "countdown",
+          "url": "/audio/packs/adventure_quest/countdown.wav",
+          "sizeBytes": 8422,
+          "durationSec": 0.19,
+          "sha256": "fd6648342de4b14aec35e0403ef1722d6b5320f4bb7551f70c6b5ccc5e4c76fa"
+        },
+        "start": {
+          "cue": "start",
+          "url": "/audio/packs/adventure_quest/start.wav",
+          "sizeBytes": 25622,
+          "durationSec": 0.58,
+          "sha256": "57e7adb800db6f31c0208a9e3133fb16806a6bc90722ec3c142c7dfe3f654d68"
+        },
+        "finish": {
+          "cue": "finish",
+          "url": "/audio/packs/adventure_quest/finish.wav",
+          "sizeBytes": 39734,
+          "durationSec": 0.9,
+          "sha256": "ebb58c4584eff537338ce9b1893a32775e290d0f1c827f85f78aaca1d2d83826"
+        },
+        "top3": {
+          "cue": "top3",
+          "url": "/audio/packs/adventure_quest/top3.wav",
+          "sizeBytes": 48554,
+          "durationSec": 1.1,
+          "sha256": "36ca859207783a642ee6eff3311fc2d6f2cb5a7e0c61c51552316bf4898fb90b"
+        }
+      }
+    },
+    "CORPORATE_TRAINING": {
+      "packId": "CORPORATE_TRAINING",
+      "folder": "corporate_training",
+      "label": "Đào tạo Doanh nghiệp / Corporate Training (Chuyên nghiệp)",
+      "cues": {
+        "correct": {
+          "cue": "correct",
+          "url": "/audio/packs/corporate_training/correct.wav",
+          "sizeBytes": 19448,
+          "durationSec": 0.44,
+          "sha256": "380b1c463cbd23e42ebf9c1e85b68702a0329f1d06167b80eaba9bb136290bbd"
+        },
+        "wrong": {
+          "cue": "wrong",
+          "url": "/audio/packs/corporate_training/wrong.wav",
+          "sizeBytes": 18566,
+          "durationSec": 0.42,
+          "sha256": "6c27e7078acca5fb5ae299e650935a593a0ea69fa2f15601c993dc0ab0c93db3"
+        },
+        "timeout": {
+          "cue": "timeout",
+          "url": "/audio/packs/corporate_training/timeout.wav",
+          "sizeBytes": 20330,
+          "durationSec": 0.46,
+          "sha256": "0ad59d2db423ebfd96c8a7d070e3c5bae567fdaa3b73faf768cd1922ea72e187"
+        },
+        "countdown": {
+          "cue": "countdown",
+          "url": "/audio/packs/corporate_training/countdown.wav",
+          "sizeBytes": 6658,
+          "durationSec": 0.15,
+          "sha256": "72274d880a18a2d9f031925162f29cca9ad48b77257af5744a5e861275144453"
+        },
+        "start": {
+          "cue": "start",
+          "url": "/audio/packs/corporate_training/start.wav",
+          "sizeBytes": 20330,
+          "durationSec": 0.46,
+          "sha256": "8a531c604f72448195b3c71b88d2d5678a38a7262cd47f5b13ad25f2b9bdc8aa"
+        },
+        "finish": {
+          "cue": "finish",
+          "url": "/audio/packs/corporate_training/finish.wav",
+          "sizeBytes": 31796,
+          "durationSec": 0.72,
+          "sha256": "5ee7fcc018a3b9985b5f662d55435c118b44b0967d98fad1986f53a7ef4f7e8b"
+        },
+        "top3": {
+          "cue": "top3",
+          "url": "/audio/packs/corporate_training/top3.wav",
+          "sizeBytes": 38852,
+          "durationSec": 0.88,
+          "sha256": "0cb20af56512f25f2a46eb7e641d98d9cd63e439327d8e15dd7142393bb153d1"
+        }
+      }
+    }
+  }
+}

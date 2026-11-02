@@ -59,10 +59,20 @@ import {
   clearGameParticipantsApi,
   grantParticipantRetakeApi,
   publishExamAnswersApi,
+  closeGameExamApi,
+  reopenGameExamApi,
   fetchGameScoreboardApi,
   downloadGameScoreboardExport,
+  parseRosterFileApi,
+  type RosterParsePreviewResult,
 } from '../services/api.js';
-import { AUDIO_PRESET_CATALOG, soundManager } from '../services/audio.js';
+import {
+  SOUND_PACK_CATALOG,
+  SFX_CUE_CATALOG,
+  mapSoundPackToPresetId,
+  resolveSoundPackDefinition,
+  soundManager,
+} from '../services/audio.js';
 import {
   buildDefaultQuestionDistributionForTypes,
   calculateMixedTypeCounts,
@@ -82,7 +92,8 @@ import {
   type RosterMode,
   type OfficialAttemptPolicy,
   type GameAudioConfig,
-  type AudioPresetId,
+  type SoundPackId,
+  type SfxCueType,
   type ParticipantRosterItem,
   type GameScoreboardSummary,
 } from '../types/index.js';
@@ -443,20 +454,60 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [rosterMode, setRosterMode] = useState<RosterMode>(
     () => effectiveBootSpec?.settings?.rosterMode || 'FREE_TEXT'
   );
-  const [audioConfig, setAudioConfig] = useState<GameAudioConfig>(() => ({
-    enabled: effectiveBootSpec?.settings?.audioConfig?.enabled ?? true,
-    presetId: effectiveBootSpec?.settings?.audioConfig?.presetId || 'ENERGETIC_ARENA',
-    customAudioUrl: effectiveBootSpec?.settings?.audioConfig?.customAudioUrl,
-    customAudioName: effectiveBootSpec?.settings?.audioConfig?.customAudioName,
-    volume: effectiveBootSpec?.settings?.audioConfig?.volume ?? 0.7,
-    countdownSoundEnabled: effectiveBootSpec?.settings?.audioConfig?.countdownSoundEnabled ?? true,
-    countdownTriggerSeconds: effectiveBootSpec?.settings?.audioConfig?.countdownTriggerSeconds ?? 5,
-  }));
+  const normalizeCreatorAudioConfig = (raw?: Partial<GameAudioConfig> | null): GameAudioConfig => {
+    const resolvedPack = resolveSoundPackDefinition(raw || undefined);
+    const enabled = raw?.enabled ?? true;
+    const soundPackId: SoundPackId =
+      !enabled || raw?.soundPackId === 'NONE' || raw?.presetId === 'NONE'
+        ? 'NONE'
+        : raw?.soundPackId ||
+          (raw?.presetId === 'CUSTOM' ? 'CUSTOM' : resolvedPack.packId || 'ARCADE_FUN');
+    const presetId =
+      raw?.presetId ||
+      (soundPackId === 'NONE'
+        ? 'NONE'
+        : soundPackId === 'CUSTOM'
+        ? 'CUSTOM'
+        : mapSoundPackToPresetId(soundPackId));
+    const normalizedOverrides: GameAudioConfig['customSfxOverrides'] = {};
+    if (raw?.customSfxOverrides && typeof raw.customSfxOverrides === 'object') {
+      for (const [cueKey, val] of Object.entries(raw.customSfxOverrides)) {
+        const entry = val as any;
+        const resolvedUrl = entry?.url || entry?.audioUrl;
+        if (resolvedUrl) {
+          normalizedOverrides[cueKey as SfxCueType] = {
+            url: resolvedUrl,
+            audioUrl: resolvedUrl,
+            fileName: entry?.fileName,
+            mimeType: entry?.mimeType,
+          };
+        }
+      }
+    }
+    return {
+      enabled: soundPackId !== 'NONE' && (raw?.enabled ?? true),
+      bgmEnabled: raw?.bgmEnabled ?? true,
+      presetId,
+      soundPackId,
+      customAudioUrl: raw?.customAudioUrl,
+      customAudioName: raw?.customAudioName,
+      customSfxOverrides: normalizedOverrides,
+      volume: raw?.volume ?? 0.7,
+      sfxEnabled: raw?.sfxEnabled ?? true,
+      countdownSoundEnabled: raw?.countdownSoundEnabled ?? true,
+      countdownTriggerSeconds: raw?.countdownTriggerSeconds ?? 5,
+    };
+  };
+
+  const [audioConfig, setAudioConfig] = useState<GameAudioConfig>(() =>
+    normalizeCreatorAudioConfig(effectiveBootSpec?.settings?.audioConfig)
+  );
   const [isAudioPreviewPlaying, setIsAudioPreviewPlaying] = useState<boolean>(false);
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(() => soundManager.isMuted());
   const [isUploadingAudio, setIsUploadingAudio] = useState<boolean>(false);
+  const [uploadingSfxCue, setUploadingSfxCue] = useState<SfxCueType | null>(null);
 
-  // V2 BTC Roster & Scoreboard Manager State
+  // V2/V3 BTC Roster & Scoreboard Manager State + Inline Creator Roster State
   const [isBtcModalOpen, setIsBtcModalOpen] = useState<boolean>(false);
   const [btcActiveTab, setBtcActiveTab] = useState<'ROSTER' | 'SCOREBOARD'>('ROSTER');
   const [btcParticipants, setBtcParticipants] = useState<ParticipantRosterItem[]>([]);
@@ -465,6 +516,139 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [isLoadingBtcData, setIsLoadingBtcData] = useState<boolean>(false);
   const [isSavingRoster, setIsSavingRoster] = useState<boolean>(false);
   const [isPublishingAnswers, setIsPublishingAnswers] = useState<boolean>(false);
+  const [isClosingExam, setIsClosingExam] = useState<boolean>(false);
+  const [confirmCloseExamOpen, setConfirmCloseExamOpen] = useState<boolean>(false);
+  const [creatorRosterTab, setCreatorRosterTab] = useState<'MANUAL' | 'IMPORT'>('MANUAL');
+  const [creatorRosterSingleName, setCreatorRosterSingleName] = useState<string>('');
+  const [creatorRosterSingleDept, setCreatorRosterSingleDept] = useState<string>('');
+  const [creatorRosterSingleError, setCreatorRosterSingleError] = useState<string | null>(null);
+  const [creatorRosterImportPreview, setCreatorRosterImportPreview] =
+    useState<RosterParsePreviewResult | null>(null);
+  const [isParsingRosterFile, setIsParsingRosterFile] = useState<boolean>(false);
+  const [showExamRosterError, setShowExamRosterError] = useState<boolean>(false);
+  const [editingRosterRowIdx, setEditingRosterRowIdx] = useState<number | null>(null);
+  const [editingRosterRowName, setEditingRosterRowName] = useState<string>('');
+  const [editingRosterRowDept, setEditingRosterRowDept] = useState<string>('');
+  const loadedRosterGameIdRef = useRef<string | null>(null);
+
+  const formatParticipantsToPasteText = (items: Array<{
+    fullName: string;
+    departmentUnit?: string | null;
+    employeeCode?: string | null;
+    contactInfo?: string | null;
+  }>): string => {
+    return items
+      .map((item) => {
+        const parts = [
+          (item.fullName || '').replace(/\s+/g, ' ').trim(),
+          (item.departmentUnit || '').replace(/\s+/g, ' ').trim(),
+          (item.employeeCode || '').replace(/\s+/g, ' ').trim(),
+          (item.contactInfo || '').replace(/\s+/g, ' ').trim(),
+        ];
+        while (parts.length > 1 && !parts[parts.length - 1]) {
+          parts.pop();
+        }
+        return parts.join(' | ');
+      })
+      .filter(Boolean)
+      .join('\n');
+  };
+
+  const parsedRosterDraft = React.useMemo(() => {
+    const rawLines = btcRosterPasteText.split(/\r?\n/);
+    const validItems: Array<{
+      lineIndex: number;
+      lineNumber: number;
+      participantId?: string;
+      fullName: string;
+      departmentUnit?: string;
+      employeeCode?: string;
+      contactInfo?: string;
+    }> = [];
+    const invalidLines: Array<{
+      lineNumber: number;
+      rawLine: string;
+      reason: string;
+    }> = [];
+    const usedParticipantIds = new Set<string>();
+    const nameCounts = new Map<string, number>();
+
+    rawLines.forEach((rawLine, idx) => {
+      const trimmed = rawLine.trim();
+      if (!trimmed) return;
+      const lineNumber = idx + 1;
+      const parts = trimmed.split(/[|\t,;]/).map((p) => p.replace(/\s+/g, ' ').trim());
+      const fullName = parts[0] || '';
+      const departmentUnit = parts[1] || '';
+      const employeeCode = parts[2] || '';
+      const contactInfo = parts[3] || '';
+
+      if (fullName.length < 2) {
+        invalidLines.push({
+          lineNumber,
+          rawLine: trimmed,
+          reason: 'Họ tên quá ngắn (tối thiểu 2 ký tự)',
+        });
+        return;
+      }
+      if (!/\p{L}/u.test(fullName)) {
+        invalidLines.push({
+          lineNumber,
+          rawLine: trimmed,
+          reason: 'Họ tên phải chứa chữ cái hợp lệ',
+        });
+        return;
+      }
+
+      const normFullKey = `${fullName.toLowerCase()}|${departmentUnit.toLowerCase()}|${employeeCode.toLowerCase()}`;
+      const normNameOnly = fullName.toLowerCase();
+      let matchedExisting = btcParticipants.find(
+        (p) =>
+          !usedParticipantIds.has(p.participantId) &&
+          `${(p.fullName || '').replace(/\s+/g, ' ').trim().toLowerCase()}|${(p.departmentUnit || '').replace(/\s+/g, ' ').trim().toLowerCase()}|${(p.employeeCode || '').replace(/\s+/g, ' ').trim().toLowerCase()}` ===
+            normFullKey
+      );
+      if (!matchedExisting) {
+        matchedExisting = btcParticipants.find(
+          (p) =>
+            !usedParticipantIds.has(p.participantId) &&
+            (p.fullName || '').replace(/\s+/g, ' ').trim().toLowerCase() === normNameOnly
+        );
+      }
+      if (matchedExisting) {
+        usedParticipantIds.add(matchedExisting.participantId);
+      }
+
+      nameCounts.set(normNameOnly, (nameCounts.get(normNameOnly) || 0) + 1);
+      validItems.push({
+        lineIndex: idx,
+        lineNumber,
+        participantId: matchedExisting?.participantId,
+        fullName,
+        departmentUnit: departmentUnit || undefined,
+        employeeCode: employeeCode || undefined,
+        contactInfo: contactInfo || undefined,
+      });
+    });
+
+    const duplicateNames: string[] = [];
+    let duplicateCount = 0;
+    for (const [normKey, count] of nameCounts.entries()) {
+      if (count > 1) {
+        duplicateCount += count - 1;
+        const sample =
+          validItems.find((it) => it.fullName.toLowerCase() === normKey)?.fullName || normKey;
+        duplicateNames.push(sample);
+      }
+    }
+
+    return {
+      validItems,
+      invalidLines,
+      duplicateNames,
+      duplicateCount,
+    };
+  }, [btcRosterPasteText, btcParticipants]);
 
   const [topicFocus, setTopicFocus] = useState('');
   const [selectedSections, setSelectedSections] = useState<string[]>([]);
@@ -568,6 +752,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   useEffect(() => {
     if (initialSpec && initialSpec.gameId !== syncedGameIdRef.current) {
       syncedGameIdRef.current = initialSpec.gameId;
+      loadedRosterGameIdRef.current = null;
       setGeneratedSpec(initialSpec);
       setCustomGameTitle(initialSpec.title || '');
       setGameType(initialSpec.gameType);
@@ -587,15 +772,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         setRosterMode(initialSpec.settings.rosterMode);
       }
       if (initialSpec.settings?.audioConfig) {
-        setAudioConfig({
-          enabled: initialSpec.settings.audioConfig.enabled ?? true,
-          presetId: initialSpec.settings.audioConfig.presetId || 'ENERGETIC_ARENA',
-          customAudioUrl: initialSpec.settings.audioConfig.customAudioUrl,
-          customAudioName: initialSpec.settings.audioConfig.customAudioName,
-          volume: initialSpec.settings.audioConfig.volume ?? 0.5,
-          countdownSoundEnabled: initialSpec.settings.audioConfig.countdownSoundEnabled ?? true,
-          countdownTriggerSeconds: initialSpec.settings.audioConfig.countdownTriggerSeconds ?? 5,
-        });
+        setAudioConfig(normalizeCreatorAudioConfig(initialSpec.settings.audioConfig));
       }
       if (initialSpec.settings?.mixedDistribution) {
         setMixedDistribution(initialSpec.settings.mixedDistribution);
@@ -642,6 +819,34 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }
   }, [initialSpec]);
 
+  // Tự động tải danh sách người tham gia khi mở lại game đã lưu hoặc khởi tạo trang có sẵn gameId
+  useEffect(() => {
+    const activeGameId = generatedSpec?.gameId;
+    if (!activeGameId || loadedRosterGameIdRef.current === activeGameId) {
+      return;
+    }
+    loadedRosterGameIdRef.current = activeGameId;
+    let cancelled = false;
+    fetchGameParticipantsApi(activeGameId, { mode: 'admin' })
+      .then((res) => {
+        if (cancelled) return;
+        const loaded = Array.isArray(res.participants) ? res.participants : [];
+        setBtcParticipants(loaded);
+        if (res.rosterMode) {
+          setRosterMode(res.rosterMode);
+        }
+        if (loaded.length > 0) {
+          setBtcRosterPasteText(formatParticipantsToPasteText(loaded));
+        }
+      })
+      .catch(() => {
+        // Ignore if new/unpersisted draft
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [generatedSpec?.gameId]);
+
   // Đồng bộ trạng thái âm thanh và dừng phát nhạc nghe thử khi thoát khỏi trang Tạo Game
   useEffect(() => {
     const unsubscribe = soundManager.subscribe(() => {
@@ -655,12 +860,12 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   }, []);
 
   const startAudioPreviewWithFeedback = (cfg: GameAudioConfig) => {
-    if (cfg.presetId === 'NONE') {
+    if (cfg.presetId === 'NONE' || cfg.soundPackId === 'NONE' || cfg.enabled === false) {
       soundManager.stopPreview();
       setIsAudioPreviewPlaying(false);
       return;
     }
-    if (cfg.presetId === 'CUSTOM' && !cfg.customAudioUrl) {
+    if ((cfg.presetId === 'CUSTOM' || cfg.soundPackId === 'CUSTOM') && !cfg.customAudioUrl) {
       soundManager.stopPreview();
       setIsAudioPreviewPlaying(false);
       toast.warning(
@@ -689,6 +894,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     } else {
       startAudioPreviewWithFeedback(audioConfig);
     }
+  };
+
+  const handleStopAudioPreview = () => {
+    soundManager.stopPreview();
+    setIsAudioPreviewPlaying(false);
   };
 
   const handleToggleCreatorAudioMute = () => {
@@ -736,7 +946,12 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       const nextCfg: GameAudioConfig = {
         ...audioConfig,
         enabled: true,
+        bgmEnabled: true,
         presetId: 'CUSTOM',
+        soundPackId:
+          audioConfig.soundPackId && audioConfig.soundPackId !== 'NONE'
+            ? audioConfig.soundPackId
+            : 'ARCADE_FUN',
         customAudioUrl: uploaded.audioUrl,
         customAudioName: uploaded.fileName,
       };
@@ -767,6 +982,188 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }
   };
 
+  const handleCustomSfxOverrideUpload = async (
+    cue: SfxCueType,
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setUploadingSfxCue(cue);
+    try {
+      const uploaded = await uploadCustomAudioApi(file);
+      const nextOverrides = {
+        ...(audioConfig.customSfxOverrides || {}),
+        [cue]: {
+          url: uploaded.audioUrl,
+          audioUrl: uploaded.audioUrl,
+          fileName: uploaded.fileName,
+        },
+      };
+      const nextCfg: GameAudioConfig = {
+        ...audioConfig,
+        enabled: true,
+        sfxEnabled: true,
+        customSfxOverrides: nextOverrides,
+      };
+      setAudioConfig(nextCfg);
+      if (generatedSpec) {
+        setGeneratedSpec((prev) =>
+          prev
+            ? {
+                ...prev,
+                settings: {
+                  ...prev.settings,
+                  audioConfig: nextCfg,
+                },
+              }
+            : prev
+        );
+        setSavedForLater(false);
+        setSaveStatus('dirty');
+      }
+      soundManager.previewSfxCue(cue, nextCfg);
+      toast.success(
+        `Đã tải hiệu ứng tùy chỉnh "${uploaded.fileName}" cho hiệu ứng [${cue}]!`,
+        'Tải hiệu ứng thành công'
+      );
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể tải tệp hiệu ứng âm thanh.', 'Lỗi tải âm thanh');
+    } finally {
+      setUploadingSfxCue(null);
+    }
+  };
+
+  const applyUpdatedRosterPasteText = (nextText: string) => {
+    setBtcRosterPasteText(nextText);
+    const hasAnyValid = nextText
+      .split(/\r?\n/)
+      .map((l) => l.split(/[|\t,;]/)[0]?.replace(/\s+/g, ' ').trim() || '')
+      .some((name) => name.length >= 2 && /\p{L}/u.test(name));
+    if (hasAnyValid) {
+      setShowExamRosterError(false);
+    }
+    const nextRosterMode: RosterMode =
+      sessionMode === 'EXAM'
+        ? 'PRECONFIGURED'
+        : hasAnyValid
+        ? rosterMode === 'HYBRID'
+          ? 'HYBRID'
+          : 'PRECONFIGURED'
+        : 'FREE_TEXT';
+    setRosterMode(nextRosterMode);
+    if (generatedSpec) {
+      setGeneratedSpec((prev) =>
+        prev
+          ? {
+              ...prev,
+              settings: {
+                ...prev.settings,
+                rosterMode: nextRosterMode,
+              },
+            }
+          : prev
+      );
+      setSavedForLater(false);
+      setSaveStatus('dirty');
+    }
+  };
+
+  const handleAddSingleRosterPerson = () => {
+    const cleanName = creatorRosterSingleName.replace(/\s+/g, ' ').trim();
+    const cleanDept = creatorRosterSingleDept.replace(/\s+/g, ' ').trim();
+    if (cleanName.length < 2 || !/\p{L}/u.test(cleanName)) {
+      setCreatorRosterSingleError('Vui lòng nhập họ tên hợp lệ (ít nhất 2 ký tự và có chữ cái).');
+      return;
+    }
+    setCreatorRosterSingleError(null);
+    const newLine = cleanDept ? `${cleanName} | ${cleanDept}` : cleanName;
+    const nextText = btcRosterPasteText.trim()
+      ? `${btcRosterPasteText.replace(/\s+$/, '')}\n${newLine}`
+      : newLine;
+    applyUpdatedRosterPasteText(nextText);
+    setCreatorRosterSingleName('');
+    setCreatorRosterSingleDept('');
+  };
+
+  const handleDeleteRosterDraftRow = (targetLineIndex: number) => {
+    const rawLines = btcRosterPasteText.split(/\r?\n/);
+    const filtered = rawLines.filter((_, idx) => idx !== targetLineIndex);
+    applyUpdatedRosterPasteText(filtered.join('\n'));
+    if (editingRosterRowIdx === targetLineIndex) {
+      setEditingRosterRowIdx(null);
+    }
+  };
+
+  const handleSaveEditedRosterDraftRow = (targetLineIndex: number) => {
+    const cleanName = editingRosterRowName.replace(/\s+/g, ' ').trim();
+    const cleanDept = editingRosterRowDept.replace(/\s+/g, ' ').trim();
+    if (cleanName.length < 2 || !/\p{L}/u.test(cleanName)) {
+      toast.error('Họ tên phải có ít nhất 2 ký tự và chứa chữ cái hợp lệ.', 'Tên chưa hợp lệ');
+      return;
+    }
+    const rawLines = btcRosterPasteText.split(/\r?\n/);
+    if (targetLineIndex >= 0 && targetLineIndex < rawLines.length) {
+      const existingParts = rawLines[targetLineIndex]
+        .split(/[|\t,;]/)
+        .map((p) => p.replace(/\s+/g, ' ').trim());
+      const nextParts = [
+        cleanName,
+        cleanDept,
+        existingParts[2] || '',
+        existingParts[3] || '',
+      ];
+      while (nextParts.length > 1 && !nextParts[nextParts.length - 1]) {
+        nextParts.pop();
+      }
+      rawLines[targetLineIndex] = nextParts.join(' | ');
+      applyUpdatedRosterPasteText(rawLines.join('\n'));
+    }
+    setEditingRosterRowIdx(null);
+  };
+
+  const handlePreviewCreatorRosterFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setIsParsingRosterFile(true);
+    try {
+      const preview = await parseRosterFileApi(file);
+      setCreatorRosterImportPreview(preview);
+      if (preview.validCount === 0 && preview.invalidRows.length > 0) {
+        toast.warning(
+          `Tệp "${file.name}" không có dòng hợp lệ nào (${preview.invalidRows.length} dòng lỗi).`,
+          'Kiểm tra tệp danh sách'
+        );
+      } else {
+        toast.info(
+          `Đã đọc tệp "${file.name}": ${preview.validCount} người hợp lệ${
+            preview.duplicateCount > 0 ? `, ${preview.duplicateCount} dòng trùng tên` : ''
+          }. Nhấn "Xác nhận nhập" để áp dụng.`,
+          'Xem trước danh sách'
+        );
+      }
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể đọc tệp danh sách (.xlsx/.csv).', 'Lỗi đọc tệp');
+    } finally {
+      setIsParsingRosterFile(false);
+    }
+  };
+
+  const handleConfirmCreatorRosterImport = () => {
+    if (!creatorRosterImportPreview || creatorRosterImportPreview.participants.length === 0) {
+      return;
+    }
+    const importedBlock = formatParticipantsToPasteText(creatorRosterImportPreview.participants);
+    const nextText = btcRosterPasteText.trim()
+      ? `${btcRosterPasteText.replace(/\s+$/, '')}\n${importedBlock}`
+      : importedBlock;
+    applyUpdatedRosterPasteText(nextText);
+    const addedCount = creatorRosterImportPreview.participants.length;
+    setCreatorRosterImportPreview(null);
+    toast.success(`Đã nhập ${addedCount} người vào danh sách tham gia!`, 'Nhập danh sách thành công');
+  };
+
   const loadBtcRosterAndScoreboard = async (targetGameId?: string) => {
     const gId = targetGameId || generatedSpec?.gameId;
     if (!gId) return;
@@ -780,7 +1177,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         })),
         fetchGameScoreboardApi(gId).catch(() => null),
       ]);
-      setBtcParticipants(rosterRes.participants || []);
+      const loadedParticipants = rosterRes.participants || [];
+      setBtcParticipants(loadedParticipants);
+      loadedRosterGameIdRef.current = gId;
+      setBtcRosterPasteText(formatParticipantsToPasteText(loadedParticipants));
       if (rosterRes.rosterMode) {
         setRosterMode(rosterRes.rosterMode);
       }
@@ -806,37 +1206,47 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
   const handleSaveBtcRoster = async () => {
     if (!generatedSpec) return;
-    const lines = btcRosterPasteText
-      .split(/\r?\n/)
-      .map((l) => l.trim())
-      .filter(Boolean);
-    const parsedItems = lines
-      .map((line) => {
-        const parts = line.split(/[|\t,;]/).map((p) => p.trim());
-        return {
-          fullName: parts[0] || '',
-          departmentUnit: parts[1] || '',
-          employeeCode: parts[2] || undefined,
-          email: parts[3] || undefined,
-        };
-      })
-      .filter((item) => item.fullName.length > 0);
+    const validDrafts = parsedRosterDraft.validItems.map((it) => ({
+      participantId: it.participantId,
+      fullName: it.fullName,
+      departmentUnit: it.departmentUnit,
+      employeeCode: it.employeeCode,
+      email: it.contactInfo,
+      contactInfo: it.contactInfo,
+    }));
+
+    if (sessionMode === 'EXAM' && validDrafts.length === 0) {
+      setShowExamRosterError(true);
+      toast.error(
+        'Chế độ Thi nghiêm túc bắt buộc phải có danh sách thí sinh (ít nhất 1 người hợp lệ).',
+        'Thiếu danh sách thí sinh'
+      );
+      return;
+    }
+
+    const effectiveRosterMode: RosterMode =
+      sessionMode === 'EXAM'
+        ? 'PRECONFIGURED'
+        : validDrafts.length > 0
+        ? rosterMode === 'HYBRID'
+          ? 'HYBRID'
+          : 'PRECONFIGURED'
+        : 'FREE_TEXT';
 
     setIsSavingRoster(true);
     try {
-      if (parsedItems.length > 0) {
-        const res = await upsertGameParticipantsApi(generatedSpec.gameId, {
-          participants: parsedItems,
-          replaceAll: false,
-          rosterMode,
-        });
-        setBtcParticipants(res.participants);
-        setBtcRosterPasteText('');
-        toast.success(`Đã lưu ${res.upsertedCount} thí sinh vào danh sách!`, 'Đã cập nhật danh sách');
-      } else {
-        await handleSaveSpecEdits(generatedSpec.isPublic);
-        toast.success('Đã cập nhật chế độ danh sách thí sinh!', 'Đã lưu cấu hình');
-      }
+      const res = await upsertGameParticipantsApi(generatedSpec.gameId, {
+        participants: validDrafts,
+        replaceAll: true,
+        rosterMode: effectiveRosterMode,
+      });
+      setBtcParticipants(res.participants);
+      setRosterMode(effectiveRosterMode);
+      setBtcRosterPasteText(formatParticipantsToPasteText(res.participants));
+      toast.success(
+        `Đã lưu danh sách người tham gia (${res.participants.length} người)!`,
+        'Đã cập nhật danh sách'
+      );
       await loadBtcRosterAndScoreboard(generatedSpec.gameId);
     } catch (err: any) {
       toast.error(err.message || 'Không thể lưu danh sách thí sinh.', 'Lỗi lưu danh sách');
@@ -850,9 +1260,18 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     if (!file) return;
     e.target.value = '';
     try {
-      const text = await file.text();
-      setBtcRosterPasteText((prev) => (prev ? `${prev}\n${text}` : text));
-      toast.info(`Đã nạp dữ liệu từ tệp "${file.name}". Nhấn "Lưu danh sách thí sinh" để áp dụng.`);
+      const parsed = await parseRosterFileApi(file);
+      if (parsed.participants.length > 0) {
+        const block = formatParticipantsToPasteText(parsed.participants);
+        applyUpdatedRosterPasteText(
+          btcRosterPasteText.trim() ? `${btcRosterPasteText.replace(/\s+$/, '')}\n${block}` : block
+        );
+        toast.info(
+          `Đã nạp ${parsed.participants.length} người từ tệp "${file.name}". Nhấn "Lưu danh sách thí sinh" để áp dụng.`
+        );
+      } else {
+        toast.warning(`Tệp "${file.name}" không có dòng hợp lệ nào.`);
+      }
     } catch {
       toast.error('Không thể đọc tệp danh sách thí sinh.');
     }
@@ -892,6 +1311,62 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       toast.error(err.message || 'Không thể công bố đáp án khi kỳ thi đang diễn ra.', 'Chưa thể công bố đáp án');
     } finally {
       setIsPublishingAnswers(false);
+    }
+  };
+
+  const handleCloseExam = async () => {
+    if (!generatedSpec || isClosingExam) return;
+    setIsClosingExam(true);
+    try {
+      const res = await closeGameExamApi(generatedSpec.gameId);
+      setConfirmCloseExamOpen(false);
+      setGeneratedSpec((prev) =>
+        prev
+          ? {
+              ...prev,
+              settings: {
+                ...prev.settings,
+                examStatus: 'CLOSED',
+                examClosedAt: res.examClosedAt,
+              },
+            }
+          : prev
+      );
+      toast.success(
+        `Đã kết thúc đợt thi! Tự động thu và chấm điểm ${res.totalAutoSubmitted} lượt thi đang diễn ra.`,
+        'Đợt thi đã kết thúc'
+      );
+      await loadBtcRosterAndScoreboard(generatedSpec.gameId);
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể kết thúc đợt thi.', 'Lỗi kết thúc đợt thi');
+    } finally {
+      setIsClosingExam(false);
+    }
+  };
+
+  const handleReopenExam = async () => {
+    if (!generatedSpec || isClosingExam) return;
+    setIsClosingExam(true);
+    try {
+      await reopenGameExamApi(generatedSpec.gameId);
+      setGeneratedSpec((prev) =>
+        prev
+          ? {
+              ...prev,
+              settings: {
+                ...prev.settings,
+                examStatus: 'OPEN',
+                examClosedAt: null,
+              },
+            }
+          : prev
+      );
+      toast.success('Đã mở lại đợt thi!', 'Đã mở đợt thi');
+      await loadBtcRosterAndScoreboard(generatedSpec.gameId);
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể mở lại đợt thi.', 'Lỗi mở lại đợt thi');
+    } finally {
+      setIsClosingExam(false);
     }
   };
 
@@ -1179,6 +1654,34 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       }
     }
 
+    const validRosterItemsForGen = parsedRosterDraft.validItems.map((it) => ({
+      participantId: it.participantId,
+      fullName: it.fullName,
+      departmentUnit: it.departmentUnit,
+      employeeCode: it.employeeCode,
+      email: it.contactInfo,
+      contactInfo: it.contactInfo,
+    }));
+
+    if (sessionMode === 'EXAM' && validRosterItemsForGen.length === 0) {
+      setShowExamRosterError(true);
+      toast.error(
+        'Chế độ Thi nghiêm túc bắt buộc phải có danh sách thí sinh (ít nhất 1 người hợp lệ). Vui lòng nhập hoặc import danh sách người tham gia.',
+        'Thiếu danh sách thí sinh'
+      );
+      return null;
+    }
+
+    const effectiveRosterModeForGen: RosterMode =
+      sessionMode === 'EXAM'
+        ? 'PRECONFIGURED'
+        : validRosterItemsForGen.length > 0
+        ? rosterMode === 'HYBRID'
+          ? 'HYBRID'
+          : 'PRECONFIGURED'
+        : 'FREE_TEXT';
+    setRosterMode(effectiveRosterModeForGen);
+
     isGeneratingRef.current = true;
     setIsGenerating(true);
     const toastId = toast.loading('Đang yêu cầu AI tổng hợp câu hỏi và phương án trả lời...');
@@ -1194,6 +1697,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         scoringMode,
         questionCount,
         timePerQuestion,
+        sessionMode,
+        passThresholdPercent,
+        officialAttemptPolicy,
+        rosterMode: effectiveRosterModeForGen,
+        requireRoster: sessionMode === 'EXAM',
+        participants: validRosterItemsForGen,
+        audioConfig,
         topicFocus: topicFocus.trim() || undefined,
         sectionFilter: selectedSections.length > 0 ? selectedSections : undefined,
         title: customGameTitle.trim() || undefined,
@@ -1229,14 +1739,26 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           sessionMode,
           passThresholdPercent,
           officialAttemptPolicy,
-          rosterMode,
+          rosterMode: effectiveRosterModeForGen,
           audioConfig,
         },
       };
 
       toast.removeToast(toastId);
       syncedGameIdRef.current = spec.gameId;
+      loadedRosterGameIdRef.current = spec.gameId;
       setGeneratedSpec(spec);
+      if (validRosterItemsForGen.length > 0) {
+        fetchGameParticipantsApi(spec.gameId, { mode: 'admin' })
+          .then((res) => {
+            if (Array.isArray(res.participants)) {
+              setBtcParticipants(res.participants);
+            }
+          })
+          .catch(() => {});
+      } else {
+        setBtcParticipants([]);
+      }
       if (spec.settings?.adventureConfig) {
         setAdventureConfig(
           syncAdventureStagesWithQuestions(spec.settings.adventureConfig, spec.questions)
@@ -1294,6 +1816,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const handleCreateGameUnified = async () => {
     // Chống submit trùng lặp đồng bộ (ngăn double-click trước khi React kịp re-render)
     if (isGenerating || isGeneratingRef.current) {
+      return;
+    }
+
+    if (sessionMode === 'EXAM' && parsedRosterDraft.validItems.length === 0) {
+      setShowExamRosterError(true);
+      toast.error(
+        'Chế độ Thi nghiêm túc bắt buộc phải có danh sách thí sinh (ít nhất 1 người hợp lệ). Vui lòng nhập hoặc import danh sách người tham gia.',
+        'Thiếu danh sách thí sinh'
+      );
       return;
     }
 
@@ -1466,6 +1997,20 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       return false;
     }
 
+    const effectiveMode = spec.settings?.sessionMode || sessionMode;
+    if (
+      effectiveMode === 'EXAM' &&
+      parsedRosterDraft.validItems.length === 0 &&
+      btcParticipants.length === 0
+    ) {
+      setShowExamRosterError(true);
+      toast.error(
+        'Chế độ Thi nghiêm túc bắt buộc phải có danh sách thí sinh (ít nhất 1 người hợp lệ). Vui lòng nhập hoặc import danh sách người tham gia.',
+        'Thiếu danh sách thí sinh'
+      );
+      return false;
+    }
+
     const seenQuestions = new Set<string>();
     for (let i = 0; i < spec.questions.length; i++) {
       const q = spec.questions[i];
@@ -1502,10 +2047,35 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       return null;
     }
 
+    const validRosterItems = parsedRosterDraft.validItems.map((it) => ({
+      participantId: it.participantId,
+      fullName: it.fullName,
+      departmentUnit: it.departmentUnit,
+      employeeCode: it.employeeCode,
+      email: it.contactInfo,
+      contactInfo: it.contactInfo,
+    }));
+    const effectiveRosterModeForRoom: RosterMode =
+      sessionMode === 'EXAM'
+        ? 'PRECONFIGURED'
+        : validRosterItems.length > 0
+        ? rosterMode === 'HYBRID'
+          ? 'HYBRID'
+          : 'PRECONFIGURED'
+        : 'FREE_TEXT';
+
     setIsCreatingRoom(true);
     const toastId = toast.loading('Đang khởi tạo phòng chơi và tạo mã QR tham gia...');
 
     try {
+      if (spec?.gameId && (validRosterItems.length > 0 || btcParticipants.length > 0)) {
+        await upsertGameParticipantsApi(spec.gameId, {
+          participants: validRosterItems,
+          replaceAll: true,
+          rosterMode: effectiveRosterModeForRoom,
+        }).catch(() => {});
+      }
+
       const roomData = await createRoom({
         gameId: spec!.gameId,
         gameSpecification: {
@@ -1518,7 +2088,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             sessionMode,
             passThresholdPercent,
             officialAttemptPolicy,
-            rosterMode,
+            rosterMode: effectiveRosterModeForRoom,
             audioConfig,
             ...(spec!.gameType === 'ADVENTURE'
               ? {
@@ -1889,6 +2459,34 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       return null;
     }
 
+    const validRosterItemsToSave = parsedRosterDraft.validItems.map((it) => ({
+      participantId: it.participantId,
+      fullName: it.fullName,
+      departmentUnit: it.departmentUnit,
+      employeeCode: it.employeeCode,
+      email: it.contactInfo,
+      contactInfo: it.contactInfo,
+    }));
+
+    if (sessionMode === 'EXAM' && validRosterItemsToSave.length === 0) {
+      setShowExamRosterError(true);
+      toast.error(
+        'Chế độ Thi nghiêm túc bắt buộc phải có danh sách thí sinh (ít nhất 1 người hợp lệ).',
+        'Thiếu danh sách thí sinh'
+      );
+      return null;
+    }
+
+    const effectiveRosterModeForSave: RosterMode =
+      sessionMode === 'EXAM'
+        ? 'PRECONFIGURED'
+        : validRosterItemsToSave.length > 0
+        ? rosterMode === 'HYBRID'
+          ? 'HYBRID'
+          : 'PRECONFIGURED'
+        : 'FREE_TEXT';
+    setRosterMode(effectiveRosterModeForSave);
+
     const nextIsPublic =
       publishFlag !== undefined ? publishFlag : (specToSave.isPublic ?? true);
     const syncedAdvCfg =
@@ -1914,9 +2512,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           sessionMode,
           passThresholdPercent,
           officialAttemptPolicy,
-          rosterMode,
+          rosterMode: effectiveRosterModeForSave,
           audioConfig,
         },
+        participants: validRosterItemsToSave,
+        requireRoster: sessionMode === 'EXAM',
         isPublic: nextIsPublic,
         ...(publishFlag === true && !specToSave.coverImageUrl ? { generateCover: true } : {}),
       });
@@ -1931,7 +2531,17 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             }
           : saved;
       syncedGameIdRef.current = finalSaved.gameId;
+      loadedRosterGameIdRef.current = finalSaved.gameId;
       setGeneratedSpec(finalSaved);
+      if (validRosterItemsToSave.length > 0 || btcParticipants.length > 0) {
+        fetchGameParticipantsApi(finalSaved.gameId, { mode: 'admin' })
+          .then((res) => {
+            if (Array.isArray(res.participants)) {
+              setBtcParticipants(res.participants);
+            }
+          })
+          .catch(() => {});
+      }
       if (finalSaved.settings?.adventureConfig) {
         setAdventureConfig(
           syncAdventureStagesWithQuestions(
@@ -2084,11 +2694,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       return;
     }
     const saved = await handleSaveSpecEdits(generatedSpec.isPublic);
-    if (!saved && generatedSpec.gameType === 'ADVENTURE') {
+    if (!saved) {
       return;
     }
-    const target = saved || generatedSpec;
-    setModeModalSpec(target);
+    setModeModalSpec(saved);
     setIsModeModalOpen(true);
   };
 
@@ -3881,9 +4490,21 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     onChange={(e) => {
                       const nextMode = e.target.value as SessionMode;
                       setSessionMode(nextMode);
+                      if (nextMode === 'PLAY') {
+                        setShowExamRosterError(false);
+                      }
                       const nextPolicy: OfficialAttemptPolicy =
                         nextMode === 'EXAM' ? 'LATEST_ATTEMPT' : 'HIGHEST_SCORE';
                       setOfficialAttemptPolicy(nextPolicy);
+                      const nextRosterMode: RosterMode =
+                        nextMode === 'EXAM'
+                          ? 'PRECONFIGURED'
+                          : parsedRosterDraft.validItems.length > 0
+                          ? rosterMode === 'HYBRID'
+                            ? 'HYBRID'
+                            : 'PRECONFIGURED'
+                          : 'FREE_TEXT';
+                      setRosterMode(nextRosterMode);
                       if (generatedSpec) {
                         setGeneratedSpec((prev) =>
                           prev
@@ -3893,6 +4514,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                   ...prev.settings,
                                   sessionMode: nextMode,
                                   officialAttemptPolicy: nextPolicy,
+                                  rosterMode: nextRosterMode,
                                 },
                               }
                             : prev
@@ -4012,25 +4634,740 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   )}
                 </div>
 
-                {/* 6. Nhạc Nền & Hiệu Ứng Âm Thanh */}
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
-                    6. Nhạc Nền & Âm Thanh Gameplay
-                  </label>
-                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                {/* 6. Danh sách người tham gia (Roster trực tiếp tại cột phải) */}
+                <div
+                  data-testid="creator-roster-section"
+                  style={{
+                    padding: '0.65rem 0.75rem',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--bg-surface)',
+                    border:
+                      sessionMode === 'EXAM' && parsedRosterDraft.validItems.length === 0
+                        ? '1.5px solid rgba(239, 68, 68, 0.55)'
+                        : '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.5rem',
+                  }}
+                >
+                  {/* Header: Tên mục + Phụ đề theo chế độ + Tổng số người hợp lệ */}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                        6. Danh sách người tham gia
+                      </div>
+                      <div
+                        data-testid="creator-roster-mode-desc"
+                        style={{
+                          fontSize: '0.71rem',
+                          fontWeight: 700,
+                          color:
+                            sessionMode === 'EXAM'
+                              ? 'var(--accent-amber)'
+                              : 'var(--text-secondary)',
+                          marginTop: '0.1rem',
+                        }}
+                      >
+                        {sessionMode === 'EXAM'
+                          ? 'Bắt buộc — cần có danh sách thí sinh'
+                          : 'Tùy chọn — có thể để trống'}
+                      </div>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+                      <span
+                        data-testid="roster-valid-count-badge"
+                        style={{
+                          padding: '0.2rem 0.55rem',
+                          borderRadius: '999px',
+                          fontSize: '0.71rem',
+                          fontWeight: 800,
+                          backgroundColor:
+                            parsedRosterDraft.validItems.length > 0
+                              ? 'rgba(16, 185, 129, 0.14)'
+                              : 'var(--bg-input)',
+                          color:
+                            parsedRosterDraft.validItems.length > 0
+                              ? 'var(--accent-emerald)'
+                              : 'var(--text-secondary)',
+                          border:
+                            parsedRosterDraft.validItems.length > 0
+                              ? '1px solid rgba(16, 185, 129, 0.4)'
+                              : '1px solid var(--border-subtle)',
+                        }}
+                      >
+                        Hợp lệ: {parsedRosterDraft.validItems.length} người
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Tabs: Nhập thủ công vs Import Excel / CSV */}
+                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <button
+                      type="button"
+                      data-testid="roster-tab-manual"
+                      onClick={() => setCreatorRosterTab('MANUAL')}
+                      style={{
+                        flex: 1,
+                        padding: '0.34rem 0.55rem',
+                        borderRadius: '6px',
+                        border:
+                          creatorRosterTab === 'MANUAL'
+                            ? '1.5px solid var(--primary)'
+                            : '1px solid var(--border-subtle)',
+                        backgroundColor:
+                          creatorRosterTab === 'MANUAL'
+                            ? 'rgba(56, 189, 248, 0.14)'
+                            : 'var(--bg-input)',
+                        color:
+                          creatorRosterTab === 'MANUAL'
+                            ? 'var(--accent-sky)'
+                            : 'var(--text-secondary)',
+                        fontSize: '0.73rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ✍ Nhập thủ công
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="roster-tab-import"
+                      onClick={() => setCreatorRosterTab('IMPORT')}
+                      style={{
+                        flex: 1,
+                        padding: '0.34rem 0.55rem',
+                        borderRadius: '6px',
+                        border:
+                          creatorRosterTab === 'IMPORT'
+                            ? '1.5px solid var(--primary)'
+                            : '1px solid var(--border-subtle)',
+                        backgroundColor:
+                          creatorRosterTab === 'IMPORT'
+                            ? 'rgba(56, 189, 248, 0.14)'
+                            : 'var(--bg-input)',
+                        color:
+                          creatorRosterTab === 'IMPORT'
+                            ? 'var(--accent-sky)'
+                            : 'var(--text-secondary)',
+                        fontSize: '0.73rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      📂 Import Excel / CSV
+                    </button>
+                  </div>
+
+                  {/* Nội dung Tab 1: Nhập thủ công */}
+                  {creatorRosterTab === 'MANUAL' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                      {/* Nhập từng người nhanh */}
+                      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                        <input
+                          type="text"
+                          data-testid="roster-single-name-input"
+                          placeholder="Họ và tên người tham gia..."
+                          value={creatorRosterSingleName}
+                          onChange={(e) => {
+                            setCreatorRosterSingleName(e.target.value);
+                            if (creatorRosterSingleError) setCreatorRosterSingleError(null);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddSingleRosterPerson();
+                            }
+                          }}
+                          style={{
+                            flex: '1 1 130px',
+                            backgroundColor: 'var(--bg-input)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            padding: '0.35rem 0.55rem',
+                            color: 'var(--text-primary)',
+                            fontSize: '0.75rem',
+                            boxSizing: 'border-box',
+                          }}
+                        />
+                        <input
+                          type="text"
+                          data-testid="roster-single-dept-input"
+                          placeholder="Đơn vị / Phòng ban (tùy chọn)"
+                          value={creatorRosterSingleDept}
+                          onChange={(e) => setCreatorRosterSingleDept(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleAddSingleRosterPerson();
+                            }
+                          }}
+                          style={{
+                            flex: '1 1 110px',
+                            backgroundColor: 'var(--bg-input)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            padding: '0.35rem 0.55rem',
+                            color: 'var(--text-primary)',
+                            fontSize: '0.75rem',
+                            boxSizing: 'border-box',
+                          }}
+                        />
+                        <button
+                          type="button"
+                          data-testid="roster-add-single-btn"
+                          onClick={handleAddSingleRosterPerson}
+                          style={{
+                            padding: '0.35rem 0.65rem',
+                            borderRadius: '6px',
+                            border: '1px solid var(--primary)',
+                            backgroundColor: 'var(--primary)',
+                            color: 'var(--primary-ink)',
+                            fontSize: '0.74rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          + Thêm
+                        </button>
+                      </div>
+                      {creatorRosterSingleError && (
+                        <div style={{ fontSize: '0.7rem', color: 'var(--accent-rose)', fontWeight: 700 }}>
+                          {creatorRosterSingleError}
+                        </div>
+                      )}
+
+                      {/* Dán nhiều dòng */}
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                          Hoặc dán danh sách nhiều dòng (mỗi dòng 1 người: Họ tên | Đơn vị | Mã NV):
+                        </label>
+                        <textarea
+                          data-testid="creator-roster-manual-textarea"
+                          rows={3}
+                          placeholder={'Nguyễn Văn An | Phòng Kỹ Thuật | NV001\nTrần Thị Bình | Phòng Kinh Doanh | NV002'}
+                          value={btcRosterPasteText}
+                          onChange={(e) => applyUpdatedRosterPasteText(e.target.value)}
+                          style={{
+                            width: '100%',
+                            backgroundColor: 'var(--bg-input)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            padding: '0.45rem 0.6rem',
+                            color: 'var(--text-primary)',
+                            fontSize: '0.76rem',
+                            fontFamily: 'inherit',
+                            boxSizing: 'border-box',
+                            resize: 'vertical',
+                          }}
+                        />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Nội dung Tab 2: Import Excel / CSV */}
+                  {creatorRosterTab === 'IMPORT' && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.45rem', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                          Hỗ trợ tệp <strong>.xlsx</strong>, <strong>.csv</strong> (Cột 1: Họ tên, Cột 2: Đơn vị, Cột 3: Mã NV)
+                        </span>
+                        <label
+                          style={{
+                            padding: '0.38rem 0.7rem',
+                            borderRadius: '6px',
+                            border: '1px solid var(--accent-sky)',
+                            backgroundColor: 'rgba(56, 189, 248, 0.12)',
+                            color: 'var(--accent-sky)',
+                            fontSize: '0.74rem',
+                            fontWeight: 800,
+                            cursor: isParsingRosterFile ? 'wait' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.3rem',
+                          }}
+                        >
+                          <UploadIcon size={12} />
+                          <span>{isParsingRosterFile ? 'Đang đọc tệp...' : 'Chọn tệp Excel / CSV (.xlsx, .csv)'}</span>
+                          <input
+                            type="file"
+                            data-testid="creator-roster-file-input"
+                            accept=".xlsx,.xls,.csv,.txt"
+                            onChange={handlePreviewCreatorRosterFile}
+                            disabled={isParsingRosterFile}
+                            style={{ display: 'none' }}
+                          />
+                        </label>
+                      </div>
+
+                      {/* Khung xem trước kết quả parse file trước khi xác nhận nhập */}
+                      {creatorRosterImportPreview && (
+                        <div
+                          data-testid="roster-import-preview-box"
+                          style={{
+                            padding: '0.55rem 0.65rem',
+                            borderRadius: '6px',
+                            backgroundColor: 'var(--bg-input)',
+                            border: '1px solid var(--accent-sky)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.4rem',
+                          }}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}>
+                            <span style={{ fontSize: '0.73rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                              📄 {creatorRosterImportPreview.fileName}
+                            </span>
+                            <span
+                              data-testid="roster-import-preview-count"
+                              style={{
+                                fontSize: '0.72rem',
+                                fontWeight: 800,
+                                color: 'var(--accent-emerald)',
+                              }}
+                            >
+                              Xem trước: {creatorRosterImportPreview.participants.length} người hợp lệ
+                            </span>
+                          </div>
+
+                          {creatorRosterImportPreview.duplicateCount > 0 && (
+                            <div
+                              data-testid="roster-import-preview-duplicates"
+                              style={{
+                                fontSize: '0.7rem',
+                                fontWeight: 700,
+                                color: 'var(--accent-amber)',
+                                backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                                padding: '0.28rem 0.45rem',
+                                borderRadius: '4px',
+                              }}
+                            >
+                              ⚠ Phát hiện {creatorRosterImportPreview.duplicateCount} dòng trùng tên (
+                              {creatorRosterImportPreview.duplicateNames.join(', ')}) — giữ nguyên từng người riêng biệt.
+                            </div>
+                          )}
+
+                          {creatorRosterImportPreview.invalidRows.length > 0 && (
+                            <div
+                              data-testid="roster-import-preview-errors"
+                              style={{
+                                fontSize: '0.7rem',
+                                fontWeight: 700,
+                                color: 'var(--accent-rose)',
+                                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                                padding: '0.28rem 0.45rem',
+                                borderRadius: '4px',
+                              }}
+                            >
+                              ⚠ Có {creatorRosterImportPreview.invalidRows.length} dòng lỗi bị bỏ qua:{' '}
+                              {creatorRosterImportPreview.invalidRows
+                                .slice(0, 3)
+                                .map((r) => `Dòng ${r.rowNumber} ("${r.rawText}"): ${r.reason}`)
+                                .join('; ')}
+                            </div>
+                          )}
+
+                          {creatorRosterImportPreview.participants.length > 0 && (
+                            <div
+                              style={{
+                                maxHeight: '110px',
+                                overflowY: 'auto',
+                                border: '1px solid var(--border-subtle)',
+                                borderRadius: '4px',
+                                padding: '0.3rem 0.45rem',
+                                fontSize: '0.72rem',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.2rem',
+                              }}
+                            >
+                              {creatorRosterImportPreview.participants.map((item, pIdx) => (
+                                <div
+                                  key={`${item.fullName}_${pIdx}`}
+                                  style={{
+                                    display: 'flex',
+                                    justifyContent: 'space-between',
+                                    alignItems: 'center',
+                                    gap: '0.35rem',
+                                  }}
+                                >
+                                  <span>
+                                    <strong>{pIdx + 1}. {item.fullName}</strong>
+                                    {item.departmentUnit ? ` — ${item.departmentUnit}` : ''}
+                                    {item.employeeCode ? ` (${item.employeeCode})` : ''}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setCreatorRosterImportPreview((prev) => {
+                                        if (!prev) return null;
+                                        const nextList = prev.participants.filter((_, i) => i !== pIdx);
+                                        return {
+                                          ...prev,
+                                          validCount: nextList.length,
+                                          participants: nextList,
+                                        };
+                                      });
+                                    }}
+                                    style={{
+                                      border: 'none',
+                                      background: 'transparent',
+                                      color: 'var(--accent-rose)',
+                                      fontSize: '0.68rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    Bỏ
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.4rem' }}>
+                            <button
+                              type="button"
+                              data-testid="roster-cancel-import-btn"
+                              onClick={() => setCreatorRosterImportPreview(null)}
+                              style={{
+                                padding: '0.3rem 0.6rem',
+                                borderRadius: '5px',
+                                border: '1px solid var(--border-subtle)',
+                                backgroundColor: 'transparent',
+                                color: 'var(--text-secondary)',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Hủy
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="roster-confirm-import-btn"
+                              disabled={creatorRosterImportPreview.participants.length === 0}
+                              onClick={handleConfirmCreatorRosterImport}
+                              style={{
+                                padding: '0.3rem 0.7rem',
+                                borderRadius: '5px',
+                                border: 'none',
+                                backgroundColor: 'var(--accent-emerald)',
+                                color: '#022c22',
+                                fontSize: '0.72rem',
+                                fontWeight: 800,
+                                cursor:
+                                  creatorRosterImportPreview.participants.length === 0
+                                    ? 'not-allowed'
+                                    : 'pointer',
+                              }}
+                            >
+                              ✓ Xác nhận nhập ({creatorRosterImportPreview.participants.length})
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Cảnh báo trùng tên (giữ nguyên từng người riêng biệt, không tự gộp) */}
+                  {parsedRosterDraft.duplicateCount > 0 && (
+                    <div
+                      data-testid="roster-duplicate-warning"
+                      style={{
+                        padding: '0.32rem 0.5rem',
+                        borderRadius: '6px',
+                        backgroundColor: 'rgba(245, 158, 11, 0.1)',
+                        border: '1px solid rgba(245, 158, 11, 0.35)',
+                        color: 'var(--accent-amber)',
+                        fontSize: '0.71rem',
+                        fontWeight: 700,
+                      }}
+                    >
+                      ⚠ Có {parsedRosterDraft.duplicateCount} người trùng tên (
+                      {parsedRosterDraft.duplicateNames.join(', ')}) — hệ thống giữ nguyên từng người riêng biệt, không tự gộp.
+                    </div>
+                  )}
+
+                  {/* Báo dòng không hợp lệ */}
+                  {parsedRosterDraft.invalidLines.length > 0 && (
+                    <div
+                      data-testid="roster-invalid-lines-error"
+                      style={{
+                        padding: '0.32rem 0.5rem',
+                        borderRadius: '6px',
+                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                        border: '1px solid rgba(239, 68, 68, 0.35)',
+                        color: 'var(--accent-rose)',
+                        fontSize: '0.71rem',
+                        fontWeight: 700,
+                      }}
+                    >
+                      ⚠ Phát hiện {parsedRosterDraft.invalidLines.length} dòng không hợp lệ:{' '}
+                      {parsedRosterDraft.invalidLines
+                        .map((l) => `Dòng ${l.lineNumber} ("${l.rawLine}"): ${l.reason}`)
+                        .join('; ')}
+                    </div>
+                  )}
+
+                  {/* Cảnh báo bắt buộc danh sách khi ở chế độ EXAM */}
+                  {sessionMode === 'EXAM' && parsedRosterDraft.validItems.length === 0 && (
+                    <div
+                      data-testid="creator-roster-exam-required-error"
+                      style={{
+                        padding: '0.38rem 0.55rem',
+                        borderRadius: '6px',
+                        backgroundColor: showExamRosterError
+                          ? 'rgba(239, 68, 68, 0.18)'
+                          : 'rgba(245, 158, 11, 0.12)',
+                        border: showExamRosterError
+                          ? '1.5px solid var(--accent-rose)'
+                          : '1px solid rgba(245, 158, 11, 0.4)',
+                        color: showExamRosterError ? 'var(--accent-rose)' : 'var(--accent-amber)',
+                        fontSize: '0.72rem',
+                        fontWeight: 800,
+                      }}
+                    >
+                      ⚠ Chế độ Thi nghiêm túc bắt buộc phải có danh sách thí sinh (ít nhất 1 người hợp lệ) trước khi tạo hoặc lưu đề thi.
+                    </div>
+                  )}
+
+                  {/* Danh sách người tham gia hiện tại (hỗ trợ sửa/xóa trực tiếp từng dòng) */}
+                  {parsedRosterDraft.validItems.length > 0 && (
+                    <div
+                      data-testid="creator-roster-list"
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.25rem',
+                        maxHeight: '140px',
+                        overflowY: 'auto',
+                        padding: '0.35rem 0.45rem',
+                        borderRadius: '6px',
+                        backgroundColor: 'var(--bg-input)',
+                        border: '1px solid var(--border-subtle)',
+                      }}
+                    >
+                      {parsedRosterDraft.validItems.map((item, idx) => {
+                        const isEditingRow = editingRosterRowIdx === item.lineIndex;
+                        return (
+                          <div
+                            key={`${item.participantId || 'draft'}_${idx}`}
+                            data-testid={`creator-roster-row-${idx}`}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              gap: '0.35rem',
+                              padding: '0.22rem 0.3rem',
+                              borderBottom:
+                                idx < parsedRosterDraft.validItems.length - 1
+                                  ? '1px solid var(--border-subtle)'
+                                  : 'none',
+                              fontSize: '0.73rem',
+                            }}
+                          >
+                            {isEditingRow ? (
+                              <div style={{ display: 'flex', gap: '0.25rem', flex: 1, alignItems: 'center' }}>
+                                <input
+                                  type="text"
+                                  data-testid={`roster-edit-name-input-${idx}`}
+                                  value={editingRosterRowName}
+                                  onChange={(e) => setEditingRosterRowName(e.target.value)}
+                                  style={{
+                                    flex: 1,
+                                    padding: '0.2rem 0.35rem',
+                                    fontSize: '0.72rem',
+                                    borderRadius: '4px',
+                                    border: '1px solid var(--primary)',
+                                    backgroundColor: 'var(--bg-surface)',
+                                    color: 'var(--text-primary)',
+                                  }}
+                                />
+                                <input
+                                  type="text"
+                                  data-testid={`roster-edit-dept-input-${idx}`}
+                                  value={editingRosterRowDept}
+                                  placeholder="Đơn vị"
+                                  onChange={(e) => setEditingRosterRowDept(e.target.value)}
+                                  style={{
+                                    width: '90px',
+                                    padding: '0.2rem 0.35rem',
+                                    fontSize: '0.72rem',
+                                    borderRadius: '4px',
+                                    border: '1px solid var(--border-strong)',
+                                    backgroundColor: 'var(--bg-surface)',
+                                    color: 'var(--text-primary)',
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  data-testid={`roster-save-row-btn-${idx}`}
+                                  onClick={() => handleSaveEditedRosterDraftRow(item.lineIndex)}
+                                  style={{
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    backgroundColor: 'var(--accent-emerald)',
+                                    color: '#022c22',
+                                    padding: '0.2rem 0.45rem',
+                                    fontSize: '0.68rem',
+                                    fontWeight: 800,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Lưu
+                                </button>
+                              </div>
+                            ) : (
+                              <>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0, flex: 1 }}>
+                                  <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>{idx + 1}.</span>
+                                  <span style={{ fontWeight: 800, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                    {item.fullName}
+                                  </span>
+                                  {item.departmentUnit && (
+                                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.69rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                      • {item.departmentUnit}
+                                    </span>
+                                  )}
+                                </div>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
+                                  <button
+                                    type="button"
+                                    data-testid={`roster-edit-row-btn-${idx}`}
+                                    onClick={() => {
+                                      setEditingRosterRowIdx(item.lineIndex);
+                                      setEditingRosterRowName(item.fullName);
+                                      setEditingRosterRowDept(item.departmentUnit || '');
+                                    }}
+                                    style={{
+                                      border: 'none',
+                                      background: 'transparent',
+                                      color: 'var(--accent-sky)',
+                                      fontSize: '0.69rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      padding: '0.1rem 0.25rem',
+                                    }}
+                                  >
+                                    Sửa
+                                  </button>
+                                  <button
+                                    type="button"
+                                    data-testid={`roster-delete-row-btn-${idx}`}
+                                    onClick={() => handleDeleteRosterDraftRow(item.lineIndex)}
+                                    style={{
+                                      border: 'none',
+                                      background: 'transparent',
+                                      color: 'var(--accent-rose)',
+                                      fontSize: '0.69rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      padding: '0.1rem 0.25rem',
+                                    }}
+                                  >
+                                    Xóa
+                                  </button>
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Thanh thao tác nhanh cho danh sách người tham gia */}
+                  {(parsedRosterDraft.validItems.length > 0 || generatedSpec) && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                      {parsedRosterDraft.validItems.length > 0 ? (
+                        <button
+                          type="button"
+                          data-testid="creator-roster-clear-btn"
+                          onClick={() => applyUpdatedRosterPasteText('')}
+                          style={{
+                            border: 'none',
+                            background: 'transparent',
+                            color: 'var(--accent-rose)',
+                            fontSize: '0.71rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                            padding: 0,
+                          }}
+                        >
+                          Xóa toàn bộ danh sách ({parsedRosterDraft.validItems.length})
+                        </button>
+                      ) : (
+                        <span />
+                      )}
+
+                      {generatedSpec && (
+                        <button
+                          type="button"
+                          data-testid="creator-roster-save-btn"
+                          onClick={handleSaveBtcRoster}
+                          disabled={isSavingRoster}
+                          style={{
+                            padding: '0.28rem 0.65rem',
+                            borderRadius: '6px',
+                            border: '1px solid var(--primary)',
+                            backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                            color: 'var(--accent-sky)',
+                            fontSize: '0.72rem',
+                            fontWeight: 800,
+                            cursor: isSavingRoster ? 'wait' : 'pointer',
+                          }}
+                        >
+                          {isSavingRoster ? 'Đang lưu...' : '💾 Lưu danh sách'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* 7. Khu vực âm thanh V3 hợp nhất duy nhất: Bộ âm thanh chủ đề (SFX + BGM) */}
+                <div
+                  data-testid="v3-sound-pack-section"
+                  style={{
+                    padding: '0.65rem 0.75rem',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.5rem',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
+                    <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                      7. Bộ âm thanh chủ đề (SFX + BGM)
+                    </label>
                     <select
-                      data-testid="audio-preset-select"
-                      value={audioConfig.presetId}
+                      data-testid="sound-pack-select"
+                      value={
+                        !audioConfig.enabled || audioConfig.soundPackId === 'NONE' || audioConfig.presetId === 'NONE'
+                          ? 'NONE'
+                          : audioConfig.soundPackId ||
+                            resolveSoundPackDefinition(audioConfig).packId
+                      }
                       onChange={(e) => {
-                        const nextPreset = e.target.value as AudioPresetId;
+                        const nextPackId = e.target.value as SoundPackId;
+                        const mappedPreset =
+                          nextPackId === 'NONE'
+                            ? 'NONE'
+                            : audioConfig.customAudioUrl && nextPackId === 'CUSTOM'
+                            ? 'CUSTOM'
+                            : mapSoundPackToPresetId(nextPackId);
                         const nextCfg: GameAudioConfig = {
                           ...audioConfig,
-                          enabled: nextPreset !== 'NONE',
-                          presetId: nextPreset,
+                          enabled: nextPackId !== 'NONE',
+                          soundPackId: nextPackId,
+                          presetId: mappedPreset,
                         };
                         setAudioConfig(nextCfg);
                         if (isAudioPreviewPlaying || soundManager.getIsPreviewing()) {
-                          if (nextPreset === 'NONE' || (nextPreset === 'CUSTOM' && !nextCfg.customAudioUrl)) {
+                          if (nextPackId === 'NONE') {
                             soundManager.stopPreview();
                             setIsAudioPreviewPlaying(false);
                           } else {
@@ -4051,46 +5388,77 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         }
                       }}
                       style={{
-                        flex: '1 1 180px',
+                        flex: '1 1 200px',
                         backgroundColor: 'var(--bg-input)',
                         border: '1px solid var(--border-strong)',
                         borderRadius: '6px',
-                        padding: '0.42rem 0.6rem',
+                        padding: '0.38rem 0.55rem',
                         color: 'var(--text-primary)',
-                        fontSize: '0.8rem',
-                        fontWeight: 600,
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
                         boxSizing: 'border-box',
                       }}
                     >
-                      {AUDIO_PRESET_CATALOG.map((preset) => (
-                        <option key={preset.presetId} value={preset.presetId}>
-                          {preset.presetId === 'CUSTOM' && audioConfig.customAudioName
-                            ? `Nhạc tải lên: ${audioConfig.customAudioName}`
-                            : preset.label}
+                      {SOUND_PACK_CATALOG.map((pack) => (
+                        <option key={pack.packId} value={pack.packId}>
+                          {pack.label} — {pack.description}
                         </option>
                       ))}
+                      {(audioConfig.customAudioName || audioConfig.soundPackId === 'CUSTOM') && (
+                        <option value="CUSTOM">
+                          Nhạc nền riêng: {audioConfig.customAudioName || 'Tùy chỉnh'}
+                        </option>
+                      )}
+                      <option value="NONE">Tắt âm thanh</option>
                     </select>
+                  </div>
 
+                  {/* Hàng điều khiển: Nghe thử bộ âm thanh / Dừng / Mute + Thanh âm lượng / Upload nhạc nền riêng */}
+                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
                     <button
                       type="button"
                       data-testid="audio-preview-btn"
                       aria-pressed={isAudioPreviewPlaying}
                       onClick={handleToggleAudioPreview}
-                      disabled={audioConfig.presetId === 'NONE'}
+                      disabled={audioConfig.soundPackId === 'NONE' || audioConfig.presetId === 'NONE' || !audioConfig.enabled}
                       style={{
-                        padding: '0.42rem 0.65rem',
+                        padding: '0.38rem 0.65rem',
                         borderRadius: '6px',
                         border: '1px solid var(--border-strong)',
                         backgroundColor: isAudioPreviewPlaying
                           ? 'rgba(16, 185, 129, 0.16)'
                           : 'var(--bg-input)',
                         color: isAudioPreviewPlaying ? 'var(--accent-emerald)' : 'var(--text-primary)',
-                        fontSize: '0.76rem',
+                        fontSize: '0.74rem',
                         fontWeight: 800,
-                        cursor: audioConfig.presetId === 'NONE' ? 'not-allowed' : 'pointer',
+                        cursor:
+                          audioConfig.soundPackId === 'NONE' || audioConfig.presetId === 'NONE' || !audioConfig.enabled
+                            ? 'not-allowed'
+                            : 'pointer',
                       }}
                     >
-                      {isAudioPreviewPlaying ? '⏹ Dừng nghe' : '🔊 Nghe thử'}
+                      {isAudioPreviewPlaying ? '🔊 Đang phát nghe thử' : '🔊 Nghe thử bộ âm thanh'}
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="audio-stop-preview-btn"
+                      onClick={handleStopAudioPreview}
+                      disabled={!isAudioPreviewPlaying}
+                      style={{
+                        padding: '0.38rem 0.6rem',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: isAudioPreviewPlaying
+                          ? 'rgba(239, 68, 68, 0.14)'
+                          : 'var(--bg-input)',
+                        color: isAudioPreviewPlaying ? 'var(--accent-rose)' : 'var(--text-muted)',
+                        fontSize: '0.74rem',
+                        fontWeight: 800,
+                        cursor: isAudioPreviewPlaying ? 'pointer' : 'not-allowed',
+                      }}
+                    >
+                      ⏹ Dừng
                     </button>
 
                     <div
@@ -4098,7 +5466,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '0.35rem',
-                        padding: '0.28rem 0.55rem',
+                        padding: '0.26rem 0.55rem',
                         borderRadius: '6px',
                         border: '1px solid var(--border-strong)',
                         backgroundColor: 'var(--bg-input)',
@@ -4137,9 +5505,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                               )
                         }
                         onChange={(e) => handleCreatorAudioVolumeChange(Number(e.target.value))}
-                        aria-label="Âm lượng nhạc nền"
+                        aria-label="Âm lượng bộ âm thanh"
                         style={{
-                          width: '60px',
+                          width: '64px',
                           height: '5px',
                           accentColor: 'var(--primary)',
                           cursor: 'pointer',
@@ -4149,22 +5517,28 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
                     <label
                       style={{
-                        padding: '0.42rem 0.65rem',
+                        padding: '0.38rem 0.65rem',
                         borderRadius: '6px',
                         border: '1px solid var(--border-strong)',
                         backgroundColor: 'var(--bg-input)',
                         color: 'var(--accent-sky)',
-                        fontSize: '0.75rem',
+                        fontSize: '0.73rem',
                         fontWeight: 800,
                         cursor: isUploadingAudio ? 'not-allowed' : 'pointer',
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '0.25rem',
                       }}
-                      title="Tải nhạc nền .mp3, .wav, .ogg (tối đa 10MB)"
+                      title="Tải nhạc nền riêng .mp3, .wav, .ogg (tối đa 10MB)"
                     >
                       <UploadIcon size={12} />
-                      <span>{isUploadingAudio ? 'Đang tải...' : 'Tải nhạc (.mp3/.wav)'}</span>
+                      <span>
+                        {isUploadingAudio
+                          ? 'Đang tải...'
+                          : audioConfig.customAudioName
+                          ? `Nhạc nền: ${audioConfig.customAudioName}`
+                          : 'Upload nhạc nền riêng (.mp3/.wav)'}
+                      </span>
                       <input
                         type="file"
                         data-testid="custom-audio-upload-input"
@@ -4174,6 +5548,143 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         style={{ display: 'none' }}
                       />
                     </label>
+                  </div>
+
+                  {/* Toggles: BGM / SFX / Countdown */}
+                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', fontSize: '0.74rem' }}>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', fontWeight: 700 }}>
+                      <input
+                        type="checkbox"
+                        data-testid="audio-bgm-toggle"
+                        checked={audioConfig.bgmEnabled !== false}
+                        onChange={(e) => {
+                          const nextCfg: GameAudioConfig = {
+                            ...audioConfig,
+                            bgmEnabled: e.target.checked,
+                          };
+                          setAudioConfig(nextCfg);
+                          if (generatedSpec) {
+                            setGeneratedSpec((prev) =>
+                              prev ? { ...prev, settings: { ...prev.settings, audioConfig: nextCfg } } : prev
+                            );
+                            setSavedForLater(false);
+                            setSaveStatus('dirty');
+                          }
+                        }}
+                      />
+                      <span>Nhạc nền (BGM)</span>
+                    </label>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', fontWeight: 700 }}>
+                      <input
+                        type="checkbox"
+                        data-testid="audio-sfx-toggle"
+                        checked={audioConfig.sfxEnabled !== false}
+                        onChange={(e) => {
+                          const nextCfg: GameAudioConfig = {
+                            ...audioConfig,
+                            sfxEnabled: e.target.checked,
+                          };
+                          setAudioConfig(nextCfg);
+                          if (generatedSpec) {
+                            setGeneratedSpec((prev) =>
+                              prev ? { ...prev, settings: { ...prev.settings, audioConfig: nextCfg } } : prev
+                            );
+                            setSavedForLater(false);
+                            setSaveStatus('dirty');
+                          }
+                        }}
+                      />
+                      <span>Hiệu ứng SFX</span>
+                    </label>
+                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', fontWeight: 700 }}>
+                      <input
+                        type="checkbox"
+                        data-testid="audio-countdown-toggle"
+                        checked={audioConfig.countdownSoundEnabled !== false}
+                        onChange={(e) => {
+                          const nextCfg: GameAudioConfig = {
+                            ...audioConfig,
+                            countdownSoundEnabled: e.target.checked,
+                          };
+                          setAudioConfig(nextCfg);
+                          if (generatedSpec) {
+                            setGeneratedSpec((prev) =>
+                              prev ? { ...prev, settings: { ...prev.settings, audioConfig: nextCfg } } : prev
+                            );
+                            setSavedForLater(false);
+                            setSaveStatus('dirty');
+                          }
+                        }}
+                      />
+                      <span>Đếm ngược cuối câu</span>
+                    </label>
+                  </div>
+
+                  {/* Nghe thử từng hiệu ứng riêng lẻ & Tải hiệu ứng tùy chỉnh */}
+                  <div data-testid="sfx-cue-preview-panel">
+                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
+                      Nghe thử từng hiệu ứng âm thanh (hoặc bấm ⬆ để thay bằng file riêng):
+                    </div>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
+                      {SFX_CUE_CATALOG.map((item) => {
+                        const overrideEntry = audioConfig.customSfxOverrides?.[item.cue];
+                        const hasCustom = Boolean(overrideEntry?.url || overrideEntry?.audioUrl);
+                        return (
+                          <div
+                            key={item.cue}
+                            style={{
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              borderRadius: '6px',
+                              border: hasCustom
+                                ? '1px solid var(--accent-emerald)'
+                                : '1px solid var(--border-subtle)',
+                              backgroundColor: 'var(--bg-input)',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            <button
+                              type="button"
+                              data-testid={`preview-sfx-cue-${item.cue}`}
+                              onClick={() => soundManager.previewSfxCue(item.cue, audioConfig)}
+                              title={`Nghe thử hiệu ứng: ${item.label}`}
+                              style={{
+                                border: 'none',
+                                background: 'transparent',
+                                color: 'var(--text-primary)',
+                                fontSize: '0.72rem',
+                                fontWeight: 700,
+                                padding: '0.28rem 0.5rem',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              🔊 {item.label}
+                            </button>
+                            <label
+                              title={`Tải file .mp3/.wav/.ogg riêng cho hiệu ứng ${item.label}`}
+                              style={{
+                                borderLeft: '1px solid var(--border-subtle)',
+                                padding: '0.28rem 0.4rem',
+                                fontSize: '0.68rem',
+                                color: hasCustom ? 'var(--accent-emerald)' : 'var(--accent-sky)',
+                                fontWeight: 800,
+                                cursor: uploadingSfxCue === item.cue ? 'wait' : 'pointer',
+                              }}
+                            >
+                              {hasCustom ? '✓' : '⬆'}
+                              <input
+                                type="file"
+                                data-testid={`upload-sfx-override-${item.cue}`}
+                                accept=".mp3,.wav,.ogg,audio/mpeg,audio/wav,audio/ogg"
+                                onChange={(e) => handleCustomSfxOverrideUpload(item.cue, e)}
+                                disabled={uploadingSfxCue === item.cue}
+                                style={{ display: 'none' }}
+                              />
+                            </label>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -6065,10 +7576,10 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         cursor: 'pointer',
                       }}
                     >
-                      Nhập từ tệp (.csv / .txt)
+                      Nhập từ tệp (.xlsx / .csv / .txt)
                       <input
                         type="file"
-                        accept=".csv,.txt"
+                        accept=".xlsx,.xls,.csv,.txt"
                         onChange={handleImportRosterFile}
                         style={{ display: 'none' }}
                       />
@@ -6079,7 +7590,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     rows={4}
                     placeholder={'Nguyễn Văn A | Phòng Kỹ Thuật | NV001\nTrần Thị B | Phòng Kinh Doanh | NV002'}
                     value={btcRosterPasteText}
-                    onChange={(e) => setBtcRosterPasteText(e.target.value)}
+                    onChange={(e) => applyUpdatedRosterPasteText(e.target.value)}
                     style={{
                       width: '100%',
                       backgroundColor: 'var(--bg-input)',
@@ -6243,26 +7754,68 @@ export const DemoPage: React.FC<DemoPageProps> = ({
 
                   <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
                     {sessionMode === 'EXAM' && (
-                      <button
-                        type="button"
-                        data-testid="publish-exam-answers-btn"
-                        onClick={handlePublishExamAnswers}
-                        disabled={isPublishingAnswers || Boolean(btcScoreboard?.answersPublished)}
-                        style={{
-                          padding: '0.42rem 0.8rem',
-                          borderRadius: '8px',
-                          border: '1px solid rgba(245, 158, 11, 0.5)',
-                          backgroundColor: btcScoreboard?.answersPublished
-                            ? 'rgba(16, 185, 129, 0.14)'
-                            : 'rgba(245, 158, 11, 0.16)',
-                          color: btcScoreboard?.answersPublished ? 'var(--accent-emerald)' : '#f59e0b',
-                          fontSize: '0.78rem',
-                          fontWeight: 800,
-                          cursor: isPublishingAnswers || btcScoreboard?.answersPublished ? 'not-allowed' : 'pointer',
-                        }}
-                      >
-                        {btcScoreboard?.answersPublished ? '✓ Đã công bố đáp án' : 'Công bố đáp án chính thức'}
-                      </button>
+                      <>
+                        {generatedSpec.settings?.examStatus === 'CLOSED' ? (
+                          <button
+                            type="button"
+                            data-testid="btc-reopen-exam-btn"
+                            onClick={handleReopenExam}
+                            disabled={isClosingExam}
+                            style={{
+                              padding: '0.42rem 0.8rem',
+                              borderRadius: '8px',
+                              border: '1px solid var(--accent-sky)',
+                              backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                              color: 'var(--accent-sky)',
+                              fontSize: '0.78rem',
+                              fontWeight: 800,
+                              cursor: isClosingExam ? 'wait' : 'pointer',
+                            }}
+                          >
+                            ↺ Mở lại đợt thi
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            data-testid="btc-close-exam-btn"
+                            onClick={() => setConfirmCloseExamOpen(true)}
+                            disabled={isClosingExam}
+                            style={{
+                              padding: '0.42rem 0.8rem',
+                              borderRadius: '8px',
+                              border: '1px solid rgba(239, 68, 68, 0.55)',
+                              backgroundColor: 'rgba(239, 68, 68, 0.16)',
+                              color: 'var(--accent-rose)',
+                              fontSize: '0.78rem',
+                              fontWeight: 800,
+                              cursor: isClosingExam ? 'wait' : 'pointer',
+                            }}
+                          >
+                            ⏹ Kết thúc đợt thi & Thu bài
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          data-testid="publish-exam-answers-btn"
+                          onClick={handlePublishExamAnswers}
+                          disabled={isPublishingAnswers || Boolean(btcScoreboard?.answersPublished)}
+                          style={{
+                            padding: '0.42rem 0.8rem',
+                            borderRadius: '8px',
+                            border: '1px solid rgba(245, 158, 11, 0.5)',
+                            backgroundColor: btcScoreboard?.answersPublished
+                              ? 'rgba(16, 185, 129, 0.14)'
+                              : 'rgba(245, 158, 11, 0.16)',
+                            color: btcScoreboard?.answersPublished ? 'var(--accent-emerald)' : '#f59e0b',
+                            fontSize: '0.78rem',
+                            fontWeight: 800,
+                            cursor: isPublishingAnswers || btcScoreboard?.answersPublished ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          {btcScoreboard?.answersPublished ? '✓ Đã công bố đáp án' : 'Công bố đáp án chính thức'}
+                        </button>
+                      </>
                     )}
 
                     <button
@@ -6302,6 +7855,64 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     </button>
                   </div>
                 </div>
+
+                {/* Hộp thoại xác nhận Kết thúc đợt thi & Tự động nộp bài */}
+                {confirmCloseExamOpen && (
+                  <div
+                    data-testid="btc-close-exam-confirm-box"
+                    style={{
+                      padding: '0.85rem 1rem',
+                      borderRadius: '10px',
+                      backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                      border: '1.5px solid rgba(239, 68, 68, 0.45)',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-primary)', fontWeight: 700 }}>
+                      <strong>Xác nhận kết thúc đợt thi?</strong> Hệ thống sẽ khóa mở lượt thi mới và tự động thu bài, chấm điểm ngay lập tức tất cả thí sinh đang làm bài (không tự công bố đáp án).
+                    </div>
+                    <div style={{ display: 'flex', gap: '0.45rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => setConfirmCloseExamOpen(false)}
+                        style={{
+                          padding: '0.4rem 0.75rem',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-secondary)',
+                          fontSize: '0.76rem',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Hủy
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="btc-confirm-close-exam-btn"
+                        disabled={isClosingExam}
+                        onClick={handleCloseExam}
+                        style={{
+                          padding: '0.4rem 0.9rem',
+                          borderRadius: '6px',
+                          border: 'none',
+                          backgroundColor: '#ef4444',
+                          color: '#ffffff',
+                          fontSize: '0.78rem',
+                          fontWeight: 900,
+                          cursor: isClosingExam ? 'wait' : 'pointer',
+                        }}
+                      >
+                        {isClosingExam ? 'Đang thu bài...' : 'Xác nhận Kết thúc & Thu bài'}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Top 3 Podium */}
                 {btcScoreboard && btcScoreboard.top3.length > 0 && (

@@ -167,16 +167,52 @@ export type AudioPresetId =
   | 'EXAM_FOCUS'
   | 'ADVENTURE_QUEST'
   | 'CORPORATE_CALM'
+  | 'ARCADE_FUN'
+  | 'CLASSROOM_QUIZ'
+  | 'CORPORATE_TRAINING'
   | 'CUSTOM';
+
+export type SoundPackId =
+  | 'ARCADE_FUN'
+  | 'CLASSROOM_QUIZ'
+  | 'ADVENTURE_QUEST'
+  | 'CORPORATE_TRAINING'
+  | 'ENERGETIC_ARENA'
+  | 'EXAM_FOCUS'
+  | 'CORPORATE_CALM'
+  | 'CUSTOM'
+  | 'NONE';
+
+export type SfxCueType =
+  | 'correct'
+  | 'wrong'
+  | 'timeout'
+  | 'countdown'
+  | 'start'
+  | 'finish'
+  | 'top3';
+
+export interface CustomSfxOverride {
+  url: string;
+  audioUrl?: string | null;
+  fileName?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+}
+
+export type ExamStatus = 'OPEN' | 'CLOSING' | 'CLOSED';
 
 export interface GameAudioConfig {
   enabled: boolean;
+  bgmEnabled?: boolean;
   presetId: AudioPresetId;
+  soundPackId?: SoundPackId;
   customAudioUrl?: string | null;
   customAudioFileName?: string | null;
   customAudioName?: string | null;
   customAudioMimeType?: string | null;
   customAudioSizeBytes?: number | null;
+  customSfxOverrides?: Partial<Record<SfxCueType, CustomSfxOverride | null>>;
   volume: number;
   countdownSoundEnabled: boolean;
   countdownTriggerSeconds: number;
@@ -525,6 +561,11 @@ export interface GameSpecification {
     answersPublished?: boolean;
     answersPublishedAt?: string | null;
     showExamLeaderboardToPlayers?: boolean;
+    examStatus?: ExamStatus;
+    examOpenAt?: string | null;
+    examCloseAt?: string | null;
+    examClosedAt?: string | null;
+    allowReplay?: boolean;
     audioConfig?: GameAudioConfig;
     mixedDistribution?: MixedQuestionDistribution;
     adventureConfig?: AdventureConfig;

@@ -24,6 +24,7 @@ interface SocketMeta {
 }
 
 export class MultiplayerWebSocketServer {
+  private static activeInstances: Set<MultiplayerWebSocketServer> = new Set();
   private wss: WebSocketServer | null = null;
   private roomSockets: Map<string, Set<WebSocket>> = new Map();
   private socketMeta: Map<WebSocket, SocketMeta> = new Map();
@@ -33,6 +34,7 @@ export class MultiplayerWebSocketServer {
    * Attaches the WebSocket server to an existing HTTP server.
    */
   public attach(server: http.Server): WebSocketServer {
+    MultiplayerWebSocketServer.activeInstances.add(this);
     this.wss = new WebSocketServer({ server, path: '/ws' });
 
     this.wss.on('connection', (ws: WebSocket) => {
@@ -105,6 +107,7 @@ export class MultiplayerWebSocketServer {
 
     this.roomSockets.clear();
     this.socketMeta.clear();
+    MultiplayerWebSocketServer.activeInstances.delete(this);
   }
 
   /**
@@ -919,6 +922,29 @@ export class MultiplayerWebSocketServer {
       type: 'room.closed' as any,
       reason: reason || 'Phòng chơi đã được đóng bởi chủ phòng.',
     } as any);
+  }
+
+  public broadcastExamClosedForRoom(
+    room: MultiplayerRoom,
+    leaderboard: LeaderboardEntry[],
+    closedAtIso: string
+  ): void {
+    const targets = new Set<MultiplayerWebSocketServer>([
+      this,
+      ...MultiplayerWebSocketServer.activeInstances,
+    ]);
+    for (const instance of targets) {
+      instance.broadcastToRoom(room.roomCode, {
+        type: 'exam.closed' as any,
+        roomCode: room.roomCode,
+        gameId: room.gameId,
+        closedAt: closedAtIso,
+        answersPublished: room.answersPublished,
+        message:
+          'Đợt thi đã kết thúc theo quyết định của Ban Tổ Chức. Bài làm đã được hệ thống tự động ghi nhận.',
+      } as any);
+      instance.broadcastGameFinished(room, leaderboard);
+    }
   }
 
   public send(ws: WebSocket, message: OutboundMessage): void {

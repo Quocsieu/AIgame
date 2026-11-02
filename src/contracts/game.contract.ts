@@ -560,18 +560,79 @@ export const AudioPresetIdEnum = z.enum([
   'EXAM_FOCUS',
   'ADVENTURE_QUEST',
   'CORPORATE_CALM',
+  'ARCADE_FUN',
+  'CLASSROOM_QUIZ',
+  'CORPORATE_TRAINING',
   'CUSTOM',
 ]);
 export type AudioPresetId = z.infer<typeof AudioPresetIdEnum>;
 
+export const SoundPackIdEnum = z.enum([
+  'ARCADE_FUN',
+  'CLASSROOM_QUIZ',
+  'ADVENTURE_QUEST',
+  'CORPORATE_TRAINING',
+  'ENERGETIC_ARENA',
+  'EXAM_FOCUS',
+  'CORPORATE_CALM',
+  'CUSTOM',
+  'NONE',
+]);
+export type SoundPackId = z.infer<typeof SoundPackIdEnum>;
+
+export const SfxCueTypeEnum = z.enum([
+  'correct',
+  'wrong',
+  'timeout',
+  'countdown',
+  'start',
+  'finish',
+  'top3',
+]);
+export type SfxCueType = z.infer<typeof SfxCueTypeEnum>;
+
+export const CustomSfxOverrideSchema = z
+  .object({
+    url: z.string().optional(),
+    audioUrl: z.string().optional(),
+    fileName: z.string().nullable().optional(),
+    mimeType: z.string().nullable().optional(),
+    sizeBytes: z.number().nullable().optional(),
+  })
+  .transform((val) => ({
+    url: val.url || val.audioUrl || '',
+    fileName: val.fileName ?? null,
+    mimeType: val.mimeType ?? null,
+    sizeBytes: val.sizeBytes ?? null,
+  }));
+export type CustomSfxOverride = z.infer<typeof CustomSfxOverrideSchema>;
+
+export const ParticipantDraftItemSchema = z.object({
+  participantId: z.string().trim().optional(),
+  fullName: z.string().trim().min(1).max(120),
+  departmentUnit: z.string().trim().max(120).nullable().optional(),
+  employeeCode: z.string().trim().max(80).nullable().optional(),
+  contactInfo: z.string().trim().max(160).nullable().optional(),
+  email: z.string().trim().max(160).nullable().optional(),
+});
+export type ParticipantDraftItem = z.infer<typeof ParticipantDraftItemSchema>;
+
+export const ExamStatusEnum = z.enum(['OPEN', 'CLOSING', 'CLOSED']);
+export type ExamStatus = z.infer<typeof ExamStatusEnum>;
+
 export const GameAudioConfigSchema = z.object({
   enabled: z.boolean().default(true).optional(),
+  bgmEnabled: z.boolean().default(true).optional(),
   presetId: AudioPresetIdEnum.default('ENERGETIC_ARENA').optional(),
+  soundPackId: SoundPackIdEnum.optional(),
   customAudioUrl: z.string().nullable().optional(),
   customAudioName: z.string().nullable().optional(),
   customAudioFileName: z.string().nullable().optional(),
   customAudioMimeType: z.string().nullable().optional(),
   customAudioSizeBytes: z.number().nullable().optional(),
+  customSfxOverrides: z
+    .record(z.string(), CustomSfxOverrideSchema.nullable())
+    .optional(),
   volume: z
     .number()
     .min(0)
@@ -601,6 +662,11 @@ export const GameSettingsSchema = z.object({
   answersPublished: z.boolean().optional(),
   answersPublishedAt: z.string().nullable().optional(),
   showExamLeaderboardToPlayers: z.boolean().optional(),
+  examStatus: ExamStatusEnum.optional(),
+  examOpenAt: z.string().nullable().optional(),
+  examCloseAt: z.string().nullable().optional(),
+  examClosedAt: z.string().nullable().optional(),
+  allowReplay: z.boolean().optional(),
   audioConfig: GameAudioConfigSchema.optional(),
 });
 export type GameSettings = z.infer<typeof GameSettingsSchema>;
@@ -657,7 +723,14 @@ export const GenerateGameRequestSchema = z.object({
   passThresholdPercent: z.number().min(0).max(100).optional(),
   officialAttemptPolicy: OfficialAttemptPolicyEnum.optional(),
   rosterMode: RosterModeEnum.optional(),
+  examStatus: ExamStatusEnum.optional(),
+  examOpenAt: z.string().nullable().optional(),
+  examCloseAt: z.string().nullable().optional(),
+  examClosedAt: z.string().nullable().optional(),
+  allowReplay: z.boolean().optional(),
   audioConfig: GameAudioConfigSchema.optional(),
+  participants: z.array(ParticipantDraftItemSchema).max(2000).optional(),
+  requireRoster: z.boolean().optional(),
 }).refine(
   data => {
     const hasValidSourceId =
@@ -698,11 +771,18 @@ export const UpdateGameQuestionsRequestSchema = z.object({
       answersPublished: z.boolean().optional(),
       answersPublishedAt: z.string().nullable().optional(),
       showExamLeaderboardToPlayers: z.boolean().optional(),
+      examStatus: ExamStatusEnum.optional(),
+      examOpenAt: z.string().nullable().optional(),
+      examCloseAt: z.string().nullable().optional(),
+      examClosedAt: z.string().nullable().optional(),
+      allowReplay: z.boolean().optional(),
       audioConfig: GameAudioConfigSchema.optional(),
     })
     .optional(),
   isPublic: z.boolean().optional(),
   coverImageUrl: z.string().nullable().optional(),
   generateCover: z.boolean().optional(),
+  participants: z.array(ParticipantDraftItemSchema).max(2000).optional(),
+  requireRoster: z.boolean().optional(),
 });
 export type UpdateGameQuestionsRequest = z.infer<typeof UpdateGameQuestionsRequestSchema>;
