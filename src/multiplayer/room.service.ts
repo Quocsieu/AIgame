@@ -4,7 +4,12 @@ import {
   GameSpecificationSchema,
   shufflePuzzleChoicesForClient,
 } from '../contracts/game.contract.js';
-import { calculateScore } from '../game/game.scoring.js';
+import {
+  calculateMaxPossibleScore,
+  calculateScore,
+  evaluatePerformanceResult,
+  PerformanceEvaluation,
+} from '../game/game.scoring.js';
 import { getHandler } from '../game/handlers/index.js';
 import { persistenceRepo } from '../storage/persistence.repository.js';
 import { AppError } from '../utils/errors.js';
@@ -28,6 +33,8 @@ export class MultiplayerRoom {
   public ownerUserId: string | null = null;
   public state: RoomState = 'WAITING';
   public isLocked: boolean = false;
+  public answersPublished: boolean = false;
+  public showExamLeaderboardToPlayers: boolean = false;
   public readonly capacity: number;
   public currentQuestionIndex: number = 0;
   public questionStartedAt: number | null = null;
@@ -39,6 +46,7 @@ export class MultiplayerRoom {
 
   public readonly players: Map<string, PlayerSession> = new Map(); // Keyed by playerToken
   public readonly playerIdToToken: Map<string, string> = new Map(); // playerId -> playerToken
+  public readonly participantIdToToken: Map<string, string> = new Map(); // participantId -> playerToken
   public timerHandle: NodeJS.Timeout | null = null;
 
   constructor(
@@ -56,20 +64,81 @@ export class MultiplayerRoom {
     this.hostToken = hostToken;
     this.ownerUserId = ownerUserId ?? gameSpecification.ownerUserId ?? null;
     this.capacity = capacity;
+    this.answersPublished = Boolean(gameSpecification.settings?.answersPublished);
+    this.showExamLeaderboardToPlayers = Boolean(
+      gameSpecification.settings?.showExamLeaderboardToPlayers
+    );
     this.createdAt = Date.now();
     this.updatedAt = Date.now();
   }
 
+  public getSessionMode(): 'PLAY' | 'EXAM' {
+    return this.gameSpecification.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+  }
+
+  public getRosterMode(): 'FREE_TEXT' | 'PRECONFIGURED' | 'HYBRID' {
+    return this.gameSpecification.settings?.rosterMode || 'FREE_TEXT';
+  }
+
+  public getPassThresholdPercent(): number {
+    return typeof this.gameSpecification.settings?.passThresholdPercent === 'number'
+      ? this.gameSpecification.settings.passThresholdPercent
+      : 50;
+  }
+
+  public getMaxPossibleScore(): number {
+    return calculateMaxPossibleScore(
+      this.gameSpecification.questions.length,
+      this.gameSpecification.settings.scoringMode
+    );
+  }
+
+  public getQuestionTimeLimitSeconds(index: number = this.currentQuestionIndex): number {
+    const q = this.gameSpecification.questions[index];
+    if (
+      typeof q?.timeLimitSeconds === 'number' &&
+      Number.isFinite(q.timeLimitSeconds) &&
+      q.timeLimitSeconds >= 5
+    ) {
+      return Math.round(q.timeLimitSeconds);
+    }
+    return this.gameSpecification.settings.timePerQuestion || 20;
+  }
+
+  public getAutoAdvanceDelayMs(): number {
+    if (typeof this.gameSpecification.settings?.autoAdvanceDelayMs === 'number') {
+      return this.gameSpecification.settings.autoAdvanceDelayMs;
+    }
+    return this.getSessionMode() === 'EXAM' ? 1500 : MULTIPLAYER_CONFIG.AUTO_ADVANCE_DELAY_MS;
+  }
+
+  public evaluatePlayerPerformance(player: PlayerSession): PerformanceEvaluation {
+    return evaluatePerformanceResult({
+      correctAnswers: player.correctCount,
+      totalQuestions: this.gameSpecification.questions.length,
+      totalScore: player.score,
+      maxPossibleScore: this.getMaxPossibleScore(),
+      sessionMode: this.getSessionMode(),
+      passThresholdPercent: this.getPassThresholdPercent(),
+    });
+  }
+
   /**
    * Adds a player to the room or reconnects an existing player.
+   * Enforces roster slot verification and prevents concurrent slot hijacking.
    */
   public addPlayer(
     displayName: string,
-    existingToken?: string
+    existingToken?: string,
+    participantOpts?: {
+      participantId?: string;
+      departmentUnit?: string;
+      lockToken?: string;
+    }
   ): { player: PlayerSession; isReconnect: boolean } {
     const now = Date.now();
 
-    // Check reconnect
+    // Check reconnect by existing playerToken
     if (existingToken && this.players.has(existingToken)) {
       const existing = this.players.get(existingToken)!;
       existing.connected = true;
@@ -78,8 +147,38 @@ export class MultiplayerRoom {
       return { player: existing, isReconnect: true };
     }
 
+    const requestedParticipantId = participantOpts?.participantId?.trim() || undefined;
+    const requestedLockToken = participantOpts?.lockToken?.trim() || existingToken || undefined;
+
+    // Check if this participantId is already in the room
+    if (requestedParticipantId && this.participantIdToToken.has(requestedParticipantId)) {
+      const boundPlayerToken = this.participantIdToToken.get(requestedParticipantId)!;
+      const existingPlayer = this.players.get(boundPlayerToken);
+      if (existingPlayer) {
+        if (
+          requestedLockToken &&
+          existingPlayer.lockToken &&
+          existingPlayer.lockToken === requestedLockToken
+        ) {
+          existingPlayer.connected = true;
+          existingPlayer.lastSeenAt = now;
+          this.updatedAt = now;
+          return { player: existingPlayer, isReconnect: true };
+        }
+        throw new AppError(
+          'PARTICIPANT_SLOT_LOCKED',
+          `Thí sinh "${existingPlayer.displayName}" đã tham gia phòng trên một thiết bị khác.`,
+          409
+        );
+      }
+    }
+
     if (this.state === 'FINISHED' || this.state === 'CLOSED') {
-      throw new AppError('GAME_FINISHED', 'Cannot join a game room that is already finished or closed.', 400);
+      throw new AppError(
+        'GAME_FINISHED',
+        'Cannot join a game room that is already finished or closed.',
+        400
+      );
     }
 
     if (this.isLocked) {
@@ -87,34 +186,102 @@ export class MultiplayerRoom {
     }
 
     if (this.players.size >= this.capacity) {
-      throw new AppError('ROOM_FULL', `Room has reached maximum capacity of ${this.capacity} players.`, 400);
+      throw new AppError(
+        'ROOM_FULL',
+        `Room has reached maximum capacity of ${this.capacity} players.`,
+        400
+      );
     }
 
-    const rawName = displayName.trim().slice(0, 30);
-    if (!rawName) {
+    const rosterMode = this.getRosterMode();
+    if (rosterMode === 'PRECONFIGURED' && !requestedParticipantId) {
+      try {
+        const rosterCheck = persistenceRepo.listParticipants(this.gameId, { limit: 1 });
+        if (rosterCheck.total > 0) {
+          throw new AppError(
+            'PARTICIPANT_REQUIRED',
+            'Phòng này yêu cầu chọn tên từ danh sách người tham gia của Ban Tổ Chức.',
+            400
+          );
+        }
+      } catch (err) {
+        if (err instanceof AppError) throw err;
+      }
+    }
+
+    let resolvedDisplayName = displayName.trim().slice(0, 80);
+    let resolvedDepartment = participantOpts?.departmentUnit?.trim().slice(0, 120) || '';
+    const effectiveLockToken = requestedLockToken || `ws_${crypto.randomUUID()}`;
+
+    if (requestedParticipantId) {
+      const claim = persistenceRepo.claimParticipantSlot({
+        gameId: this.gameId,
+        participantId: requestedParticipantId,
+        lockToken: effectiveLockToken,
+        roomCode: this.roomCode,
+        sessionMode: this.getSessionMode(),
+      });
+      resolvedDisplayName = claim.participant.fullName;
+      resolvedDepartment = claim.participant.departmentUnit;
+    }
+
+    if (!resolvedDisplayName) {
       throw new AppError('INVALID_REQUEST', 'Player display name cannot be empty.', 400);
     }
 
-    // Gracefully disambiguate duplicate display names in the room (e.g. Tuấn Kiệt #2)
-    let cleanName = rawName;
+    // Disambiguate duplicate display names in the room
+    let cleanName = resolvedDisplayName;
     const existingNames = new Set(
-      Array.from(this.players.values()).map((p) => p.displayName.trim().toLowerCase())
+      Array.from(this.players.values()).map(p => p.displayName.trim().toLowerCase())
     );
-    if (existingNames.has(rawName.toLowerCase())) {
-      let counter = 2;
-      while (existingNames.has(`${rawName} #${counter}`.toLowerCase())) {
-        counter++;
+    if (existingNames.has(resolvedDisplayName.toLowerCase())) {
+      const withDept = resolvedDepartment
+        ? `${resolvedDisplayName} (${resolvedDepartment})`
+        : '';
+      if (withDept && !existingNames.has(withDept.toLowerCase())) {
+        cleanName = withDept;
+      } else {
+        let counter = 2;
+        while (existingNames.has(`${resolvedDisplayName} #${counter}`.toLowerCase())) {
+          counter++;
+        }
+        cleanName = `${resolvedDisplayName} #${counter}`;
       }
-      cleanName = `${rawName} #${counter}`;
     }
 
     const playerId = `player_${crypto.randomUUID()}`;
     const playerToken = `token_${crypto.randomUUID()}`;
 
+    let attemptId: string | null = null;
+    if (requestedParticipantId) {
+      try {
+        const attempt = persistenceRepo.recordParticipantAttemptStart({
+          gameId: this.gameId,
+          participantId: requestedParticipantId,
+          roomId: this.roomId,
+          roomCode: this.roomCode,
+          deliveryMode: 'MULTIPLAYER',
+          sessionMode: this.getSessionMode(),
+          displayName: cleanName,
+          departmentUnit: resolvedDepartment,
+          lockToken: effectiveLockToken,
+          totalQuestions: this.gameSpecification.questions.length,
+          maxPossibleScore: this.getMaxPossibleScore(),
+        });
+        attemptId = attempt.attemptId;
+      } catch {
+        // Ignore if SQLite unavailable in unit tests
+      }
+    }
+
     const player: PlayerSession = {
       playerId,
       playerToken,
       displayName: cleanName,
+      participantId: requestedParticipantId ?? null,
+      departmentUnit: resolvedDepartment,
+      lockToken: effectiveLockToken,
+      attemptId,
       connected: true,
       score: 0,
       correctCount: 0,
@@ -130,6 +297,9 @@ export class MultiplayerRoom {
 
     this.players.set(playerToken, player);
     this.playerIdToToken.set(playerId, playerToken);
+    if (requestedParticipantId) {
+      this.participantIdToToken.set(requestedParticipantId, playerToken);
+    }
     this.updatedAt = now;
 
     return { player, isReconnect: false };
@@ -153,7 +323,11 @@ export class MultiplayerRoom {
   public reconnectPlayer(playerToken: string): PlayerSession {
     const player = this.players.get(playerToken);
     if (!player) {
-      throw new AppError('INVALID_PLAYER_TOKEN', 'Player token is invalid or player does not exist in room.', 404);
+      throw new AppError(
+        'INVALID_PLAYER_TOKEN',
+        'Player token is invalid or player does not exist in room.',
+        404
+      );
     }
 
     if (this.state === 'CLOSED') {
@@ -180,6 +354,50 @@ export class MultiplayerRoom {
   }
 
   /**
+   * Toggles whether exam leaderboard is visible to players (Host only).
+   */
+  public setExamLeaderboardVisibility(hostToken: string, visible: boolean): boolean {
+    if (hostToken !== this.hostToken) {
+      throw new AppError('INVALID_HOST_TOKEN', 'Action denied: invalid host token.', 403);
+    }
+    this.showExamLeaderboardToPlayers = Boolean(visible);
+    this.updatedAt = Date.now();
+    return this.showExamLeaderboardToPlayers;
+  }
+
+  /**
+   * Publishes exam answers after the room has finished (Host only).
+   */
+  public publishAnswers(hostToken: string): Array<{
+    id: string;
+    questionIndex: number;
+    question: string;
+    correctAnswer: string;
+    explanation?: string;
+  }> {
+    if (hostToken !== this.hostToken) {
+      throw new AppError('INVALID_HOST_TOKEN', 'Action denied: invalid host token.', 403);
+    }
+    if (this.state !== 'FINISHED') {
+      throw new AppError(
+        'EXAM_NOT_FINISHED',
+        'Chỉ được phép công bố đáp án sau khi toàn bộ phiên thi trong phòng đã kết thúc.',
+        400
+      );
+    }
+    this.answersPublished = true;
+    this.updatedAt = Date.now();
+
+    return this.gameSpecification.questions.map((q, idx) => ({
+      id: q.id,
+      questionIndex: idx,
+      question: q.question,
+      correctAnswer: q.correctAnswer,
+      explanation: q.explanation,
+    }));
+  }
+
+  /**
    * Starts the multiplayer game (Host only).
    */
   public start(hostToken: string): SanitizedQuestion {
@@ -188,11 +406,19 @@ export class MultiplayerRoom {
     }
 
     if (this.state !== 'WAITING') {
-      throw new AppError('INVALID_ROOM_STATE', `Game can only be started from WAITING state. Current state: ${this.state}.`, 400);
+      throw new AppError(
+        'INVALID_ROOM_STATE',
+        `Game can only be started from WAITING state. Current state: ${this.state}.`,
+        400
+      );
     }
 
     if (this.players.size === 0) {
-      throw new AppError('INVALID_ROOM_STATE', 'Cannot start game without any players in the room.', 400);
+      throw new AppError(
+        'INVALID_ROOM_STATE',
+        'Cannot start game without any players in the room.',
+        400
+      );
     }
 
     this.startedAtIso = new Date().toISOString();
@@ -213,7 +439,7 @@ export class MultiplayerRoom {
     this.currentQuestionIndex = index;
     this.questionStartedAt = Date.now();
 
-    const timeLimitSec = this.gameSpecification.settings.timePerQuestion;
+    const timeLimitSec = this.getQuestionTimeLimitSeconds(index);
     this.questionDeadlineAt = this.questionStartedAt + timeLimitSec * 1000;
     this.updatedAt = Date.now();
 
@@ -229,28 +455,49 @@ export class MultiplayerRoom {
     questionId: string,
     rawAnswer: string,
     now: number = Date.now()
-  ): { result: PlayerQuestionResult; allAnswered: boolean; answeredCount: number; totalPlayers: number } {
+  ): {
+    result: PlayerQuestionResult;
+    allAnswered: boolean;
+    answeredCount: number;
+    totalPlayers: number;
+  } {
     const player = this.players.get(playerToken);
     if (!player) {
       throw new AppError('SESSION_NOT_FOUND', 'Player session not found in this room.', 404);
     }
 
     if (this.state !== 'QUESTION_ACTIVE') {
-      throw new AppError('INVALID_ROOM_STATE', `Question is not currently active for answering. Current state: ${this.state}.`, 400);
+      throw new AppError(
+        'INVALID_ROOM_STATE',
+        `Question is not currently active for answering. Current state: ${this.state}.`,
+        400
+      );
     }
 
     const activeQuestion = this.gameSpecification.questions[this.currentQuestionIndex];
     if (!activeQuestion || activeQuestion.id !== questionId) {
-      throw new AppError('QUESTION_NOT_FOUND', `Question "${questionId}" does not match the active question.`, 404);
+      throw new AppError(
+        'QUESTION_NOT_FOUND',
+        `Question "${questionId}" does not match the active question.`,
+        404
+      );
     }
 
     if (player.answeredQuestionIds.has(questionId)) {
-      throw new AppError('QUESTION_ALREADY_ANSWERED', 'You have already submitted an answer for this question.', 400);
+      throw new AppError(
+        'QUESTION_ALREADY_ANSWERED',
+        'You have already submitted an answer for this question.',
+        400
+      );
     }
 
     // Server-authoritative timer deadline check
     if (this.questionDeadlineAt !== null && now > this.questionDeadlineAt) {
-      throw new AppError('ANSWER_TIMEOUT', 'Answer submitted after question time limit expired.', 400);
+      throw new AppError(
+        'ANSWER_TIMEOUT',
+        'Answer submitted after question time limit expired.',
+        400
+      );
     }
 
     // Reuse Day 3 handler for answer validation
@@ -258,12 +505,16 @@ export class MultiplayerRoom {
     const validation = handler.validateAnswer(activeQuestion, rawAnswer);
 
     if (!validation.isValid) {
-      throw new AppError('INVALID_ANSWER', validation.invalidReason || 'Invalid answer submitted.', 400);
+      throw new AppError(
+        'INVALID_ANSWER',
+        validation.invalidReason || 'Invalid answer submitted.',
+        400
+      );
     }
 
     // Reuse Day 3 scoring calculation
     const responseTimeMs = Math.max(0, now - (this.questionStartedAt || now));
-    const timeLimitMs = this.gameSpecification.settings.timePerQuestion * 1000;
+    const timeLimitMs = this.getQuestionTimeLimitSeconds(this.currentQuestionIndex) * 1000;
 
     const scoreResult = calculateScore({
       isCorrect: validation.isCorrect,
@@ -302,9 +553,14 @@ export class MultiplayerRoom {
 
     // Check if all connected players have answered
     const connectedPlayers = Array.from(this.players.values()).filter(p => p.connected);
-    const totalAnsweredCount = Array.from(this.players.values()).filter(p => p.answeredQuestionIds.has(questionId)).length;
-    const connectedAnsweredCount = connectedPlayers.filter(p => p.answeredQuestionIds.has(questionId)).length;
-    const allAnswered = connectedPlayers.length > 0 && connectedAnsweredCount >= connectedPlayers.length;
+    const totalAnsweredCount = Array.from(this.players.values()).filter(p =>
+      p.answeredQuestionIds.has(questionId)
+    ).length;
+    const connectedAnsweredCount = connectedPlayers.filter(p =>
+      p.answeredQuestionIds.has(questionId)
+    ).length;
+    const allAnswered =
+      connectedPlayers.length > 0 && connectedAnsweredCount >= connectedPlayers.length;
 
     return {
       result,
@@ -316,6 +572,7 @@ export class MultiplayerRoom {
 
   /**
    * Reveals the answer and leaderboard for the current question.
+   * Also records timeout (0 pts) idempotently for any player who did not answer before reveal.
    */
   public revealQuestion(): {
     questionId: string;
@@ -330,17 +587,35 @@ export class MultiplayerRoom {
     }
 
     this.state = 'QUESTION_REVEAL';
-    this.updatedAt = Date.now();
+    const now = Date.now();
+    this.updatedAt = now;
 
     const activeQuestion = this.gameSpecification.questions[this.currentQuestionIndex];
+    const timeLimitMs = this.getQuestionTimeLimitSeconds(this.currentQuestionIndex) * 1000;
 
-    // Compute answer stats across all players who answered
+    // Compute answer stats across all players and record timeout for unanswered players once
     const answerStats: Record<string, number> = {};
     for (const player of this.players.values()) {
       const qResult = player.questionResults.get(activeQuestion.id);
       if (qResult) {
-        const key = qResult.answer.trim();
-        answerStats[key] = (answerStats[key] || 0) + 1;
+        if (!qResult.timedOut && qResult.answer.trim()) {
+          const key = qResult.answer.trim();
+          answerStats[key] = (answerStats[key] || 0) + 1;
+        }
+      } else {
+        player.wrongCount++;
+        player.currentStreak = 0;
+        player.totalResponseTimeMs += timeLimitMs;
+        player.answeredQuestionIds.add(activeQuestion.id);
+        player.questionResults.set(activeQuestion.id, {
+          questionId: activeQuestion.id,
+          answer: '',
+          isCorrect: false,
+          pointsEarned: 0,
+          responseTimeMs: timeLimitMs,
+          answeredAt: now,
+          timedOut: true,
+        });
       }
     }
 
@@ -367,7 +642,11 @@ export class MultiplayerRoom {
     }
 
     if (this.state !== 'QUESTION_REVEAL') {
-      throw new AppError('INVALID_ROOM_STATE', 'Cannot advance to next question until the current question has been revealed.', 400);
+      throw new AppError(
+        'INVALID_ROOM_STATE',
+        'Cannot advance to next question until the current question has been revealed.',
+        400
+      );
     }
 
     const nextIndex = this.currentQuestionIndex + 1;
@@ -407,21 +686,54 @@ export class MultiplayerRoom {
 
   public persistHistory(leaderboardOverride?: LeaderboardEntry[]): void {
     const leaderboard = leaderboardOverride || this.getLeaderboard();
-    persistenceRepo.saveRoomHistory({
-      roomId: this.roomId,
-      roomCode: this.roomCode,
-      gameId: this.gameId,
-      ownerUserId: this.ownerUserId,
-      gameTitle: this.gameSpecification.title,
-      gameType: this.gameSpecification.gameType,
-      scoringMode: this.gameSpecification.settings.scoringMode,
-      state: this.state,
-      playerCount: this.players.size,
-      totalQuestions: this.gameSpecification.questions.length,
-      leaderboard,
-      startedAt: this.startedAtIso,
-      finishedAt: this.finishedAtIso,
-    });
+    const maxPossibleScore = this.getMaxPossibleScore();
+    const totalQuestions = this.gameSpecification.questions.length;
+    const sessionMode = this.getSessionMode();
+    const passThresholdPercent = this.getPassThresholdPercent();
+
+    try {
+      persistenceRepo.saveRoomHistory({
+        roomId: this.roomId,
+        roomCode: this.roomCode,
+        gameId: this.gameId,
+        ownerUserId: this.ownerUserId,
+        gameTitle: this.gameSpecification.title,
+        gameType: this.gameSpecification.gameType,
+        scoringMode: this.gameSpecification.settings.scoringMode,
+        state: this.state,
+        playerCount: this.players.size,
+        totalQuestions,
+        leaderboard,
+        startedAt: this.startedAtIso,
+        finishedAt: this.finishedAtIso,
+      });
+
+      const attemptState = this.state === 'FINISHED' ? 'FINISHED' : 'ABANDONED';
+      for (const player of this.players.values()) {
+        const answersList = Array.from(player.questionResults.values());
+        persistenceRepo.recordParticipantAttemptCompletion({
+          attemptId: player.attemptId ?? undefined,
+          roomId: this.roomId,
+          participantId: player.participantId ?? null,
+          gameId: this.gameId,
+          displayName: player.displayName,
+          departmentUnit: player.departmentUnit || '',
+          deliveryMode: 'MULTIPLAYER',
+          sessionMode,
+          state: attemptState,
+          score: player.score,
+          maxPossibleScore,
+          correctAnswers: player.correctCount,
+          totalQuestions,
+          durationMs: player.totalResponseTimeMs,
+          passThresholdPercent,
+          answers: answersList,
+          finishedAt: this.finishedAtIso,
+        });
+      }
+    } catch {
+      // Graceful fallback in isolated memory tests
+    }
   }
 
   /**
@@ -445,24 +757,39 @@ export class MultiplayerRoom {
    */
   public getLeaderboard(): LeaderboardEntry[] {
     const playerList = Array.from(this.players.values());
+    const totalQuestions = this.gameSpecification.questions.length;
+    const maxPossibleScore = this.getMaxPossibleScore();
+    const isExam = this.getSessionMode() === 'EXAM';
+    const threshold = this.getPassThresholdPercent();
 
     playerList.sort((a, b) => {
       if (b.score !== a.score) return b.score - a.score;
       if (b.correctCount !== a.correctCount) return b.correctCount - a.correctCount;
-      if (a.totalResponseTimeMs !== b.totalResponseTimeMs) return a.totalResponseTimeMs - b.totalResponseTimeMs;
+      if (a.totalResponseTimeMs !== b.totalResponseTimeMs)
+        return a.totalResponseTimeMs - b.totalResponseTimeMs;
       return a.playerId.localeCompare(b.playerId);
     });
 
-    return playerList.map((player, index) => ({
-      rank: index + 1,
-      playerId: player.playerId,
-      displayName: player.displayName,
-      score: player.score,
-      correctCount: player.correctCount,
-      streak: player.maxStreak,
-      totalResponseTimeMs: player.totalResponseTimeMs,
-      connected: player.connected,
-    }));
+    return playerList.map((player, index) => {
+      const accuracyPercent =
+        totalQuestions > 0 ? Math.round((player.correctCount / totalQuestions) * 100) : 0;
+      return {
+        rank: index + 1,
+        playerId: player.playerId,
+        displayName: player.displayName,
+        participantId: player.participantId ?? null,
+        departmentUnit: player.departmentUnit || '',
+        score: player.score,
+        maxPossibleScore,
+        correctCount: player.correctCount,
+        totalQuestions,
+        accuracyPercent,
+        isPassed: isExam ? accuracyPercent >= threshold : null,
+        streak: player.maxStreak,
+        totalResponseTimeMs: player.totalResponseTimeMs,
+        connected: player.connected,
+      };
+    });
   }
 
   /**
@@ -502,7 +829,7 @@ export class MultiplayerRoom {
         : {}),
       questionIndex: this.currentQuestionIndex,
       totalQuestions: this.gameSpecification.questions.length,
-      timePerQuestion: this.gameSpecification.settings.timePerQuestion,
+      timePerQuestion: this.getQuestionTimeLimitSeconds(this.currentQuestionIndex),
       deadlineAt: this.questionDeadlineAt || Date.now(),
     };
   }
@@ -511,14 +838,25 @@ export class MultiplayerRoom {
    * Returns safe public lobby status.
    */
   public getLobbyInfo(): RoomLobbyInfo {
+    let hasRoster = false;
+    try {
+      hasRoster = persistenceRepo.listParticipants(this.gameId, { limit: 1 }).total > 0;
+    } catch {
+      hasRoster = false;
+    }
+
     return {
       roomCode: this.roomCode,
+      gameId: this.gameId,
       state: this.state,
       playerCount: this.players.size,
       capacity: this.capacity,
       title: this.gameSpecification.title,
       gameType: this.gameSpecification.gameType,
       totalQuestions: this.gameSpecification.questions.length,
+      sessionMode: this.getSessionMode(),
+      rosterMode: this.getRosterMode(),
+      hasRoster,
     };
   }
 }
@@ -537,7 +875,8 @@ class RoomService {
     const roomId = `room_${crypto.randomUUID()}`;
     const roomCode = roomStore.generateUniqueRoomCode();
     const hostToken = `host_${crypto.randomUUID()}`;
-    const resolvedOwner = ownerUserId !== undefined ? ownerUserId : gameSpecification.ownerUserId ?? null;
+    const resolvedOwner =
+      ownerUserId !== undefined ? ownerUserId : gameSpecification.ownerUserId ?? null;
 
     const room = new MultiplayerRoom(
       roomId,
@@ -569,4 +908,3 @@ class RoomService {
 }
 
 export const roomService = new RoomService();
-

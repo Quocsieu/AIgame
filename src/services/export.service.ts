@@ -1,32 +1,52 @@
+import * as XLSX from 'xlsx';
 import { LIMITS } from '../config/limits.js';
 import { GameSpecification } from '../contracts/game.contract.js';
-import { PersistedPracticeSessionRecord } from '../storage/persistence.repository.js';
+import { evaluatePerformanceResult } from '../game/game.scoring.js';
+import {
+  GameScoreboardSummary,
+  PersistedPracticeSessionRecord,
+} from '../storage/persistence.repository.js';
 import { AppError } from '../utils/errors.js';
 
 export type ExportFormat = 'csv' | 'json';
+export type ScoreboardExportFormat = 'csv' | 'xlsx' | 'json';
 
 const DANGEROUS_FORMULA_PREFIXES = new Set(['=', '+', '-', '@', '\t', '\r']);
+
+/**
+ * Neutralizes spreadsheet formula injection for string values in both CSV and XLSX cells.
+ * Any string cell starting with =, +, -, @, \t, or \r (even after leading spaces) is prefixed with a single quote (').
+ */
+export function sanitizeSpreadsheetText(rawValue: unknown): string | number | boolean {
+  if (rawValue === null || rawValue === undefined) {
+    return '';
+  }
+
+  if (typeof rawValue === 'number' || typeof rawValue === 'boolean') {
+    return rawValue;
+  }
+
+  const str = String(rawValue);
+  const trimmedLeading = str.replace(/^[ \u00A0]+/, '');
+
+  if (trimmedLeading.length > 0 && DANGEROUS_FORMULA_PREFIXES.has(trimmedLeading[0])) {
+    return `'${str}`;
+  }
+
+  return str;
+}
 
 /**
  * Neutralizes spreadsheet formula injection (CSV Injection) and escapes RFC-4180 CSV cells.
  * Any string cell starting with =, +, -, @, \t, or \r (even after leading spaces) is prefixed with a single quote (').
  */
 export function escapeSafeCsvCell(rawValue: unknown): string {
-  if (rawValue === null || rawValue === undefined) {
-    return '';
+  const safeVal = sanitizeSpreadsheetText(rawValue);
+  if (typeof safeVal === 'number' || typeof safeVal === 'boolean') {
+    return String(safeVal);
   }
 
-  if (typeof rawValue === 'number' || typeof rawValue === 'boolean') {
-    return String(rawValue);
-  }
-
-  let str = String(rawValue);
-  const trimmedLeading = str.replace(/^[ \u00A0]+/, '');
-
-  if (trimmedLeading.length > 0 && DANGEROUS_FORMULA_PREFIXES.has(trimmedLeading[0])) {
-    str = `'${str}`;
-  }
-
+  const str = String(safeVal);
   const needsQuotes =
     str.includes(',') ||
     str.includes('"') ||
@@ -100,6 +120,7 @@ export class ExportService {
         crosswordClue: q.crosswordClue || null,
         crosswordAnswer: q.crosswordAnswer || null,
         explanation: q.explanation || '',
+        timeLimitSeconds: q.timeLimitSeconds ?? spec.settings.timePerQuestion,
         sourceReference: {
           sourceType: ref.sourceType,
           sourceName: safeSourceName,
@@ -241,6 +262,7 @@ export class ExportService {
     const headers = [
       'STT',
       'Mã câu hỏi',
+      'Loại câu hỏi',
       'Câu trả lời đã nộp',
       'Kết quả',
       'Điểm đạt được',
@@ -252,6 +274,7 @@ export class ExportService {
     const rows = session.questionResults.map((r, idx) => [
       idx + 1,
       r.questionId,
+      'QUIZ',
       r.answer,
       r.isCorrect ? 'Đúng' : 'Sai',
       r.pointsEarned,
@@ -264,6 +287,197 @@ export class ExportService {
       contentType: 'text/csv; charset=utf-8',
       filename: `${safeSlug}_result.csv`,
       body: buildCsvDocument(headers, rows),
+    };
+  }
+
+  /**
+   * Exports a comprehensive Scoreboard & Attempt History for a game in CSV, XLSX, or JSON format.
+   * Neutralizes Formula Injection in both CSV and XLSX cells.
+   */
+  public exportGameScoreboard(
+    scoreboard: GameScoreboardSummary,
+    format: ScoreboardExportFormat
+  ): { contentType: string; filename: string; body: string | Buffer } {
+    const safeSlug = scoreboard.gameId.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    if (format === 'json') {
+      return {
+        contentType: 'application/json; charset=utf-8',
+        filename: `${safeSlug}_scoreboard.json`,
+        body: JSON.stringify(
+          {
+            ...scoreboard,
+            exportedAt: new Date().toISOString(),
+          },
+          null,
+          2
+        ),
+      };
+    }
+
+    const headers = [
+      'Hạng',
+      'Họ và tên',
+      'Phòng ban / Đơn vị',
+      'Trạng thái',
+      'Lượt chính thức',
+      'Tổng số lượt thi',
+      'Số lần cấp thi lại',
+      'Số câu đúng',
+      'Tổng số câu',
+      'Tỷ lệ đúng (%)',
+      'Điểm đạt được',
+      'Điểm tối đa',
+      'Kết quả Đạt/Chưa đạt',
+      'Xếp loại đánh giá',
+      'Nhận xét',
+      'Thời gian làm bài (giây)',
+      'Thời điểm hoàn thành',
+    ];
+
+    const translateStatus = (status: string): string => {
+      switch (status) {
+        case 'COMPLETED':
+          return 'Đã hoàn thành';
+        case 'IN_PROGRESS':
+          return 'Đang làm bài';
+        case 'PENDING':
+        default:
+          return 'Chưa tham gia';
+      }
+    };
+
+    const sourceEntries =
+      Array.isArray(scoreboard.allEntries) && scoreboard.allEntries.length > 0
+        ? scoreboard.allEntries
+        : scoreboard.entries;
+
+    const summaryRows: unknown[][] = sourceEntries.map((entry, idx) => {
+      const hasFinished = entry.status === 'COMPLETED';
+      const evalRes = hasFinished
+        ? evaluatePerformanceResult({
+            correctAnswers: entry.correctAnswers,
+            totalQuestions: entry.totalQuestions,
+            totalScore: entry.score,
+            maxPossibleScore: entry.maxPossibleScore,
+            sessionMode: scoreboard.sessionMode,
+            passThresholdPercent: scoreboard.passThresholdPercent,
+          })
+        : null;
+
+      return [
+        entry.rank ?? idx + 1,
+        entry.fullName,
+        entry.departmentUnit || '',
+        translateStatus(entry.status),
+        entry.officialAttemptNumber ?? 0,
+        entry.usedAttempts,
+        entry.retakeGrantedCount,
+        entry.correctAnswers,
+        entry.totalQuestions,
+        entry.accuracyPercent,
+        entry.score,
+        entry.maxPossibleScore,
+        hasFinished
+          ? entry.isPassed === null
+            ? 'N/A'
+            : entry.isPassed
+              ? 'Đạt'
+              : 'Chưa đạt'
+          : 'Chưa thi',
+        evalRes ? evalRes.tierLabel : '',
+        evalRes ? evalRes.comment : '',
+        Number((entry.durationMs / 1000).toFixed(1)),
+        entry.finishedAt || '',
+      ];
+    });
+
+    if (format === 'csv') {
+      return {
+        contentType: 'text/csv; charset=utf-8',
+        filename: `${safeSlug}_scoreboard.csv`,
+        body: buildCsvDocument(headers, summaryRows),
+      };
+    }
+
+    // XLSX Export with 2 sheets: "Bang Diem Tong Hop" and "Lich Su Luot Thi"
+    const workbook = XLSX.utils.book_new();
+
+    const sanitizedSummaryAoA: Array<Array<string | number | boolean>> = [
+      headers.map(h => sanitizeSpreadsheetText(h)),
+      ...summaryRows.map(row => row.map(cell => sanitizeSpreadsheetText(cell))),
+    ];
+    const wsSummary = XLSX.utils.aoa_to_sheet(sanitizedSummaryAoA);
+    XLSX.utils.book_append_sheet(workbook, wsSummary, 'Bang Diem Tong Hop');
+
+    const historyHeaders = [
+      'Mã lượt thi',
+      'Họ và tên',
+      'Phòng ban / Đơn vị',
+      'Lần thi thứ',
+      'Là lượt chính thức',
+      'Hình thức',
+      'Trạng thái lượt',
+      'Số câu đúng',
+      'Tổng số câu',
+      'Tỷ lệ đúng (%)',
+      'Điểm đạt được',
+      'Điểm tối đa',
+      'Đạt / Chưa đạt',
+      'Xếp loại đánh giá',
+      'Thời gian làm bài (giây)',
+      'Bắt đầu lúc',
+      'Kết thúc lúc',
+    ];
+
+    const historyRows: Array<Array<string | number | boolean>> = [
+      historyHeaders.map(h => sanitizeSpreadsheetText(h)),
+    ];
+
+    for (const entry of sourceEntries) {
+      for (const att of entry.attemptHistory) {
+        const isOfficial = entry.officialAttemptId === att.attemptId;
+        const attEval = evaluatePerformanceResult({
+          correctAnswers: att.correctAnswers,
+          totalQuestions: att.totalQuestions,
+          totalScore: att.score,
+          maxPossibleScore: att.maxPossibleScore,
+          sessionMode: att.sessionMode,
+          passThresholdPercent: scoreboard.passThresholdPercent,
+        });
+        historyRows.push(
+          [
+            att.attemptId,
+            att.displayName,
+            att.departmentUnit || '',
+            att.attemptNumber,
+            isOfficial ? 'Chính thức' : 'Phụ / Lịch sử',
+            att.deliveryMode === 'MULTIPLAYER' ? 'Phòng trực tiếp' : 'Cá nhân (Solo)',
+            att.state,
+            att.correctAnswers,
+            att.totalQuestions,
+            att.accuracyPercent,
+            att.score,
+            att.maxPossibleScore,
+            att.isPassed === null ? 'N/A' : att.isPassed ? 'Đạt' : 'Chưa đạt',
+            attEval.tierLabel,
+            Number((att.durationMs / 1000).toFixed(1)),
+            att.startedAt,
+            att.finishedAt || '',
+          ].map(cell => sanitizeSpreadsheetText(cell))
+        );
+      }
+    }
+
+    const wsHistory = XLSX.utils.aoa_to_sheet(historyRows);
+    XLSX.utils.book_append_sheet(workbook, wsHistory, 'Lich Su Luot Thi');
+
+    const xlsxBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+
+    return {
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      filename: `${safeSlug}_scoreboard.xlsx`,
+      body: xlsxBuffer,
     };
   }
 }

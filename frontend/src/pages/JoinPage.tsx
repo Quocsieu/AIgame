@@ -9,7 +9,8 @@ import {
   SpinnerIcon,
   UsersIcon,
 } from '../components/Icons.js';
-import { fetchRoomLobby, type RoomLobbyInfo } from '../services/api.js';
+import { fetchRoomLobby, fetchGameParticipantsApi, type RoomLobbyInfo } from '../services/api.js';
+import type { PublicParticipantItem, RosterMode } from '../types/index.js';
 
 interface JoinPageProps {
   initialRoomCode?: string;
@@ -35,6 +36,44 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
 
   const [pasteInput, setPasteInput] = useState('');
   const [showPasteSection, setShowPasteSection] = useState(false);
+
+  // V2 Roster Gate State
+  const [rosterMode, setRosterMode] = useState<RosterMode>('FREE_TEXT');
+  const [rosterParticipants, setRosterParticipants] = useState<PublicParticipantItem[]>([]);
+  const [rosterSearch, setRosterSearch] = useState('');
+  const [selectedParticipant, setSelectedParticipant] = useState<PublicParticipantItem | null>(null);
+  const [departmentInput, setDepartmentInput] = useState(() => {
+    try {
+      return sessionStorage.getItem('active_player_department') || '';
+    } catch {
+      return '';
+    }
+  });
+  const [confirmedIdentity, setConfirmedIdentity] = useState(false);
+
+  // Tải danh sách thí sinh công khai khi phòng có cấu hình Roster
+  useEffect(() => {
+    if (!verifiedLobby?.gameId) {
+      setRosterParticipants([]);
+      setSelectedParticipant(null);
+      setConfirmedIdentity(false);
+      return;
+    }
+    const mode = (verifiedLobby.rosterMode as RosterMode) || 'FREE_TEXT';
+    setRosterMode(mode);
+    if (mode !== 'FREE_TEXT' || verifiedLobby.hasRoster) {
+      fetchGameParticipantsApi(verifiedLobby.gameId, { mode: 'public' })
+        .then((res) => {
+          setRosterParticipants(res.participants || []);
+          if (res.rosterMode) setRosterMode(res.rosterMode);
+        })
+        .catch(() => {
+          setRosterParticipants([]);
+        });
+    } else {
+      setRosterParticipants([]);
+    }
+  }, [verifiedLobby]);
 
   // Verify room code when passed as prop (e.g. from QR / URL)
   useEffect(() => {
@@ -170,16 +209,34 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
     }
   };
 
-  // Handle final join with nickname
+  // Handle final join with nickname or BTC roster identity
   const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanCode = roomCode.trim().toUpperCase();
-    const cleanName = displayName.trim();
+    const isPreconfigured =
+      (rosterMode === 'PRECONFIGURED' || (rosterMode === 'HYBRID' && selectedParticipant)) &&
+      rosterParticipants.length > 0;
 
     if (!cleanCode) {
       toast.error('Chưa có mã phòng chơi. Vui lòng nhập mã PIN trước.', 'Thiếu mã PIN');
       return;
     }
+
+    if (rosterMode === 'PRECONFIGURED' && rosterParticipants.length > 0 && !selectedParticipant) {
+      toast.error('Vui lòng chọn tên của bạn từ danh sách thí sinh BTC.', 'Chưa chọn thí sinh');
+      return;
+    }
+
+    if (isPreconfigured && selectedParticipant && !confirmedIdentity) {
+      toast.warning('Vui lòng tích chọn xác nhận "Đây là tôi" trước khi vào phòng.', 'Xác nhận danh tính');
+      return;
+    }
+
+    const cleanName = selectedParticipant ? selectedParticipant.fullName : displayName.trim();
+    const cleanDept = selectedParticipant
+      ? selectedParticipant.departmentUnit || ''
+      : departmentInput.trim();
+
     if (!cleanName) {
       toast.error('Vui lòng nhập tên hoặc biệt danh của bạn.', 'Thiếu tên người chơi');
       return;
@@ -187,6 +244,17 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
 
     try {
       sessionStorage.setItem('active_player_name', cleanName);
+      sessionStorage.setItem('active_player_department', cleanDept);
+      if (selectedParticipant) {
+        sessionStorage.setItem('active_player_participant_id', selectedParticipant.participantId);
+      } else {
+        sessionStorage.removeItem('active_player_participant_id');
+      }
+      let lockTok = sessionStorage.getItem('active_player_lock_token');
+      if (!lockTok) {
+        lockTok = `lock_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+        sessionStorage.setItem('active_player_lock_token', lockTok);
+      }
     } catch {}
 
     toast.info(`Đang kết nối vào phòng ${cleanCode}...`, 'Tham gia phòng');
@@ -307,44 +375,199 @@ export const JoinPage: React.FC<JoinPageProps> = ({ initialRoomCode = '', onJoin
               </div>
             </div>
 
-            {/* Ô nhập Nickname */}
-            <div style={{ marginBottom: '1.75rem' }}>
-              <label
-                htmlFor="join-player-name"
+            {/* Chọn thí sinh từ danh sách BTC hoặc nhập tên */}
+            {(rosterMode === 'PRECONFIGURED' || rosterMode === 'HYBRID') && rosterParticipants.length > 0 && (
+              <div
+                data-testid="join-roster-gate"
                 style={{
-                  display: 'block',
-                  marginBottom: '0.45rem',
-                  color: 'var(--text-primary)',
-                  fontWeight: 800,
-                  fontSize: '0.9rem',
+                  marginBottom: '1.25rem',
+                  padding: '0.9rem',
+                  borderRadius: '14px',
+                  backgroundColor: 'var(--bg-input)',
+                  border: '1.5px solid var(--border-strong)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.6rem',
                 }}
               >
-                Tên hoặc biệt danh của bạn <span style={{ color: 'var(--accent-rose)' }}>*</span>
-              </label>
-              <input
-                id="join-player-name"
-                type="text"
-                maxLength={30}
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="VD: Tia Chớp, Tuấn Kiệt"
-                required
-                autoFocus
-                autoComplete="nickname"
-                style={{
-                  width: '100%',
-                  padding: '0.9rem 1.1rem',
-                  borderRadius: '14px',
-                  border: '2px solid var(--border-strong)',
-                  backgroundColor: 'var(--bg-input)',
-                  color: 'var(--text-primary)',
-                  fontSize: '1.1rem',
-                  fontWeight: 800,
-                  boxSizing: 'border-box',
-                  outline: 'none',
-                }}
-              />
-            </div>
+                <label style={{ fontSize: '0.84rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                  Chọn tên của bạn trong danh sách thí sinh BTC:
+                </label>
+                <input
+                  type="text"
+                  data-testid="join-roster-search-input"
+                  value={rosterSearch}
+                  onChange={(e) => setRosterSearch(e.target.value)}
+                  placeholder="Tìm theo Họ tên, Đơn vị hoặc Mã NV..."
+                  style={{
+                    width: '100%',
+                    padding: '0.55rem 0.75rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-subtle)',
+                    backgroundColor: 'var(--bg-surface)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.84rem',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <div
+                  style={{
+                    maxHeight: '160px',
+                    overflowY: 'auto',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.35rem',
+                  }}
+                >
+                  {rosterParticipants
+                    .filter((p) => {
+                      const q = rosterSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      return (
+                        p.fullName.toLowerCase().includes(q) ||
+                        (p.departmentUnit || '').toLowerCase().includes(q) ||
+                        (p.employeeCode || '').toLowerCase().includes(q)
+                      );
+                    })
+                    .map((p) => {
+                      const isSel = selectedParticipant?.participantId === p.participantId;
+                      return (
+                        <button
+                          key={p.participantId}
+                          type="button"
+                          data-testid={`join-roster-item-${p.participantId}`}
+                          disabled={!p.canStartAttempt}
+                          onClick={() => {
+                            setSelectedParticipant(p);
+                            setDisplayName(p.fullName);
+                            setDepartmentInput(p.departmentUnit || '');
+                            setConfirmedIdentity(false);
+                          }}
+                          style={{
+                            textAlign: 'left',
+                            padding: '0.5rem 0.65rem',
+                            borderRadius: '8px',
+                            border: isSel ? '2px solid var(--accent-emerald)' : '1px solid var(--border-subtle)',
+                            backgroundColor: isSel ? 'rgba(16, 185, 129, 0.14)' : 'var(--bg-surface)',
+                            color: 'var(--text-primary)',
+                            cursor: p.canStartAttempt ? 'pointer' : 'not-allowed',
+                            opacity: p.canStartAttempt ? 1 : 0.55,
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            gap: '0.4rem',
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: '0.84rem', fontWeight: 800 }}>{p.fullName}</div>
+                            <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                              {p.departmentUnit || 'Thí sinh'} {p.employeeCode ? `• ${p.employeeCode}` : ''}
+                            </div>
+                          </div>
+                          <span style={{ fontSize: '0.72rem', fontWeight: 800, color: p.canStartAttempt ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
+                            {p.canStartAttempt ? 'Sẵn sàng' : 'Đã hết lượt'}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </div>
+
+                {selectedParticipant && (
+                  <label
+                    data-testid="join-confirm-identity-label"
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.5rem 0.65rem',
+                      borderRadius: '8px',
+                      backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                      border: '1px solid rgba(16, 185, 129, 0.35)',
+                      fontSize: '0.8rem',
+                      fontWeight: 800,
+                      color: 'var(--accent-emerald)',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      data-testid="join-confirm-identity-checkbox"
+                      checked={confirmedIdentity}
+                      onChange={(e) => setConfirmedIdentity(e.target.checked)}
+                    />
+                    <span>
+                      Đây là tôi: {selectedParticipant.fullName}
+                      {selectedParticipant.departmentUnit ? ` (${selectedParticipant.departmentUnit})` : ''}
+                    </span>
+                  </label>
+                )}
+              </div>
+            )}
+
+            {/* Ô nhập Nickname (ẩn khi bắt buộc chọn từ danh sách PRECONFIGURED) */}
+            {(rosterMode !== 'PRECONFIGURED' || rosterParticipants.length === 0) && (
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label
+                  htmlFor="join-player-name"
+                  style={{
+                    display: 'block',
+                    marginBottom: '0.45rem',
+                    color: 'var(--text-primary)',
+                    fontWeight: 800,
+                    fontSize: '0.9rem',
+                  }}
+                >
+                  Tên hoặc biệt danh của bạn <span style={{ color: 'var(--accent-rose)' }}>*</span>
+                </label>
+                <input
+                  id="join-player-name"
+                  type="text"
+                  maxLength={50}
+                  value={displayName}
+                  onChange={(e) => {
+                    setDisplayName(e.target.value);
+                    setSelectedParticipant(null);
+                  }}
+                  placeholder="VD: Nguyễn Văn A, Tuấn Kiệt"
+                  required={!selectedParticipant}
+                  autoFocus
+                  autoComplete="nickname"
+                  style={{
+                    width: '100%',
+                    padding: '0.85rem 1rem',
+                    borderRadius: '14px',
+                    border: '2px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    fontSize: '1.05rem',
+                    fontWeight: 800,
+                    boxSizing: 'border-box',
+                    outline: 'none',
+                  }}
+                />
+                <input
+                  type="text"
+                  data-testid="join-department-input"
+                  maxLength={80}
+                  value={departmentInput}
+                  onChange={(e) => setDepartmentInput(e.target.value)}
+                  placeholder="Đơn vị / Phòng ban (tùy chọn)"
+                  style={{
+                    width: '100%',
+                    marginTop: '0.5rem',
+                    padding: '0.65rem 0.9rem',
+                    borderRadius: '12px',
+                    border: '1px solid var(--border-subtle)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.88rem',
+                    fontWeight: 600,
+                    boxSizing: 'border-box',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+            )}
 
             <button
               type="submit"

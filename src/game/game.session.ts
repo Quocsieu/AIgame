@@ -5,7 +5,11 @@ import {
 } from '../contracts/game.contract.js';
 import { persistenceRepo } from '../storage/persistence.repository.js';
 import { AppError } from '../utils/errors.js';
-import { calculateMaxPossibleScore, calculateScore } from './game.scoring.js';
+import {
+  calculateMaxPossibleScore,
+  calculateScore,
+  evaluatePerformanceResult,
+} from './game.scoring.js';
 import { ClockFunction, GameTimer } from './game.timer.js';
 import {
   ClientQuestion,
@@ -21,6 +25,12 @@ export class GameSession {
   public readonly sessionId: string;
   public readonly specification: GameSpecification;
   public ownerUserId: string | null = null;
+  public participantId: string | null = null;
+  public displayName: string | null = null;
+  public departmentUnit: string | null = null;
+  public employeeCode: string | null = null;
+  public lockToken: string | null = null;
+  public attemptId: string | null = null;
   public state: GameSessionState = 'NOT_STARTED';
   public currentQuestionIndex: number = 0;
   public score: number = 0;
@@ -33,6 +43,8 @@ export class GameSession {
   public readonly answeredQuestionIds: Set<string> = new Set();
   public readonly questionResults: QuestionResult[] = [];
   public readonly timer: GameTimer;
+  public readonly examTimer: GameTimer;
+  private readonly checkpointOpenedIndices: Set<number> = new Set();
 
   constructor(
     sessionId: string,
@@ -41,9 +53,51 @@ export class GameSession {
     ownerUserId?: string | null
   ) {
     this.sessionId = sessionId;
-    this.specification = specification;
+    // Deep snapshot specification so active exam/play sessions are never mutated by live edits
+    this.specification = JSON.parse(JSON.stringify(specification)) as GameSpecification;
     this.ownerUserId = ownerUserId !== undefined ? ownerUserId : (specification.ownerUserId ?? null);
     this.timer = new GameTimer(clock);
+    this.examTimer = new GameTimer(clock);
+  }
+
+  public getSessionMode(): 'PLAY' | 'EXAM' {
+    return this.specification.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+  }
+
+  public getQuestionTimeLimitSeconds(questionIndex: number = this.currentQuestionIndex): number {
+    if (this.specification.settings?.timerMode === 'UNLIMITED') {
+      return 3600;
+    }
+    const q = this.specification.questions[questionIndex];
+    if (typeof q?.timeLimitSeconds === 'number' && Number.isFinite(q.timeLimitSeconds) && q.timeLimitSeconds >= 5) {
+      return Math.round(q.timeLimitSeconds);
+    }
+    return this.specification.settings.timePerQuestion || 20;
+  }
+
+  private startQuestionTimerForIndex(questionIndex: number): void {
+    const qLimitSec = this.getQuestionTimeLimitSeconds(questionIndex);
+    if (this.specification.gameType === 'ADVENTURE') {
+      // Wait for checkpoint open before enforcing strict question countdown; keep 600s travel buffer until checkpoint opens
+      this.timer.start(qLimitSec + 600);
+    } else {
+      this.timer.start(qLimitSec);
+    }
+  }
+
+  /**
+   * Starts the strict question countdown when an Adventure checkpoint is opened for the first time.
+   * Subsequent calls for the same questionIndex (e.g. on refresh/reconnect) do NOT reset the deadline.
+   */
+  public activateCheckpoint(questionIndex: number = this.currentQuestionIndex): ClientQuestion {
+    if (this.state !== 'QUESTION_ACTIVE') {
+      return this.getCurrentClientQuestion();
+    }
+    if (questionIndex === this.currentQuestionIndex && !this.checkpointOpenedIndices.has(questionIndex)) {
+      this.checkpointOpenedIndices.add(questionIndex);
+      this.timer.start(this.getQuestionTimeLimitSeconds(questionIndex));
+    }
+    return this.getCurrentClientQuestion();
   }
 
   /**
@@ -65,10 +119,12 @@ export class GameSession {
     this.state = 'QUESTION_ACTIVE';
     this.startedAt = new Date().toISOString();
     this.currentQuestionIndex = 0;
-    this.timer.start(
-      this.specification.settings.timePerQuestion +
-        (this.specification.gameType === 'ADVENTURE' ? 600 : 0)
-    );
+    this.startQuestionTimerForIndex(0);
+
+    const totalExamSec = Number(this.specification.settings?.totalExamDurationSeconds || 0);
+    if (this.specification.settings?.timerMode === 'TOTAL_EXAM' && totalExamSec > 0) {
+      this.examTimer.start(totalExamSec);
+    }
 
     try {
       this.persistSessionState();
@@ -124,12 +180,25 @@ export class GameSession {
           }
         : undefined;
 
-    const deadlineAt = this.timer.getDeadline();
+    const qTimeLimit = this.getQuestionTimeLimitSeconds(this.currentQuestionIndex);
+    let deadlineAt = this.timer.getDeadline();
     const rawRemainingSec = Math.max(0, Math.ceil(this.timer.getRemainingTimeMs() / 1000));
-    const remainingTimeSeconds =
-      this.specification.gameType === 'ADVENTURE'
-        ? Math.min(this.specification.settings.timePerQuestion, rawRemainingSec)
+    let remainingTimeSeconds =
+      this.specification.gameType === 'ADVENTURE' && !this.checkpointOpenedIndices.has(this.currentQuestionIndex)
+        ? Math.min(qTimeLimit, rawRemainingSec)
         : rawRemainingSec;
+
+    const examDeadlineAt = this.examTimer.getDeadline();
+    let examRemainingSeconds: number | undefined;
+    if (examDeadlineAt !== null) {
+      examRemainingSeconds = Math.max(0, Math.ceil(this.examTimer.getRemainingTimeMs() / 1000));
+      if (examRemainingSeconds < remainingTimeSeconds) {
+        remainingTimeSeconds = examRemainingSeconds;
+      }
+      if (deadlineAt === null || examDeadlineAt < deadlineAt) {
+        deadlineAt = examDeadlineAt;
+      }
+    }
 
     const crosswordWordLength =
       question.type === 'CROSSWORD'
@@ -147,10 +216,81 @@ export class GameSession {
       ...(crosswordWordLength && crosswordWordLength > 0 ? { crosswordWordLength } : {}),
       questionIndex: this.currentQuestionIndex,
       totalQuestions: this.specification.questions.length,
-      timePerQuestion: this.specification.settings.timePerQuestion,
+      timePerQuestion: qTimeLimit,
       remainingTimeSeconds,
       ...(deadlineAt !== null ? { deadlineAt } : {}),
+      ...(examRemainingSeconds !== undefined ? { examRemainingSeconds } : {}),
+      ...(examDeadlineAt !== null ? { examDeadlineAt } : {}),
     };
+  }
+
+  /**
+   * Idempotently records a timeout for the current active question (0 points, wrong answer).
+   * Guaranteed to execute at most once per question.
+   */
+  public recordTimeout(questionId?: string): QuestionResult {
+    if (this.state === 'NOT_STARTED') {
+      throw new AppError('GAME_NOT_STARTED', 'Game session has not started yet.', 400);
+    }
+    if (this.state === 'FINISHED') {
+      throw new AppError('GAME_FINISHED', 'Game session is already finished.', 400);
+    }
+    if (this.state === 'ABANDONED') {
+      throw new AppError('INVALID_GAME_STATE', 'Game session has been abandoned.', 400);
+    }
+
+    const currentQuestion = this.specification.questions[this.currentQuestionIndex];
+    if (!currentQuestion) {
+      throw new AppError('QUESTION_NOT_FOUND', 'Active question not found.', 404);
+    }
+
+    if (questionId && currentQuestion.id !== questionId) {
+      const existingResult = this.questionResults.find(r => r.questionId === questionId);
+      if (existingResult) {
+        return existingResult;
+      }
+      throw new AppError(
+        'QUESTION_NOT_FOUND',
+        `Question ID "${questionId}" does not match active question ID "${currentQuestion.id}".`,
+        404
+      );
+    }
+
+    // Idempotent check: if already answered or timed out for this question, return existing result
+    if (this.state === 'QUESTION_ANSWERED' || this.answeredQuestionIds.has(currentQuestion.id)) {
+      const existing = this.questionResults.find(r => r.questionId === currentQuestion.id);
+      if (existing) {
+        this.state = 'QUESTION_ANSWERED';
+        return existing;
+      }
+    }
+
+    const timeLimitMs = this.getQuestionTimeLimitSeconds(this.currentQuestionIndex) * 1000;
+    this.wrongCount++;
+    this.currentStreak = 0;
+    this.answeredQuestionIds.add(currentQuestion.id);
+    this.state = 'QUESTION_ANSWERED';
+
+    const result: QuestionResult = {
+      questionId: currentQuestion.id,
+      answer: '',
+      isCorrect: false,
+      pointsEarned: 0,
+      responseTimeMs: timeLimitMs,
+      answeredAt: new Date().toISOString(),
+      correctAnswer: currentQuestion.correctAnswer,
+      explanation: currentQuestion.explanation,
+      sourceReference: currentQuestion.sourceReference,
+      timedOut: true,
+    };
+
+    this.questionResults.push(result);
+    try {
+      this.persistSessionState();
+    } catch {
+      // Graceful fallback
+    }
+    return result;
   }
 
   /**
@@ -200,8 +340,11 @@ export class GameSession {
       );
     }
 
-    // Check timer expiration
-    if (this.timer.isExpired()) {
+    // Check total exam timer or question timer expiration
+    if (
+      (this.examTimer.getDeadline() !== null && this.examTimer.isExpired()) ||
+      this.timer.isExpired()
+    ) {
       throw new AppError(
         'ANSWER_TIMEOUT',
         'Answer submitted after question time limit expired.',
@@ -210,7 +353,7 @@ export class GameSession {
     }
 
     const rawResponseTimeMs = this.timer.getResponseTimeMs();
-    const timeLimitMs = this.specification.settings.timePerQuestion * 1000;
+    const timeLimitMs = this.getQuestionTimeLimitSeconds(this.currentQuestionIndex) * 1000;
     const responseTimeMs =
       this.specification.gameType === 'ADVENTURE'
         ? Math.min(rawResponseTimeMs, timeLimitMs)
@@ -291,8 +434,12 @@ export class GameSession {
     if (this.state === 'ABANDONED') {
       throw new AppError('INVALID_GAME_STATE', 'Cannot advance an abandoned session.', 400);
     }
+
+    const totalExamExpired =
+      this.examTimer.getDeadline() !== null && this.examTimer.isExpired(-500);
+
     if (this.state === 'QUESTION_ACTIVE') {
-      if (!this.timer.isExpired(-500)) {
+      if (!totalExamExpired && !this.timer.isExpired(-500)) {
         throw new AppError(
           'INVALID_GAME_STATE',
           'Cannot advance while the current question is still active. Please submit an answer first.',
@@ -300,35 +447,48 @@ export class GameSession {
         );
       }
 
-      // Question timer expired without answer: record timeout miss and allow advancing
-      const expiredQ = this.specification.questions[this.currentQuestionIndex];
-      if (expiredQ && !this.answeredQuestionIds.has(expiredQ.id)) {
-        this.wrongCount++;
-        this.currentStreak = 0;
-        this.answeredQuestionIds.add(expiredQ.id);
-        this.questionResults.push({
-          questionId: expiredQ.id,
-          answer: '',
-          isCorrect: false,
-          pointsEarned: 0,
-          responseTimeMs: this.specification.settings.timePerQuestion * 1000,
-          answeredAt: new Date().toISOString(),
-          correctAnswer: expiredQ.correctAnswer,
-          explanation: expiredQ.explanation,
-          sourceReference: expiredQ.sourceReference,
-        });
+      // Question timer expired without answer: record timeout miss idempotently
+      this.recordTimeout();
+    }
+
+    // If overall exam duration expired, auto-complete remaining questions as timedOut and finish
+    if (totalExamExpired) {
+      for (let idx = this.currentQuestionIndex + 1; idx < this.specification.questions.length; idx++) {
+        const q = this.specification.questions[idx];
+        if (q && !this.answeredQuestionIds.has(q.id)) {
+          this.wrongCount++;
+          this.currentStreak = 0;
+          this.answeredQuestionIds.add(q.id);
+          this.questionResults.push({
+            questionId: q.id,
+            answer: '',
+            isCorrect: false,
+            pointsEarned: 0,
+            responseTimeMs: 0,
+            answeredAt: new Date().toISOString(),
+            correctAnswer: q.correctAnswer,
+            explanation: q.explanation,
+            sourceReference: q.sourceReference,
+            timedOut: true,
+          });
+        }
       }
-      this.state = 'QUESTION_ANSWERED';
+      this.state = 'FINISHED';
+      this.finishedAt = new Date().toISOString();
+      const result = this.getResult();
+      this.persistSessionState(result);
+      return {
+        nextQuestionAvailable: false,
+        finished: true,
+        result,
+      };
     }
 
     const nextIndex = this.currentQuestionIndex + 1;
     if (nextIndex < this.specification.questions.length) {
       this.currentQuestionIndex = nextIndex;
       this.state = 'QUESTION_ACTIVE';
-      this.timer.start(
-        this.specification.settings.timePerQuestion +
-          (this.specification.gameType === 'ADVENTURE' ? 600 : 0)
-      );
+      this.startQuestionTimerForIndex(nextIndex);
 
       try {
         this.persistSessionState();
@@ -398,6 +558,37 @@ export class GameSession {
       startedAt: this.startedAt,
       finishedAt: this.finishedAt,
     });
+
+    if (this.attemptId || this.participantId || this.displayName) {
+      const attemptState =
+        this.state === 'FINISHED'
+          ? 'FINISHED'
+          : this.state === 'ABANDONED'
+            ? 'ABANDONED'
+            : 'IN_PROGRESS';
+      const synced = persistenceRepo.recordParticipantAttemptCompletion({
+        attemptId: this.attemptId ?? undefined,
+        sessionId: this.sessionId,
+        participantId: this.participantId,
+        gameId: this.specification.gameId,
+        displayName: this.displayName || 'Người chơi',
+        departmentUnit: this.departmentUnit || '',
+        deliveryMode: 'SOLO',
+        sessionMode: this.getSessionMode(),
+        state: attemptState,
+        score: this.score,
+        maxPossibleScore: result.maxPossibleScore,
+        correctAnswers: this.correctCount,
+        totalQuestions: result.totalQuestions,
+        durationMs: totalDurationMs,
+        passThresholdPercent: this.specification.settings?.passThresholdPercent ?? 50,
+        answers: this.questionResults,
+        finishedAt: this.finishedAt,
+      });
+      if (synced && !this.attemptId) {
+        this.attemptId = synced.attemptId;
+      }
+    }
   }
 
   /**
@@ -423,12 +614,23 @@ export class GameSession {
       totalQuestions,
       this.specification.settings.scoringMode
     );
+    const sessionMode = this.getSessionMode();
+    const evaluation = evaluatePerformanceResult({
+      correctAnswers: this.correctCount,
+      totalQuestions,
+      totalScore: this.score,
+      maxPossibleScore,
+      sessionMode,
+      passThresholdPercent: this.specification.settings?.passThresholdPercent ?? 50,
+    });
 
     return {
       sessionId: this.sessionId,
       gameId: this.specification.gameId,
       title: this.specification.title,
       gameType: this.specification.gameType,
+      sessionMode,
+      answersPublished: Boolean(this.specification.settings?.answersPublished),
       totalQuestions,
       correctCount: this.correctCount,
       wrongCount: this.wrongCount,
@@ -439,6 +641,10 @@ export class GameSession {
       questionResults: [...this.questionResults],
       accuracy,
       streak: this.maxStreak,
+      evaluation,
+      participantId: this.participantId,
+      displayName: this.displayName,
+      departmentUnit: this.departmentUnit,
     };
   }
 
@@ -446,10 +652,17 @@ export class GameSession {
    * Returns a status summary of the session.
    */
   public getSummary(): GameSessionSummary {
+    const examDeadlineAt = this.examTimer.getDeadline();
+    const examRemainingSeconds =
+      examDeadlineAt !== null
+        ? Math.max(0, Math.ceil(this.examTimer.getRemainingTimeMs() / 1000))
+        : undefined;
+
     return {
       sessionId: this.sessionId,
       gameId: this.specification.gameId,
       state: this.state,
+      sessionMode: this.getSessionMode(),
       currentQuestionIndex: this.currentQuestionIndex,
       totalQuestions: this.specification.questions.length,
       score: this.score,
@@ -458,6 +671,11 @@ export class GameSession {
       currentStreak: this.currentStreak,
       startedAt: this.startedAt,
       finishedAt: this.finishedAt,
+      participantId: this.participantId,
+      displayName: this.displayName,
+      departmentUnit: this.departmentUnit,
+      ...(examRemainingSeconds !== undefined ? { examRemainingSeconds } : {}),
+      ...(examDeadlineAt !== null ? { examDeadlineAt } : {}),
     };
   }
 }

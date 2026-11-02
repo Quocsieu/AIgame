@@ -9,6 +9,7 @@ import {
   GameTypeEnum,
   ScoringMode,
 } from '../contracts/game.contract.js';
+import type { PerformanceEvaluation } from './game.scoring.js';
 
 export const GameSessionStateEnum = z.enum([
   'NOT_STARTED',
@@ -43,6 +44,8 @@ export interface ClientQuestion {
   timePerQuestion: number;
   remainingTimeSeconds?: number;
   deadlineAt?: number;
+  examRemainingSeconds?: number;
+  examDeadlineAt?: number;
 }
 
 /**
@@ -58,6 +61,7 @@ export interface QuestionResult {
   correctAnswer: string;
   explanation?: string;
   sourceReference?: GameQuestion['sourceReference'];
+  timedOut?: boolean;
 }
 
 /**
@@ -68,6 +72,8 @@ export interface GameResult {
   gameId: string;
   title: string;
   gameType: GameType;
+  sessionMode?: 'PLAY' | 'EXAM';
+  answersPublished?: boolean;
   totalQuestions: number;
   correctCount: number;
   wrongCount: number;
@@ -78,6 +84,10 @@ export interface GameResult {
   questionResults: QuestionResult[];
   accuracy: number;
   streak: number;
+  evaluation?: PerformanceEvaluation;
+  participantId?: string | null;
+  displayName?: string | null;
+  departmentUnit?: string | null;
 }
 
 /**
@@ -87,6 +97,7 @@ export interface GameSessionSummary {
   sessionId: string;
   gameId: string;
   state: GameSessionState;
+  sessionMode?: 'PLAY' | 'EXAM';
   currentQuestionIndex: number;
   totalQuestions: number;
   score: number;
@@ -95,6 +106,11 @@ export interface GameSessionSummary {
   currentStreak: number;
   startedAt: string | null;
   finishedAt: string | null;
+  participantId?: string | null;
+  displayName?: string | null;
+  departmentUnit?: string | null;
+  examRemainingSeconds?: number;
+  examDeadlineAt?: number | null;
 }
 
 /**
@@ -104,6 +120,11 @@ export const CreateSessionRequestSchema = z.object({
   gameId: z.string().min(1),
   gameSpecification: GameSpecificationSchema.optional(),
   publicPlay: z.boolean().optional(),
+  participantId: z.string().trim().min(1).optional(),
+  participantName: z.string().trim().max(120).optional(),
+  departmentUnit: z.string().trim().max(120).optional(),
+  employeeCode: z.string().trim().max(80).optional(),
+  lockToken: z.string().trim().max(200).optional(),
 });
 export type CreateSessionRequest = z.infer<typeof CreateSessionRequestSchema>;
 
@@ -115,5 +136,6 @@ export const SubmitAnswerRequestSchema = z.object({
   questionId: z.string().min(1),
   answer: z.string(),
   clientTimestamp: z.number().optional(),
+  timedOut: z.boolean().optional(),
 });
 export type SubmitAnswerRequest = z.infer<typeof SubmitAnswerRequestSchema>;

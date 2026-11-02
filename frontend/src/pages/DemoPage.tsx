@@ -52,7 +52,17 @@ import {
   analyzeAdventureContextApi,
   retryAdventureAssetsApi,
   saveEditedQuestions,
+  uploadCustomAudioApi,
+  fetchGameParticipantsApi,
+  upsertGameParticipantsApi,
+  deleteGameParticipantApi,
+  clearGameParticipantsApi,
+  grantParticipantRetakeApi,
+  publishExamAnswersApi,
+  fetchGameScoreboardApi,
+  downloadGameScoreboardExport,
 } from '../services/api.js';
+import { AUDIO_PRESET_CATALOG, soundManager } from '../services/audio.js';
 import {
   buildDefaultQuestionDistributionForTypes,
   calculateMixedTypeCounts,
@@ -68,6 +78,13 @@ import {
   type IndustryId,
   type QuestionType,
   type ScoringMode,
+  type SessionMode,
+  type RosterMode,
+  type OfficialAttemptPolicy,
+  type GameAudioConfig,
+  type AudioPresetId,
+  type ParticipantRosterItem,
+  type GameScoreboardSummary,
 } from '../types/index.js';
 
 interface DemoPageProps {
@@ -411,6 +428,43 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [timePerQuestion, setTimePerQuestion] = useState(
     () => effectiveBootSpec?.settings?.timePerQuestion || 20
   );
+  // V2 Settings State (Phase 1, 2, 4)
+  const [sessionMode, setSessionMode] = useState<SessionMode>(
+    () => effectiveBootSpec?.settings?.sessionMode || 'PLAY'
+  );
+  const [passThresholdPercent, setPassThresholdPercent] = useState<number>(
+    () => effectiveBootSpec?.settings?.passThresholdPercent ?? 50
+  );
+  const [officialAttemptPolicy, setOfficialAttemptPolicy] = useState<OfficialAttemptPolicy>(
+    () =>
+      effectiveBootSpec?.settings?.officialAttemptPolicy ||
+      (effectiveBootSpec?.settings?.sessionMode === 'EXAM' ? 'LATEST_ATTEMPT' : 'HIGHEST_SCORE')
+  );
+  const [rosterMode, setRosterMode] = useState<RosterMode>(
+    () => effectiveBootSpec?.settings?.rosterMode || 'FREE_TEXT'
+  );
+  const [audioConfig, setAudioConfig] = useState<GameAudioConfig>(() => ({
+    enabled: effectiveBootSpec?.settings?.audioConfig?.enabled ?? true,
+    presetId: effectiveBootSpec?.settings?.audioConfig?.presetId || 'ENERGETIC_ARENA',
+    customAudioUrl: effectiveBootSpec?.settings?.audioConfig?.customAudioUrl,
+    customAudioName: effectiveBootSpec?.settings?.audioConfig?.customAudioName,
+    volume: effectiveBootSpec?.settings?.audioConfig?.volume ?? 0.5,
+    countdownSoundEnabled: effectiveBootSpec?.settings?.audioConfig?.countdownSoundEnabled ?? true,
+    countdownTriggerSeconds: effectiveBootSpec?.settings?.audioConfig?.countdownTriggerSeconds ?? 5,
+  }));
+  const [isAudioPreviewPlaying, setIsAudioPreviewPlaying] = useState<boolean>(false);
+  const [isUploadingAudio, setIsUploadingAudio] = useState<boolean>(false);
+
+  // V2 BTC Roster & Scoreboard Manager State
+  const [isBtcModalOpen, setIsBtcModalOpen] = useState<boolean>(false);
+  const [btcActiveTab, setBtcActiveTab] = useState<'ROSTER' | 'SCOREBOARD'>('ROSTER');
+  const [btcParticipants, setBtcParticipants] = useState<ParticipantRosterItem[]>([]);
+  const [btcRosterPasteText, setBtcRosterPasteText] = useState<string>('');
+  const [btcScoreboard, setBtcScoreboard] = useState<GameScoreboardSummary | null>(null);
+  const [isLoadingBtcData, setIsLoadingBtcData] = useState<boolean>(false);
+  const [isSavingRoster, setIsSavingRoster] = useState<boolean>(false);
+  const [isPublishingAnswers, setIsPublishingAnswers] = useState<boolean>(false);
+
   const [topicFocus, setTopicFocus] = useState('');
   const [selectedSections, setSelectedSections] = useState<string[]>([]);
   const [mixedDistribution, setMixedDistribution] = useState<MixedQuestionDistribution>(() =>
@@ -519,6 +573,29 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       setScoringMode(initialSpec.settings.scoringMode);
       setTimePerQuestion(initialSpec.settings.timePerQuestion);
       setQuestionCount(initialSpec.questions.length);
+      if (initialSpec.settings?.sessionMode) {
+        setSessionMode(initialSpec.settings.sessionMode);
+      }
+      if (typeof initialSpec.settings?.passThresholdPercent === 'number') {
+        setPassThresholdPercent(initialSpec.settings.passThresholdPercent);
+      }
+      if (initialSpec.settings?.officialAttemptPolicy) {
+        setOfficialAttemptPolicy(initialSpec.settings.officialAttemptPolicy);
+      }
+      if (initialSpec.settings?.rosterMode) {
+        setRosterMode(initialSpec.settings.rosterMode);
+      }
+      if (initialSpec.settings?.audioConfig) {
+        setAudioConfig({
+          enabled: initialSpec.settings.audioConfig.enabled ?? true,
+          presetId: initialSpec.settings.audioConfig.presetId || 'ENERGETIC_ARENA',
+          customAudioUrl: initialSpec.settings.audioConfig.customAudioUrl,
+          customAudioName: initialSpec.settings.audioConfig.customAudioName,
+          volume: initialSpec.settings.audioConfig.volume ?? 0.5,
+          countdownSoundEnabled: initialSpec.settings.audioConfig.countdownSoundEnabled ?? true,
+          countdownTriggerSeconds: initialSpec.settings.audioConfig.countdownTriggerSeconds ?? 5,
+        });
+      }
       if (initialSpec.settings?.mixedDistribution) {
         setMixedDistribution(initialSpec.settings.mixedDistribution);
       }
@@ -563,6 +640,189 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       });
     }
   }, [initialSpec]);
+
+  // Dừng phát nhạc nghe thử khi thoát khỏi trang Tạo Game
+  useEffect(() => {
+    return () => {
+      soundManager.stopPreview();
+    };
+  }, []);
+
+  const handleToggleAudioPreview = () => {
+    if (isAudioPreviewPlaying) {
+      soundManager.stopPreview();
+      setIsAudioPreviewPlaying(false);
+    } else {
+      soundManager.playPreview(audioConfig);
+      setIsAudioPreviewPlaying(true);
+    }
+  };
+
+  const handleCustomAudioUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    setIsUploadingAudio(true);
+    try {
+      const uploaded = await uploadCustomAudioApi(file);
+      const nextCfg: GameAudioConfig = {
+        ...audioConfig,
+        enabled: true,
+        presetId: 'CUSTOM',
+        customAudioUrl: uploaded.audioUrl,
+        customAudioName: uploaded.fileName,
+      };
+      setAudioConfig(nextCfg);
+      if (generatedSpec) {
+        setGeneratedSpec((prev) =>
+          prev
+            ? {
+                ...prev,
+                settings: {
+                  ...prev.settings,
+                  audioConfig: nextCfg,
+                },
+              }
+            : prev
+        );
+        setSavedForLater(false);
+        setSaveStatus('dirty');
+      }
+      toast.success(`Đã tải lên nhạc nền "${uploaded.fileName}" thành công!`, 'Tải nhạc thành công');
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể tải tệp âm thanh lên.', 'Lỗi tải tệp âm thanh');
+    } finally {
+      setIsUploadingAudio(false);
+    }
+  };
+
+  const loadBtcRosterAndScoreboard = async (targetGameId?: string) => {
+    const gId = targetGameId || generatedSpec?.gameId;
+    if (!gId) return;
+    setIsLoadingBtcData(true);
+    try {
+      const [rosterRes, sbRes] = await Promise.all([
+        fetchGameParticipantsApi(gId, { mode: 'admin' }).catch(() => ({
+          gameId: gId,
+          rosterMode,
+          participants: [],
+        })),
+        fetchGameScoreboardApi(gId).catch(() => null),
+      ]);
+      setBtcParticipants(rosterRes.participants || []);
+      if (rosterRes.rosterMode) {
+        setRosterMode(rosterRes.rosterMode);
+      }
+      if (sbRes) {
+        setBtcScoreboard(sbRes);
+      }
+    } finally {
+      setIsLoadingBtcData(false);
+    }
+  };
+
+  const handleOpenBtcManager = async () => {
+    if (!generatedSpec) return;
+    setIsBtcModalOpen(true);
+    // Đảm bảo game đã được lưu vào DB trước khi tải danh sách thí sinh
+    let activeSpec = generatedSpec;
+    if (saveStatus === 'unsaved' || saveStatus === 'dirty') {
+      const saved = await handleSaveSpecEdits(generatedSpec.isPublic);
+      if (saved) activeSpec = saved;
+    }
+    await loadBtcRosterAndScoreboard(activeSpec.gameId);
+  };
+
+  const handleSaveBtcRoster = async () => {
+    if (!generatedSpec) return;
+    const lines = btcRosterPasteText
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
+    const parsedItems = lines
+      .map((line) => {
+        const parts = line.split(/[|\t,;]/).map((p) => p.trim());
+        return {
+          fullName: parts[0] || '',
+          departmentUnit: parts[1] || '',
+          employeeCode: parts[2] || undefined,
+          email: parts[3] || undefined,
+        };
+      })
+      .filter((item) => item.fullName.length > 0);
+
+    setIsSavingRoster(true);
+    try {
+      if (parsedItems.length > 0) {
+        const res = await upsertGameParticipantsApi(generatedSpec.gameId, {
+          participants: parsedItems,
+          replaceAll: false,
+          rosterMode,
+        });
+        setBtcParticipants(res.participants);
+        setBtcRosterPasteText('');
+        toast.success(`Đã lưu ${res.upsertedCount} thí sinh vào danh sách!`, 'Đã cập nhật danh sách');
+      } else {
+        await handleSaveSpecEdits(generatedSpec.isPublic);
+        toast.success('Đã cập nhật chế độ danh sách thí sinh!', 'Đã lưu cấu hình');
+      }
+      await loadBtcRosterAndScoreboard(generatedSpec.gameId);
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể lưu danh sách thí sinh.', 'Lỗi lưu danh sách');
+    } finally {
+      setIsSavingRoster(false);
+    }
+  };
+
+  const handleImportRosterFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    try {
+      const text = await file.text();
+      setBtcRosterPasteText((prev) => (prev ? `${prev}\n${text}` : text));
+      toast.info(`Đã nạp dữ liệu từ tệp "${file.name}". Nhấn "Lưu danh sách thí sinh" để áp dụng.`);
+    } catch {
+      toast.error('Không thể đọc tệp danh sách thí sinh.');
+    }
+  };
+
+  const handleGrantRetake = async (participantId: string, fullName: string) => {
+    if (!generatedSpec) return;
+    try {
+      await grantParticipantRetakeApi(generatedSpec.gameId, participantId, 1);
+      toast.success(`Đã cấp thêm 1 lượt thi lại cho "${fullName}"!`, 'Cấp quyền thi lại');
+      await loadBtcRosterAndScoreboard(generatedSpec.gameId);
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể cấp quyền thi lại.', 'Lỗi cấp quyền');
+    }
+  };
+
+  const handlePublishExamAnswers = async () => {
+    if (!generatedSpec || isPublishingAnswers) return;
+    setIsPublishingAnswers(true);
+    try {
+      await publishExamAnswersApi(generatedSpec.gameId);
+      setGeneratedSpec((prev) =>
+        prev
+          ? {
+              ...prev,
+              settings: {
+                ...prev.settings,
+                answersPublished: true,
+                answersPublishedAt: new Date().toISOString(),
+              },
+            }
+          : prev
+      );
+      toast.success('Đã công bố đáp án chính thức cho kỳ thi!', 'Công bố đáp án');
+      await loadBtcRosterAndScoreboard(generatedSpec.gameId);
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể công bố đáp án khi kỳ thi đang diễn ra.', 'Chưa thể công bố đáp án');
+    } finally {
+      setIsPublishingAnswers(false);
+    }
+  };
 
   // Đồng bộ game vừa tạo / chỉnh sửa trong phiên hiện tại vào sessionStorage và parent state
   useEffect(() => {
@@ -853,7 +1113,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     const toastId = toast.loading('Đang yêu cầu AI tổng hợp câu hỏi và phương án trả lời...');
 
     try {
-      const spec = await generateGame({
+      const rawSpec = await generateGame({
         sourceId: primaryId,
         sourceIds: sIds,
         sources: activeSources.length > 0 ? activeSources : undefined,
@@ -890,6 +1150,18 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                 } as any)
             : undefined,
       });
+
+      const spec: GameSpecification = {
+        ...rawSpec,
+        settings: {
+          ...rawSpec.settings,
+          sessionMode,
+          passThresholdPercent,
+          officialAttemptPolicy,
+          rosterMode,
+          audioConfig,
+        },
+      };
 
       toast.removeToast(toastId);
       syncedGameIdRef.current = spec.gameId;
@@ -1172,6 +1444,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             questionCount: spec!.questions.length,
             scoringMode,
             timePerQuestion,
+            sessionMode,
+            passThresholdPercent,
+            officialAttemptPolicy,
+            rosterMode,
+            audioConfig,
             ...(spec!.gameType === 'ADVENTURE'
               ? {
                   adventureConfig: syncAdventureStagesWithQuestions(
@@ -1563,6 +1840,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           timePerQuestion,
           ...(syncedAdvCfg ? { adventureConfig: syncedAdvCfg } : {}),
           scoringMode,
+          sessionMode,
+          passThresholdPercent,
+          officialAttemptPolicy,
+          rosterMode,
+          audioConfig,
         },
         isPublic: nextIsPublic,
         ...(publishFlag === true && !specToSave.coverImageUrl ? { generateCover: true } : {}),
@@ -1661,6 +1943,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         questionCount: specForPlaytest.questions.length,
         scoringMode,
         timePerQuestion,
+        sessionMode,
+        passThresholdPercent,
+        officialAttemptPolicy,
+        rosterMode,
+        audioConfig,
         ...(specForPlaytest.gameType === 'ADVENTURE'
           ? {
               adventureConfig: syncAdventureStagesWithQuestions(
@@ -3509,6 +3796,257 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     }}
                   />
                 </div>
+
+                {/* 5. Chế Độ Vận Hành (Chơi vs Thi Nghiêm Túc) */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
+                    5. Chế Độ Vận Hành (Chơi / Thi Nghiêm Túc)
+                  </label>
+                  <select
+                    data-testid="session-mode-select"
+                    value={sessionMode}
+                    onChange={(e) => {
+                      const nextMode = e.target.value as SessionMode;
+                      setSessionMode(nextMode);
+                      const nextPolicy: OfficialAttemptPolicy =
+                        nextMode === 'EXAM' ? 'LATEST_ATTEMPT' : 'HIGHEST_SCORE';
+                      setOfficialAttemptPolicy(nextPolicy);
+                      if (generatedSpec) {
+                        setGeneratedSpec((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                settings: {
+                                  ...prev.settings,
+                                  sessionMode: nextMode,
+                                  officialAttemptPolicy: nextPolicy,
+                                },
+                              }
+                            : prev
+                        );
+                        setSavedForLater(false);
+                        setSaveStatus('dirty');
+                      }
+                    }}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--bg-input)',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: '6px',
+                      padding: '0.45rem 0.65rem',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.82rem',
+                      fontWeight: 600,
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <option value="PLAY">Chơi / Luyện tập (Hiện đáp án ngay, tính điểm cao nhất)</option>
+                    <option value="EXAM">Thi nghiêm túc (Ẩn đáp án cho đến khi kết thúc, tính lượt hợp lệ cuối)</option>
+                  </select>
+
+                  {sessionMode === 'EXAM' && (
+                    <div
+                      style={{
+                        marginTop: '0.45rem',
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 1fr',
+                        gap: '0.45rem',
+                        padding: '0.5rem 0.65rem',
+                        borderRadius: '8px',
+                        backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                        border: '1px solid rgba(245, 158, 11, 0.3)',
+                      }}
+                    >
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.15rem' }}>
+                          Ngưỡng Đạt (%):
+                        </label>
+                        <input
+                          type="number"
+                          data-testid="pass-threshold-input"
+                          min={0}
+                          max={100}
+                          value={passThresholdPercent}
+                          onChange={(e) => {
+                            const nextVal = Math.min(100, Math.max(0, parseInt(e.target.value, 10) || 50));
+                            setPassThresholdPercent(nextVal);
+                            if (generatedSpec) {
+                              setGeneratedSpec((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      settings: { ...prev.settings, passThresholdPercent: nextVal },
+                                    }
+                                  : prev
+                              );
+                              setSavedForLater(false);
+                              setSaveStatus('dirty');
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            backgroundColor: 'var(--bg-input)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            padding: '0.35rem 0.5rem',
+                            color: 'var(--text-primary)',
+                            fontSize: '0.8rem',
+                            fontWeight: 700,
+                            boxSizing: 'border-box',
+                          }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.15rem' }}>
+                          Chính sách điểm:
+                        </label>
+                        <select
+                          data-testid="official-attempt-policy-select"
+                          value={officialAttemptPolicy}
+                          onChange={(e) => {
+                            const nextPol = e.target.value as OfficialAttemptPolicy;
+                            setOfficialAttemptPolicy(nextPol);
+                            if (generatedSpec) {
+                              setGeneratedSpec((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      settings: { ...prev.settings, officialAttemptPolicy: nextPol },
+                                    }
+                                  : prev
+                              );
+                              setSavedForLater(false);
+                              setSaveStatus('dirty');
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            backgroundColor: 'var(--bg-input)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            padding: '0.35rem 0.45rem',
+                            color: 'var(--text-primary)',
+                            fontSize: '0.76rem',
+                            fontWeight: 600,
+                            boxSizing: 'border-box',
+                          }}
+                        >
+                          <option value="LATEST_ATTEMPT">Lượt hợp lệ cuối</option>
+                          <option value="HIGHEST_SCORE">Điểm cao nhất</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* 6. Nhạc Nền & Hiệu Ứng Âm Thanh */}
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '0.2rem' }}>
+                    6. Nhạc Nền & Âm Thanh Gameplay
+                  </label>
+                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <select
+                      data-testid="audio-preset-select"
+                      value={audioConfig.presetId}
+                      onChange={(e) => {
+                        const nextPreset = e.target.value as AudioPresetId;
+                        const nextCfg: GameAudioConfig = {
+                          ...audioConfig,
+                          enabled: nextPreset !== 'NONE',
+                          presetId: nextPreset,
+                        };
+                        setAudioConfig(nextCfg);
+                        if (isAudioPreviewPlaying) {
+                          soundManager.stopPreview();
+                          setIsAudioPreviewPlaying(false);
+                        }
+                        if (generatedSpec) {
+                          setGeneratedSpec((prev) =>
+                            prev
+                              ? {
+                                  ...prev,
+                                  settings: { ...prev.settings, audioConfig: nextCfg },
+                                }
+                              : prev
+                          );
+                          setSavedForLater(false);
+                          setSaveStatus('dirty');
+                        }
+                      }}
+                      style={{
+                        flex: '1 1 180px',
+                        backgroundColor: 'var(--bg-input)',
+                        border: '1px solid var(--border-strong)',
+                        borderRadius: '6px',
+                        padding: '0.42rem 0.6rem',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.8rem',
+                        fontWeight: 600,
+                        boxSizing: 'border-box',
+                      }}
+                    >
+                      {AUDIO_PRESET_CATALOG.map((preset) => (
+                        <option key={preset.presetId} value={preset.presetId}>
+                          {preset.label}
+                        </option>
+                      ))}
+                      {audioConfig.customAudioUrl && (
+                        <option value="CUSTOM">
+                          Nhạc tải lên: {audioConfig.customAudioName || 'Custom Audio'}
+                        </option>
+                      )}
+                    </select>
+
+                    <button
+                      type="button"
+                      data-testid="audio-preview-btn"
+                      onClick={handleToggleAudioPreview}
+                      disabled={audioConfig.presetId === 'NONE'}
+                      style={{
+                        padding: '0.42rem 0.65rem',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: isAudioPreviewPlaying
+                          ? 'rgba(16, 185, 129, 0.16)'
+                          : 'var(--bg-input)',
+                        color: isAudioPreviewPlaying ? 'var(--accent-emerald)' : 'var(--text-primary)',
+                        fontSize: '0.76rem',
+                        fontWeight: 800,
+                        cursor: audioConfig.presetId === 'NONE' ? 'not-allowed' : 'pointer',
+                      }}
+                    >
+                      {isAudioPreviewPlaying ? '⏹ Dừng nghe' : '🔊 Nghe thử'}
+                    </button>
+
+                    <label
+                      style={{
+                        padding: '0.42rem 0.65rem',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-input)',
+                        color: 'var(--accent-sky)',
+                        fontSize: '0.75rem',
+                        fontWeight: 800,
+                        cursor: isUploadingAudio ? 'not-allowed' : 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.25rem',
+                      }}
+                      title="Tải nhạc nền .mp3, .wav, .ogg (tối đa 10MB)"
+                    >
+                      <UploadIcon size={12} />
+                      <span>{isUploadingAudio ? 'Đang tải...' : 'Tải nhạc (.mp3/.wav)'}</span>
+                      <input
+                        type="file"
+                        data-testid="custom-audio-upload-input"
+                        accept=".mp3,.wav,.ogg,audio/mpeg,audio/wav,audio/ogg"
+                        onChange={handleCustomAudioUpload}
+                        disabled={isUploadingAudio}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
+                  </div>
+                </div>
               </div>
 
               {/* Nút hành động chính: Tạo Game Bằng AI */}
@@ -4146,6 +4684,30 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         <span>Xem Trong Kho Game</span>
                       </button>
                     )}
+
+                    <button
+                      type="button"
+                      data-testid="open-btc-manager-btn"
+                      onClick={handleOpenBtcManager}
+                      style={{
+                        backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                        color: 'var(--accent-sky)',
+                        border: '1.5px solid rgba(56, 189, 248, 0.45)',
+                        borderRadius: '8px',
+                        padding: '0.55rem 0.9rem',
+                        fontSize: '0.82rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        minHeight: '38px',
+                      }}
+                      title="Quản lý danh sách thí sinh, cấp lượt thi lại, công bố đáp án và xuất bảng điểm CSV/Excel"
+                    >
+                      <UsersIcon size={14} />
+                      <span>Danh sách & Bảng điểm BTC</span>
+                    </button>
 
                     <button
                       type="button"
@@ -5014,6 +5576,41 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                           />
                                         </div>
 
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                                          <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                                            Thời gian riêng câu này (giây, để trống dùng mặc định {timePerQuestion}s):
+                                          </label>
+                                          <input
+                                            type="number"
+                                            data-testid={`edit-question-time-${idx}`}
+                                            min={5}
+                                            max={300}
+                                            placeholder={`${timePerQuestion}`}
+                                            value={editingQuestionDraft.timeLimitSeconds ?? ''}
+                                            onChange={(e) => {
+                                              const rawVal = e.target.value.trim();
+                                              const numVal = rawVal
+                                                ? Math.min(300, Math.max(5, parseInt(rawVal, 10) || timePerQuestion))
+                                                : undefined;
+                                              handleUpdateQuestionDraft((prev) => ({
+                                                ...prev,
+                                                timeLimitSeconds: numVal,
+                                              }));
+                                            }}
+                                            style={{
+                                              width: '90px',
+                                              backgroundColor: 'var(--bg-input)',
+                                              border: '1px solid var(--border-strong)',
+                                              borderRadius: '6px',
+                                              padding: '0.35rem 0.5rem',
+                                              color: 'var(--text-primary)',
+                                              fontSize: '0.82rem',
+                                              fontWeight: 700,
+                                              boxSizing: 'border-box',
+                                            }}
+                                          />
+                                        </div>
+
                                         <div
                                           style={{
                                             display: 'flex',
@@ -5164,7 +5761,576 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             initialSpec={playtestSpec}
             playtestMode={true}
             onLeave={handleExitPlaytest}
+            onSpecUpdated={(updatedSpec) => {
+              syncedGameIdRef.current = updatedSpec.gameId;
+              setGeneratedSpec(updatedSpec);
+              setPlaytestSpec(updatedSpec);
+              setSavedForLater(true);
+              setSaveStatus('saved');
+              writeCreatorSessionSnapshot({
+                spec: updatedSpec,
+                saveStatus: 'saved',
+                savedForLater: true,
+                customGameTitle: updatedSpec.title || customGameTitle,
+              });
+              onCurrentSpecChange?.(updatedSpec);
+            }}
           />
+        </div>
+      )}
+
+      {/* MODAL QUẢN LÝ DANH SÁCH THÍ SINH & BẢNG ĐIỂM BTC (PHASE 2 & 5) */}
+      {isBtcModalOpen && generatedSpec && (
+        <div
+          data-testid="btc-roster-scoreboard-modal"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1400,
+            backgroundColor: 'rgba(2, 6, 23, 0.85)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+            boxSizing: 'border-box',
+          }}
+        >
+          <div
+            style={{
+              width: '100%',
+              maxWidth: '940px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              backgroundColor: 'var(--bg-card)',
+              border: '1.5px solid var(--border-strong)',
+              borderRadius: '16px',
+              padding: '1.25rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1rem',
+              boxShadow: '0 24px 56px rgba(0, 0, 0, 0.65)',
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.08rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                  Quản Lý Danh Sách Thí Sinh & Bảng Điểm BTC — {generatedSpec.title}
+                </h3>
+                <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '0.2rem' }}>
+                  Mã Game: <strong>{generatedSpec.gameId}</strong> • Chế độ: <strong>{sessionMode === 'EXAM' ? 'Thi nghiêm túc (EXAM)' : 'Chơi / Luyện tập (PLAY)'}</strong>
+                </div>
+              </div>
+              <button
+                type="button"
+                data-testid="close-btc-modal-btn"
+                onClick={() => setIsBtcModalOpen(false)}
+                style={{
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '8px',
+                  padding: '0.4rem 0.75rem',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Đóng
+              </button>
+            </div>
+
+            {/* Tabs */}
+            <div style={{ display: 'flex', gap: '0.5rem', borderBottom: '1px solid var(--border-subtle)', paddingBottom: '0.5rem' }}>
+              <button
+                type="button"
+                data-testid="btc-tab-roster"
+                onClick={() => setBtcActiveTab('ROSTER')}
+                style={{
+                  padding: '0.45rem 0.9rem',
+                  borderRadius: '8px',
+                  border: btcActiveTab === 'ROSTER' ? '1.5px solid var(--primary)' : '1px solid var(--border-subtle)',
+                  backgroundColor: btcActiveTab === 'ROSTER' ? 'var(--primary)' : 'var(--bg-input)',
+                  color: btcActiveTab === 'ROSTER' ? 'var(--primary-ink)' : 'var(--text-primary)',
+                  fontSize: '0.82rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Danh sách Thí sinh ({btcParticipants.length})
+              </button>
+              <button
+                type="button"
+                data-testid="btc-tab-scoreboard"
+                onClick={() => {
+                  setBtcActiveTab('SCOREBOARD');
+                  loadBtcRosterAndScoreboard(generatedSpec.gameId);
+                }}
+                style={{
+                  padding: '0.45rem 0.9rem',
+                  borderRadius: '8px',
+                  border: btcActiveTab === 'SCOREBOARD' ? '1.5px solid var(--primary)' : '1px solid var(--border-subtle)',
+                  backgroundColor: btcActiveTab === 'SCOREBOARD' ? 'var(--primary)' : 'var(--bg-input)',
+                  color: btcActiveTab === 'SCOREBOARD' ? 'var(--primary-ink)' : 'var(--text-primary)',
+                  fontSize: '0.82rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Bảng điểm & Lượt thi ({btcScoreboard?.totals?.totalParticipants ?? btcParticipants.length})
+              </button>
+            </div>
+
+            {btcActiveTab === 'ROSTER' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                <div style={{ display: 'flex', gap: '0.6rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                    Chế độ xác thực người tham gia:
+                  </label>
+                  <select
+                    data-testid="btc-roster-mode-select"
+                    value={rosterMode}
+                    onChange={(e) => {
+                      const nextMode = e.target.value as RosterMode;
+                      setRosterMode(nextMode);
+                      setGeneratedSpec((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              settings: { ...prev.settings, rosterMode: nextMode },
+                            }
+                          : prev
+                      );
+                    }}
+                    style={{
+                      backgroundColor: 'var(--bg-input)',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: '6px',
+                      padding: '0.4rem 0.65rem',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.8rem',
+                      fontWeight: 700,
+                    }}
+                  >
+                    <option value="FREE_TEXT">Tự do nhập tên (FREE_TEXT)</option>
+                    <option value="PRECONFIGURED">Bắt buộc chọn từ danh sách BTC cấu hình sẵn (PRECONFIGURED)</option>
+                    <option value="HYBRID">Kết hợp: Chọn danh sách BTC hoặc tự nhập (HYBRID)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.3rem', flexWrap: 'wrap', gap: '0.4rem' }}>
+                    <label style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                      Thêm nhanh danh sách thí sinh (mỗi dòng: Họ tên | Đơn vị/Phòng ban | Mã NV):
+                    </label>
+                    <label
+                      style={{
+                        padding: '0.3rem 0.65rem',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-input)',
+                        color: 'var(--accent-sky)',
+                        fontSize: '0.75rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Nhập từ tệp (.csv / .txt)
+                      <input
+                        type="file"
+                        accept=".csv,.txt"
+                        onChange={handleImportRosterFile}
+                        style={{ display: 'none' }}
+                      />
+                    </label>
+                  </div>
+                  <textarea
+                    data-testid="btc-roster-paste-input"
+                    rows={4}
+                    placeholder={'Nguyễn Văn A | Phòng Kỹ Thuật | NV001\nTrần Thị B | Phòng Kinh Doanh | NV002'}
+                    value={btcRosterPasteText}
+                    onChange={(e) => setBtcRosterPasteText(e.target.value)}
+                    style={{
+                      width: '100%',
+                      backgroundColor: 'var(--bg-input)',
+                      border: '1px solid var(--border-strong)',
+                      borderRadius: '8px',
+                      padding: '0.55rem 0.7rem',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.82rem',
+                      fontFamily: 'inherit',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    data-testid="btc-roster-clear-btn"
+                    onClick={async () => {
+                      await clearGameParticipantsApi(generatedSpec.gameId);
+                      await loadBtcRosterAndScoreboard(generatedSpec.gameId);
+                      toast.info('Đã xóa toàn bộ danh sách thí sinh.');
+                    }}
+                    disabled={btcParticipants.length === 0}
+                    style={{
+                      padding: '0.45rem 0.8rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-strong)',
+                      backgroundColor: 'var(--bg-input)',
+                      color: btcParticipants.length === 0 ? 'var(--text-muted)' : 'var(--accent-rose)',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      cursor: btcParticipants.length === 0 ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    Xóa toàn bộ danh sách
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="btc-roster-save-btn"
+                    onClick={handleSaveBtcRoster}
+                    disabled={isSavingRoster}
+                    style={{
+                      padding: '0.5rem 1.1rem',
+                      borderRadius: '8px',
+                      border: 'none',
+                      backgroundColor: 'var(--primary)',
+                      color: 'var(--primary-ink)',
+                      fontSize: '0.84rem',
+                      fontWeight: 900,
+                      cursor: isSavingRoster ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {isSavingRoster ? 'Đang lưu...' : 'Lưu danh sách thí sinh'}
+                  </button>
+                </div>
+
+                {/* Bảng danh sách thí sinh hiện tại */}
+                <div
+                  data-testid="btc-roster-table"
+                  style={{
+                    maxHeight: '280px',
+                    overflowY: 'auto',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--bg-surface)',
+                  }}
+                >
+                  {btcParticipants.length === 0 ? (
+                    <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                      Chưa có thí sinh nào trong danh sách. Hãy dán danh sách ở trên và nhấn "Lưu danh sách thí sinh".
+                    </div>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-secondary)' }}>
+                          <th style={{ padding: '0.5rem 0.65rem' }}>#</th>
+                          <th style={{ padding: '0.5rem 0.65rem' }}>Họ và tên</th>
+                          <th style={{ padding: '0.5rem 0.65rem' }}>Đơn vị / Phòng ban</th>
+                          <th style={{ padding: '0.5rem 0.65rem' }}>Mã NV</th>
+                          <th style={{ padding: '0.5rem 0.65rem' }}>Trạng thái</th>
+                          <th style={{ padding: '0.5rem 0.65rem' }}>Lượt dùng / Tối đa</th>
+                          <th style={{ padding: '0.5rem 0.65rem' }}>Thao tác</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {btcParticipants.map((p, idx) => (
+                          <tr key={p.participantId} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                            <td style={{ padding: '0.45rem 0.65rem', fontWeight: 700 }}>{idx + 1}</td>
+                            <td style={{ padding: '0.45rem 0.65rem', fontWeight: 800, color: 'var(--text-primary)' }}>{p.fullName}</td>
+                            <td style={{ padding: '0.45rem 0.65rem', color: 'var(--text-secondary)' }}>{p.departmentUnit || '—'}</td>
+                            <td style={{ padding: '0.45rem 0.65rem', color: 'var(--text-muted)' }}>{p.employeeCode || '—'}</td>
+                            <td style={{ padding: '0.45rem 0.65rem', fontWeight: 700 }}>
+                              {p.status === 'COMPLETED' ? 'Đã hoàn thành' : p.status === 'IN_PROGRESS' ? 'Đang thi' : 'Chưa thi'}
+                            </td>
+                            <td style={{ padding: '0.45rem 0.65rem', fontWeight: 700 }}>
+                              {p.usedAttempts ?? p.attemptsUsed ?? 0} / {p.allowedAttempts ?? 1}
+                            </td>
+                            <td style={{ padding: '0.45rem 0.65rem', display: 'flex', gap: '0.35rem' }}>
+                              <button
+                                type="button"
+                                data-testid={`grant-retake-btn-${p.participantId}`}
+                                onClick={() => handleGrantRetake(p.participantId, p.fullName)}
+                                style={{
+                                  padding: '0.22rem 0.5rem',
+                                  borderRadius: '5px',
+                                  border: '1px solid var(--accent-emerald)',
+                                  backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                                  color: 'var(--accent-emerald)',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 800,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                +1 Thi lại
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  await deleteGameParticipantApi(generatedSpec.gameId, p.participantId);
+                                  await loadBtcRosterAndScoreboard(generatedSpec.gameId);
+                                }}
+                                style={{
+                                  padding: '0.22rem 0.5rem',
+                                  borderRadius: '5px',
+                                  border: '1px solid var(--border-subtle)',
+                                  backgroundColor: 'transparent',
+                                  color: 'var(--accent-rose)',
+                                  fontSize: '0.72rem',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Xóa
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {btcActiveTab === 'SCOREBOARD' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+                {/* Thanh công cụ BTC: Công bố đáp án + Xuất CSV / XLSX */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                    <span style={{ padding: '0.3rem 0.65rem', borderRadius: '999px', backgroundColor: 'var(--bg-input)', fontSize: '0.76rem', fontWeight: 800 }}>
+                      Tổng thí sinh: {btcScoreboard?.totals?.totalParticipants ?? btcScoreboard?.totalParticipants ?? 0}
+                    </span>
+                    <span style={{ padding: '0.3rem 0.65rem', borderRadius: '999px', backgroundColor: 'rgba(16, 185, 129, 0.14)', color: 'var(--accent-emerald)', fontSize: '0.76rem', fontWeight: 800 }}>
+                      Đạt: {btcScoreboard?.totals?.passedCount ?? btcScoreboard?.passedCount ?? 0}
+                    </span>
+                    <span style={{ padding: '0.3rem 0.65rem', borderRadius: '999px', backgroundColor: 'rgba(239, 68, 68, 0.14)', color: 'var(--accent-rose)', fontSize: '0.76rem', fontWeight: 800 }}>
+                      Chưa đạt: {btcScoreboard?.totals?.failedCount ?? btcScoreboard?.failedCount ?? 0}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+                    {sessionMode === 'EXAM' && (
+                      <button
+                        type="button"
+                        data-testid="publish-exam-answers-btn"
+                        onClick={handlePublishExamAnswers}
+                        disabled={isPublishingAnswers || Boolean(btcScoreboard?.answersPublished)}
+                        style={{
+                          padding: '0.42rem 0.8rem',
+                          borderRadius: '8px',
+                          border: '1px solid rgba(245, 158, 11, 0.5)',
+                          backgroundColor: btcScoreboard?.answersPublished
+                            ? 'rgba(16, 185, 129, 0.14)'
+                            : 'rgba(245, 158, 11, 0.16)',
+                          color: btcScoreboard?.answersPublished ? 'var(--accent-emerald)' : '#f59e0b',
+                          fontSize: '0.78rem',
+                          fontWeight: 800,
+                          cursor: isPublishingAnswers || btcScoreboard?.answersPublished ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {btcScoreboard?.answersPublished ? '✓ Đã công bố đáp án' : 'Công bố đáp án chính thức'}
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      data-testid="export-scoreboard-csv-btn"
+                      onClick={() => downloadGameScoreboardExport(generatedSpec.gameId, 'csv')}
+                      style={{
+                        padding: '0.42rem 0.75rem',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-input)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.78rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Xuất CSV
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="export-scoreboard-xlsx-btn"
+                      onClick={() => downloadGameScoreboardExport(generatedSpec.gameId, 'xlsx')}
+                      style={{
+                        padding: '0.42rem 0.75rem',
+                        borderRadius: '8px',
+                        border: '1px solid var(--accent-emerald)',
+                        backgroundColor: 'rgba(16, 185, 129, 0.14)',
+                        color: 'var(--accent-emerald)',
+                        fontSize: '0.78rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Xuất Excel (.xlsx)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Top 3 Podium */}
+                {btcScoreboard && btcScoreboard.top3.length > 0 && (
+                  <div
+                    data-testid="btc-scoreboard-top3"
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                      gap: '0.6rem',
+                      padding: '0.75rem',
+                      borderRadius: '10px',
+                      backgroundColor: 'rgba(245, 158, 11, 0.08)',
+                      border: '1px solid rgba(245, 158, 11, 0.3)',
+                    }}
+                  >
+                    {btcScoreboard.top3.map((top, idx) => (
+                      <div
+                        key={top.participantId}
+                        style={{
+                          padding: '0.6rem 0.75rem',
+                          borderRadius: '8px',
+                          backgroundColor: 'var(--bg-card)',
+                          border: '1px solid var(--border-subtle)',
+                        }}
+                      >
+                        <div style={{ fontSize: '0.74rem', fontWeight: 900, color: '#f59e0b' }}>
+                          Hạng #{idx + 1}
+                        </div>
+                        <div style={{ fontSize: '0.9rem', fontWeight: 900, color: 'var(--text-primary)' }}>
+                          {top.fullName}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                          {top.departmentUnit || 'Thí sinh tự do'}
+                        </div>
+                        <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--accent-emerald)', marginTop: '0.2rem' }}>
+                          {top.score ?? top.officialAttempt?.totalScore ?? 0} điểm • {top.accuracyPercent ?? top.officialAttempt?.accuracyPercent ?? 0}%
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Bảng điểm toàn bộ người tham gia */}
+                <div
+                  data-testid="btc-scoreboard-table"
+                  style={{
+                    maxHeight: '300px',
+                    overflowY: 'auto',
+                    border: '1px solid var(--border-subtle)',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--bg-surface)',
+                  }}
+                >
+                  {!btcScoreboard || (btcScoreboard.entries || btcScoreboard.participants || []).length === 0 ? (
+                    <div style={{ padding: '1rem', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.82rem' }}>
+                      Chưa có lượt thi hoàn tất nào được ghi nhận.
+                    </div>
+                  ) : (
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-secondary)' }}>
+                          <th style={{ padding: '0.45rem 0.6rem' }}>Hạng</th>
+                          <th style={{ padding: '0.45rem 0.6rem' }}>Họ và tên</th>
+                          <th style={{ padding: '0.45rem 0.6rem' }}>Đơn vị</th>
+                          <th style={{ padding: '0.45rem 0.6rem' }}>Điểm chính thức</th>
+                          <th style={{ padding: '0.45rem 0.6rem' }}>Đúng / Tổng</th>
+                          <th style={{ padding: '0.45rem 0.6rem' }}>Xếp loại</th>
+                          <th style={{ padding: '0.45rem 0.6rem' }}>Số lượt</th>
+                          <th style={{ padding: '0.45rem 0.6rem' }}>Thi lại</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(btcScoreboard.entries || btcScoreboard.participants || []).map((row, rIdx) => {
+                          const hasAttempt = row.status === 'COMPLETED' || Boolean(row.officialAttemptId) || Boolean(row.officialAttempt);
+                          const scoreVal = row.officialAttempt?.totalScore ?? row.score ?? 0;
+                          const correctVal = row.officialAttempt?.correctAnswers ?? row.correctAnswers ?? 0;
+                          const totalVal = row.officialAttempt?.totalQuestions ?? row.totalQuestions ?? 5;
+                          const accVal = row.officialAttempt?.accuracyPercent ?? row.accuracyPercent ?? 0;
+                          const passedVal = row.officialAttempt !== undefined ? row.officialAttempt?.isPassed : row.isPassed;
+
+                          return (
+                          <tr key={row.participantId || rIdx} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                            <td style={{ padding: '0.45rem 0.6rem', fontWeight: 800 }}>
+                              {row.rank ? `#${row.rank}` : '—'}
+                            </td>
+                            <td style={{ padding: '0.45rem 0.6rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                              {row.fullName}
+                            </td>
+                            <td style={{ padding: '0.45rem 0.6rem', color: 'var(--text-secondary)' }}>
+                              {row.departmentUnit || '—'}
+                            </td>
+                            <td style={{ padding: '0.45rem 0.6rem', fontWeight: 900, color: 'var(--accent-sky)' }}>
+                              {hasAttempt ? `${scoreVal} đ` : '—'}
+                            </td>
+                            <td style={{ padding: '0.45rem 0.6rem' }}>
+                              {hasAttempt ? `${correctVal}/${totalVal} (${accVal}%)` : '—'}
+                            </td>
+                            <td style={{ padding: '0.45rem 0.6rem', fontWeight: 800 }}>
+                              {hasAttempt ? (
+                                <span>
+                                  {accVal >= 90
+                                    ? 'Xuất sắc'
+                                    : accVal >= 70
+                                      ? 'Làm tốt'
+                                      : accVal >= 50
+                                        ? 'Đã nắm được một phần kiến thức'
+                                        : 'Cần cố gắng thêm'}
+                                  {passedVal !== null && passedVal !== undefined && (
+                                    <span
+                                      style={{
+                                        marginLeft: '0.35rem',
+                                        color: passedVal ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                                      }}
+                                    >
+                                      ({passedVal ? 'ĐẠT' : 'CHƯA ĐẠT'})
+                                    </span>
+                                  )}
+                                </span>
+                              ) : (
+                                'Chưa thi'
+                              )}
+                            </td>
+                            <td style={{ padding: '0.45rem 0.6rem' }}>
+                              {row.usedAttempts ?? row.attemptsUsed ?? 0}/{row.allowedAttempts ?? 1}
+                            </td>
+                            <td style={{ padding: '0.45rem 0.6rem' }}>
+                              {row.participantId ? (
+                                <button
+                                  type="button"
+                                  data-testid={`scoreboard-grant-retake-btn-${row.participantId}`}
+                                  onClick={() => handleGrantRetake(row.participantId!, row.fullName)}
+                                  style={{
+                                    padding: '0.2rem 0.45rem',
+                                    borderRadius: '5px',
+                                    border: '1px solid var(--accent-emerald)',
+                                    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                                    color: 'var(--accent-emerald)',
+                                    fontSize: '0.72rem',
+                                    fontWeight: 800,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  +1 Thi lại
+                                </button>
+                              ) : (
+                                '—'
+                              )}
+                            </td>
+                          </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
       {/* MODAL CHỌN CHẾ ĐỘ CHƠI (CHƠI ĐƠN VS MULTIPLAYER) */}

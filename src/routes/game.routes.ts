@@ -1,5 +1,10 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import { Router, Request, Response, NextFunction } from 'express';
+import multer from 'multer';
 import QRCode from 'qrcode';
+import * as XLSX from 'xlsx';
 import {
   ADVENTURE_THEME_PRESETS,
   analyzeSourceContentForAdventure,
@@ -8,8 +13,10 @@ import {
   sanitizeAdventureConfig,
 } from '../contracts/adventure.contract.js';
 import {
+  GameSpecification,
   GameSpecificationSchema,
   GenerateGameRequestSchema,
+  RosterModeEnum,
   UpdateGameQuestionsRequestSchema,
 } from '../contracts/game.contract.js';
 import { gameStore, sessionStore } from '../game/game.store.js';
@@ -26,7 +33,11 @@ import {
 import { aiImageService } from '../services/ai.image.service.js';
 import { aiQuestionService } from '../services/ai.question.service.js';
 import { authService } from '../services/auth.service.js';
-import { exportService, ExportFormat } from '../services/export.service.js';
+import {
+  exportService,
+  ExportFormat,
+  ScoreboardExportFormat,
+} from '../services/export.service.js';
 import { quotaService } from '../services/quota.service.js';
 import { persistenceRepo } from '../storage/persistence.repository.js';
 import { sourceStore } from '../storage/source.store.js';
@@ -37,6 +48,231 @@ export const gameRouter = Router();
 
 // Mount Day 3 Game Session Router
 gameRouter.use('/sessions', sessionRouter);
+
+const MAX_AUDIO_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: MAX_AUDIO_FILE_BYTES,
+    files: 1,
+  },
+});
+
+const rosterFileUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5 MB
+    files: 1,
+  },
+});
+
+/**
+ * Verifies real audio file signature (magic bytes) to prevent disguised scripts/executables.
+ */
+export function verifyAudioMagicBytes(
+  buffer: Buffer,
+  ext: string
+): { valid: boolean; mimeType: 'audio/mpeg' | 'audio/wav' | 'audio/ogg'; reason?: string } {
+  if (!buffer || buffer.length < 12) {
+    return { valid: false, mimeType: 'audio/mpeg', reason: 'Tệp âm thanh rỗng hoặc quá nhỏ.' };
+  }
+
+  // Reject executable or script headers disguised as audio
+  const headAscii = buffer.subarray(0, Math.min(256, buffer.length)).toString('utf-8').toLowerCase();
+  if (
+    (buffer[0] === 0x4d && buffer[1] === 0x5a) || // MZ PE executable
+    (buffer[0] === 0x7f && buffer[1] === 0x45 && buffer[2] === 0x4c && buffer[3] === 0x46) || // ELF
+    headAscii.includes('<script') ||
+    headAscii.includes('<?php') ||
+    headAscii.startsWith('#!/') ||
+    headAscii.startsWith('<!doctype html') ||
+    headAscii.startsWith('<html')
+  ) {
+    return {
+      valid: false,
+      mimeType: 'audio/mpeg',
+      reason: 'Phát hiện nội dung thực thi hoặc mã kịch bản không hợp lệ trong tệp tải lên.',
+    };
+  }
+
+  const normalizedExt = ext.toLowerCase();
+
+  if (normalizedExt === '.mp3') {
+    const isId3 = buffer[0] === 0x49 && buffer[1] === 0x44 && buffer[2] === 0x33; // "ID3"
+    const isMpegSync = buffer[0] === 0xff && (buffer[1] & 0xe0) === 0xe0;
+    if (!isId3 && !isMpegSync) {
+      return {
+        valid: false,
+        mimeType: 'audio/mpeg',
+        reason: 'Chữ ký byte của tệp không khớp định dạng âm thanh MP3 hợp lệ.',
+      };
+    }
+    return { valid: true, mimeType: 'audio/mpeg' };
+  }
+
+  if (normalizedExt === '.wav') {
+    const isRiff =
+      buffer[0] === 0x52 && buffer[1] === 0x49 && buffer[2] === 0x46 && buffer[3] === 0x46; // "RIFF"
+    const isWave =
+      buffer[8] === 0x57 && buffer[9] === 0x41 && buffer[10] === 0x56 && buffer[11] === 0x45; // "WAVE"
+    if (!isRiff || !isWave) {
+      return {
+        valid: false,
+        mimeType: 'audio/wav',
+        reason: 'Chữ ký byte của tệp không khớp định dạng âm thanh WAV (RIFF/WAVE) hợp lệ.',
+      };
+    }
+    return { valid: true, mimeType: 'audio/wav' };
+  }
+
+  if (normalizedExt === '.ogg') {
+    const isOggS =
+      buffer[0] === 0x4f && buffer[1] === 0x67 && buffer[2] === 0x67 && buffer[3] === 0x53; // "OggS"
+    if (!isOggS) {
+      return {
+        valid: false,
+        mimeType: 'audio/ogg',
+        reason: 'Chữ ký byte của tệp không khớp định dạng âm thanh OGG (OggS) hợp lệ.',
+      };
+    }
+    return { valid: true, mimeType: 'audio/ogg' };
+  }
+
+  return {
+    valid: false,
+    mimeType: 'audio/mpeg',
+    reason: `Định dạng tệp "${ext}" không được hỗ trợ. Chỉ chấp nhận .mp3, .wav, .ogg.`,
+  };
+}
+
+/**
+ * Helper to check if the request caller is the Game Owner, an ADMIN, or holds a valid Host Token for a room of this game.
+ */
+function hasCreatorOrHostManagementAccess(
+  req: Request,
+  gameId: string,
+  ownerUserId: string | null
+): boolean {
+  if (req.user?.role === 'ADMIN') return true;
+  if (req.user?.userId && ownerUserId && req.user.userId === ownerUserId) return true;
+
+  const providedHostToken =
+    (req.headers['x-host-token'] as string | undefined) ||
+    (req.body?.hostToken as string | undefined) ||
+    '';
+  if (providedHostToken) {
+    const allRooms = roomStore.getAll();
+    for (const room of allRooms) {
+      if (room.gameId === gameId && room.hostToken === providedHostToken) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * Parses roster participants from multiline text, CSV, or XLSX buffer.
+ */
+function parseParticipantsFromBufferOrText(options: {
+  rawText?: string;
+  fileBuffer?: Buffer;
+  fileName?: string;
+}): Array<{ fullName: string; departmentUnit: string | null }> {
+  const results: Array<{ fullName: string; departmentUnit: string | null }> = [];
+
+  if (options.fileBuffer && options.fileBuffer.length > 0) {
+    const ext = path.extname(options.fileName || '').toLowerCase();
+    if (ext === '.xlsx' || ext === '.xls' || ext === '.csv') {
+      const workbook = XLSX.read(options.fileBuffer, { type: 'buffer' });
+      const firstSheetName = workbook.SheetNames[0];
+      if (firstSheetName) {
+        const sheet = workbook.Sheets[firstSheetName];
+        const rows = XLSX.utils.sheet_to_json< unknown[] >(sheet, { header: 1, defval: '' });
+        for (let i = 0; i < rows.length; i++) {
+          const row = rows[i];
+          if (!Array.isArray(row) || row.length === 0) continue;
+          const cells = row.map(c => String(c ?? '').trim()).filter(Boolean);
+          if (cells.length === 0) continue;
+
+          // Skip obvious header row on row 0
+          const firstLower = cells[0].toLowerCase();
+          if (
+            i === 0 &&
+            (firstLower === 'stt' ||
+              firstLower === 'họ và tên' ||
+              firstLower === 'họ tên' ||
+              firstLower === 'full name' ||
+              firstLower === 'fullname' ||
+              firstLower === 'tên thí sinh')
+          ) {
+            continue;
+          }
+
+          // If column 0 is numeric STT, take column 1 as fullName and column 2 as departmentUnit
+          if (/^\d+$/.test(cells[0]) && cells.length >= 2) {
+            results.push({
+              fullName: cells[1],
+              departmentUnit: cells[2] || null,
+            });
+          } else {
+            results.push({
+              fullName: cells[0],
+              departmentUnit: cells[1] || null,
+            });
+          }
+        }
+      }
+    } else {
+      const text = options.fileBuffer.toString('utf-8');
+      return parseParticipantsFromBufferOrText({ rawText: text });
+    }
+  }
+
+  if (typeof options.rawText === 'string' && options.rawText.trim().length > 0) {
+    const lines = options.rawText
+      .replace(/^\uFEFF/, '')
+      .split(/\r?\n/)
+      .map(l => l.trim())
+      .filter(Boolean);
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const parts = line
+        .split(/[|\t;,]/)
+        .map(p => p.trim().replace(/^["']|["']$/g, ''))
+        .filter(Boolean);
+      if (parts.length === 0) continue;
+
+      const firstLower = parts[0].toLowerCase();
+      if (
+        i === 0 &&
+        (firstLower === 'stt' ||
+          firstLower === 'họ và tên' ||
+          firstLower === 'họ tên' ||
+          firstLower === 'full name' ||
+          firstLower === 'fullname')
+      ) {
+        continue;
+      }
+
+      if (/^\d+$/.test(parts[0]) && parts.length >= 2) {
+        results.push({
+          fullName: parts[1],
+          departmentUnit: parts[2] || null,
+        });
+      } else {
+        results.push({
+          fullName: parts[0],
+          departmentUnit: parts[1] || null,
+        });
+      }
+    }
+  }
+
+  return results;
+}
 
 export interface GameActiveStatus {
   gameId: string;
@@ -97,6 +333,98 @@ function buildSoloPlayUrl(req: Request, gameId: string): string {
   const protocol = req.protocol || 'http';
   return `${protocol}://${host}/?play=${encodeURIComponent(gameId)}`;
 }
+
+/**
+ * POST /api/games/audio/upload
+ * Uploads a custom background audio file (.mp3, .wav, .ogg, max 10MB) with strict magic-byte validation.
+ */
+gameRouter.post(
+  '/audio/upload',
+  (req: Request, res: Response, next: NextFunction) => {
+    audioUpload.single('file')(req, res, (err: any) => {
+      if (err) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return next(
+            new AppError(
+              'AUDIO_FILE_TOO_LARGE',
+              'Tệp âm thanh vượt quá dung lượng tối đa 10 MB.',
+              413
+            )
+          );
+        }
+        return next(new AppError('AUDIO_UPLOAD_ERROR', err.message || 'Lỗi tải tệp âm thanh.', 400));
+      }
+      next();
+    });
+  },
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      rejectGuestOrPlayerWrite(req, 'tải lên nhạc nền tùy chỉnh');
+
+      let buffer: Buffer | null = null;
+      let originalName = 'custom-audio.mp3';
+
+      if (req.file && req.file.buffer) {
+        buffer = req.file.buffer;
+        originalName = req.file.originalname || originalName;
+      } else if (typeof req.body?.fileBase64 === 'string' && req.body.fileBase64.trim()) {
+        const rawB64 = req.body.fileBase64.replace(/^data:[^;]+;base64,/, '');
+        buffer = Buffer.from(rawB64, 'base64');
+        originalName = typeof req.body.fileName === 'string' ? req.body.fileName : originalName;
+      }
+
+      if (!buffer || buffer.length === 0) {
+        throw new AppError('INVALID_REQUEST', 'Vui lòng chọn một tệp âm thanh (.mp3, .wav, .ogg) để tải lên.', 400);
+      }
+
+      if (buffer.length > MAX_AUDIO_FILE_BYTES) {
+        throw new AppError('AUDIO_FILE_TOO_LARGE', 'Tệp âm thanh vượt quá dung lượng tối đa 10 MB.', 413);
+      }
+
+      const ext = path.extname(originalName).toLowerCase();
+      if (!['.mp3', '.wav', '.ogg'].includes(ext)) {
+        throw new AppError(
+          'UNSUPPORTED_AUDIO_FORMAT',
+          `Định dạng tệp "${ext || 'không xác định'}" không được hỗ trợ. Chỉ chấp nhận .mp3, .wav, .ogg.`,
+          415
+        );
+      }
+
+      const magicCheck = verifyAudioMagicBytes(buffer, ext);
+      if (!magicCheck.valid) {
+        throw new AppError(
+          'INVALID_AUDIO_SIGNATURE',
+          magicCheck.reason || 'Tệp tải lên không phải là tệp âm thanh hợp lệ.',
+          415
+        );
+      }
+
+      const safeUuid = crypto.randomUUID();
+      const storedFileName = `bgm_${safeUuid}${ext}`;
+      const uploadDir = path.resolve(process.cwd(), 'public', 'uploads', 'audio');
+      fs.mkdirSync(uploadDir, { recursive: true });
+
+      const targetPath = path.join(uploadDir, storedFileName);
+      fs.writeFileSync(targetPath, buffer);
+
+      const safeDisplayFileName = path
+        .basename(originalName)
+        .replace(/[^a-zA-Z0-9._\-\u00C0-\u1EF9 ]/g, '_')
+        .slice(0, 120);
+
+      res.status(200).json(
+        createSuccessResponse({
+          audioUrl: `/uploads/audio/${storedFileName}`,
+          fileName: safeDisplayFileName,
+          mimeType: magicCheck.mimeType,
+          sizeBytes: buffer.length,
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 /**
  * GET /api/games
@@ -245,7 +573,25 @@ gameRouter.post(
         userId: req.user?.userId ?? null,
       });
 
-      let gameSpecification = rawGameSpecification;
+      let gameSpecification: GameSpecification = {
+        ...rawGameSpecification,
+        settings: {
+          ...rawGameSpecification.settings,
+          ...(requestData.sessionMode ? { sessionMode: requestData.sessionMode } : {}),
+          ...(requestData.timerMode ? { timerMode: requestData.timerMode } : {}),
+          ...(requestData.totalExamDurationSeconds
+            ? { totalExamDurationSeconds: requestData.totalExamDurationSeconds }
+            : {}),
+          ...(requestData.passThresholdPercent !== undefined
+            ? { passThresholdPercent: requestData.passThresholdPercent }
+            : {}),
+          ...(requestData.officialAttemptPolicy
+            ? { officialAttemptPolicy: requestData.officialAttemptPolicy }
+            : {}),
+          ...(requestData.rosterMode ? { rosterMode: requestData.rosterMode } : {}),
+          ...(requestData.audioConfig ? { audioConfig: requestData.audioConfig } : {}),
+        },
+      };
       let adventureAssetsReady = true;
       if (gameSpecification.gameType === 'ADVENTURE') {
         const assetProvision = await provisionAdventureAssetsForGame(gameSpecification, {
@@ -356,7 +702,8 @@ gameRouter.get(
       const coverMeta = persistenceRepo.getGameCoverMetadata(gameId);
       const coverImageUrl = spec.coverImageUrl ?? coverMeta?.coverImageUrl ?? null;
 
-      if (String(req.query.mode || '').toLowerCase() === 'public' && !isPublic) {
+      const isPublicQuery = String(req.query.mode || '').toLowerCase() === 'public';
+      if (isPublicQuery && !isPublic) {
         throw new AppError(
           'GAME_NOT_PUBLISHED',
           'Game này chưa được xuất bản nên không thể mở ở chế độ chơi công khai.',
@@ -372,9 +719,32 @@ gameRouter.get(
         isPublic,
       });
 
+      const isOwnerOrAdmin = hasCreatorOrHostManagementAccess(req, gameId, ownerUserId);
+      const shouldRedactExamAnswers =
+        spec.settings?.sessionMode === 'EXAM' &&
+        !spec.settings?.answersPublished &&
+        (isPublicQuery || !isOwnerOrAdmin);
+
+      const returnedQuestions = shouldRedactExamAnswers
+        ? spec.questions.map((q) => ({
+            ...q,
+            correctAnswer: '',
+            acceptedAlternatives: [],
+            crosswordAnswer: undefined,
+            explanation: '',
+            sliderConfig: q.sliderConfig
+              ? {
+                  ...q.sliderConfig,
+                  correctValue: q.sliderConfig.min,
+                }
+              : undefined,
+          }))
+        : spec.questions;
+
       res.status(200).json(
         createSuccessResponse({
           ...spec,
+          questions: returnedQuestions,
           ownerUserId,
           isPublic,
           ...(coverImageUrl ? { coverImageUrl } : {}),
@@ -459,6 +829,31 @@ async function handleUpdateGameSpecification(req: Request, res: Response, next: 
         ...existing.settings,
         ...(settings?.timePerQuestion !== undefined ? { timePerQuestion: settings.timePerQuestion } : {}),
         ...(settings?.scoringMode !== undefined ? { scoringMode: settings.scoringMode } : {}),
+        ...(settings?.sessionMode !== undefined ? { sessionMode: settings.sessionMode } : {}),
+        ...(settings?.timerMode !== undefined ? { timerMode: settings.timerMode } : {}),
+        ...(settings?.totalExamDurationSeconds !== undefined
+          ? { totalExamDurationSeconds: settings.totalExamDurationSeconds }
+          : {}),
+        ...(settings?.autoAdvanceDelayMs !== undefined
+          ? { autoAdvanceDelayMs: settings.autoAdvanceDelayMs }
+          : {}),
+        ...(settings?.passThresholdPercent !== undefined
+          ? { passThresholdPercent: settings.passThresholdPercent }
+          : {}),
+        ...(settings?.officialAttemptPolicy !== undefined
+          ? { officialAttemptPolicy: settings.officialAttemptPolicy }
+          : {}),
+        ...(settings?.rosterMode !== undefined ? { rosterMode: settings.rosterMode } : {}),
+        ...(settings?.answersPublished !== undefined
+          ? { answersPublished: settings.answersPublished }
+          : {}),
+        ...(settings?.answersPublishedAt !== undefined
+          ? { answersPublishedAt: settings.answersPublishedAt }
+          : {}),
+        ...(settings?.showExamLeaderboardToPlayers !== undefined
+          ? { showExamLeaderboardToPlayers: settings.showExamLeaderboardToPlayers }
+          : {}),
+        ...(settings?.audioConfig !== undefined ? { audioConfig: settings.audioConfig } : {}),
         ...(settings?.mixedDistribution !== undefined ? { mixedDistribution: settings.mixedDistribution } : {}),
         ...(settings?.adventureConfig !== undefined
           ? {
@@ -834,10 +1229,591 @@ gameRouter.post(
 );
 
 /**
+ * GET /api/games/:gameId/participants
+ * Lists participants for a game.
+ * - Creator/Admin/Host receives full participant records.
+ * - Public/Player receives safe roster entries (participantId, fullName, departmentUnit, status, isLocked, canJoin).
+ */
+gameRouter.get(
+  '/:gameId/participants',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const gameId = String(req.params.gameId || '');
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+      const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
+      const hasActiveRoom = roomStore.hasActiveRoomForGame(gameId);
+
+      const isManager = hasCreatorOrHostManagementAccess(req, gameId, ownerUserId);
+      if (!isManager && !isPublic && !hasActiveRoom) {
+        authService.assertResourceAccess({
+          resourceType: 'danh sách thí sinh',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'read',
+          isPublic,
+        });
+      }
+
+      const search =
+        typeof req.query.search === 'string' && req.query.search.trim()
+          ? req.query.search.trim()
+          : undefined;
+      const status =
+        typeof req.query.status === 'string' && req.query.status.trim()
+          ? req.query.status.trim()
+          : undefined;
+
+      const result = persistenceRepo.listParticipants(gameId, {
+        search,
+        status,
+        limit: 1000,
+        offset: 0,
+      });
+      const list = result.participants;
+      const rosterMode = spec.settings?.rosterMode || 'FREE_TEXT';
+
+      if (isManager && String(req.query.mode || '').toLowerCase() !== 'public') {
+        res.status(200).json(
+          createSuccessResponse({
+            gameId,
+            rosterMode,
+            total: result.total,
+            departments: result.departments,
+            participants: list,
+          })
+        );
+        return;
+      }
+
+      // Safe public roster view for participant selection dropdown
+      const safeParticipants = list.map((p) => {
+        const isLocked = Boolean(p.activeSessionId || p.activeRoomCode);
+        const canJoin = p.usedAttempts < p.allowedAttempts || isLocked;
+        return {
+          participantId: p.participantId,
+          fullName: p.fullName,
+          departmentUnit: p.departmentUnit,
+          status: p.status,
+          isLocked,
+          canJoin,
+        };
+      });
+
+      res.status(200).json(
+        createSuccessResponse({
+          gameId,
+          rosterMode,
+          total: safeParticipants.length,
+          departments: result.departments,
+          participants: safeParticipants,
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * POST /api/games/:gameId/participants
+ * Adds or imports participants into the game's roster (manual array, pasted multiline text, or CSV/XLSX upload).
+ */
+gameRouter.post(
+  '/:gameId/participants',
+  rosterFileUpload.single('file'),
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      rejectGuestOrPlayerWrite(req, 'quản lý danh sách thí sinh');
+
+      const gameId = String(req.params.gameId || '');
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+      const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
+
+      if (!hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+        authService.assertResourceAccess({
+          resourceType: 'danh sách thí sinh',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      }
+
+      const incomingItems: Array<{ fullName: string; departmentUnit?: string | null }> = [];
+
+      if (Array.isArray(req.body?.participants)) {
+        for (const item of req.body.participants) {
+          if (item && typeof item.fullName === 'string' && item.fullName.trim()) {
+            incomingItems.push({
+              fullName: item.fullName.trim(),
+              departmentUnit:
+                typeof item.departmentUnit === 'string' ? item.departmentUnit.trim() : null,
+            });
+          }
+        }
+      }
+
+      if (typeof req.body?.fullName === 'string' && req.body.fullName.trim()) {
+        incomingItems.push({
+          fullName: req.body.fullName.trim(),
+          departmentUnit:
+            typeof req.body?.departmentUnit === 'string' ? req.body.departmentUnit.trim() : null,
+        });
+      }
+
+      let fileBuffer: Buffer | undefined = req.file?.buffer;
+      let fileName: string | undefined = req.file?.originalname;
+      if (!fileBuffer && typeof req.body?.fileBase64 === 'string' && req.body.fileBase64.trim()) {
+        const rawB64 = req.body.fileBase64.replace(/^data:[^;]+;base64,/, '');
+        fileBuffer = Buffer.from(rawB64, 'base64');
+        fileName = typeof req.body.fileName === 'string' ? req.body.fileName : 'roster.xlsx';
+      }
+
+      const parsedFromTextOrFile = parseParticipantsFromBufferOrText({
+        rawText: typeof req.body?.rawText === 'string' ? req.body.rawText : undefined,
+        fileBuffer,
+        fileName,
+      });
+      incomingItems.push(...parsedFromTextOrFile);
+
+      const replaceAll = Boolean(req.body?.replaceAll);
+      const savedParticipants = persistenceRepo.upsertParticipants(
+        gameId,
+        incomingItems.map((item) => ({
+          fullName: item.fullName,
+          departmentUnit: item.departmentUnit || undefined,
+        })),
+        replaceAll
+      );
+
+      // Optionally update rosterMode on game settings
+      const parsedRosterMode = RosterModeEnum.safeParse(req.body?.rosterMode);
+      const currentRosterMode = spec.settings?.rosterMode || 'FREE_TEXT';
+      const nextRosterMode = parsedRosterMode.success
+        ? parsedRosterMode.data
+        : currentRosterMode === 'FREE_TEXT' && savedParticipants.length > 0
+          ? 'PRECONFIGURED'
+          : currentRosterMode;
+
+      if (nextRosterMode !== currentRosterMode) {
+        const updatedSpec: GameSpecification = {
+          ...spec,
+          settings: {
+            ...spec.settings,
+            rosterMode: nextRosterMode,
+          },
+        };
+        gameStore.save(updatedSpec, Date.now(), ownerUserId, isPublic);
+      }
+
+      res.status(200).json(
+        createSuccessResponse({
+          gameId,
+          rosterMode: nextRosterMode,
+          addedOrUpdatedCount: incomingItems.length,
+          total: savedParticipants.length,
+          participants: savedParticipants,
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * PATCH /api/games/:gameId/participants/:participantId
+ * Updates a participant's fullName or departmentUnit.
+ */
+gameRouter.patch(
+  '/:gameId/participants/:participantId',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      rejectGuestOrPlayerWrite(req, 'cập nhật thông tin thí sinh');
+
+      const gameId = String(req.params.gameId || '');
+      const participantId = String(req.params.participantId || '');
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+
+      if (!hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+        authService.assertResourceAccess({
+          resourceType: 'thí sinh',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      }
+
+      const updated = persistenceRepo.updateParticipant(gameId, participantId, {
+        fullName: typeof req.body?.fullName === 'string' ? req.body.fullName : undefined,
+        departmentUnit:
+          req.body?.departmentUnit !== undefined ? req.body.departmentUnit : undefined,
+      });
+
+      if (!updated) {
+        throw new AppError('PARTICIPANT_NOT_FOUND', 'Không tìm thấy thí sinh trong danh sách.', 404);
+      }
+
+      res.status(200).json(createSuccessResponse(updated));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * DELETE /api/games/:gameId/participants/:participantId
+ * Removes a single participant from the game's roster.
+ */
+gameRouter.delete(
+  '/:gameId/participants/:participantId',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      rejectGuestOrPlayerWrite(req, 'xóa thí sinh khỏi danh sách');
+
+      const gameId = String(req.params.gameId || '');
+      const participantId = String(req.params.participantId || '');
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+
+      if (!hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+        authService.assertResourceAccess({
+          resourceType: 'thí sinh',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      }
+
+      const deleted = persistenceRepo.deleteParticipant(gameId, participantId);
+      if (!deleted) {
+        throw new AppError('PARTICIPANT_NOT_FOUND', 'Không tìm thấy thí sinh cần xóa.', 404);
+      }
+
+      res.status(200).json(createSuccessResponse({ deleted: true, participantId }));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * DELETE /api/games/:gameId/participants
+ * Clears all participants from the game's roster.
+ */
+gameRouter.delete(
+  '/:gameId/participants',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      rejectGuestOrPlayerWrite(req, 'xóa toàn bộ danh sách thí sinh');
+
+      const gameId = String(req.params.gameId || '');
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+
+      if (!hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+        authService.assertResourceAccess({
+          resourceType: 'danh sách thí sinh',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      }
+
+      const deletedCount = persistenceRepo.clearParticipants(gameId);
+      res.status(200).json(createSuccessResponse({ cleared: true, deletedCount }));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * POST /api/games/:gameId/participants/:participantId/grant-retake
+ * Allows Creator, Admin, or Room Host to grant 1 additional retake attempt to a specific participant.
+ * Preserves all historical attempts while unlocking the participant for a new attempt.
+ */
+gameRouter.post(
+  '/:gameId/participants/:participantId/grant-retake',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const gameId = String(req.params.gameId || '');
+      const participantId = String(req.params.participantId || '');
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+
+      if (!hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+        rejectGuestOrPlayerWrite(req, 'cấp quyền thi lại');
+        authService.assertResourceAccess({
+          resourceType: 'quyền thi lại của thí sinh',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      }
+
+      const existingParticipant = persistenceRepo.getParticipantById(gameId, participantId);
+      if (!existingParticipant) {
+        throw new AppError('PARTICIPANT_NOT_FOUND', 'Không tìm thấy thí sinh trong danh sách.', 404);
+      }
+
+      // If the participant had an in-memory stuck active session, remove it from sessionStore
+      if (existingParticipant.activeSessionId) {
+        sessionStore.delete(existingParticipant.activeSessionId);
+      }
+
+      const grantedBy = req.user?.userId || 'host';
+      const updated = persistenceRepo.grantParticipantRetake({
+        gameId,
+        participantId,
+        grantedByUserId: grantedBy,
+      });
+
+      res.status(200).json(
+        createSuccessResponse({
+          granted: true,
+          participant: updated,
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * POST /api/games/:gameId/publish-answers
+ * Explicitly publishes correct answers & explanations for an EXAM game after the exam has ended.
+ * Rejects with 409 EXAM_STILL_ACTIVE if any solo session or multiplayer room is still in progress.
+ */
+gameRouter.post(
+  '/:gameId/publish-answers',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const gameId = String(req.params.gameId || '');
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+      const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
+
+      if (!hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+        rejectGuestOrPlayerWrite(req, 'công bố đáp án bài thi');
+        authService.assertResourceAccess({
+          resourceType: 'bộ câu hỏi bài thi',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      }
+
+      const activeSessions = sessionStore.getActiveSessionsForGame(gameId);
+      const activeRooms = roomStore.getActiveRoomsForGame(gameId);
+      if (activeSessions.length > 0 || activeRooms.length > 0) {
+        throw new AppError(
+          'EXAM_STILL_ACTIVE',
+          'Không thể công bố đáp án khi vẫn còn phiên thi cá nhân hoặc phòng thi trực tiếp đang diễn ra. Vui lòng chờ hoặc kết thúc kỳ thi trước.',
+          409
+        );
+      }
+
+      const publishedAt = new Date().toISOString();
+      const updatedSpec: GameSpecification = {
+        ...spec,
+        settings: {
+          ...spec.settings,
+          answersPublished: true,
+          answersPublishedAt: publishedAt,
+        },
+      };
+
+      gameStore.save(updatedSpec, Date.now(), ownerUserId, isPublic);
+
+      // Sync any finished rooms for this game in roomStore
+      for (const room of roomStore.getAll()) {
+        if (room.gameId === gameId) {
+          room.answersPublished = true;
+        }
+      }
+
+      res.status(200).json(
+        createSuccessResponse({
+          gameId,
+          answersPublished: true,
+          answersPublishedAt: publishedAt,
+          questions: updatedSpec.questions.map((q) => ({
+            id: q.id,
+            question: q.question,
+            correctAnswer: q.correctAnswer,
+            explanation: q.explanation,
+          })),
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * GET /api/games/:gameId/scoreboard
+ * Returns full Scoreboard, Top 3 Podium, Pass/Fail statistics, and Attempt History for Creator/Admin/Host.
+ */
+gameRouter.get(
+  '/:gameId/scoreboard',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const gameId = String(req.params.gameId || '');
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+
+      if (!hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+        authService.assertResourceAccess({
+          resourceType: 'bảng điểm bài thi',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      }
+
+      const search =
+        typeof req.query.search === 'string' && req.query.search.trim()
+          ? req.query.search.trim()
+          : undefined;
+      const status =
+        typeof req.query.status === 'string' && req.query.status.trim()
+          ? req.query.status.trim()
+          : undefined;
+      const departmentUnit =
+        typeof req.query.departmentUnit === 'string' && req.query.departmentUnit.trim()
+          ? req.query.departmentUnit.trim()
+          : undefined;
+      const rawSort = String(req.query.sortBy || 'rank').toLowerCase();
+      const sortBy =
+        rawSort === 'score' ||
+        rawSort === 'accuracy' ||
+        rawSort === 'duration' ||
+        rawSort === 'name' ||
+        rawSort === 'attempts'
+          ? rawSort
+          : 'rank';
+      const sortDir = String(req.query.sortDir || 'asc').toLowerCase() === 'desc' ? 'desc' : 'asc';
+      const limit = Math.min(1000, Math.max(1, Number(req.query.limit) || 200));
+      const offset = Math.max(0, Number(req.query.offset) || 0);
+
+      const scoreboard = persistenceRepo.getGameScoreboard(gameId, {
+        search,
+        departmentUnit,
+        statusFilter: status,
+        sortBy,
+        sortDir,
+        limit,
+        offset,
+      });
+
+      res.status(200).json(createSuccessResponse(scoreboard));
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * GET /api/games/:gameId/scoreboard/export?format=csv|xlsx|json
+ * Exports the full Scoreboard & Attempt History for Creator/Admin/Host in CSV, XLSX, or JSON format.
+ */
+gameRouter.get(
+  '/:gameId/scoreboard/export',
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const gameId = String(req.params.gameId || '');
+      const rawFormat = String(req.query.format || 'csv').toLowerCase();
+      if (rawFormat !== 'csv' && rawFormat !== 'xlsx' && rawFormat !== 'json') {
+        throw new AppError(
+          'INVALID_EXPORT_FORMAT',
+          `Định dạng xuất "${rawFormat}" không được hỗ trợ. Chỉ hỗ trợ: csv, xlsx, json.`,
+          400
+        );
+      }
+      const format: ScoreboardExportFormat = rawFormat;
+
+      const spec = gameStore.get(gameId);
+      if (!spec) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+
+      if (!hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+        authService.assertResourceAccess({
+          resourceType: 'xuất bảng điểm',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      }
+
+      const scoreboard = persistenceRepo.getGameScoreboard(gameId, {
+        limit: 5000,
+        offset: 0,
+      });
+
+      const payload = exportService.exportGameScoreboard(scoreboard, format);
+      res.setHeader('Content-Type', payload.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${payload.filename}"`);
+      res.status(200).send(payload.body);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
  * DELETE /api/games
  * Safely deletes saved game specifications scoped strictly by authorization:
  * - Rejects Player and Guest tokens (403 ACCESS_DENIED).
- * - Requires an authenticated user session (401 UNAUTHORIZED).
+ * - Requires an authenticated user session (401 UNAUTZZZ).
  * - Regular authenticated users (USER) can only delete games they own (ownerUserId === req.user.userId).
  * - Administrators (ADMIN) can delete across the repository per admin policy.
  * - Skips and reports any game currently locked by an active practice session or multiplayer room.
@@ -1075,6 +2051,7 @@ gameRouter.get(
 /**
  * GET /api/games/:gameId/export?format=csv|json
  * Export question set in CSV or JSON format.
+ * When sessionMode === 'EXAM' and answersPublished !== true, only the Owner or Admin can export questions (which contain answers).
  */
 gameRouter.get(
   '/:gameId/export',
@@ -1096,13 +2073,27 @@ gameRouter.get(
       const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
       const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
 
-      authService.assertResourceAccess({
-        resourceType: 'bộ câu hỏi',
-        ownerUserId,
-        currentUser: req.user,
-        mode: 'read',
-        isPublic,
-      });
+      const isUnpublishedExam =
+        spec.settings?.sessionMode === 'EXAM' && !spec.settings?.answersPublished;
+
+      if (isUnpublishedExam) {
+        if (!hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+          authService.assertResourceAccess({
+            resourceType: 'đáp án bài thi',
+            ownerUserId,
+            currentUser: req.user,
+            mode: 'write',
+          });
+        }
+      } else {
+        authService.assertResourceAccess({
+          resourceType: 'bộ câu hỏi',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'read',
+          isPublic,
+        });
+      }
 
       const payload = exportService.exportGameQuestions(spec, format);
       res.setHeader('Content-Type', payload.contentType);

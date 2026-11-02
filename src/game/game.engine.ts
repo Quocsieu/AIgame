@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { GameSpecification, GameSpecificationSchema } from '../contracts/game.contract.js';
 import { persistenceRepo } from '../storage/persistence.repository.js';
 import { AppError } from '../utils/errors.js';
+import { evaluatePerformanceResult } from './game.scoring.js';
 import { GameSession } from './game.session.js';
 import { gameStore, sessionStore } from './game.store.js';
 import { ClockFunction } from './game.timer.js';
@@ -31,7 +32,14 @@ export class GameEngine {
   public createSession(
     gameId: string,
     customSpec?: GameSpecification,
-    ownerUserId?: string | null
+    ownerUserId?: string | null,
+    participantContext?: {
+      participantId?: string | null;
+      displayName?: string | null;
+      departmentUnit?: string | null;
+      employeeCode?: string | null;
+      lockToken?: string | null;
+    }
   ): GameSession {
     let spec = customSpec;
 
@@ -49,6 +57,13 @@ export class GameEngine {
     const sessionId = `session_${crypto.randomUUID()}`;
     const resolvedOwner = ownerUserId !== undefined ? ownerUserId : spec.ownerUserId ?? null;
     const session = new GameSession(sessionId, spec, this.clock, resolvedOwner);
+    if (participantContext) {
+      session.participantId = participantContext.participantId ?? null;
+      session.displayName = participantContext.displayName ?? null;
+      session.departmentUnit = participantContext.departmentUnit ?? null;
+      session.employeeCode = participantContext.employeeCode ?? null;
+      session.lockToken = participantContext.lockToken ?? null;
+    }
     sessionStore.save(session);
 
     return session;
@@ -83,6 +98,47 @@ export class GameEngine {
   public getCurrentQuestion(sessionId: string): ClientQuestion {
     const session = this.getSession(sessionId);
     return session.getCurrentClientQuestion();
+  }
+
+  /**
+   * Activates strict countdown when an Adventure checkpoint opens.
+   */
+  public activateCheckpoint(sessionId: string, questionIndex?: number): ClientQuestion {
+    const session = this.getSession(sessionId);
+    return session.activateCheckpoint(questionIndex);
+  }
+
+  /**
+   * Records a timeout for the current active question idempotently.
+   */
+  public recordTimeout(
+    sessionId: string,
+    questionId?: string
+  ): {
+    questionId: string;
+    isCorrect: boolean;
+    pointsEarned: number;
+    score: number;
+    correctAnswer: string;
+    explanation?: string;
+    timedOut: boolean;
+    nextQuestionAvailable: boolean;
+  } {
+    const session = this.getSession(sessionId);
+    const result = session.recordTimeout(questionId);
+    const nextQuestionAvailable =
+      session.currentQuestionIndex + 1 < session.specification.questions.length;
+
+    return {
+      questionId: result.questionId,
+      isCorrect: false,
+      pointsEarned: 0,
+      score: session.score,
+      correctAnswer: result.correctAnswer,
+      explanation: result.explanation,
+      timedOut: true,
+      nextQuestionAvailable,
+    };
   }
 
   /**
@@ -160,15 +216,28 @@ export class GameEngine {
       if (persisted.state !== 'FINISHED') {
         throw new AppError('INVALID_GAME_STATE', 'Game session is not finished yet.', 400);
       }
+      const spec = gameStore.get(persisted.gameId);
+      const sessionMode = spec?.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+      const passThresholdPercent = spec?.settings?.passThresholdPercent ?? 50;
       const accuracy =
         persisted.totalQuestions > 0
           ? Math.round((persisted.correctAnswers / persisted.totalQuestions) * 100)
           : 0;
+      const evaluation = evaluatePerformanceResult({
+        correctAnswers: persisted.correctAnswers,
+        totalQuestions: persisted.totalQuestions,
+        totalScore: persisted.totalScore,
+        maxPossibleScore: persisted.maxPossibleScore,
+        sessionMode,
+        passThresholdPercent,
+      });
       return {
         sessionId: persisted.sessionId,
         gameId: persisted.gameId,
         title: persisted.gameTitle,
         gameType: persisted.gameType,
+        sessionMode,
+        answersPublished: Boolean(spec?.settings?.answersPublished),
         totalQuestions: persisted.totalQuestions,
         correctCount: persisted.correctAnswers,
         wrongCount: persisted.wrongAnswers,
@@ -179,6 +248,7 @@ export class GameEngine {
         questionResults: persisted.questionResults,
         accuracy,
         streak: persisted.maxStreak,
+        evaluation,
       };
     }
 

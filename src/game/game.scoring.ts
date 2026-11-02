@@ -128,3 +128,83 @@ export function calculateMaxPossibleScore(
   }
 }
 
+export type PerformanceTier = 'NEEDS_EFFORT' | 'PARTIAL_MASTERY' | 'GOOD_WORK' | 'EXCELLENT';
+
+export interface PerformanceEvaluation {
+  correctAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number;
+  totalScore: number;
+  maxPossibleScore: number;
+  tier: PerformanceTier;
+  tierLabel: string;
+  comment: string;
+  isPassed?: boolean;
+  passThresholdPercent?: number;
+}
+
+export function evaluatePerformanceResult(input: {
+  correctAnswers: number;
+  totalQuestions: number;
+  totalScore: number;
+  maxPossibleScore: number;
+  sessionMode?: 'PLAY' | 'EXAM';
+  passThresholdPercent?: number;
+}): PerformanceEvaluation {
+  const safeTotalQuestions = Math.max(0, Math.floor(Number(input.totalQuestions) || 0));
+  const safeCorrectAnswers = Math.max(
+    0,
+    Math.min(safeTotalQuestions, Math.floor(Number(input.correctAnswers) || 0))
+  );
+  const accuracyPercent =
+    safeTotalQuestions > 0 ? Math.round((safeCorrectAnswers / safeTotalQuestions) * 100) : 0;
+
+  let tier: PerformanceTier;
+  let tierLabel: string;
+  let comment: string;
+
+  if (accuracyPercent < 50) {
+    tier = 'NEEDS_EFFORT';
+    tierLabel = 'Cần cố gắng thêm';
+    comment = 'Cần cố gắng thêm. Bạn hãy ôn tập thêm để nắm vững nội dung hơn.';
+  } else if (accuracyPercent < 70) {
+    tier = 'PARTIAL_MASTERY';
+    tierLabel = 'Đã nắm được một phần kiến thức';
+    comment =
+      'Đã nắm được một phần kiến thức. Kết quả khá, bạn đã nắm được phần cơ bản nhưng vẫn còn có thể cải thiện.';
+  } else if (accuracyPercent < 90) {
+    tier = 'GOOD_WORK';
+    tierLabel = 'Làm tốt';
+    comment = 'Làm tốt! Bạn hiểu nội dung khá chắc chắn.';
+  } else {
+    tier = 'EXCELLENT';
+    tierLabel = 'Xuất sắc';
+    comment = 'Xuất sắc! Bạn nắm rất vững kiến thức của chủ đề này.';
+  }
+
+  const threshold =
+    typeof input.passThresholdPercent === 'number' && Number.isFinite(input.passThresholdPercent)
+      ? Math.max(0, Math.min(100, input.passThresholdPercent))
+      : 50;
+
+  const isExam = input.sessionMode === 'EXAM';
+
+  return {
+    correctAnswers: safeCorrectAnswers,
+    totalQuestions: safeTotalQuestions,
+    accuracyPercent,
+    totalScore: Math.max(0, Math.floor(Number(input.totalScore) || 0)),
+    maxPossibleScore: Math.max(0, Math.floor(Number(input.maxPossibleScore) || 0)),
+    tier,
+    tierLabel,
+    comment,
+    ...(isExam
+      ? {
+          isPassed: accuracyPercent >= threshold,
+          passThresholdPercent: threshold,
+        }
+      : {}),
+  };
+}
+
+

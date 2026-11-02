@@ -157,6 +157,167 @@ export interface AdventureConfig {
 }
 export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 export type ScoringMode = 'STANDARD' | 'SPEED_BONUS' | 'STREAK';
+export type SessionMode = 'PLAY' | 'EXAM';
+export type TimerMode = 'PER_QUESTION' | 'TOTAL_EXAM' | 'UNLIMITED';
+export type RosterMode = 'FREE_TEXT' | 'PRECONFIGURED' | 'HYBRID';
+export type OfficialAttemptPolicy = 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
+export type AudioPresetId =
+  | 'NONE'
+  | 'ENERGETIC_ARENA'
+  | 'EXAM_FOCUS'
+  | 'ADVENTURE_QUEST'
+  | 'CORPORATE_CALM'
+  | 'CUSTOM';
+
+export interface GameAudioConfig {
+  enabled: boolean;
+  presetId: AudioPresetId;
+  customAudioUrl?: string | null;
+  customAudioFileName?: string | null;
+  customAudioName?: string | null;
+  customAudioMimeType?: string | null;
+  customAudioSizeBytes?: number | null;
+  volume: number;
+  countdownSoundEnabled: boolean;
+  countdownTriggerSeconds: number;
+  sfxEnabled?: boolean;
+}
+
+export type PerformanceTier = 'NEEDS_EFFORT' | 'PARTIAL_MASTERY' | 'GOOD' | 'EXCELLENT';
+
+export interface PerformanceEvaluation {
+  correctAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number;
+  accuracyPercentage?: number;
+  totalScore: number;
+  maxPossibleScore: number;
+  tier: PerformanceTier;
+  tierLabel:
+    | 'Cần cố gắng thêm'
+    | 'Đã nắm được một phần kiến thức'
+    | 'Làm tốt'
+    | 'Xuất sắc';
+  comment: string;
+  isPassed: boolean | null;
+  passStatusLabel: 'Đạt' | 'Chưa đạt' | null;
+  passThresholdPercent: number;
+}
+
+export function calculateFrontendMaxPossibleScore(
+  questionCount: number,
+  scoringMode: ScoringMode = 'SPEED_BONUS'
+): number {
+  const count = Math.max(0, Math.floor(Number(questionCount) || 0));
+  if (count === 0) return 0;
+  const basePoints = 100;
+  const maxSpeedBonus = 50;
+  const streakBonusStep = 20;
+  const maxStreakMultiplier = 5;
+
+  switch (scoringMode) {
+    case 'STANDARD':
+      return count * basePoints;
+    case 'SPEED_BONUS':
+      return count * (basePoints + maxSpeedBonus);
+    case 'STREAK': {
+      let total = 0;
+      for (let i = 0; i < count; i++) {
+        const effectiveStreak = Math.min(i, maxStreakMultiplier);
+        total += basePoints + maxSpeedBonus + effectiveStreak * streakBonusStep;
+      }
+      return total;
+    }
+    default:
+      return count * basePoints;
+  }
+}
+
+export function evaluateFrontendPerformance(
+  paramsOrCorrect:
+    | {
+        correctAnswers: number;
+        totalQuestions: number;
+        totalScore?: number;
+        maxPossibleScore?: number;
+        sessionMode?: SessionMode;
+        passThresholdPercent?: number;
+      }
+    | number,
+  totalQuestionsArg?: number,
+  passThresholdArg?: number
+): PerformanceEvaluation {
+  const params =
+    typeof paramsOrCorrect === 'number'
+      ? {
+          correctAnswers: paramsOrCorrect,
+          totalQuestions: totalQuestionsArg ?? 0,
+          totalScore: paramsOrCorrect * 100,
+          maxPossibleScore: (totalQuestionsArg ?? 0) * 100,
+          sessionMode: (passThresholdArg !== undefined ? 'EXAM' : 'PLAY') as SessionMode,
+          passThresholdPercent: passThresholdArg,
+        }
+      : paramsOrCorrect;
+
+  const safeTotal = Math.max(0, Math.floor(Number(params.totalQuestions) || 0));
+  const safeCorrect = Math.min(
+    safeTotal,
+    Math.max(0, Math.floor(Number(params.correctAnswers) || 0))
+  );
+  const accuracyPercent =
+    safeTotal > 0 ? Math.min(100, Math.max(0, Math.round((safeCorrect / safeTotal) * 100))) : 0;
+  const totalScore = Math.max(0, Math.round(Number(params.totalScore ?? safeCorrect * 100) || 0));
+  const maxPossibleScore = Math.max(
+    totalScore,
+    Math.round(Number(params.maxPossibleScore ?? safeTotal * 100) || 0)
+  );
+  const sessionMode: SessionMode = params.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+  const passThresholdPercent =
+    typeof params.passThresholdPercent === 'number' && Number.isFinite(params.passThresholdPercent)
+      ? Math.min(100, Math.max(0, Math.round(params.passThresholdPercent)))
+      : 50;
+
+  let tier: PerformanceTier;
+  let tierLabel: PerformanceEvaluation['tierLabel'];
+  let comment: string;
+
+  if (accuracyPercent >= 90) {
+    tier = 'EXCELLENT';
+    tierLabel = 'Xuất sắc';
+    comment = 'Bạn đã nắm vững toàn diện nội dung và hoàn thành bài với độ chính xác rất cao.';
+  } else if (accuracyPercent >= 70) {
+    tier = 'GOOD';
+    tierLabel = 'Làm tốt';
+    comment = 'Bạn nắm khá chắc kiến thức cốt lõi, chỉ còn một vài chi tiết nhỏ cần lưu ý thêm.';
+  } else if (accuracyPercent >= 50) {
+    tier = 'PARTIAL_MASTERY';
+    tierLabel = 'Đã nắm được một phần kiến thức';
+    comment = 'Bạn đã hiểu các ý cơ bản nhưng cần ôn tập thêm để củng cố phần kiến thức còn thiếu.';
+  } else {
+    tier = 'NEEDS_EFFORT';
+    tierLabel = 'Cần cố gắng thêm';
+    comment = 'Hãy xem lại tài liệu và luyện tập thêm để nắm vững kiến thức trọng tâm nhé.';
+  }
+
+  const isPassed = sessionMode === 'EXAM' ? accuracyPercent >= passThresholdPercent : null;
+  const passStatusLabel = isPassed === null ? null : isPassed ? 'Đạt' : 'Chưa đạt';
+
+  return {
+    correctAnswers: safeCorrect,
+    totalQuestions: safeTotal,
+    accuracyPercent,
+    accuracyPercentage: accuracyPercent,
+    totalScore,
+    maxPossibleScore,
+    tier,
+    tierLabel,
+    comment,
+    isPassed,
+    passStatusLabel,
+    passThresholdPercent,
+  };
+}
+
 export type SourceType = 'WEBSITE' | 'DOCX' | 'XLSX' | 'PDF' | 'TXT' | 'MARKDOWN' | 'CSV';
 
 export interface MixedQuestionDistribution {
@@ -335,6 +496,7 @@ export interface GameQuestion {
   acceptedAlternatives?: string[];
   explanation?: string;
   difficulty: Difficulty;
+  timeLimitSeconds?: number;
   crosswordClue?: string;
   crosswordAnswer?: string;
   sourceReference: ProvenanceReference;
@@ -353,12 +515,23 @@ export interface GameSpecification {
     questionCount: number;
     timePerQuestion: number;
     scoringMode: ScoringMode;
+    sessionMode?: SessionMode;
+    timerMode?: TimerMode;
+    totalExamDurationSeconds?: number;
+    autoAdvanceDelayMs?: number;
+    passThresholdPercent?: number;
+    officialAttemptPolicy?: OfficialAttemptPolicy;
+    rosterMode?: RosterMode;
+    answersPublished?: boolean;
+    answersPublishedAt?: string | null;
+    showExamLeaderboardToPlayers?: boolean;
+    audioConfig?: GameAudioConfig;
     mixedDistribution?: MixedQuestionDistribution;
     adventureConfig?: AdventureConfig;
   };
   sourceSummary?: {
     sourceCount: number;
-  adventureConfig?: AdventureConfig;
+    adventureConfig?: AdventureConfig;
     sources: {
       sourceId: string;
       sourceType: SourceType;
@@ -384,14 +557,23 @@ export interface SanitizedQuestion {
   timePerQuestion: number;
   remainingTimeSeconds?: number;
   deadlineAt?: number;
+  sessionMode?: SessionMode;
+  timerMode?: TimerMode;
+  examRemainingSeconds?: number;
 }
 
 export interface LeaderboardEntry {
   rank: number;
   playerId: string;
   displayName: string;
+  participantId?: string | null;
+  departmentUnit?: string;
   score: number;
+  maxPossibleScore?: number;
   correctCount: number;
+  totalQuestions?: number;
+  accuracyPercent?: number;
+  isPassed?: boolean | null;
   streak: number;
   totalResponseTimeMs: number;
   connected: boolean;
@@ -404,6 +586,8 @@ export interface PlayerQuestionResult {
   pointsEarned: number;
   responseTimeMs: number;
   answeredAt: number;
+  timedOut?: boolean;
+  examRedacted?: boolean;
 }
 
 export interface IngestedSourceSection {
@@ -455,7 +639,9 @@ export interface PracticeQuestionResult {
   pointsEarned: number;
   responseTimeMs: number;
   answeredAt: string;
-  correctAnswer: string;
+  timedOut?: boolean;
+  examRedacted?: boolean;
+  correctAnswer?: string;
   explanation?: string;
   sourceReference?: ProvenanceReference;
 }
@@ -465,6 +651,13 @@ export interface PracticeFinalResult {
   gameId: string;
   title: string;
   gameType: GameType;
+  sessionMode?: SessionMode;
+  answersPublished?: boolean;
+  passThresholdPercent?: number;
+  isPassed?: boolean | null;
+  accuracyPercent?: number;
+  evaluation?: PerformanceEvaluation;
+  performanceEvaluation?: PerformanceEvaluation;
   totalQuestions: number;
   correctCount?: number;
   wrongCount?: number;
@@ -480,6 +673,122 @@ export interface PracticeFinalResult {
   streak?: number;
   maxStreak?: number;
   durationMs?: number;
+}
+
+export interface ParticipantRosterItem {
+  id?: string;
+  participantId: string;
+  gameId?: string;
+  fullName: string;
+  departmentUnit: string;
+  employeeCode?: string;
+  contactInfo?: string;
+  allowedAttempts?: number;
+  usedAttempts?: number;
+  attemptsUsed?: number;
+  retakesGranted?: number;
+  activeSessionId?: string | null;
+  activeRoomCode?: string | null;
+  isLocked?: boolean;
+  lockStatus?: string;
+  canJoin?: boolean;
+  canStartAttempt?: boolean;
+  bestScore?: number | null;
+  latestScore?: number | null;
+  latestCorrectAnswers?: number | null;
+  latestTotalQuestions?: number | null;
+  latestAccuracyPercent?: number | null;
+  latestDurationMs?: number | null;
+  latestIsPassed?: boolean | null;
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
+  retakeGrantedCount?: number;
+}
+
+export type PublicParticipantItem = ParticipantRosterItem;
+
+export interface ParticipantAttemptHistoryItem {
+  attemptId: string;
+  gameId: string;
+  participantId: string | null;
+  sessionId: string | null;
+  roomId: string | null;
+  roomCode: string | null;
+  deliveryMode: 'SOLO' | 'MULTIPLAYER';
+  sessionMode: SessionMode;
+  attemptNumber: number;
+  displayName: string;
+  departmentUnit: string;
+  state: 'IN_PROGRESS' | 'FINISHED' | 'ABANDONED';
+  score: number;
+  maxPossibleScore: number;
+  correctAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number;
+  durationMs: number;
+  isPassed: boolean | null;
+  startedAt: string;
+  finishedAt: string | null;
+}
+
+export interface ScoreboardParticipantEntry {
+  rank: number | null;
+  participantId: string | null;
+  fullName: string;
+  departmentUnit: string;
+  employeeCode: string;
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
+  correctAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number;
+  score: number;
+  maxPossibleScore: number;
+  isPassed: boolean | null;
+  durationMs: number;
+  usedAttempts: number;
+  attemptsUsed?: number;
+  allowedAttempts: number;
+  retakeGrantedCount: number;
+  officialAttemptId: string | null;
+  officialAttemptNumber: number | null;
+  officialAttempt?: {
+    totalScore: number;
+    correctAnswers: number;
+    totalQuestions: number;
+    accuracyPercent: number;
+    evaluationTierLabel?: string;
+    isPassed: boolean | null;
+  } | null;
+  finishedAt: string | null;
+  attemptHistory: ParticipantAttemptHistoryItem[];
+}
+
+export interface GameScoreboardSummary {
+  gameId: string;
+  gameTitle: string;
+  sessionMode: SessionMode;
+  officialAttemptPolicy: OfficialAttemptPolicy;
+  passThresholdPercent: number;
+  answersPublished: boolean;
+  totalParticipants?: number;
+  passedCount?: number;
+  failedCount?: number;
+  participants?: ScoreboardParticipantEntry[];
+  totals: {
+    totalParticipants: number;
+    completedCount: number;
+    inProgressCount: number;
+    pendingCount: number;
+    passedCount: number;
+    failedCount: number;
+  };
+  top3: ScoreboardParticipantEntry[];
+  entries: ScoreboardParticipantEntry[];
+  allEntries: ScoreboardParticipantEntry[];
+  totalFiltered: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  departments: string[];
 }
 
 // Phase 3 & Phase 4 Types: Auth, Quotas, Persistence, Analytics & Observability

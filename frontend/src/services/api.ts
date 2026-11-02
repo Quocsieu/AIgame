@@ -8,20 +8,27 @@ import type {
   AuthenticatedUser,
   CreateRoomResponse,
   Difficulty,
+  GameActiveStatus,
+  GameAudioConfig,
   GameQuestion,
+  GameScoreboardSummary,
   GameSpecification,
   IndustryId,
   IngestedSource,
   LearningAnalyticsSummary,
   MixedQuestionDistribution,
-  GameActiveStatus,
+  OfficialAttemptPolicy,
+  ParticipantRosterItem,
   PersistedGameSummary,
   PersistedPracticeSessionRecord,
   PracticeFinalResult,
   PracticeQuestionResult,
   QrResponse,
+  RosterMode,
   SanitizedQuestion,
   ScoringMode,
+  SessionMode,
+  TimerMode,
   UserQuotaSummary,
 } from '../types/index.js';
 
@@ -235,6 +242,13 @@ export async function generateGame(params: {
   timePerQuestion: number;
   difficulty?: Difficulty;
   scoringMode?: ScoringMode;
+  sessionMode?: SessionMode;
+  timerMode?: TimerMode;
+  totalExamDurationSeconds?: number;
+  passThresholdPercent?: number;
+  officialAttemptPolicy?: OfficialAttemptPolicy;
+  rosterMode?: RosterMode;
+  audioConfig?: Partial<GameAudioConfig>;
   topicFocus?: string;
   sectionFilter?: string[];
   title?: string;
@@ -512,25 +526,39 @@ export async function analyzeAdventureContextApi(params: {
 
 export async function saveEditedQuestions(
   gameId: string,
-  params: {
-    title?: string;
-    description?: string;
-    questions: GameQuestion[];
-    settings?: {
-      timePerQuestion?: number;
-      scoringMode?: ScoringMode;
-      mixedDistribution?: MixedQuestionDistribution;
-      adventureConfig?: Partial<AdventureConfig>;
-    };
-    isPublic?: boolean;
-    coverImageUrl?: string | null;
-    generateCover?: boolean;
-  }
+  params:
+    | GameQuestion[]
+    | {
+        title?: string;
+        description?: string;
+        questions: GameQuestion[];
+        settings?: {
+          timePerQuestion?: number;
+          scoringMode?: ScoringMode;
+          sessionMode?: SessionMode;
+          timerMode?: TimerMode;
+          totalExamDurationSeconds?: number;
+          autoAdvanceDelayMs?: number;
+          passThresholdPercent?: number;
+          officialAttemptPolicy?: OfficialAttemptPolicy;
+          rosterMode?: RosterMode;
+          answersPublished?: boolean;
+          answersPublishedAt?: string | null;
+          showExamLeaderboardToPlayers?: boolean;
+          audioConfig?: Partial<GameAudioConfig>;
+          mixedDistribution?: MixedQuestionDistribution;
+          adventureConfig?: Partial<AdventureConfig>;
+        };
+        isPublic?: boolean;
+        coverImageUrl?: string | null;
+        generateCover?: boolean;
+      }
 ): Promise<GameSpecification> {
+  const payload = Array.isArray(params) ? { questions: params } : params;
   const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/questions`, {
     method: 'PATCH',
     headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(params),
+    body: JSON.stringify(payload),
   });
   const data = await res.json();
   if (!data.success) {
@@ -710,12 +738,16 @@ export async function fetchRoomQr(roomCode: string): Promise<QrResponse> {
 
 export interface RoomLobbyInfo {
   roomCode: string;
+  gameId?: string;
   state: 'WAITING' | 'QUESTION_ACTIVE' | 'QUESTION_REVEAL' | 'FINISHED' | 'CLOSED';
   playerCount: number;
   capacity: number;
   title: string;
   gameType: string;
   totalQuestions: number;
+  sessionMode?: SessionMode;
+  rosterMode?: RosterMode;
+  hasRoster?: boolean;
 }
 
 export async function fetchRoomLobby(roomCode: string): Promise<RoomLobbyInfo> {
@@ -732,7 +764,308 @@ export async function fetchRoomLobby(roomCode: string): Promise<RoomLobbyInfo> {
   return data.data;
 }
 
+// ==========================================
+// V2 Audio Upload, Roster & Scoreboard APIs
+// ==========================================
 
+export async function uploadCustomAudioApi(file: File): Promise<{
+  audioUrl: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+}> {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API_BASE_URL}/games/audio/upload`, {
+    method: 'POST',
+    headers: buildAuthHeaders(),
+    body: formData,
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải lên tệp âm thanh.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function fetchGameParticipantsApi(
+  gameId: string,
+  options?: { mode?: 'public' | 'manage' | 'admin'; search?: string; status?: string; hostToken?: string }
+): Promise<{
+  gameId: string;
+  rosterMode: RosterMode;
+  total: number;
+  departments?: string[];
+  participants: ParticipantRosterItem[];
+}> {
+  const query = new URLSearchParams();
+  if (options?.mode) {
+    query.set('mode', options.mode === 'admin' ? 'manage' : options.mode);
+  }
+  if (options?.search) query.set('search', options.search);
+  if (options?.status) query.set('status', options.status);
+  const qs = query.toString();
+
+  const extraHeaders: Record<string, string> = {};
+  if (options?.hostToken) {
+    extraHeaders['x-host-token'] = options.hostToken;
+  }
+
+  const res = await fetch(
+    `${API_BASE_URL}/games/${encodeURIComponent(gameId)}/participants${qs ? `?${qs}` : ''}`,
+    {
+      headers: buildAuthHeaders(extraHeaders),
+    }
+  );
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải danh sách thí sinh.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function upsertGameParticipantsApi(
+  gameId: string,
+  params: {
+    participants?: Array<{
+      fullName: string;
+      departmentUnit?: string | null;
+      employeeCode?: string;
+      email?: string;
+      contactInfo?: string;
+    }>;
+    fullName?: string;
+    departmentUnit?: string;
+    rawText?: string;
+    file?: File;
+    replaceAll?: boolean;
+    rosterMode?: RosterMode;
+  }
+): Promise<{
+  gameId: string;
+  rosterMode: RosterMode;
+  addedOrUpdatedCount: number;
+  upsertedCount?: number;
+  total: number;
+  participants: ParticipantRosterItem[];
+}> {
+  let res: Response;
+  if (params.file) {
+    const formData = new FormData();
+    formData.append('file', params.file);
+    if (params.rawText) formData.append('rawText', params.rawText);
+    if (params.replaceAll !== undefined) formData.append('replaceAll', String(params.replaceAll));
+    if (params.rosterMode) formData.append('rosterMode', params.rosterMode);
+    res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/participants`, {
+      method: 'POST',
+      headers: buildAuthHeaders(),
+      body: formData,
+    });
+  } else {
+    res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/participants`, {
+      method: 'POST',
+      headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(params),
+    });
+  }
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể lưu danh sách thí sinh.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return {
+    ...data.data,
+    upsertedCount: data.data?.addedOrUpdatedCount ?? data.data?.upsertedCount ?? 0,
+  };
+}
+
+export async function updateGameParticipantApi(
+  gameId: string,
+  participantId: string,
+  params: { fullName?: string; departmentUnit?: string }
+): Promise<ParticipantRosterItem> {
+  const res = await fetch(
+    `${API_BASE_URL}/games/${encodeURIComponent(gameId)}/participants/${encodeURIComponent(participantId)}`,
+    {
+      method: 'PATCH',
+      headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(params),
+    }
+  );
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể cập nhật thông tin thí sinh.');
+  }
+  return data.data;
+}
+
+export async function deleteGameParticipantApi(
+  gameId: string,
+  participantId: string
+): Promise<{ deleted: boolean; participantId: string }> {
+  const res = await fetch(
+    `${API_BASE_URL}/games/${encodeURIComponent(gameId)}/participants/${encodeURIComponent(participantId)}`,
+    {
+      method: 'DELETE',
+      headers: buildAuthHeaders(),
+    }
+  );
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể xóa thí sinh.');
+  }
+  return data.data;
+}
+
+export async function clearGameParticipantsApi(
+  gameId: string
+): Promise<{ cleared: boolean; deletedCount: number }> {
+  const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/participants`, {
+    method: 'DELETE',
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể xóa toàn bộ danh sách thí sinh.');
+  }
+  return data.data;
+}
+
+export async function grantParticipantRetakeApi(
+  gameId: string,
+  participantId: string,
+  incrementOrHostToken?: number | string,
+  hostToken?: string
+): Promise<{ granted: boolean; participant: ParticipantRosterItem }> {
+  const resolvedHostToken =
+    typeof incrementOrHostToken === 'string' ? incrementOrHostToken : hostToken;
+  const extraHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (resolvedHostToken) {
+    extraHeaders['x-host-token'] = resolvedHostToken;
+  }
+  const res = await fetch(
+    `${API_BASE_URL}/games/${encodeURIComponent(gameId)}/participants/${encodeURIComponent(participantId)}/grant-retake`,
+    {
+      method: 'POST',
+      headers: buildAuthHeaders(extraHeaders),
+      body: JSON.stringify(resolvedHostToken ? { hostToken: resolvedHostToken } : {}),
+    }
+  );
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể cấp quyền thi lại cho thí sinh.');
+  }
+  return data.data;
+}
+
+export async function publishExamAnswersApi(
+  gameId: string,
+  hostToken?: string
+): Promise<{
+  gameId: string;
+  answersPublished: boolean;
+  answersPublishedAt: string;
+  questions: Array<{ id: string; question: string; correctAnswer: string; explanation?: string }>;
+}> {
+  const extraHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (hostToken) {
+    extraHeaders['x-host-token'] = hostToken;
+  }
+  const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/publish-answers`, {
+    method: 'POST',
+    headers: buildAuthHeaders(extraHeaders),
+    body: JSON.stringify(hostToken ? { hostToken } : {}),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể công bố đáp án bài thi.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function fetchGameScoreboardApi(
+  gameId: string,
+  options?: {
+    search?: string;
+    status?: string;
+    departmentUnit?: string;
+    sortBy?: 'rank' | 'score' | 'accuracy' | 'duration' | 'name' | 'attempts';
+    sortDir?: 'asc' | 'desc';
+    limit?: number;
+    offset?: number;
+    hostToken?: string;
+  }
+): Promise<GameScoreboardSummary> {
+  const query = new URLSearchParams();
+  if (options?.search) query.set('search', options.search);
+  if (options?.status) query.set('status', options.status);
+  if (options?.departmentUnit) query.set('departmentUnit', options.departmentUnit);
+  if (options?.sortBy) query.set('sortBy', options.sortBy);
+  if (options?.sortDir) query.set('sortDir', options.sortDir);
+  if (options?.limit) query.set('limit', String(options.limit));
+  if (options?.offset) query.set('offset', String(options.offset));
+  const qs = query.toString();
+
+  const extraHeaders: Record<string, string> = {};
+  if (options?.hostToken) {
+    extraHeaders['x-host-token'] = options.hostToken;
+  }
+
+  const res = await fetch(
+    `${API_BASE_URL}/games/${encodeURIComponent(gameId)}/scoreboard${qs ? `?${qs}` : ''}`,
+    {
+      headers: buildAuthHeaders(extraHeaders),
+    }
+  );
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể tải bảng điểm bài thi.');
+  }
+  return data.data;
+}
+
+export async function downloadGameScoreboardExport(
+  gameId: string,
+  format: 'csv' | 'xlsx' | 'json',
+  hostToken?: string
+): Promise<void> {
+  const extraHeaders: Record<string, string> = {};
+  if (hostToken) {
+    extraHeaders['x-host-token'] = hostToken;
+  }
+  const res = await fetch(
+    `${API_BASE_URL}/games/${encodeURIComponent(gameId)}/scoreboard/export?format=${format}`,
+    {
+      headers: buildAuthHeaders(extraHeaders),
+    }
+  );
+  if (!res.ok) {
+    let message = 'Lỗi khi xuất bảng điểm.';
+    try {
+      const errJson = await res.json();
+      message = errJson.error?.message || message;
+    } catch {
+      // ignore
+    }
+    throw new Error(message);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${gameId}_scoreboard.${format}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
 
 // ==========================================
 // Single-Player Practice Mode APIs
@@ -742,20 +1075,84 @@ export async function createPracticeSession(params: {
   gameId: string;
   gameSpecification?: GameSpecification;
   publicPlay?: boolean;
+  participantId?: string;
+  displayName?: string;
+  playerName?: string;
+  departmentUnit?: string;
+  lockToken?: string;
+  sessionMode?: SessionMode;
 }): Promise<{
   sessionId: string;
   gameId: string;
   state: string;
+  resumed?: boolean;
+  sessionMode?: SessionMode;
+  timerMode?: TimerMode;
+  participantId?: string | null;
+  displayName?: string;
+  departmentUnit?: string;
+  lockToken?: string;
   totalQuestions: number;
+  currentQuestionIndex?: number;
+  score?: number;
+  correctCount?: number;
+  wrongCount?: number;
+  currentStreak?: number;
+  examRemainingSeconds?: number;
 }> {
+  const payload = {
+    ...params,
+    displayName: params.displayName || params.playerName,
+  };
   const res = await fetch(`${API_BASE_URL}/games/sessions`, {
     method: 'POST',
-    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(params),
+    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { isGuestPlayer: true }),
+    body: JSON.stringify(payload),
   });
   const data = await res.json();
   if (!data.success) {
-    throw new Error(data.error?.message || 'Không thể khởi tạo phiên luyện tập cá nhân.');
+    const err = new Error(data.error?.message || 'Không thể khởi tạo phiên luyện tập cá nhân.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function activatePracticeCheckpoint(sessionId: string): Promise<{
+  sessionId: string;
+  question: SanitizedQuestion;
+}> {
+  const res = await fetch(
+    `${API_BASE_URL}/games/sessions/${encodeURIComponent(sessionId)}/checkpoint`,
+    {
+      method: 'POST',
+      headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { isGuestPlayer: true }),
+    }
+  );
+  const data = await res.json();
+  if (!data.success) {
+    throw new Error(data.error?.message || 'Không thể kích hoạt câu hỏi tại checkpoint.');
+  }
+  return data.data;
+}
+
+export async function recordPracticeTimeout(
+  sessionId: string,
+  questionId?: string
+): Promise<PracticeQuestionResult> {
+  const res = await fetch(
+    `${API_BASE_URL}/games/sessions/${encodeURIComponent(sessionId)}/timeout`,
+    {
+      method: 'POST',
+      headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { isGuestPlayer: true }),
+      body: JSON.stringify(questionId ? { questionId } : {}),
+    }
+  );
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể ghi nhận hết giờ câu hỏi.');
+    (err as any).code = data.error?.code;
+    throw err;
   }
   return data.data;
 }
@@ -772,7 +1169,7 @@ export async function startPracticeSession(sessionId: string): Promise<{
 }> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${sessionId}/start`, {
     method: 'POST',
-    headers: buildAuthHeaders(),
+    headers: buildAuthHeaders(undefined, { isGuestPlayer: true }),
   });
   const data = await res.json();
   if (!data.success) {
@@ -787,7 +1184,7 @@ export async function submitPracticeAnswer(
 ): Promise<PracticeQuestionResult> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${sessionId}/answer`, {
     method: 'POST',
-    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }),
+    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { isGuestPlayer: true }),
     body: JSON.stringify({
       ...params,
       clientTimestamp: Date.now(),
@@ -810,7 +1207,7 @@ export async function advancePracticeSession(sessionId: string): Promise<{
 }> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${sessionId}/next`, {
     method: 'POST',
-    headers: buildAuthHeaders(),
+    headers: buildAuthHeaders(undefined, { isGuestPlayer: true }),
   });
   const data = await res.json();
   if (!data.success) {
@@ -831,7 +1228,7 @@ export async function fetchPracticeSessionSummary(sessionId: string): Promise<{
   currentStreak: number;
 }> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${encodeURIComponent(sessionId)}`, {
-    headers: buildAuthHeaders(),
+    headers: buildAuthHeaders(undefined, { isGuestPlayer: true }),
   });
   const data = await res.json();
   if (!data.success) {
@@ -842,7 +1239,7 @@ export async function fetchPracticeSessionSummary(sessionId: string): Promise<{
 
 export async function fetchPracticeSessionQuestion(sessionId: string): Promise<SanitizedQuestion> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${encodeURIComponent(sessionId)}/question`, {
-    headers: buildAuthHeaders(),
+    headers: buildAuthHeaders(undefined, { isGuestPlayer: true }),
   });
   const data = await res.json();
   if (!data.success) {
@@ -853,7 +1250,7 @@ export async function fetchPracticeSessionQuestion(sessionId: string): Promise<S
 
 export async function fetchPracticeResult(sessionId: string): Promise<PracticeFinalResult> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${sessionId}/result`, {
-    headers: buildAuthHeaders(),
+    headers: buildAuthHeaders(undefined, { isGuestPlayer: true }),
   });
   const data = await res.json();
   if (!data.success) {

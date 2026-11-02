@@ -1,21 +1,17 @@
 import http from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
+import { gameStore } from '../game/game.store.js';
 import { AppError } from '../utils/errors.js';
-import { MultiplayerRoom, roomService } from './room.service.js';
+import { MultiplayerRoom } from './room.service.js';
 import { roomStore } from './room.store.js';
 import {
-  HostEndSchema,
   HostJoinSchema,
-  HostLockSchema,
-  HostNextSchema,
-  HostStartSchema,
-  HostUnlockSchema,
+  HostPublishAnswersSchema,
+  HostToggleLeaderboardSchema,
   LeaderboardEntry,
-  MULTIPLAYER_CONFIG,
   OutboundMessage,
   PlayerAnswerSchema,
   PlayerJoinSchema,
-  PlayerLeaveSchema,
   PlayerReconnectSchema,
 } from './room.types.js';
 
@@ -61,7 +57,7 @@ export class MultiplayerWebSocketServer {
         this.handleDisconnect(ws);
       });
 
-      ws.on('error', (err) => {
+      ws.on('error', () => {
         this.handleDisconnect(ws);
       });
     });
@@ -155,6 +151,14 @@ export class MultiplayerWebSocketServer {
           this.handleHostLock(ws, false);
           break;
 
+        case 'host.publishAnswers':
+          this.handleHostPublishAnswers(ws, payload);
+          break;
+
+        case 'host.toggleLeaderboard':
+          this.handleHostToggleLeaderboard(ws, payload);
+          break;
+
         case 'player.join':
           this.handlePlayerJoin(ws, payload);
           break;
@@ -207,14 +211,23 @@ export class MultiplayerWebSocketServer {
       role: 'host',
       roomCode: room.roomCode,
       roomId: room.roomId,
+      gameId: room.gameId,
       state: room.state,
       title: room.gameSpecification.title,
       gameType: room.gameSpecification.gameType,
+      sessionMode: room.getSessionMode(),
+      rosterMode: room.getRosterMode(),
+      answersPublished: room.answersPublished,
+      showExamLeaderboardToPlayers: room.showExamLeaderboardToPlayers,
+      passThresholdPercent: room.getPassThresholdPercent(),
+      audioConfig: room.gameSpecification.settings?.audioConfig,
       totalQuestions: room.gameSpecification.questions.length,
       playerCount: room.players.size,
       players: Array.from(room.players.values()).map((p) => ({
         id: p.playerId,
         displayName: p.displayName,
+        participantId: p.participantId ?? null,
+        departmentUnit: p.departmentUnit || undefined,
         connected: p.connected,
       })),
       isLocked: room.isLocked,
@@ -231,6 +244,7 @@ export class MultiplayerWebSocketServer {
         question: currentQ,
         answeredCount,
         totalPlayers: room.players.size,
+        sessionMode: room.getSessionMode(),
       });
     } else if (room.state === 'QUESTION_REVEAL') {
       const activeQ = room.gameSpecification.questions[room.currentQuestionIndex];
@@ -240,6 +254,9 @@ export class MultiplayerWebSocketServer {
         correctAnswer: activeQ.correctAnswer,
         explanation: activeQ.explanation,
         leaderboard: room.getLeaderboard(),
+        autoAdvanceMs: room.getAutoAdvanceDelayMs(),
+        sessionMode: room.getSessionMode(),
+        answersPublished: room.answersPublished,
       });
     } else if (room.state === 'FINISHED') {
       const leaderboard = room.getLeaderboard();
@@ -248,6 +265,10 @@ export class MultiplayerWebSocketServer {
         leaderboard,
         winner: leaderboard[0],
         totalQuestions: room.gameSpecification.questions.length,
+        maxPossibleScore: room.getMaxPossibleScore(),
+        sessionMode: room.getSessionMode(),
+        answersPublished: room.answersPublished,
+        passThresholdPercent: room.getPassThresholdPercent(),
       });
     }
   }
@@ -272,6 +293,86 @@ export class MultiplayerWebSocketServer {
     });
   }
 
+  private handleHostPublishAnswers(ws: WebSocket, payload: unknown): void {
+    const parse = HostPublishAnswersSchema.safeParse(payload);
+    if (!parse.success) {
+      this.sendError(ws, 'INVALID_MESSAGE', parse.error.issues[0]?.message || 'Invalid host.publishAnswers payload.');
+      return;
+    }
+
+    const meta = this.socketMeta.get(ws);
+    if (!meta || meta.role !== 'host') {
+      this.sendError(ws, 'NOT_HOST', 'Only the room host can publish exam answers.');
+      return;
+    }
+
+    const room = roomStore.getByRoomCode(meta.roomCode);
+    if (!room) {
+      this.sendError(ws, 'ROOM_NOT_FOUND', 'Room not found.');
+      return;
+    }
+
+    const questionsPayload = room.publishAnswers(meta.token);
+    const publishedAt = new Date().toISOString();
+
+    // Also update saved GameSpecification if present so REST endpoints reflect published answers
+    const storedSpec = gameStore.get(room.gameId);
+    if (storedSpec) {
+      const updatedSpec = {
+        ...storedSpec,
+        settings: {
+          ...storedSpec.settings,
+          answersPublished: true,
+          answersPublishedAt: publishedAt,
+        },
+      };
+      gameStore.save(updatedSpec, Date.now(), storedSpec.ownerUserId ?? null, storedSpec.isPublic ?? true);
+    }
+
+    this.broadcastToRoom(room.roomCode, {
+      type: 'answers.published',
+      answersPublished: true,
+      publishedAt,
+      questions: questionsPayload,
+    });
+  }
+
+  private handleHostToggleLeaderboard(ws: WebSocket, payload: unknown): void {
+    const parse = HostToggleLeaderboardSchema.safeParse(payload);
+    if (!parse.success) {
+      this.sendError(ws, 'INVALID_MESSAGE', parse.error.issues[0]?.message || 'Invalid host.toggleLeaderboard payload.');
+      return;
+    }
+
+    const meta = this.socketMeta.get(ws);
+    if (!meta || meta.role !== 'host') {
+      this.sendError(ws, 'NOT_HOST', 'Only the room host can toggle leaderboard visibility.');
+      return;
+    }
+
+    const room = roomStore.getByRoomCode(meta.roomCode);
+    if (!room) {
+      this.sendError(ws, 'ROOM_NOT_FOUND', 'Room not found.');
+      return;
+    }
+
+    room.setExamLeaderboardVisibility(meta.token, parse.data.visible);
+    const fullLb = room.getLeaderboard();
+    const socketSet = this.roomSockets.get(room.roomCode);
+    if (socketSet) {
+      for (const clientWs of socketSet) {
+        if (clientWs.readyState !== WebSocket.OPEN) continue;
+        const clientMeta = this.socketMeta.get(clientWs);
+        const isHost = clientMeta?.role === 'host';
+        this.send(clientWs, {
+          type: 'leaderboard.updated',
+          showExamLeaderboardToPlayers: room.showExamLeaderboardToPlayers,
+          leaderboard: isHost || room.showExamLeaderboardToPlayers ? fullLb : [],
+        });
+      }
+    }
+  }
+
   private handlePlayerJoin(ws: WebSocket, payload: unknown): void {
     const parse = PlayerJoinSchema.safeParse(payload);
     if (!parse.success) {
@@ -279,15 +380,18 @@ export class MultiplayerWebSocketServer {
       return;
     }
 
-    const { roomCode, displayName, playerToken } = parse.data;
+    const { roomCode, displayName, playerToken, participantId, departmentUnit, lockToken } = parse.data;
     const room = roomStore.getByRoomCode(roomCode);
     if (!room) {
       this.sendError(ws, 'ROOM_NOT_FOUND', `Room "${roomCode}" not found.`);
       return;
     }
 
-    // Players can join room with roomCode/PIN without requiring any password (password protection is for game deletion only)
-    const { player, isReconnect } = room.addPlayer(displayName, playerToken);
+    const { player, isReconnect } = room.addPlayer(displayName, playerToken, {
+      participantId,
+      departmentUnit,
+      lockToken,
+    });
     this.registerSocket(ws, room.roomCode, 'player', player.playerToken, player.playerId);
 
     this.send(ws, {
@@ -295,12 +399,22 @@ export class MultiplayerWebSocketServer {
       role: 'player',
       roomCode: room.roomCode,
       roomId: room.roomId,
+      gameId: room.gameId,
       playerId: player.playerId,
       playerToken: player.playerToken,
+      participantId: player.participantId ?? null,
+      departmentUnit: player.departmentUnit || undefined,
       score: player.score,
+      maxPossibleScore: room.getMaxPossibleScore(),
       state: room.state,
       title: room.gameSpecification.title,
       gameType: room.gameSpecification.gameType,
+      sessionMode: room.getSessionMode(),
+      rosterMode: room.getRosterMode(),
+      answersPublished: room.answersPublished,
+      showExamLeaderboardToPlayers: room.showExamLeaderboardToPlayers,
+      passThresholdPercent: room.getPassThresholdPercent(),
+      audioConfig: room.gameSpecification.settings?.audioConfig,
       totalQuestions: room.gameSpecification.questions.length,
       playerCount: room.players.size,
       isLocked: room.isLocked,
@@ -311,47 +425,16 @@ export class MultiplayerWebSocketServer {
       this.broadcastToRoom(room.roomCode, {
         type: 'lobby.playerJoined',
         playerCount: room.players.size,
-        player: { id: player.playerId, displayName: player.displayName },
+        player: {
+          id: player.playerId,
+          displayName: player.displayName,
+          participantId: player.participantId ?? null,
+          departmentUnit: player.departmentUnit || undefined,
+        },
       });
     }
 
-    if (room.state === 'QUESTION_ACTIVE') {
-      const currentQ = room.getSanitizedCurrentQuestion();
-      const answeredCount = Array.from(room.players.values()).filter((p) =>
-        p.answeredQuestionIds.has(currentQ.id)
-      ).length;
-      this.send(ws, {
-        type: 'question.started',
-        question: currentQ,
-        answeredCount,
-        totalPlayers: room.players.size,
-      });
-      if (player.answeredQuestionIds.has(currentQ.id)) {
-        this.send(ws, {
-          type: 'question.answerReceived',
-          questionId: currentQ.id,
-        });
-      }
-    } else if (room.state === 'QUESTION_REVEAL') {
-      const activeQ = room.gameSpecification.questions[room.currentQuestionIndex];
-      const personalResult = player.questionResults.get(activeQ.id);
-      this.send(ws, {
-        type: 'question.revealed',
-        questionId: activeQ.id,
-        correctAnswer: activeQ.correctAnswer,
-        explanation: activeQ.explanation,
-        leaderboard: room.getLeaderboard(),
-        personalResult,
-      });
-    } else if (room.state === 'FINISHED') {
-      const leaderboard = room.getLeaderboard();
-      this.send(ws, {
-        type: 'game.finished',
-        leaderboard,
-        winner: leaderboard[0],
-        totalQuestions: room.gameSpecification.questions.length,
-      });
-    }
+    this.syncPlayerCurrentRoomState(ws, room, player);
   }
 
   private handlePlayerReconnect(ws: WebSocket, payload: unknown): void {
@@ -376,18 +459,36 @@ export class MultiplayerWebSocketServer {
       role: 'player',
       roomCode: room.roomCode,
       roomId: room.roomId,
+      gameId: room.gameId,
       playerId: player.playerId,
       playerToken: player.playerToken,
+      participantId: player.participantId ?? null,
+      departmentUnit: player.departmentUnit || undefined,
       score: player.score,
+      maxPossibleScore: room.getMaxPossibleScore(),
       state: room.state,
       title: room.gameSpecification.title,
       gameType: room.gameSpecification.gameType,
+      sessionMode: room.getSessionMode(),
+      rosterMode: room.getRosterMode(),
+      answersPublished: room.answersPublished,
+      showExamLeaderboardToPlayers: room.showExamLeaderboardToPlayers,
+      passThresholdPercent: room.getPassThresholdPercent(),
+      audioConfig: room.gameSpecification.settings?.audioConfig,
       totalQuestions: room.gameSpecification.questions.length,
       playerCount: room.players.size,
       isLocked: room.isLocked,
       currentQuestionIndex: room.currentQuestionIndex,
     });
 
+    this.syncPlayerCurrentRoomState(ws, room, player);
+  }
+
+  private syncPlayerCurrentRoomState(
+    ws: WebSocket,
+    room: MultiplayerRoom,
+    player: ReturnType<MultiplayerRoom['reconnectPlayer']>
+  ): void {
     if (room.state === 'QUESTION_ACTIVE') {
       const currentQ = room.getSanitizedCurrentQuestion();
       const answeredCount = Array.from(room.players.values()).filter((p) =>
@@ -398,6 +499,7 @@ export class MultiplayerWebSocketServer {
         question: currentQ,
         answeredCount,
         totalPlayers: room.players.size,
+        sessionMode: room.getSessionMode(),
       });
       if (player.answeredQuestionIds.has(currentQ.id)) {
         this.send(ws, {
@@ -407,22 +509,53 @@ export class MultiplayerWebSocketServer {
       }
     } else if (room.state === 'QUESTION_REVEAL') {
       const activeQ = room.gameSpecification.questions[room.currentQuestionIndex];
-      const personalResult = player.questionResults.get(activeQ.id);
+      const rawPersonal = player.questionResults.get(activeQ.id);
+      const hideAnswers = room.getSessionMode() === 'EXAM' && !room.answersPublished;
+      const showLb =
+        room.getSessionMode() !== 'EXAM' ||
+        room.showExamLeaderboardToPlayers ||
+        room.answersPublished;
+
       this.send(ws, {
         type: 'question.revealed',
         questionId: activeQ.id,
-        correctAnswer: activeQ.correctAnswer,
-        explanation: activeQ.explanation,
-        leaderboard: room.getLeaderboard(),
-        personalResult,
+        correctAnswer: hideAnswers ? '' : activeQ.correctAnswer,
+        explanation: hideAnswers ? undefined : activeQ.explanation,
+        leaderboard: showLb ? room.getLeaderboard() : [],
+        personalResult: rawPersonal
+          ? hideAnswers
+            ? {
+                questionId: rawPersonal.questionId,
+                answer: rawPersonal.answer,
+                isCorrect: false,
+                pointsEarned: 0,
+                responseTimeMs: rawPersonal.responseTimeMs,
+                answeredAt: rawPersonal.answeredAt,
+                timedOut: rawPersonal.timedOut,
+                examRedacted: true,
+              }
+            : rawPersonal
+          : undefined,
+        autoAdvanceMs: room.getAutoAdvanceDelayMs(),
+        sessionMode: room.getSessionMode(),
+        answersPublished: room.answersPublished,
       });
     } else if (room.state === 'FINISHED') {
       const leaderboard = room.getLeaderboard();
+      const showLb =
+        room.getSessionMode() !== 'EXAM' ||
+        room.showExamLeaderboardToPlayers ||
+        room.answersPublished;
       this.send(ws, {
         type: 'game.finished',
-        leaderboard,
-        winner: leaderboard[0],
+        leaderboard: showLb ? leaderboard : [],
+        winner: showLb ? leaderboard[0] : undefined,
         totalQuestions: room.gameSpecification.questions.length,
+        maxPossibleScore: room.getMaxPossibleScore(),
+        sessionMode: room.getSessionMode(),
+        answersPublished: room.answersPublished,
+        passThresholdPercent: room.getPassThresholdPercent(),
+        personalEvaluation: room.evaluatePlayerPerformance(player),
       });
     }
   }
@@ -445,6 +578,7 @@ export class MultiplayerWebSocketServer {
     this.broadcastToRoom(room.roomCode, {
       type: 'game.started',
       totalQuestions: room.gameSpecification.questions.length,
+      sessionMode: room.getSessionMode(),
     });
 
     this.broadcastToRoom(room.roomCode, {
@@ -452,6 +586,7 @@ export class MultiplayerWebSocketServer {
       question,
       answeredCount: 0,
       totalPlayers: room.players.size,
+      sessionMode: room.getSessionMode(),
     });
 
     this.scheduleQuestionTimer(room);
@@ -534,17 +669,13 @@ export class MultiplayerWebSocketServer {
         question: nextResult.question,
         answeredCount: 0,
         totalPlayers: room.players.size,
+        sessionMode: room.getSessionMode(),
       });
 
       this.scheduleQuestionTimer(room);
     } else if (nextResult.finished) {
       const leaderboard = nextResult.finalLeaderboard || room.getLeaderboard();
-      this.broadcastToRoom(room.roomCode, {
-        type: 'game.finished',
-        leaderboard,
-        winner: leaderboard[0],
-        totalQuestions: room.gameSpecification.questions.length,
-      });
+      this.broadcastGameFinished(room, leaderboard);
     }
   }
 
@@ -562,12 +693,47 @@ export class MultiplayerWebSocketServer {
     }
 
     const leaderboard = room.endGame(meta.token);
-    this.broadcastToRoom(room.roomCode, {
-      type: 'game.finished',
-      leaderboard,
-      winner: leaderboard[0],
-      totalQuestions: room.gameSpecification.questions.length,
-    });
+    this.broadcastGameFinished(room, leaderboard);
+  }
+
+  private broadcastGameFinished(room: MultiplayerRoom, leaderboard: LeaderboardEntry[]): void {
+    const socketSet = this.roomSockets.get(room.roomCode);
+    if (!socketSet) return;
+
+    const showLbToPlayers =
+      room.getSessionMode() !== 'EXAM' ||
+      room.showExamLeaderboardToPlayers ||
+      room.answersPublished;
+    const maxPossibleScore = room.getMaxPossibleScore();
+    const sessionMode = room.getSessionMode();
+    const passThresholdPercent = room.getPassThresholdPercent();
+    const totalQuestions = room.gameSpecification.questions.length;
+
+    for (const ws of socketSet) {
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const meta = this.socketMeta.get(ws);
+      const isHost = meta?.role === 'host';
+      let personalEvaluation = undefined;
+
+      if (meta?.role === 'player') {
+        const player = room.players.get(meta.token);
+        if (player) {
+          personalEvaluation = room.evaluatePlayerPerformance(player);
+        }
+      }
+
+      this.send(ws, {
+        type: 'game.finished',
+        leaderboard: isHost || showLbToPlayers ? leaderboard : [],
+        winner: isHost || showLbToPlayers ? leaderboard[0] : undefined,
+        totalQuestions,
+        maxPossibleScore,
+        sessionMode,
+        answersPublished: room.answersPublished,
+        passThresholdPercent,
+        personalEvaluation,
+      });
+    }
   }
 
   private handlePlayerLeave(ws: WebSocket): void {
@@ -629,7 +795,7 @@ export class MultiplayerWebSocketServer {
     }
 
     const questionIndexAtReveal = room.currentQuestionIndex;
-    const autoAdvanceDelayMs = MULTIPLAYER_CONFIG.AUTO_ADVANCE_DELAY_MS;
+    const autoAdvanceDelayMs = room.getAutoAdvanceDelayMs();
 
     room.timerHandle = setTimeout(() => {
       if (room.state === 'QUESTION_REVEAL' && room.currentQuestionIndex === questionIndexAtReveal) {
@@ -649,6 +815,12 @@ export class MultiplayerWebSocketServer {
     if (room.state !== 'QUESTION_ACTIVE') return;
 
     const revealData = room.revealQuestion();
+    const autoAdvanceMs = room.getAutoAdvanceDelayMs();
+    const hideAnswersFromPlayers = room.getSessionMode() === 'EXAM' && !room.answersPublished;
+    const showLbToPlayers =
+      room.getSessionMode() !== 'EXAM' ||
+      room.showExamLeaderboardToPlayers ||
+      room.answersPublished;
 
     // Broadcast timeUp event
     this.broadcastToRoom(room.roomCode, { type: 'question.timeUp' });
@@ -660,24 +832,41 @@ export class MultiplayerWebSocketServer {
         if (ws.readyState !== WebSocket.OPEN) continue;
 
         const meta = this.socketMeta.get(ws);
+        const isHost = meta?.role === 'host';
         let personalResult = undefined;
 
         if (meta && meta.role === 'player') {
           const player = room.players.get(meta.token);
           if (player) {
-            personalResult = player.questionResults.get(revealData.questionId);
+            const rawPersonal = player.questionResults.get(revealData.questionId);
+            if (rawPersonal) {
+              personalResult = hideAnswersFromPlayers
+                ? {
+                    questionId: rawPersonal.questionId,
+                    answer: rawPersonal.answer,
+                    isCorrect: false,
+                    pointsEarned: 0,
+                    responseTimeMs: rawPersonal.responseTimeMs,
+                    answeredAt: rawPersonal.answeredAt,
+                    timedOut: rawPersonal.timedOut,
+                    examRedacted: true,
+                  }
+                : rawPersonal;
+            }
           }
         }
 
         this.send(ws, {
           type: 'question.revealed',
           questionId: revealData.questionId,
-          correctAnswer: revealData.correctAnswer,
-          explanation: revealData.explanation,
-          leaderboard: revealData.leaderboard,
-          answerStats: revealData.answerStats,
+          correctAnswer: isHost || !hideAnswersFromPlayers ? revealData.correctAnswer : '',
+          explanation: isHost || !hideAnswersFromPlayers ? revealData.explanation : undefined,
+          leaderboard: isHost || showLbToPlayers ? revealData.leaderboard : [],
+          answerStats: isHost || !hideAnswersFromPlayers ? revealData.answerStats : undefined,
           personalResult,
-          autoAdvanceMs: MULTIPLAYER_CONFIG.AUTO_ADVANCE_DELAY_MS,
+          autoAdvanceMs,
+          sessionMode: room.getSessionMode(),
+          answersPublished: room.answersPublished,
         });
       }
     }
@@ -750,4 +939,3 @@ export class MultiplayerWebSocketServer {
 }
 
 export const multiplayerWsServer = new MultiplayerWebSocketServer();
-

@@ -13,6 +13,10 @@ import type {
   PracticeQuestionResult,
   SanitizedQuestion,
 } from '../types/index.js';
+import {
+  calculateFrontendMaxPossibleScore,
+  evaluateFrontendPerformance,
+} from '../types/index.js';
 
 export type AdventureAssetItem = AdventureAssetMetadata;
 
@@ -818,6 +822,9 @@ export interface AdventureGameEngineProps {
   onOpenConfigTab?: () => void;
   isPlaytest?: boolean;
   onCheckpointModalChange?: (isOpen: boolean, stageIndex: number) => void;
+  onEditCheckpointQuestion?: (stageIndex: number) => void;
+  audioMuted?: boolean;
+  onToggleAudioMute?: () => void;
 }
 
 export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
@@ -849,6 +856,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   onExit,
   isPlaytest = false,
   onCheckpointModalChange,
+  onEditCheckpointQuestion,
+  audioMuted = false,
+  onToggleAudioMute,
 }) => {
   const effectiveOnStartSession = onStartSession || onStartLiveSession;
   const effectiveOnSubmitAnswer = onSubmitAnswer || onSubmitLiveAnswer;
@@ -1831,6 +1841,27 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               <span>CHẾ ĐỘ CHƠI THỬ</span>
             </div>
           )}
+          {onToggleAudioMute && (
+            <button
+              type="button"
+              data-testid="audio-mute-toggle-btn"
+              onClick={onToggleAudioMute}
+              style={{
+                height: '38px',
+                padding: '0 12px',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(15, 23, 42, 0.88)',
+                border: '1px solid rgba(148, 163, 184, 0.3)',
+                color: audioMuted ? '#94a3b8' : '#38bdf8',
+                fontSize: '12px',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+              title={audioMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
+            >
+              {audioMuted ? '🔇 Đã tắt tiếng' : '🔊 Âm thanh'}
+            </button>
+          )}
           {isJourneyStarted && !isJourneyFinished && assetLoadStatus === 'READY' && (
             <button
               type="button"
@@ -2300,6 +2331,25 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                  {isPlaytest && onEditCheckpointQuestion && (
+                    <button
+                      type="button"
+                      data-testid="playtest-inline-edit-btn"
+                      onClick={() => onEditCheckpointQuestion(activeStageIndex)}
+                      style={{
+                        padding: '3px 10px',
+                        borderRadius: '8px',
+                        fontSize: '11.5px',
+                        fontWeight: 800,
+                        backgroundColor: 'rgba(245, 158, 11, 0.18)',
+                        border: '1px solid rgba(245, 158, 11, 0.6)',
+                        color: '#fde68a',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ✎ Chỉnh sửa câu này
+                    </button>
+                  )}
                   {mode === 'LIVE_SESSION' && typeof timeRemaining === 'number' && !activeFeedback && (
                     <span
                       data-testid="checkpoint-timer-badge"
@@ -2922,15 +2972,32 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               </div>
 
               {/* Feedback & Continue Button */}
-              {activeFeedback && (
+              {activeFeedback && (() => {
+                const isExamUnpublished =
+                  game.settings?.sessionMode === 'EXAM' &&
+                  !game.settings?.answersPublished &&
+                  !isPlaytest;
+                const isTimedOutFeedback =
+                  (activeFeedback as PracticeQuestionResult).timedOut === true;
+                return (
                 <div
                   data-testid="checkpoint-feedback-panel"
                   style={{
                     marginTop: '14px',
                     padding: '12px 14px',
                     borderRadius: '8px',
-                    backgroundColor: activeFeedback.isCorrect ? '#172a1d' : '#2c1a20',
-                    border: `1px solid ${activeFeedback.isCorrect ? '#3fc07a' : '#e5566f'}`,
+                    backgroundColor: isExamUnpublished
+                      ? '#161f30'
+                      : activeFeedback.isCorrect
+                        ? '#172a1d'
+                        : '#2c1a20',
+                    border: `1px solid ${
+                      isExamUnpublished
+                        ? '#38bdf8'
+                        : activeFeedback.isCorrect
+                          ? '#3fc07a'
+                          : '#e5566f'
+                    }`,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
@@ -2943,14 +3010,22 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       style={{
                         fontSize: '13.5px',
                         fontWeight: 700,
-                        color: activeFeedback.isCorrect ? '#3fc07a' : '#e5566f',
+                        color: isExamUnpublished
+                          ? '#38bdf8'
+                          : activeFeedback.isCorrect
+                            ? '#3fc07a'
+                            : '#e5566f',
                       }}
                     >
-                      {activeFeedback.isCorrect
-                        ? `[CHÍNH XÁC +${activeFeedback.pointsEarned}Đ] Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
-                        : `[CHƯA ĐÚNG] Đáp án chuẩn: ${activeFeedback.correctAnswer}`}
+                      {isExamUnpublished
+                        ? isTimedOutFeedback
+                          ? `[HẾT THỜI GIAN TRẢ LỜI] Đã ghi nhận tự động — Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
+                          : `[ĐÃ GHI NHẬN CÂU TRẢ LỜI] Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
+                        : activeFeedback.isCorrect
+                          ? `[CHÍNH XÁC +${activeFeedback.pointsEarned}Đ] Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
+                          : `[CHƯA ĐÚNG]${activeFeedback.correctAnswer ? ` Đáp án chuẩn: ${activeFeedback.correctAnswer}` : ''}`}
                     </div>
-                    {activeFeedback.explanation && (
+                    {!isExamUnpublished && activeFeedback.explanation && (
                       <div
                         style={{
                           marginTop: '4px',
@@ -2984,13 +3059,32 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       : 'Tiến về đích (Space)'}
                   </button>
                 </div>
-              )}
+                );
+              })()}
             </div>
           </div>
         )}
 
         {/* ================= VICTORY / FINISH OVERLAY ================= */}
-        {isJourneyFinished && (
+        {isJourneyFinished && (() => {
+          const victoryCorrectCount =
+            mode === 'LIVE_SESSION'
+              ? (effectiveFinalResult as PracticeFinalResult | null)?.correctCount ??
+                effectiveFinalResult?.correctAnswers ??
+                liveCorrectCount
+              : previewCorrectCount;
+          const victoryMaxScore =
+            (effectiveFinalResult as PracticeFinalResult | null)?.maxPossibleScore ||
+            calculateFrontendMaxPossibleScore(totalStages, game.settings?.scoringMode);
+          const victoryEval =
+            (effectiveFinalResult as PracticeFinalResult | null)?.performanceEvaluation ||
+            evaluateFrontendPerformance({
+              correctAnswers: victoryCorrectCount,
+              totalQuestions: totalStages,
+              sessionMode: game.settings?.sessionMode,
+              passThresholdPercent: game.settings?.passThresholdPercent,
+            });
+          return (
           <div
             data-testid="scene-victory-overlay"
             style={{
@@ -3008,7 +3102,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             <div
               style={{
                 width: '100%',
-                maxWidth: '560px',
+                maxWidth: '580px',
                 backgroundColor: '#111726',
                 border: '1px solid #26334d',
                 borderRadius: '12px',
@@ -3016,12 +3110,30 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 color: '#f8fafc',
               }}
             >
-              <div style={{ fontSize: '12px', color: '#3fc07a', fontWeight: 700 }}>
-                HOÀN THÀNH MÀN CHƠI · {effectiveConfig.industryLabel}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                <div style={{ fontSize: '12px', color: '#3fc07a', fontWeight: 700 }}>
+                  HOÀN THÀNH MÀN CHƠI · {effectiveConfig.industryLabel}
+                </div>
+                {victoryEval.isPassed !== null && (
+                  <span
+                    data-testid="exam-pass-status-badge"
+                    style={{
+                      padding: '3px 10px',
+                      borderRadius: '999px',
+                      fontSize: '11.5px',
+                      fontWeight: 900,
+                      backgroundColor: victoryEval.isPassed ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
+                      border: `1.5px solid ${victoryEval.isPassed ? '#22c55e' : '#ef4444'}`,
+                      color: victoryEval.isPassed ? '#4ade80' : '#fca5a5',
+                    }}
+                  >
+                    {victoryEval.isPassed ? '✓ ĐẠT YÊU CẦU' : '✕ CHƯA ĐẠT'} (Ngưỡng {victoryEval.passThresholdPercent}%)
+                  </span>
+                )}
               </div>
               <h2
                 style={{
-                  margin: '4px 0 18px 0',
+                  margin: '4px 0 14px 0',
                   fontSize: '23px',
                   fontWeight: 700,
                   color: '#f8fafc',
@@ -3029,6 +3141,27 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               >
                 {game.title || effectiveConfig.environmentTitle}
               </h2>
+
+              <div
+                data-testid="adventure-victory-evaluation"
+                style={{
+                  padding: '12px 14px',
+                  borderRadius: '10px',
+                  backgroundColor: '#161f30',
+                  border: `1px solid ${accentHex}`,
+                  marginBottom: '16px',
+                }}
+              >
+                <div
+                  data-testid="result-tier-label"
+                  style={{ fontSize: '15px', fontWeight: 900, color: accentHex }}
+                >
+                  Đánh giá: {victoryEval.tierLabel} ({victoryEval.accuracyPercentage}%)
+                </div>
+                <div style={{ fontSize: '12.5px', color: '#cbd5e1', marginTop: '4px', lineHeight: 1.45 }}>
+                  {victoryEval.comment}
+                </div>
+              </div>
 
               <div
                 style={{
@@ -3043,11 +3176,13 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 }}
               >
                 <div style={{ padding: '14px 16px', borderRight: '1px solid #222d42' }}>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>Tổng điểm màn chơi</div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>
+                    Tổng điểm (Tối đa: <span data-testid="victory-max-score">{victoryMaxScore}</span>)
+                  </div>
                   <div
                     data-testid="victory-total-score"
                     style={{
-                      fontSize: '25px',
+                      fontSize: '21px',
                       fontWeight: 700,
                       color: accentHex,
                       marginTop: '4px',
@@ -3058,21 +3193,16 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 </div>
 
                 <div style={{ padding: '14px 16px', borderRight: '1px solid #222d42' }}>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>Trạm trả lời đúng</div>
+                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>Trạm đúng ({victoryEval.accuracyPercentage}%)</div>
                   <div
                     style={{
-                      fontSize: '25px',
+                      fontSize: '21px',
                       fontWeight: 700,
                       color: '#f8fafc',
                       marginTop: '4px',
                     }}
                   >
-                    {mode === 'LIVE_SESSION'
-                      ? (effectiveFinalResult as PracticeFinalResult | null)?.correctCount ??
-                        effectiveFinalResult?.correctAnswers ??
-                        liveCorrectCount
-                      : previewCorrectCount}
-                    /{totalStages}
+                    {victoryCorrectCount}/{totalStages}
                   </div>
                 </div>
 
@@ -3080,7 +3210,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   <div style={{ fontSize: '12px', color: '#94a3b8' }}>Vật cản vượt qua</div>
                   <div
                     style={{
-                      fontSize: '25px',
+                      fontSize: '21px',
                       fontWeight: 700,
                       color: '#3fc07a',
                       marginTop: '4px',
@@ -3131,7 +3261,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               </div>
             </div>
           </div>
-        )}
+          );
+        })()}
       </div>
     </div>
   );

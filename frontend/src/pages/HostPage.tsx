@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from '../components/ToastContext.js';
 import { GameSocketClient, ConnectionStatus } from '../services/socket.js';
-import { fetchRoomQr, closeMultiplayerRoom } from '../services/api.js';
+import {
+  fetchRoomQr,
+  closeMultiplayerRoom,
+  downloadGameScoreboardExport,
+  grantParticipantRetakeApi,
+} from '../services/api.js';
+import { soundManager } from '../services/audio.js';
 import {
   AlertTriangleIcon,
   ArrowLeftIcon,
@@ -20,7 +26,12 @@ import {
   TrophyIcon,
   UsersIcon,
 } from '../components/Icons.js';
-import type { LeaderboardEntry, SanitizedQuestion } from '../types/index.js';
+import {
+  evaluateFrontendPerformance,
+  type LeaderboardEntry,
+  type SanitizedQuestion,
+  type SessionMode,
+} from '../types/index.js';
 
 interface HostPageProps {
   initialRoomCode?: string;
@@ -43,11 +54,24 @@ export const HostPage: React.FC<HostPageProps> = ({
   const [hostToken, setHostToken] = useState(
     initialHostToken || sessionStorage.getItem('active_host_token') || ''
   );
+  const [activeGameId, setActiveGameId] = useState(initialGameId || '');
   const [gameTitle, setGameTitle] = useState('');
   const [joinUrl, setJoinUrl] = useState('');
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [isLocked, setIsLocked] = useState(false);
+
+  // V2 Host State (Session Mode, Exam Answers Publish, Leaderboard Visibility, Audio)
+  const [sessionMode, setSessionMode] = useState<SessionMode>('PLAY');
+  const [answersPublished, setAnswersPublished] = useState<boolean>(false);
+  const [showExamLeaderboardToPlayers, setShowExamLeaderboardToPlayers] = useState<boolean>(false);
+  const [passThresholdPercent, setPassThresholdPercent] = useState<number>(50);
+  const [isAudioMuted, setIsAudioMuted] = useState<boolean>(() => soundManager.isMuted());
+
+  const handleToggleAudioMute = () => {
+    const nextMuted = soundManager.toggleMute();
+    setIsAudioMuted(nextMuted);
+  };
 
   // Host screens: 'lobby' | 'question' | 'reveal' | 'finish'
   const [viewState, setViewState] = useState<'lobby' | 'question' | 'reveal' | 'finish'>('lobby');
@@ -116,6 +140,27 @@ export const HostPage: React.FC<HostPageProps> = ({
 
     client.on('room.joined', (msg: any) => {
       setGameTitle(msg.title || 'Trò chơi nhiều người');
+      if (msg.gameId) {
+        setActiveGameId(msg.gameId);
+      }
+      if (msg.sessionMode === 'EXAM' || msg.sessionMode === 'PLAY') {
+        setSessionMode(msg.sessionMode);
+      }
+      if (typeof msg.answersPublished === 'boolean') {
+        setAnswersPublished(msg.answersPublished);
+      }
+      if (typeof msg.showExamLeaderboardToPlayers === 'boolean') {
+        setShowExamLeaderboardToPlayers(msg.showExamLeaderboardToPlayers);
+      }
+      if (typeof msg.passThresholdPercent === 'number') {
+        setPassThresholdPercent(msg.passThresholdPercent);
+      }
+      if (msg.audioConfig) {
+        soundManager.configure(msg.audioConfig);
+        if (msg.state === 'QUESTION_ACTIVE') {
+          soundManager.startBackgroundMusic();
+        }
+      }
       if (Array.isArray(msg.players)) {
         setPlayers(msg.players.map((p: any) => ({ id: p.id, displayName: p.displayName })));
       }
@@ -132,6 +177,17 @@ export const HostPage: React.FC<HostPageProps> = ({
         setViewState('finish');
       }
       toast.info(`Đã kết nối với phòng ${code}`, 'Kết nối thành công');
+    });
+
+    client.on('answers.published', () => {
+      setAnswersPublished(true);
+      toast.success('Đã công bố đáp án chính thức cho toàn bộ thí sinh!', 'Đã công bố đáp án');
+    });
+
+    client.on('leaderboard.visibilityChanged', (msg: any) => {
+      if (typeof msg.showExamLeaderboardToPlayers === 'boolean') {
+        setShowExamLeaderboardToPlayers(msg.showExamLeaderboardToPlayers);
+      }
     });
 
     client.on('room.lockStateChanged', (msg: any) => {
@@ -161,6 +217,7 @@ export const HostPage: React.FC<HostPageProps> = ({
     });
 
     client.on('game.started', () => {
+      soundManager.startBackgroundMusic();
       setViewState('question');
       toast.success('Chủ phòng đã kích hoạt bắt đầu trò chơi!', 'Bắt đầu');
     });
@@ -205,6 +262,8 @@ export const HostPage: React.FC<HostPageProps> = ({
 
     client.on('game.finished', (msg: any) => {
       stopTimer();
+      soundManager.stopBackgroundMusic();
+      soundManager.playSfx('finish');
       setFinishData({
         winner: msg.winner,
         leaderboard: msg.leaderboard || [],
@@ -253,6 +312,7 @@ export const HostPage: React.FC<HostPageProps> = ({
 
     return () => {
       stopTimer();
+      soundManager.stopAll();
       if (socketRef.current) {
         socketRef.current.close();
       }
@@ -276,6 +336,35 @@ export const HostPage: React.FC<HostPageProps> = ({
   const handleNextQuestion = () => {
     if (socketRef.current) {
       socketRef.current.send({ type: 'host.next' });
+    }
+  };
+
+  const handlePublishAnswers = () => {
+    if (socketRef.current && hostToken) {
+      socketRef.current.send({
+        type: 'host.publishAnswers',
+        hostToken,
+      });
+    }
+  };
+
+  const handleToggleExamLeaderboard = () => {
+    if (socketRef.current && hostToken) {
+      socketRef.current.send({
+        type: 'host.toggleLeaderboard',
+        hostToken,
+        show: !showExamLeaderboardToPlayers,
+      });
+    }
+  };
+
+  const handleHostGrantRetake = async (participantId: string | null | undefined, displayName: string) => {
+    if (!activeGameId || !participantId) return;
+    try {
+      await grantParticipantRetakeApi(activeGameId, participantId, 1);
+      toast.success(`Đã cấp thêm 1 lượt thi lại cho "${displayName}"!`, 'Cấp quyền thi lại');
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể cấp quyền thi lại.', 'Lỗi');
     }
   };
 
@@ -475,6 +564,25 @@ export const HostPage: React.FC<HostPageProps> = ({
               >
                 <LockIcon size={15} />
                 <span>{isLocked ? 'Mở khóa phòng' : 'Khóa phòng'}</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="audio-mute-toggle-btn"
+                onClick={handleToggleAudioMute}
+                style={{
+                  backgroundColor: 'var(--bg-card)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '10px',
+                  padding: '0.65rem 1.05rem',
+                  fontWeight: 700,
+                  fontSize: '0.9rem',
+                  cursor: 'pointer',
+                  minHeight: '44px',
+                }}
+              >
+                {isAudioMuted ? '🔇 Bật nhạc' : '🔊 Tắt nhạc'}
               </button>
 
               <button
@@ -1146,63 +1254,227 @@ export const HostPage: React.FC<HostPageProps> = ({
             Trận Đấu Kết Thúc!
           </h2>
 
-          {/* Winner Showcase Podium */}
-          {finishData.winner && (
+          {/* Top 3 Podium Showcase */}
+          {finishData.leaderboard.length > 0 && (
             <div
+              data-testid="host-podium-top3"
               style={{
-                backgroundColor: 'var(--bg-card)',
-                border: '2px solid #eab308',
-                borderRadius: '20px',
-                padding: '1.75rem 2.5rem',
-                display: 'inline-block',
-                margin: '1rem 0 2rem 0',
-                boxShadow: '0 12px 35px -5px rgba(234, 179, 8, 0.3)',
-                animation: 'popIn 0.4s ease-out',
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+                gap: '0.85rem',
+                maxWidth: '780px',
+                margin: '1rem auto 2rem auto',
               }}
             >
-              <div style={{ fontSize: '0.85rem', color: '#facc15', textTransform: 'uppercase', fontWeight: 900, letterSpacing: '0.1em' }}>
-                NHÀ VÔ ĐỊCH
-              </div>
-              <div style={{ fontSize: '2.4rem', fontWeight: 900, color: 'var(--accent-sky)', margin: '0.5rem 0' }}>
-                {finishData.winner.displayName}
-              </div>
-              <div style={{ fontSize: '1.4rem', color: 'var(--accent-emerald)', fontWeight: 900 }}>
-                {finishData.winner.score} Điểm
-              </div>
+              {finishData.leaderboard.slice(0, 3).map((entry) => (
+                <div
+                  key={entry.playerId}
+                  style={{
+                    backgroundColor: 'var(--bg-card)',
+                    border: entry.rank === 1 ? '2px solid #eab308' : '1px solid var(--border-strong)',
+                    borderRadius: '18px',
+                    padding: '1.25rem',
+                    boxShadow: entry.rank === 1 ? '0 12px 35px -5px rgba(234, 179, 8, 0.3)' : 'none',
+                  }}
+                >
+                  <div style={{ fontSize: '0.8rem', color: entry.rank === 1 ? '#facc15' : 'var(--text-secondary)', textTransform: 'uppercase', fontWeight: 900 }}>
+                    {entry.rank === 1 ? '🥇 HẠNG #1 — VÔ ĐỊCH' : entry.rank === 2 ? '🥈 HẠNG #2' : '🥉 HẠNG #3'}
+                  </div>
+                  <div style={{ fontSize: '1.45rem', fontWeight: 900, color: 'var(--accent-sky)', margin: '0.35rem 0' }}>
+                    {entry.displayName}
+                  </div>
+                  {entry.departmentUnit && (
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
+                      {entry.departmentUnit}
+                    </div>
+                  )}
+                  <div style={{ fontSize: '1.2rem', color: 'var(--accent-emerald)', fontWeight: 900 }}>
+                    {entry.score} Điểm ({entry.correctCount}/{entry.totalQuestions || 5} câu)
+                  </div>
+                </div>
+              ))}
             </div>
           )}
+
+          {/* Thanh điều khiển BTC / Host sau khi kết thúc */}
+          <div
+            data-testid="host-finish-controls"
+            style={{
+              display: 'flex',
+              justifyContent: 'center',
+              gap: '0.65rem',
+              flexWrap: 'wrap',
+              marginBottom: '1.5rem',
+            }}
+          >
+            {sessionMode === 'EXAM' && (
+              <>
+                <button
+                  type="button"
+                  data-testid="host-publish-answers-btn"
+                  onClick={handlePublishAnswers}
+                  disabled={answersPublished}
+                  style={{
+                    padding: '0.65rem 1.15rem',
+                    borderRadius: '10px',
+                    border: '1.5px solid rgba(245, 158, 11, 0.5)',
+                    backgroundColor: answersPublished
+                      ? 'rgba(16, 185, 129, 0.14)'
+                      : 'rgba(245, 158, 11, 0.16)',
+                    color: answersPublished ? 'var(--accent-emerald)' : '#f59e0b',
+                    fontSize: '0.86rem',
+                    fontWeight: 900,
+                    cursor: answersPublished ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  {answersPublished ? '✓ Đã công bố đáp án chính thức' : 'Công bố đáp án chính thức'}
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="host-toggle-leaderboard-btn"
+                  onClick={handleToggleExamLeaderboard}
+                  style={{
+                    padding: '0.65rem 1.15rem',
+                    borderRadius: '10px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-card)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.86rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {showExamLeaderboardToPlayers ? 'Ẩn BXH với thí sinh' : 'Hiện BXH cho thí sinh'}
+                </button>
+              </>
+            )}
+
+            {activeGameId && (
+              <>
+                <button
+                  type="button"
+                  data-testid="host-export-csv-btn"
+                  onClick={() => downloadGameScoreboardExport(activeGameId, 'csv')}
+                  style={{
+                    padding: '0.65rem 1.15rem',
+                    borderRadius: '10px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-card)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.86rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Xuất kết quả CSV
+                </button>
+                <button
+                  type="button"
+                  data-testid="host-export-xlsx-btn"
+                  onClick={() => downloadGameScoreboardExport(activeGameId, 'xlsx')}
+                  style={{
+                    padding: '0.65rem 1.15rem',
+                    borderRadius: '10px',
+                    border: '1.5px solid var(--accent-emerald)',
+                    backgroundColor: 'rgba(16, 185, 129, 0.14)',
+                    color: 'var(--accent-emerald)',
+                    fontSize: '0.86rem',
+                    fontWeight: 900,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Xuất kết quả Excel (.xlsx)
+                </button>
+              </>
+            )}
+          </div>
 
           <h3 style={{ color: 'var(--text-primary)', fontSize: '1.35rem', margin: '1.5rem 0 1rem 0', fontWeight: 900 }}>
             Bảng Xếp Hạng Chung Cuộc
           </h3>
 
-          <div style={{ maxWidth: '680px', margin: '0 auto', overflowX: 'auto', textAlign: 'left', backgroundColor: 'var(--bg-card)', borderRadius: '14px', border: '1px solid var(--border-subtle)' }}>
+          <div style={{ maxWidth: '860px', margin: '0 auto', overflowX: 'auto', textAlign: 'left', backgroundColor: 'var(--bg-card)', borderRadius: '14px', border: '1px solid var(--border-subtle)' }}>
             <table style={{ width: '100%', borderCollapse: 'collapse' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase' }}>
                   <th style={{ padding: '0.85rem 1rem' }}>Hạng</th>
                   <th style={{ padding: '0.85rem 1rem' }}>Người chơi</th>
+                  <th style={{ padding: '0.85rem 1rem' }}>Đơn vị</th>
                   <th style={{ padding: '0.85rem 1rem' }}>Điểm</th>
                   <th style={{ padding: '0.85rem 1rem' }}>Số câu đúng</th>
+                  <th style={{ padding: '0.85rem 1rem' }}>Đánh giá</th>
+                  {activeGameId && <th style={{ padding: '0.85rem 1rem' }}>Thi lại</th>}
                 </tr>
               </thead>
               <tbody>
-                {finishData.leaderboard.map((entry) => (
-                  <tr key={entry.playerId} style={{ borderBottom: '1px solid var(--border-subtle)', fontSize: '0.95rem' }}>
+                {finishData.leaderboard.map((entry) => {
+                  const totalQs = entry.totalQuestions || 5;
+                  const evalItem = evaluateFrontendPerformance(
+                    entry.correctCount,
+                    totalQs,
+                    sessionMode === 'EXAM' ? passThresholdPercent : undefined
+                  );
+                  const isPassedVal = entry.isPassed !== undefined ? entry.isPassed : evalItem.isPassed;
+
+                  return (
+                  <tr key={entry.playerId} style={{ borderBottom: '1px solid var(--border-subtle)', fontSize: '0.92rem' }}>
                     <td style={{ padding: '0.85rem 1rem', fontWeight: 900, color: entry.rank === 1 ? '#facc15' : entry.rank === 2 ? '#cbd5e1' : entry.rank === 3 ? '#d97706' : 'var(--text-muted)' }}>
                       {entry.rank === 1 ? '1' : entry.rank === 2 ? '2' : entry.rank === 3 ? '3' : `#${entry.rank}`}
                     </td>
                     <td style={{ padding: '0.85rem 1rem', fontWeight: 700, color: 'var(--text-primary)' }}>
                       {entry.displayName}
                     </td>
+                    <td style={{ padding: '0.85rem 1rem', color: 'var(--text-secondary)' }}>
+                      {entry.departmentUnit || '—'}
+                    </td>
                     <td style={{ padding: '0.85rem 1rem', color: 'var(--accent-emerald)', fontWeight: 900 }}>
                       {entry.score}
                     </td>
                     <td style={{ padding: '0.85rem 1rem', color: 'var(--text-secondary)' }}>
-                      {entry.correctCount}
+                      {entry.correctCount}/{totalQs} ({evalItem.accuracyPercent}%)
                     </td>
+                    <td style={{ padding: '0.85rem 1rem', fontWeight: 800 }}>
+                      <span>{evalItem.tierLabel}</span>
+                      {sessionMode === 'EXAM' && isPassedVal !== null && (
+                        <span
+                          style={{
+                            marginLeft: '0.4rem',
+                            color: isPassedVal ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                          }}
+                        >
+                          ({isPassedVal ? 'ĐẠT' : 'CHƯA ĐẠT'})
+                        </span>
+                      )}
+                    </td>
+                    {activeGameId && (
+                      <td style={{ padding: '0.85rem 1rem' }}>
+                        {entry.participantId ? (
+                          <button
+                            type="button"
+                            data-testid={`host-grant-retake-btn-${entry.participantId}`}
+                            onClick={() => handleHostGrantRetake(entry.participantId, entry.displayName)}
+                            style={{
+                              padding: '0.25rem 0.55rem',
+                              borderRadius: '6px',
+                              border: '1px solid var(--accent-emerald)',
+                              backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                              color: 'var(--accent-emerald)',
+                              fontSize: '0.75rem',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            +1 Thi lại
+                          </button>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                    )}
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>

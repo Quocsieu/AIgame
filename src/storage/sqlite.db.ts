@@ -199,6 +199,83 @@ export const MIGRATIONS: MigrationDefinition[] = [
       ALTER TABLE game_questions ADD COLUMN slider_config_json TEXT;
     `,
   },
+  {
+    version: 4,
+    name: '004_v2_exam_roster_and_attempts',
+    upSql: `
+      ALTER TABLE game_questions ADD COLUMN time_limit_seconds INTEGER;
+
+      CREATE TABLE IF NOT EXISTS game_participants (
+        participant_id TEXT PRIMARY KEY,
+        game_id TEXT NOT NULL,
+        full_name TEXT NOT NULL,
+        normalized_name TEXT NOT NULL,
+        department_unit TEXT NOT NULL DEFAULT '',
+        employee_code TEXT NOT NULL DEFAULT '',
+        contact_info TEXT NOT NULL DEFAULT '',
+        allowed_attempts INTEGER NOT NULL DEFAULT 1,
+        used_attempts INTEGER NOT NULL DEFAULT 0,
+        active_session_id TEXT,
+        active_room_code TEXT,
+        active_lock_token TEXT,
+        active_locked_at TEXT,
+        best_score INTEGER,
+        latest_score INTEGER,
+        latest_correct_answers INTEGER,
+        latest_total_questions INTEGER,
+        latest_accuracy_percent INTEGER,
+        latest_duration_ms INTEGER,
+        latest_is_passed INTEGER,
+        status TEXT NOT NULL DEFAULT 'PENDING',
+        retake_granted_count INTEGER NOT NULL DEFAULT 0,
+        retake_granted_by TEXT,
+        retake_granted_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_game_participants_game_id
+        ON game_participants(game_id, department_unit, normalized_name);
+
+      CREATE TABLE IF NOT EXISTS game_participant_attempts (
+        attempt_id TEXT PRIMARY KEY,
+        game_id TEXT NOT NULL,
+        participant_id TEXT,
+        session_id TEXT,
+        room_id TEXT,
+        room_code TEXT,
+        delivery_mode TEXT NOT NULL DEFAULT 'SOLO',
+        session_mode TEXT NOT NULL DEFAULT 'PLAY',
+        attempt_number INTEGER NOT NULL DEFAULT 1,
+        display_name TEXT NOT NULL,
+        department_unit TEXT NOT NULL DEFAULT '',
+        employee_code TEXT NOT NULL DEFAULT '',
+        participant_token_hash TEXT,
+        state TEXT NOT NULL DEFAULT 'IN_PROGRESS',
+        score INTEGER NOT NULL DEFAULT 0,
+        max_possible_score INTEGER NOT NULL DEFAULT 0,
+        correct_answers INTEGER NOT NULL DEFAULT 0,
+        total_questions INTEGER NOT NULL DEFAULT 0,
+        accuracy_percent INTEGER NOT NULL DEFAULT 0,
+        duration_ms INTEGER NOT NULL DEFAULT 0,
+        is_passed INTEGER,
+        answers_json TEXT NOT NULL DEFAULT '[]',
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        FOREIGN KEY (game_id) REFERENCES games(game_id) ON DELETE CASCADE,
+        FOREIGN KEY (participant_id) REFERENCES game_participants(participant_id) ON DELETE SET NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_participant_attempts_game_score
+        ON game_participant_attempts(game_id, state, score DESC, duration_ms ASC);
+
+      CREATE INDEX IF NOT EXISTS idx_participant_attempts_participant
+        ON game_participant_attempts(participant_id, attempt_number DESC);
+    `,
+  },
 ];
 
 let dbInstance: DatabaseSync | null = null;

@@ -1,7 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useToast } from '../components/ToastContext.js';
 import { GameSocketClient, ConnectionStatus } from '../services/socket.js';
-import type { LeaderboardEntry, SanitizedQuestion } from '../types/index.js';
+import { soundManager } from '../services/audio.js';
+import {
+  evaluateFrontendPerformance,
+  type LeaderboardEntry,
+  type SanitizedQuestion,
+  type SessionMode,
+} from '../types/index.js';
 import {
   AlertTriangleIcon,
   CheckIcon,
@@ -102,6 +108,19 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   const [finalRank, setFinalRank] = useState<number | null>(null);
   const [showLeaveConfirm, setShowLeaveConfirm] = useState(false);
   const [isLeaving, setIsLeaving] = useState(false);
+
+  // V2 Session Mode, Exam Redaction & Audio Controls
+  const [sessionMode, setSessionMode] = useState<SessionMode>('PLAY');
+  const [answersPublished, setAnswersPublished] = useState<boolean>(false);
+  const [publishedAnswersList, setPublishedAnswersList] = useState<
+    Array<{ id: string; question: string; correctAnswer: string; explanation?: string }>
+  >([]);
+  const [isAudioMuted, setIsAudioMuted] = useState<boolean>(() => soundManager.isMuted());
+
+  const handleToggleAudioMute = () => {
+    const nextMuted = soundManager.toggleMute();
+    setIsAudioMuted(nextMuted);
+  };
 
   const confirmLeaveRoom = () => {
     if (isLeaving) return;
@@ -209,17 +228,29 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
         });
       } else {
         const storedPassword = sessionStorage.getItem(`room_game_password_${roomCode}`) || undefined;
+        const storedParticipantId = sessionStorage.getItem('active_player_participant_id') || undefined;
+        const storedDept = sessionStorage.getItem('active_player_department') || undefined;
+        const storedLockToken = sessionStorage.getItem('active_player_lock_token') || undefined;
         client.send({
           type: 'player.join',
           roomCode,
           displayName,
           password: storedPassword,
+          participantId: storedParticipantId,
+          departmentUnit: storedDept,
+          lockToken: storedLockToken,
         });
       }
     });
 
     client.on('room.joined', (msg: any) => {
       setRoomError(null);
+      if (msg.sessionMode === 'EXAM' || msg.sessionMode === 'PLAY') {
+        setSessionMode(msg.sessionMode);
+      }
+      if (typeof msg.answersPublished === 'boolean') {
+        setAnswersPublished(msg.answersPublished);
+      }
       if (msg.playerToken) {
         sessionStorage.setItem(tokenKey, msg.playerToken);
       }
@@ -280,15 +311,26 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
     client.on('question.revealed', (msg: any) => {
       stopTimer();
       setIsSubmittingAnswer(false);
-      setCorrectAnswer(msg.correctAnswer);
+      if (msg.sessionMode === 'EXAM' || msg.sessionMode === 'PLAY') {
+        setSessionMode(msg.sessionMode);
+      }
+      if (typeof msg.answersPublished === 'boolean') {
+        setAnswersPublished(msg.answersPublished);
+      }
+      setCorrectAnswer(msg.correctAnswer || '');
       setExplanation(msg.explanation);
       setLeaderboard(msg.leaderboard || []);
       setPersonalResult(msg.personalResult ?? null);
 
-      if (msg.personalResult) {
+      const isExamRedacted =
+        (msg.sessionMode === 'EXAM' || sessionMode === 'EXAM') && !msg.answersPublished;
+
+      if (msg.personalResult && !isExamRedacted) {
         if (msg.personalResult.isCorrect) {
+          soundManager.playSfx('correct');
           toast.success(`Chính xác! Bạn nhận được +${msg.personalResult.pointsEarned} điểm!`, 'Chính xác');
         } else {
+          soundManager.playSfx('wrong');
           toast.error('Rất tiếc! Chưa phải đáp án chính xác.', 'Chưa chính xác');
         }
       }
@@ -307,6 +349,12 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
     client.on('game.finished', (msg: any) => {
       stopTimer();
       setIsSubmittingAnswer(false);
+      if (msg.sessionMode === 'EXAM' || msg.sessionMode === 'PLAY') {
+        setSessionMode(msg.sessionMode);
+      }
+      if (typeof msg.answersPublished === 'boolean') {
+        setAnswersPublished(msg.answersPublished);
+      }
       setLeaderboard(msg.leaderboard || []);
       const myId = playerIdRef.current;
       if (msg.leaderboard && myId) {
@@ -316,8 +364,17 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           setFinalRank(me.rank);
         }
       }
+      soundManager.playSfx('finish');
       setScreen('finish');
       toast.success('Trò chơi đã kết thúc! Xem kết quả chung cuộc của bạn bên dưới.', 'Kết thúc');
+    });
+
+    client.on('answers.published', (msg: any) => {
+      setAnswersPublished(true);
+      if (Array.isArray(msg.questions)) {
+        setPublishedAnswersList(msg.questions);
+      }
+      toast.success('Ban tổ chức đã công bố đáp án chính thức của kỳ thi!', 'Đã công bố đáp án');
     });
 
     client.on('error', (msg: any) => {
@@ -541,6 +598,26 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               </strong>
             </div>
           </div>
+
+          <button
+            type="button"
+            data-testid="audio-mute-toggle-btn"
+            onClick={handleToggleAudioMute}
+            title={isAudioMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
+            style={{
+              backgroundColor: 'var(--bg-input)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '10px',
+              padding: '0.45rem 0.7rem',
+              fontSize: '0.82rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+              minHeight: '38px',
+            }}
+          >
+            {isAudioMuted ? '🔇 Tắt tiếng' : '🔊 Âm thanh'}
+          </button>
 
           <button
             type="button"
@@ -1514,125 +1591,155 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             animation: 'popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
           }}
         >
-          {personalResult ? (
-            <div style={{ marginBottom: '2rem' }}>
+          {sessionMode === 'EXAM' && !answersPublished ? (
+            <div data-testid="exam-reveal-redacted" style={{ marginBottom: '1.25rem' }}>
               <div
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
-                  gap: '0.65rem',
-                  padding: '0.85rem 2rem',
+                  gap: '0.6rem',
+                  padding: '0.85rem 1.8rem',
                   borderRadius: '16px',
                   fontWeight: 900,
-                  fontSize: '1.35rem',
-                  backgroundColor: personalResult.isCorrect ? 'var(--k-green)' : 'var(--k-red)',
-                  color: '#ffffff',
-                  boxShadow: personalResult.isCorrect
-                    ? '0 4px 0 var(--k-green-dark)'
-                    : '0 4px 0 var(--k-red-dark)',
+                  fontSize: '1.2rem',
+                  backgroundColor: 'rgba(56, 189, 248, 0.16)',
+                  color: 'var(--accent-sky)',
+                  border: '1.5px solid rgba(56, 189, 248, 0.45)',
                 }}
               >
-                {personalResult.isCorrect ? <CheckIcon size={26} /> : <XMarkIcon size={26} />}
-                <span>{personalResult.isCorrect ? 'CHÍNH XÁC!' : 'CHƯA ĐÚNG!'}</span>
+                <CheckIcon size={22} />
+                <span>ĐÃ GHI NHẬN LƯỢT TRẢ LỜI</span>
               </div>
-
-              <div
-                style={{
-                  marginTop: '1.15rem',
-                  fontSize: '1.85rem',
-                  fontWeight: 900,
-                  color: personalResult.isCorrect ? 'var(--accent-emerald)' : 'var(--text-muted)',
-                }}
-              >
-                {personalResult.pointsEarned > 0 ? `+${personalResult.pointsEarned.toLocaleString()} điểm` : '+0 điểm'}
-              </div>
-
-              {personalResult.streak && personalResult.streak > 1 && (
-                <div
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '0.35rem',
-                    marginTop: '0.75rem',
-                    padding: '0.35rem 0.85rem',
-                    borderRadius: '20px',
-                    backgroundColor: 'rgba(255, 166, 2, 0.2)',
-                    border: '1.5px solid var(--k-yellow)',
-                    color: 'var(--k-yellow)',
-                    fontWeight: 900,
-                    fontSize: '0.95rem',
-                  }}
-                >
-                  <FlameIcon size={16} />
-                  <span>Chuỗi đúng liên tiếp x{personalResult.streak}!</span>
-                </div>
-              )}
+              <p style={{ marginTop: '0.85rem', color: 'var(--text-secondary)', fontSize: '0.92rem' }}>
+                Chế độ <strong>Thi nghiêm túc (EXAM)</strong>: Đáp án đúng và giải thích được bảo mật cho đến khi toàn bộ kỳ thi kết thúc và Ban tổ chức công bố.
+              </p>
             </div>
           ) : (
-            <div style={{ marginBottom: '2rem' }}>
-              <div
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  padding: '0.75rem 1.75rem',
-                  borderRadius: '16px',
-                  fontWeight: 900,
-                  fontSize: '1.15rem',
-                  backgroundColor: 'var(--k-yellow)',
-                  color: 'var(--k-yellow-ink)',
-                  boxShadow: '0 4px 0 var(--k-yellow-dark)',
-                }}
-              >
-                <ClockIcon size={22} />
-                <span>CHƯA TRẢ LỜI / HẾT GIỜ</span>
-              </div>
-              <div style={{ marginTop: '0.75rem', fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-muted)' }}>
-                +0 điểm
-              </div>
-            </div>
+            <>
+              {personalResult ? (
+                <div style={{ marginBottom: '2rem' }}>
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.65rem',
+                      padding: '0.85rem 2rem',
+                      borderRadius: '16px',
+                      fontWeight: 900,
+                      fontSize: '1.35rem',
+                      backgroundColor: personalResult.isCorrect ? 'var(--k-green)' : 'var(--k-red)',
+                      color: '#ffffff',
+                      boxShadow: personalResult.isCorrect
+                        ? '0 4px 0 var(--k-green-dark)'
+                        : '0 4px 0 var(--k-red-dark)',
+                    }}
+                  >
+                    {personalResult.isCorrect ? <CheckIcon size={26} /> : <XMarkIcon size={26} />}
+                    <span>{personalResult.isCorrect ? 'CHÍNH XÁC!' : 'CHƯA ĐÚNG!'}</span>
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: '1.15rem',
+                      fontSize: '1.85rem',
+                      fontWeight: 900,
+                      color: personalResult.isCorrect ? 'var(--accent-emerald)' : 'var(--text-muted)',
+                    }}
+                  >
+                    {personalResult.pointsEarned > 0 ? `+${personalResult.pointsEarned.toLocaleString()} điểm` : '+0 điểm'}
+                  </div>
+
+                  {personalResult.streak && personalResult.streak > 1 && (
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        marginTop: '0.75rem',
+                        padding: '0.35rem 0.85rem',
+                        borderRadius: '20px',
+                        backgroundColor: 'rgba(255, 166, 2, 0.2)',
+                        border: '1.5px solid var(--k-yellow)',
+                        color: 'var(--k-yellow)',
+                        fontWeight: 900,
+                        fontSize: '0.95rem',
+                      }}
+                    >
+                      <FlameIcon size={16} />
+                      <span>Chuỗi đúng liên tiếp x{personalResult.streak}!</span>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ marginBottom: '2rem' }}>
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      padding: '0.75rem 1.75rem',
+                      borderRadius: '16px',
+                      fontWeight: 900,
+                      fontSize: '1.15rem',
+                      backgroundColor: 'var(--k-yellow)',
+                      color: 'var(--k-yellow-ink)',
+                      boxShadow: '0 4px 0 var(--k-yellow-dark)',
+                    }}
+                  >
+                    <ClockIcon size={22} />
+                    <span>CHƯA TRẢ LỜI / HẾT GIỜ</span>
+                  </div>
+                  <div style={{ marginTop: '0.75rem', fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-muted)' }}>
+                    +0 điểm
+                  </div>
+                </div>
+              )}
+
+              {/* Correct answer callout */}
+              {correctAnswer && (
+                <div
+                  style={{
+                    margin: '1.25rem 0',
+                    padding: '1.15rem',
+                    backgroundColor: 'var(--bg-card)',
+                    borderRadius: '14px',
+                    border: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em', display: 'block', marginBottom: '0.4rem' }}>
+                    ĐÁP ÁN ĐÚNG
+                  </span>
+                  <strong style={{ color: 'var(--accent-emerald)', fontSize: '1.35rem', fontWeight: 900 }}>
+                    {correctAnswer}
+                  </strong>
+
+                  {explanation && (
+                    <p
+                      style={{
+                        color: 'var(--text-secondary)',
+                        fontSize: '0.9rem',
+                        fontStyle: 'italic',
+                        margin: '0.75rem 0 0 0',
+                        lineHeight: '1.45',
+                        paddingTop: '0.75rem',
+                        borderTop: '1px solid var(--border-subtle)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.45rem',
+                      }}
+                    >
+                      <SparklesIcon size={16} />
+                      <span>{explanation}</span>
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
           )}
 
-          {/* Correct answer callout */}
-          <div
-            style={{
-              margin: '1.25rem 0',
-              padding: '1.15rem',
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: '14px',
-              border: '1px solid var(--border-subtle)',
-            }}
-          >
-            <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em', display: 'block', marginBottom: '0.4rem' }}>
-              ĐÁP ÁN ĐÚNG
-            </span>
-            <strong style={{ color: 'var(--accent-emerald)', fontSize: '1.35rem', fontWeight: 900 }}>
-              {correctAnswer}
-            </strong>
-
-            {explanation && (
-              <p
-                style={{
-                  color: 'var(--text-secondary)',
-                  fontSize: '0.9rem',
-                  fontStyle: 'italic',
-                  margin: '0.75rem 0 0 0',
-                  lineHeight: '1.45',
-                  paddingTop: '0.75rem',
-                  borderTop: '1px solid var(--border-subtle)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.45rem',
-                }}
-              >
-                <SparklesIcon size={16} />
-                <span>{explanation}</span>
-              </p>
-            )}
-          </div>
-
           {/* Top 10 Mini Leaderboard */}
+          {leaderboard.length > 0 && (
           <div
             style={{
               marginTop: '1.75rem',
@@ -1690,11 +1797,24 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               </table>
             </div>
           </div>
+          )}
         </div>
       )}
 
       {/* 5. Màn hình Kết thúc (Finish Screen) */}
-      {screen === 'finish' && (
+      {screen === 'finish' && (() => {
+        const myEntry = leaderboard.find((e) => e.playerId === playerId);
+        const totalQs = myEntry?.totalQuestions || currentQuestion?.totalQuestions || 5;
+        const correctCnt = myEntry?.correctCount ?? 0;
+        const maxPossible = myEntry?.maxPossibleScore || totalQs * 100;
+        const evalRes = evaluateFrontendPerformance(
+          correctCnt,
+          totalQs,
+          sessionMode === 'EXAM' ? 50 : undefined
+        );
+        const isPassedVal = myEntry?.isPassed !== undefined ? myEntry.isPassed : evalRes.isPassed;
+
+        return (
         <div
           style={{
             backgroundColor: 'var(--bg-surface)',
@@ -1713,6 +1833,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           </h2>
 
           <div
+            data-testid="play-finish-evaluation"
             style={{
               backgroundColor: 'var(--bg-card)',
               border: '1px solid var(--border-subtle)',
@@ -1724,8 +1845,48 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em' }}>
               TỔNG ĐIỂM CHUNG CUỘC
             </span>
-            <div style={{ color: 'var(--accent-emerald)', fontSize: '2.5rem', fontWeight: 900, margin: '0.25rem 0' }}>
-              {playerScore}
+            <div style={{ color: 'var(--accent-emerald)', fontSize: '2.35rem', fontWeight: 900, margin: '0.25rem 0' }}>
+              {playerScore} <span style={{ fontSize: '1.1rem', color: 'var(--text-muted)' }}>/ {maxPossible}</span>
+            </div>
+
+            <div style={{ margin: '0.6rem 0', fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+              Đúng {correctCnt}/{totalQs} câu ({evalRes.accuracyPercent}%)
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
+              <span
+                data-testid="result-tier-label"
+                style={{
+                  padding: '0.35rem 0.9rem',
+                  borderRadius: '999px',
+                  backgroundColor: 'rgba(16, 185, 129, 0.14)',
+                  color: 'var(--accent-emerald)',
+                  border: '1px solid rgba(16, 185, 129, 0.4)',
+                  fontSize: '0.88rem',
+                  fontWeight: 900,
+                }}
+              >
+                {evalRes.tierLabel}
+              </span>
+
+              {sessionMode === 'EXAM' && isPassedVal !== null && (
+                <span
+                  data-testid="exam-pass-status-badge"
+                  style={{
+                    padding: '0.35rem 0.9rem',
+                    borderRadius: '999px',
+                    backgroundColor: isPassedVal ? 'rgba(16, 185, 129, 0.18)' : 'rgba(239, 68, 68, 0.18)',
+                    color: isPassedVal ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                    border: isPassedVal
+                      ? '1px solid var(--accent-emerald)'
+                      : '1px solid var(--accent-rose)',
+                    fontSize: '0.88rem',
+                    fontWeight: 900,
+                  }}
+                >
+                  {isPassedVal ? 'ĐẠT' : 'CHƯA ĐẠT'}
+                </span>
+              )}
             </div>
 
             {finalRank !== null && (
@@ -1740,7 +1901,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   color: 'var(--accent-sky)',
                   fontWeight: 800,
                   fontSize: '1rem',
-                  marginTop: '0.5rem',
+                  marginTop: '0.75rem',
                 }}
               >
                 <TrophyIcon size={16} />
@@ -1748,6 +1909,34 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               </div>
             )}
           </div>
+
+          {publishedAnswersList.length > 0 && (
+            <div
+              data-testid="published-exam-answers-list"
+              style={{
+                textAlign: 'left',
+                backgroundColor: 'var(--bg-card)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '14px',
+                padding: '1rem',
+                marginBottom: '1rem',
+              }}
+            >
+              <div style={{ fontSize: '0.86rem', fontWeight: 900, color: 'var(--accent-emerald)', marginBottom: '0.5rem' }}>
+                Đáp án chính thức đã được Ban tổ chức công bố:
+              </div>
+              {publishedAnswersList.map((item, idx) => (
+                <div key={item.id || idx} style={{ padding: '0.45rem 0', borderBottom: '1px solid var(--border-subtle)', fontSize: '0.82rem' }}>
+                  <div style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
+                    Câu {idx + 1}: {item.question}
+                  </div>
+                  <div style={{ color: 'var(--accent-emerald)', fontWeight: 800 }}>
+                    Đáp án đúng: {item.correctAnswer}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
 
           <div style={{ marginTop: '1.5rem' }}>
             <button
@@ -1771,7 +1960,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             </button>
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

@@ -9,6 +9,7 @@ import {
   GameTypeEnum,
   ScoringMode,
 } from '../contracts/game.contract.js';
+import type { PerformanceEvaluation } from '../game/game.scoring.js';
 
 export const RoomStateEnum = z.enum([
   'WAITING',
@@ -25,7 +26,7 @@ export const MULTIPLAYER_CONFIG = {
   ROOM_CODE_LENGTH: 6,
   // Ambiguity-free uppercase alphabet (excludes confusing characters: 0, O, 1, I, 5, S)
   ROOM_CODE_ALPHABET: 'ABCDEFGHJKLMNPQRTUVWXYZ2346789',
-  AUTO_ADVANCE_DELAY_MS: parseInt(process.env.AUTO_ADVANCE_DELAY_MS || '4000', 10),
+  AUTO_ADVANCE_DELAY_MS: parseInt(process.env.AUTO_ADVANCE_DELAY_MS || '3500', 10),
 } as const;
 
 /**
@@ -38,6 +39,8 @@ export interface PlayerQuestionResult {
   pointsEarned: number;
   responseTimeMs: number;
   answeredAt: number;
+  timedOut?: boolean;
+  examRedacted?: boolean;
 }
 
 /**
@@ -47,6 +50,10 @@ export interface PlayerSession {
   playerId: string;
   playerToken: string;
   displayName: string;
+  participantId?: string | null;
+  departmentUnit?: string;
+  lockToken?: string | null;
+  attemptId?: string | null;
   connected: boolean;
   score: number;
   correctCount: number;
@@ -67,8 +74,14 @@ export interface LeaderboardEntry {
   rank: number;
   playerId: string;
   displayName: string;
+  participantId?: string | null;
+  departmentUnit?: string;
   score: number;
+  maxPossibleScore?: number;
   correctCount: number;
+  totalQuestions?: number;
+  accuracyPercent?: number;
+  isPassed?: boolean | null;
   streak: number;
   totalResponseTimeMs: number;
   connected: boolean;
@@ -127,11 +140,23 @@ export const HostUnlockSchema = z.object({
   type: z.literal('host.unlock'),
 });
 
+export const HostPublishAnswersSchema = z.object({
+  type: z.literal('host.publishAnswers'),
+});
+
+export const HostToggleLeaderboardSchema = z.object({
+  type: z.literal('host.toggleLeaderboard'),
+  visible: z.boolean(),
+});
+
 export const PlayerJoinSchema = z.object({
   type: z.literal('player.join'),
   roomCode: z.string().min(1),
-  displayName: z.string().trim().min(1).max(30),
+  displayName: z.string().trim().min(1).max(80),
   playerToken: z.string().optional(),
+  participantId: z.string().trim().min(1).optional(),
+  departmentUnit: z.string().trim().max(120).optional(),
+  lockToken: z.string().trim().max(200).optional(),
   gameAccessToken: z.string().optional(),
   password: z.string().optional(),
 });
@@ -158,7 +183,9 @@ export type HostInboundMessage =
   | z.infer<typeof HostNextSchema>
   | z.infer<typeof HostEndSchema>
   | z.infer<typeof HostLockSchema>
-  | z.infer<typeof HostUnlockSchema>;
+  | z.infer<typeof HostUnlockSchema>
+  | z.infer<typeof HostPublishAnswersSchema>
+  | z.infer<typeof HostToggleLeaderboardSchema>;
 
 export type PlayerInboundMessage =
   | z.infer<typeof PlayerJoinSchema>
@@ -178,22 +205,43 @@ export type OutboundMessage =
       role: 'host' | 'player';
       roomCode: string;
       roomId: string;
+      gameId?: string;
       playerId?: string;
       playerToken?: string;
+      participantId?: string | null;
+      departmentUnit?: string;
       score?: number;
+      maxPossibleScore?: number;
+      sessionMode?: 'PLAY' | 'EXAM';
+      rosterMode?: 'FREE_TEXT' | 'PRECONFIGURED' | 'HYBRID';
+      answersPublished?: boolean;
+      showExamLeaderboardToPlayers?: boolean;
+      passThresholdPercent?: number;
+      audioConfig?: any;
       state: RoomState;
       title: string;
       gameType: GameType;
       totalQuestions: number;
       playerCount: number;
-      players?: Array<{ id: string; displayName: string; connected: boolean }>;
+      players?: Array<{
+        id: string;
+        displayName: string;
+        departmentUnit?: string;
+        participantId?: string | null;
+        connected: boolean;
+      }>;
       isLocked?: boolean;
       currentQuestionIndex?: number;
     }
   | {
       type: 'lobby.playerJoined';
       playerCount: number;
-      player: { id: string; displayName: string };
+      player: {
+        id: string;
+        displayName: string;
+        departmentUnit?: string;
+        participantId?: string | null;
+      };
     }
   | {
       type: 'lobby.playerLeft';
@@ -207,12 +255,14 @@ export type OutboundMessage =
   | {
       type: 'game.started';
       totalQuestions: number;
+      sessionMode?: 'PLAY' | 'EXAM';
     }
   | {
       type: 'question.started';
       question: SanitizedQuestion;
       answeredCount?: number;
       totalPlayers?: number;
+      sessionMode?: 'PLAY' | 'EXAM';
     }
   | {
       type: 'question.answerReceived';
@@ -238,16 +288,36 @@ export type OutboundMessage =
       personalResult?: PlayerQuestionResult;
       answerStats?: Record<string, number>;
       autoAdvanceMs?: number;
+      sessionMode?: 'PLAY' | 'EXAM';
+      answersPublished?: boolean;
     }
   | {
       type: 'leaderboard.updated';
       leaderboard: LeaderboardEntry[];
+      showExamLeaderboardToPlayers?: boolean;
+    }
+  | {
+      type: 'answers.published';
+      answersPublished: boolean;
+      publishedAt: string;
+      questions: Array<{
+        id: string;
+        questionIndex: number;
+        question: string;
+        correctAnswer: string;
+        explanation?: string;
+      }>;
     }
   | {
       type: 'game.finished';
       leaderboard: LeaderboardEntry[];
       winner?: LeaderboardEntry;
       totalQuestions: number;
+      maxPossibleScore?: number;
+      sessionMode?: 'PLAY' | 'EXAM';
+      answersPublished?: boolean;
+      passThresholdPercent?: number;
+      personalEvaluation?: PerformanceEvaluation;
     }
   | {
       type: 'error';
@@ -277,11 +347,14 @@ export interface CreateRoomResponseData {
 
 export interface RoomLobbyInfo {
   roomCode: string;
+  gameId?: string;
   state: RoomState;
   playerCount: number;
   capacity: number;
   title: string;
   gameType: GameType;
   totalQuestions: number;
+  sessionMode?: 'PLAY' | 'EXAM';
+  rosterMode?: 'FREE_TEXT' | 'PRECONFIGURED' | 'HYBRID';
+  hasRoster?: boolean;
 }
-

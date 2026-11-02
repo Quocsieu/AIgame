@@ -1,8 +1,11 @@
+import crypto from 'node:crypto';
 import { NextFunction, Request, Response, Router } from 'express';
 import { gameEngine } from '../game/game.engine.js';
+import { calculateMaxPossibleScore, evaluatePerformanceResult } from '../game/game.scoring.js';
 import { gameStore } from '../game/game.store.js';
 import {
   CreateSessionRequestSchema,
+  GameResult,
   SubmitAnswerRequestSchema,
 } from '../game/game.types.js';
 import { authService } from '../services/auth.service.js';
@@ -13,9 +16,97 @@ import { AppError, createSuccessResponse } from '../utils/errors.js';
 
 export const sessionRouter = Router();
 
+function resolveGameExamState(gameId: string, fallbackSpec?: any, currentUser?: any): {
+  sessionMode: 'PLAY' | 'EXAM';
+  answersPublished: boolean;
+  canRevealAnswers: boolean;
+  autoAdvanceMs: number;
+  passThresholdPercent: number;
+} {
+  const liveSpec = gameStore.get(gameId) || fallbackSpec;
+  const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+  const ownerUserId = liveSpec?.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+  const sessionMode: 'PLAY' | 'EXAM' =
+    liveSpec?.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+  const answersPublished = Boolean(liveSpec?.settings?.answersPublished);
+  const isOwnerOrAdmin =
+    Boolean(currentUser?.role === 'ADMIN') ||
+    Boolean(currentUser?.userId && ownerUserId && currentUser.userId === ownerUserId);
+
+  const canRevealAnswers = sessionMode === 'PLAY' || answersPublished;
+  const autoAdvanceMs =
+    typeof liveSpec?.settings?.autoAdvanceDelayMs === 'number'
+      ? liveSpec.settings.autoAdvanceDelayMs
+      : sessionMode === 'EXAM'
+        ? 1500
+        : 3500;
+  const passThresholdPercent =
+    typeof liveSpec?.settings?.passThresholdPercent === 'number'
+      ? liveSpec.settings.passThresholdPercent
+      : 50;
+
+  return {
+    sessionMode,
+    answersPublished,
+    canRevealAnswers,
+    autoAdvanceMs,
+    passThresholdPercent,
+    ...(isOwnerOrAdmin ? { isOwnerOrAdmin: true } : {}),
+  } as any;
+}
+
+function sanitizeGameResultForClient(
+  result: GameResult,
+  examState: {
+    sessionMode: 'PLAY' | 'EXAM';
+    answersPublished: boolean;
+    canRevealAnswers: boolean;
+    passThresholdPercent: number;
+  }
+): GameResult {
+  const evaluation =
+    result.evaluation ||
+    evaluatePerformanceResult({
+      correctAnswers: result.correctCount,
+      totalQuestions: result.totalQuestions,
+      totalScore: result.score,
+      maxPossibleScore: result.maxPossibleScore,
+      sessionMode: examState.sessionMode,
+      passThresholdPercent: examState.passThresholdPercent,
+    });
+
+  if (examState.canRevealAnswers) {
+    return {
+      ...result,
+      sessionMode: examState.sessionMode,
+      answersPublished: examState.answersPublished,
+      evaluation,
+    };
+  }
+
+  return {
+    ...result,
+    sessionMode: examState.sessionMode,
+    answersPublished: examState.answersPublished,
+    evaluation,
+    questionResults: (result.questionResults || []).map(qr => ({
+      questionId: qr.questionId,
+      answer: qr.answer,
+      isCorrect: qr.isCorrect,
+      pointsEarned: qr.pointsEarned,
+      responseTimeMs: qr.responseTimeMs,
+      answeredAt: qr.answeredAt,
+      timedOut: qr.timedOut,
+      correctAnswer: '[Đáp án sẽ được công bố sau khi kết thúc kỳ thi]',
+      explanation: undefined,
+      sourceReference: undefined,
+    })),
+  };
+}
+
 /**
  * POST /api/games/sessions
- * Create a new single-player game session.
+ * Create or resume a single-player game session (Solo Play or Solo Exam).
  */
 sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -25,7 +116,16 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
       throw new AppError('INVALID_REQUEST', `Invalid session creation request: ${issues}`, 400);
     }
 
-    const { gameId, gameSpecification, publicPlay } = parseResult.data;
+    const {
+      gameId,
+      gameSpecification,
+      publicPlay,
+      participantId,
+      participantName,
+      departmentUnit,
+      employeeCode,
+      lockToken,
+    } = parseResult.data;
 
     // Verify draft access: public play MUST be on a published game
     const storedSpec = gameStore.get(gameId);
@@ -52,19 +152,125 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
       });
     }
 
+    const effectiveSpec = storedSpec || gameSpecification;
+    const rosterMode = effectiveSpec?.settings?.rosterMode || 'FREE_TEXT';
+    const sessionMode: 'PLAY' | 'EXAM' =
+      effectiveSpec?.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+
+    // Check if roster is preconfigured and has participants
+    if (rosterMode === 'PRECONFIGURED' && publicPlay && !participantId) {
+      const rosterCheck = persistenceRepo.listParticipants(gameId, { limit: 1 });
+      if (rosterCheck.total > 0) {
+        throw new AppError(
+          'PARTICIPANT_REQUIRED',
+          'Vui lòng chọn tên của bạn trong danh sách người tham gia và xác nhận danh tính trước khi bắt đầu.',
+          400
+        );
+      }
+    }
+
+    const effectiveLockToken =
+      lockToken?.trim() ||
+      (typeof req.headers['x-participant-token'] === 'string'
+        ? req.headers['x-participant-token'].trim()
+        : '') ||
+      req.user?.userId ||
+      `ptok_${crypto.randomUUID()}`;
+
+    let resolvedParticipantName = participantName?.trim() || req.user?.displayName || null;
+    let resolvedDepartment = departmentUnit?.trim() || null;
+    let resolvedEmployeeCode = employeeCode?.trim() || null;
+
+    if (participantId) {
+      const claim = persistenceRepo.claimParticipantSlot({
+        gameId,
+        participantId,
+        lockToken: effectiveLockToken,
+        sessionMode,
+      });
+
+      resolvedParticipantName = claim.participant.fullName;
+      resolvedDepartment = claim.participant.departmentUnit;
+      resolvedEmployeeCode = claim.participant.employeeCode;
+
+      // If resuming an already active session on refresh/reconnect, return that session without resetting deadline!
+      if (claim.resumed && claim.activeSessionId) {
+        try {
+          const existingSession = gameEngine.getSession(claim.activeSessionId);
+          if (
+            existingSession &&
+            existingSession.state !== 'FINISHED' &&
+            existingSession.state !== 'ABANDONED'
+          ) {
+            res.status(200).json(
+              createSuccessResponse({
+                sessionId: existingSession.sessionId,
+                gameId: existingSession.specification.gameId,
+                state: existingSession.state,
+                sessionMode,
+                resumed: true,
+                participantId: claim.participant.participantId,
+                displayName: claim.participant.fullName,
+                departmentUnit: claim.participant.departmentUnit,
+                lockToken: effectiveLockToken,
+                totalQuestions: existingSession.specification.questions.length,
+                isPreview: !resolvedIsPublic,
+              })
+            );
+            return;
+          }
+        } catch {
+          // Active session expired from memory, proceed to create fresh session bound to claimed slot
+        }
+      }
+    }
+
     if (req.user) {
       quotaService.enforceActiveSessionLimit(req.user.userId);
     }
 
     // Do not allow client-supplied custom specification to overwrite stored game
     const customSpecToUse = storedSpec ? undefined : gameSpecification;
-    const session = gameEngine.createSession(gameId, customSpecToUse, req.user?.userId ?? null);
+    const session = gameEngine.createSession(gameId, customSpecToUse, req.user?.userId ?? null, {
+      participantId: participantId ?? null,
+      displayName: resolvedParticipantName,
+      departmentUnit: resolvedDepartment,
+      employeeCode: resolvedEmployeeCode,
+      lockToken: effectiveLockToken,
+    });
+
+    if (participantId || resolvedParticipantName) {
+      const maxPossibleScore = calculateMaxPossibleScore(
+        session.specification.questions.length,
+        session.specification.settings.scoringMode
+      );
+      const attempt = persistenceRepo.recordParticipantAttemptStart({
+        gameId: session.specification.gameId,
+        participantId: participantId ?? null,
+        sessionId: session.sessionId,
+        deliveryMode: 'SOLO',
+        sessionMode,
+        displayName: resolvedParticipantName || 'Người chơi',
+        departmentUnit: resolvedDepartment || '',
+        employeeCode: resolvedEmployeeCode || '',
+        lockToken: effectiveLockToken,
+        totalQuestions: session.specification.questions.length,
+        maxPossibleScore,
+      });
+      session.attemptId = attempt.attemptId;
+    }
 
     res.status(200).json(
       createSuccessResponse({
         sessionId: session.sessionId,
         gameId: session.specification.gameId,
         state: session.state,
+        sessionMode,
+        resumed: false,
+        participantId: session.participantId,
+        displayName: session.displayName,
+        departmentUnit: session.departmentUnit,
+        lockToken: effectiveLockToken,
         totalQuestions: session.specification.questions.length,
         isPreview: !resolvedIsPublic,
       })
@@ -76,7 +282,7 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
 
 /**
  * POST /api/games/sessions/:sessionId/start
- * Starts the session and returns the first question without answer leakage.
+ * Starts the session (or returns current question if already started on refresh) without answer leakage.
  */
 sessionRouter.post('/:sessionId/start', (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -89,9 +295,45 @@ sessionRouter.post('/:sessionId/start', (req: Request, res: Response, next: Next
       mode: 'write',
     });
 
+    // If session is already active (e.g. client refreshed browser during Solo Exam), return current state & question without resetting deadline!
+    if (session.state === 'QUESTION_ACTIVE' || session.state === 'QUESTION_ANSWERED') {
+      res.status(200).json(
+        createSuccessResponse({
+          session: session.getSummary(),
+          question: session.getCurrentClientQuestion(),
+          resumed: true,
+        })
+      );
+      return;
+    }
+
     const startResult = gameEngine.start(sessionId);
 
     res.status(200).json(createSuccessResponse(startResult));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /api/games/sessions/:sessionId/checkpoint
+ * Activates strict question timer when an Adventure checkpoint opens for the first time.
+ */
+sessionRouter.post('/:sessionId/checkpoint', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const sessionId = String(req.params.sessionId);
+    const session = gameEngine.getSession(sessionId);
+    authService.assertResourceAccess({
+      resourceType: 'phiên luyện tập',
+      ownerUserId: session.ownerUserId,
+      currentUser: req.user,
+      mode: 'write',
+    });
+
+    const questionIndex =
+      typeof req.body?.questionIndex === 'number' ? req.body.questionIndex : undefined;
+    const question = gameEngine.activateCheckpoint(sessionId, questionIndex);
+    res.status(200).json(createSuccessResponse({ question }));
   } catch (err) {
     next(err);
   }
@@ -142,8 +384,59 @@ sessionRouter.get('/:sessionId/question', (req: Request, res: Response, next: Ne
 });
 
 /**
+ * POST /api/games/sessions/:sessionId/timeout
+ * Records a question timeout idempotently (at most once per question) and returns mode-appropriate feedback.
+ */
+sessionRouter.post('/:sessionId/timeout', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const sessionId = String(req.params.sessionId);
+    const session = gameEngine.getSession(sessionId);
+    authService.assertResourceAccess({
+      resourceType: 'phiên luyện tập',
+      ownerUserId: session.ownerUserId,
+      currentUser: req.user,
+      mode: 'write',
+    });
+
+    const questionId =
+      typeof req.body?.questionId === 'string' ? req.body.questionId.trim() : undefined;
+    const timeoutResult = gameEngine.recordTimeout(sessionId, questionId);
+    const examState = resolveGameExamState(
+      session.specification.gameId,
+      session.specification,
+      req.user
+    );
+
+    if (!examState.canRevealAnswers) {
+      res.status(200).json(
+        createSuccessResponse({
+          questionId: timeoutResult.questionId,
+          timedOut: true,
+          examAnswerRecorded: true,
+          sessionMode: 'EXAM',
+          autoAdvanceMs: examState.autoAdvanceMs,
+          nextQuestionAvailable: timeoutResult.nextQuestionAvailable,
+        })
+      );
+      return;
+    }
+
+    res.status(200).json(
+      createSuccessResponse({
+        ...timeoutResult,
+        sessionMode: examState.sessionMode,
+        autoAdvanceMs: examState.autoAdvanceMs,
+      })
+    );
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * POST /api/games/sessions/:sessionId/answer
  * Submits player answer, performs server-side validation and scoring.
+ * In EXAM mode (before answersPublished), strictly omits correctAnswer, explanation, isCorrect, and pointsEarned.
  */
 sessionRouter.post('/:sessionId/answer', (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -163,10 +456,60 @@ sessionRouter.post('/:sessionId/answer', (req: Request, res: Response, next: Nex
       throw new AppError('INVALID_REQUEST', `Invalid answer submission: ${issues}`, 400);
     }
 
-    const { questionId, answer, clientTimestamp } = parseResult.data;
+    const { questionId, answer, clientTimestamp, timedOut } = parseResult.data;
+    const examState = resolveGameExamState(
+      session.specification.gameId,
+      session.specification,
+      req.user
+    );
+
+    if (timedOut || answer === '__TIMEOUT__') {
+      const timeoutResult = gameEngine.recordTimeout(sessionId, questionId);
+      if (!examState.canRevealAnswers) {
+        res.status(200).json(
+          createSuccessResponse({
+            questionId: timeoutResult.questionId,
+            timedOut: true,
+            examAnswerRecorded: true,
+            sessionMode: 'EXAM',
+            autoAdvanceMs: examState.autoAdvanceMs,
+            nextQuestionAvailable: timeoutResult.nextQuestionAvailable,
+          })
+        );
+        return;
+      }
+      res.status(200).json(
+        createSuccessResponse({
+          ...timeoutResult,
+          sessionMode: examState.sessionMode,
+          autoAdvanceMs: examState.autoAdvanceMs,
+        })
+      );
+      return;
+    }
+
     const answerResult = gameEngine.submitAnswer(sessionId, questionId, answer, clientTimestamp);
 
-    res.status(200).json(createSuccessResponse(answerResult));
+    if (!examState.canRevealAnswers) {
+      res.status(200).json(
+        createSuccessResponse({
+          questionId: answerResult.questionId,
+          examAnswerRecorded: true,
+          sessionMode: 'EXAM',
+          autoAdvanceMs: examState.autoAdvanceMs,
+          nextQuestionAvailable: answerResult.nextQuestionAvailable,
+        })
+      );
+      return;
+    }
+
+    res.status(200).json(
+      createSuccessResponse({
+        ...answerResult,
+        sessionMode: examState.sessionMode,
+        autoAdvanceMs: examState.autoAdvanceMs,
+      })
+    );
   } catch (err) {
     next(err);
   }
@@ -188,6 +531,14 @@ sessionRouter.post('/:sessionId/next', (req: Request, res: Response, next: NextF
     });
 
     const advanceResult = gameEngine.advance(sessionId);
+    if (advanceResult.finished && advanceResult.result) {
+      const examState = resolveGameExamState(
+        session.specification.gameId,
+        session.specification,
+        req.user
+      );
+      advanceResult.result = sanitizeGameResultForClient(advanceResult.result, examState);
+    }
 
     res.status(200).json(createSuccessResponse(advanceResult));
   } catch (err) {
@@ -256,8 +607,14 @@ sessionRouter.get('/:sessionId/result', (req: Request, res: Response, next: Next
         currentUser: req.user,
         mode: 'read',
       });
-      const result = gameEngine.getResult(sessionId);
-      res.status(200).json(createSuccessResponse(result));
+      const rawResult = gameEngine.getResult(sessionId);
+      const examState = resolveGameExamState(
+        activeSession.specification.gameId,
+        activeSession.specification,
+        req.user
+      );
+      const sanitized = sanitizeGameResultForClient(rawResult, examState);
+      res.status(200).json(createSuccessResponse(sanitized));
       return;
     } catch (innerErr) {
       if (innerErr instanceof AppError && innerErr.code !== 'SESSION_NOT_FOUND') {
@@ -281,21 +638,51 @@ sessionRouter.get('/:sessionId/result', (req: Request, res: Response, next: Next
       throw new AppError('GAME_NOT_FINISHED', 'Game session is not finished yet.', 400);
     }
 
+    const examState = resolveGameExamState(persisted.gameId, undefined, req.user);
+    const evaluation = evaluatePerformanceResult({
+      correctAnswers: persisted.correctAnswers,
+      totalQuestions: persisted.totalQuestions,
+      totalScore: persisted.totalScore,
+      maxPossibleScore: persisted.maxPossibleScore,
+      sessionMode: examState.sessionMode,
+      passThresholdPercent: examState.passThresholdPercent,
+    });
+
+    const sanitizedResults = examState.canRevealAnswers
+      ? persisted.questionResults
+      : (persisted.questionResults || []).map(qr => ({
+          questionId: qr.questionId,
+          answer: qr.answer,
+          isCorrect: qr.isCorrect,
+          pointsEarned: qr.pointsEarned,
+          responseTimeMs: qr.responseTimeMs,
+          answeredAt: qr.answeredAt,
+          correctAnswer: '[Đáp án sẽ được công bố sau khi kết thúc kỳ thi]',
+          explanation: undefined,
+          sourceReference: undefined,
+        }));
+
     res.status(200).json(
       createSuccessResponse({
         sessionId: persisted.sessionId,
         gameId: persisted.gameId,
         title: persisted.gameTitle,
         gameType: persisted.gameType,
+        sessionMode: examState.sessionMode,
+        answersPublished: examState.answersPublished,
         state: 'FINISHED',
         totalScore: persisted.totalScore,
+        score: persisted.totalScore,
         maxPossibleScore: persisted.maxPossibleScore,
         correctAnswers: persisted.correctAnswers,
+        correctCount: persisted.correctAnswers,
         wrongAnswers: persisted.wrongAnswers,
+        wrongCount: persisted.wrongAnswers,
         totalQuestions: persisted.totalQuestions,
         maxStreak: persisted.maxStreak,
         durationMs: persisted.durationMs,
-        questionResults: persisted.questionResults,
+        evaluation,
+        questionResults: sanitizedResults,
       })
     );
   } catch (err) {
@@ -344,6 +731,15 @@ sessionRouter.get('/:sessionId/export', (req: Request, res: Response, next: Next
       currentUser: req.user,
       mode: 'read',
     });
+
+    const examState = resolveGameExamState(persisted.gameId, undefined, req.user);
+    if (!examState.canRevealAnswers && !(examState as any).isOwnerOrAdmin) {
+      throw new AppError(
+        'EXAM_ANSWERS_LOCKED',
+        'Đáp án kỳ thi chưa được Ban Tổ Chức công bố nên chưa thể xuất chi tiết bài làm.',
+        403
+      );
+    }
 
     const payload = exportService.exportPracticeSession(persisted, format);
     res.setHeader('Content-Type', payload.contentType);

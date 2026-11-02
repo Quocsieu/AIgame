@@ -11,21 +11,32 @@ import {
   XMarkIcon,
 } from './Icons.js';
 import {
+  activatePracticeCheckpoint,
   advancePracticeSession,
   createPracticeSession,
   fetchGameById,
+  fetchGameParticipantsApi,
   fetchPracticeResult,
   fetchPracticeSessionQuestion,
   fetchPracticeSessionSummary,
+  recordPracticeTimeout,
+  saveEditedQuestions,
   startPracticeSession,
   submitPracticeAnswer,
 } from '../services/api.js';
+import { soundManager } from '../services/audio.js';
 import { AdventureGameEngine } from './AdventureGameEngine.js';
 import type {
+  GameQuestion,
   GameSpecification,
+  ParticipantRosterItem,
   PracticeFinalResult,
   PracticeQuestionResult,
   SanitizedQuestion,
+} from '../types/index.js';
+import {
+  calculateFrontendMaxPossibleScore,
+  evaluateFrontendPerformance,
 } from '../types/index.js';
 
 interface SoloPlayerProps {
@@ -33,6 +44,7 @@ interface SoloPlayerProps {
   initialSpec?: GameSpecification | null;
   onLeave: () => void;
   playtestMode?: boolean;
+  onSpecUpdated?: (spec: GameSpecification) => void;
 }
 
 function normalizePlaytestToken(value: string): string {
@@ -100,7 +112,10 @@ function buildPlaytestClientQuestion(
 ): SanitizedQuestion {
   const q = spec.questions[index];
   const effectiveType = q.type || spec.gameType;
-  const timePerQ = spec.settings?.timePerQuestion || 20;
+  const timePerQ =
+    (typeof q.timeLimitSeconds === 'number' && q.timeLimitSeconds >= 5
+      ? q.timeLimitSeconds
+      : spec.settings?.timePerQuestion) || 20;
   const crosswordWordLength =
     effectiveType === 'CROSSWORD'
       ? (q.crosswordAnswer || q.correctAnswer || '').replace(/\s+/g, '').length
@@ -267,9 +282,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   initialSpec,
   onLeave,
   playtestMode = false,
+  onSpecUpdated,
 }) => {
   const toast = useToast();
-
 
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -282,6 +297,46 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const [puzzleOrder, setPuzzleOrder] = useState<string[]>([]);
   const [sliderValue, setSliderValue] = useState<number>(0);
   const [sliderTouched, setSliderTouched] = useState<boolean>(false);
+
+  // Audio state
+  const [audioMuted, setAudioMuted] = useState<boolean>(() => soundManager.isMuted());
+  const [audioVolume, setAudioVolume] = useState<number>(() => soundManager.getVolume());
+
+  // Roster Gate state (for Solo live sessions when game has PRECONFIGURED / HYBRID roster)
+  const [rosterGateOpen, setRosterGateOpen] = useState<boolean>(false);
+  const [rosterItems, setRosterItems] = useState<ParticipantRosterItem[]>([]);
+  const [rosterSearch, setRosterSearch] = useState<string>('');
+  const [selectedParticipantId, setSelectedParticipantId] = useState<string>('');
+  const [confirmingIdentity, setConfirmingIdentity] = useState<boolean>(false);
+  const [hybridFreeTextMode, setHybridFreeTextMode] = useState<boolean>(false);
+  const [freeTextPlayerName, setFreeTextPlayerName] = useState<string>('');
+  const [freeTextDepartment, setFreeTextDepartment] = useState<string>('');
+  const confirmedIdentityRef = useRef<{
+    participantId?: string;
+    playerName?: string;
+    departmentUnit?: string;
+    lockToken?: string;
+  } | null>(null);
+
+  // Playtest Inline Question Editor state
+  const [inlineEditOpen, setInlineEditOpen] = useState<boolean>(false);
+  const [inlineEditIndex, setInlineEditIndex] = useState<number>(0);
+  const [savingInlineEdit, setSavingInlineEdit] = useState<boolean>(false);
+  const [editDraft, setEditDraft] = useState<{
+    question: string;
+    choices: string[];
+    correctAnswer: string;
+    explanation: string;
+    timeLimitSeconds: number;
+    crosswordClue?: string;
+    crosswordAnswer?: string;
+  }>({
+    question: '',
+    choices: ['', '', '', ''],
+    correctAnswer: '',
+    explanation: '',
+    timeLimitSeconds: 20,
+  });
 
   useEffect(() => {
     if (currentQuestion?.type === 'SLIDER' && currentQuestion.sliderConfig) {
@@ -324,18 +379,50 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const [playerCorrectCount, setPlayerCorrectCount] = useState(0);
   const [playerWrongCount, setPlayerWrongCount] = useState(0);
   const submittingLockRef = useRef(false);
+  const advancingLockRef = useRef(false);
   const answeredQuestionIdsRef = useRef<Set<string>>(new Set());
   const [timeLeft, setTimeLeft] = useState(20);
 
   const timerRef = useRef<number | null>(null);
+  const autoAdvanceTimerRef = useRef<number | null>(null);
   const playtestQuestionIndexRef = useRef<number>(0);
   const playtestQuestionStartedAtRef = useRef<number>(Date.now());
   const playtestStartedAtRef = useRef<number>(Date.now());
   const playtestMaxStreakRef = useRef<number>(0);
 
+  const clearAutoAdvanceTimer = () => {
+    if (autoAdvanceTimerRef.current !== null) {
+      window.clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+  };
+
+  const handleToggleAudioMute = () => {
+    const nextMuted = soundManager.toggleMute();
+    setAudioMuted(nextMuted);
+    if (!nextMuted) {
+      const spec = loadedSpec || initialSpec;
+      soundManager.startSessionAudio(spec?.settings?.audioConfig);
+    }
+  };
+
+  const handleAudioVolumeChange = (vol: number) => {
+    soundManager.setVolume(vol);
+    setAudioVolume(vol);
+    if (audioMuted && vol > 0) {
+      soundManager.setMuted(false);
+      setAudioMuted(false);
+    }
+  };
+
   const handleLeave = () => {
+    stopTimer();
+    clearAutoAdvanceTimer();
+    soundManager.stopAll();
     const targetGameId = gameId || initialSpec?.gameId;
-    if (targetGameId && !playtestMode) sessionStorage.removeItem(`active_solo_session_${targetGameId}`);
+    if (targetGameId && !playtestMode) {
+      sessionStorage.removeItem(`active_solo_session_${targetGameId}`);
+    }
     onLeave();
   };
 
@@ -368,6 +455,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     }, 1000);
   };
 
+  // Trigger countdown tick sound when timeLeft reaches last N seconds
+  useEffect(() => {
+    if (!currentQuestion || questionFeedback || isQuestionTimedOut || inlineEditOpen) return;
+    const spec = loadedSpec || initialSpec;
+    soundManager.checkCountdownTick(timeLeft, spec?.settings?.audioConfig);
+  }, [timeLeft, currentQuestion?.id, questionFeedback, isQuestionTimedOut, inlineEditOpen, loadedSpec, initialSpec]);
+
   const initializeSession = async (forceStart?: boolean | unknown) => {
     const isExplicitStart = forceStart === true || forceStart === 'RESTART';
     const isForceRestart = forceStart === 'RESTART';
@@ -383,16 +477,20 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     setPlayerCorrectCount(0);
     setPlayerWrongCount(0);
     submittingLockRef.current = false;
+    advancingLockRef.current = false;
+    clearAutoAdvanceTimer();
     answeredQuestionIdsRef.current.clear();
+
     if (playtestMode) {
       stopTimer();
-      const spec = initialSpec || loadedSpec;
+      const spec = loadedSpec || initialSpec;
       if (!spec || !Array.isArray(spec.questions) || spec.questions.length === 0) {
         setErrorMessage('Không tìm thấy câu hỏi để bắt đầu chế độ chơi thử.');
         setIsLoading(false);
         return;
       }
       setLoadedSpec(spec);
+      soundManager.startSessionAudio(spec.settings?.audioConfig);
       if (spec.gameType === 'ADVENTURE' && !isExplicitStart) {
         setSessionId(null);
         setIsLoading(false);
@@ -417,38 +515,42 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     stopTimer();
 
     const targetGameId = gameId || initialSpec?.gameId;
-    if (initialSpec) {
+    let resolvedSpec = loadedSpec || initialSpec || null;
+    if (initialSpec && !loadedSpec) {
       setLoadedSpec(initialSpec);
-    } else if (gameId && !loadedSpec) {
+    } else if (gameId && !resolvedSpec) {
       try {
         const fetched = await fetchGameById(gameId, { mode: 'public' }).catch(() =>
           fetchGameById(gameId)
         );
+        resolvedSpec = fetched;
         setLoadedSpec(fetched);
-        if (fetched?.gameType === 'ADVENTURE' && !isExplicitStart && !(targetGameId && sessionStorage.getItem(`active_solo_session_${targetGameId}`))) {
-          const advSessionKey = targetGameId ? `active_solo_session_${targetGameId}` : null;
-          if (advSessionKey) sessionStorage.removeItem(advSessionKey);
-          setSessionId(null);
-          setIsLoading(false);
-          return;
-        }
       } catch {
         // Ignore if public play only allows session endpoints
       }
     }
+
     const sessionKey = targetGameId ? `active_solo_session_${targetGameId}` : null;
+    const identityKey = targetGameId ? `solo_roster_identity_${targetGameId}` : null;
     if (isForceRestart && sessionKey) {
       sessionStorage.removeItem(sessionKey);
     }
-    if ((initialSpec?.gameType === 'ADVENTURE' || loadedSpec?.gameType === 'ADVENTURE') && !isExplicitStart && !(sessionKey && sessionStorage.getItem(sessionKey))) {
-      if (sessionKey) sessionStorage.removeItem(sessionKey);
-      setSessionId(null);
-      setIsLoading(false);
-      return;
+
+    // Restore saved roster identity from sessionStorage if present
+    if (!confirmedIdentityRef.current && identityKey) {
+      try {
+        const rawIdent = sessionStorage.getItem(identityKey);
+        if (rawIdent) {
+          confirmedIdentityRef.current = JSON.parse(rawIdent);
+        }
+      } catch {
+        // Ignore corrupt storage
+      }
     }
+
     const savedSessionId = sessionKey ? sessionStorage.getItem(sessionKey) : null;
 
-    // Reload recovery: check if previous in-progress session exists
+    // Reload recovery: check if previous in-progress session exists BEFORE showing roster gate
     if (savedSessionId) {
       try {
         const summary = await fetchPracticeSessionSummary(savedSessionId);
@@ -470,17 +572,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           setPlayerStreak(summary.currentStreak || 0);
           setPlayerCorrectCount((summary as any).correctCount || 0);
           setPlayerWrongCount((summary as any).wrongCount || 0);
+          soundManager.startSessionAudio(resolvedSpec?.settings?.audioConfig);
           if (summary.state === 'QUESTION_ANSWERED') {
             const adv = await advancePracticeSession(savedSessionId);
             if (adv.finished && adv.result) {
               setSessionId(savedSessionId);
               setFinalResult(adv.result);
               if (sessionKey) sessionStorage.removeItem(sessionKey);
-        if ((initialSpec?.gameType === 'ADVENTURE' || loadedSpec?.gameType === 'ADVENTURE') && !isExplicitStart) {
-          setSessionId(null);
-          setIsLoading(false);
-          return;
-        }
               setIsLoading(false);
               return;
             } else if (adv.question) {
@@ -500,26 +598,66 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           return;
         }
       } catch {
-        // Stale or abandoned session in storage, clear and recreate
         if (sessionKey) sessionStorage.removeItem(sessionKey);
-        if ((initialSpec?.gameType === 'ADVENTURE' || loadedSpec?.gameType === 'ADVENTURE') && !isExplicitStart) {
-          setSessionId(null);
+      }
+    }
+
+    // Check if game requires Roster Gate (PRECONFIGURED or HYBRID) before creating session
+    if (targetGameId && !confirmedIdentityRef.current) {
+      try {
+        const rosterRes = await fetchGameParticipantsApi(targetGameId, { mode: 'public' });
+        const mode = rosterRes.rosterMode || resolvedSpec?.settings?.rosterMode || 'FREE_TEXT';
+        if (
+          (mode === 'PRECONFIGURED' || mode === 'HYBRID') &&
+          Array.isArray(rosterRes.participants) &&
+          rosterRes.participants.length > 0
+        ) {
+          setRosterItems(rosterRes.participants);
+          setRosterGateOpen(true);
           setIsLoading(false);
           return;
         }
+      } catch {
+        // Proceed without roster gate if endpoint not applicable
       }
+    }
+
+    if (
+      (initialSpec?.gameType === 'ADVENTURE' || resolvedSpec?.gameType === 'ADVENTURE') &&
+      !isExplicitStart
+    ) {
+      if (sessionKey) sessionStorage.removeItem(sessionKey);
+      setSessionId(null);
+      setIsLoading(false);
+      return;
     }
 
     try {
       let activeSessionId: string;
+      const ident = confirmedIdentityRef.current;
 
       if (gameId) {
-        const sessionRes = await createPracticeSession({ gameId, publicPlay: true });
+        const sessionRes = await createPracticeSession({
+          gameId,
+          publicPlay: true,
+          participantId: ident?.participantId,
+          playerName: ident?.playerName,
+          departmentUnit: ident?.departmentUnit,
+          lockToken: ident?.lockToken,
+        });
         activeSessionId = sessionRes.sessionId;
+        if (sessionRes.lockToken && ident) {
+          ident.lockToken = sessionRes.lockToken;
+          if (identityKey) sessionStorage.setItem(identityKey, JSON.stringify(ident));
+        }
       } else if (initialSpec?.gameId) {
         const sessionRes = await createPracticeSession({
           gameId: initialSpec.gameId,
-          gameSpecification: initialSpec,
+          gameSpecification: resolvedSpec || initialSpec,
+          participantId: ident?.participantId,
+          playerName: ident?.playerName,
+          departmentUnit: ident?.departmentUnit,
+          lockToken: ident?.lockToken,
         });
         activeSessionId = sessionRes.sessionId;
       } else {
@@ -530,9 +668,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       if (sessionKey) {
         sessionStorage.setItem(sessionKey, activeSessionId);
       }
+      soundManager.startSessionAudio(resolvedSpec?.settings?.audioConfig);
       const startRes = await startPracticeSession(activeSessionId);
       setCurrentQuestion(startRes.question);
-      const questionTime = startRes.question.timePerQuestion || 20;
+      const questionTime =
+        typeof startRes.question.remainingTimeSeconds === 'number'
+          ? startRes.question.remainingTimeSeconds
+          : startRes.question.timePerQuestion || 20;
       startCountdown(questionTime);
     } catch (err: any) {
       setErrorMessage(err.message || 'Không thể khởi động phiên chơi solo.');
@@ -546,6 +688,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     initializeSession();
     return () => {
       stopTimer();
+      clearAutoAdvanceTimer();
+      soundManager.stopAll();
     };
   }, [gameId, initialSpec]);
 
@@ -557,59 +701,104 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         if (!questionFeedback) {
           playtestQuestionStartedAtRef.current = Date.now();
           setIsQuestionTimedOut(false);
-          const qTime =
-            currentQuestion?.timePerQuestion || spec.settings?.timePerQuestion || 20;
-          startCountdown(qTime);
+          if (!playtestMode && sessionId) {
+            activatePracticeCheckpoint(sessionId)
+              .then((res) => {
+                const qTime =
+                  res.question?.remainingTimeSeconds ??
+                  res.question?.timePerQuestion ??
+                  currentQuestion?.timePerQuestion ??
+                  spec.settings?.timePerQuestion ??
+                  20;
+                startCountdown(qTime);
+              })
+              .catch(() => {
+                const qTime =
+                  currentQuestion?.timePerQuestion || spec.settings?.timePerQuestion || 20;
+                startCountdown(qTime);
+              });
+          } else {
+            const qTime =
+              currentQuestion?.timePerQuestion || spec.settings?.timePerQuestion || 20;
+            startCountdown(qTime);
+          }
         }
       } else {
         stopTimer();
       }
     },
-    [loadedSpec, initialSpec, questionFeedback, currentQuestion?.timePerQuestion]
+    [loadedSpec, initialSpec, questionFeedback, currentQuestion?.timePerQuestion, playtestMode, sessionId]
   );
 
-  // Tự động tạo phản hồi hết giờ tại trạm kiểm tra trong Adventure Playtest để không bao giờ bị kẹt modal
+  // Ghi nhận tự động khi hết thời gian trả lời (cả Playtest lẫn Live Session) để chuyển sang feedback & tự động qua câu
   useEffect(() => {
-    const spec = loadedSpec || initialSpec;
-    if (
-      !playtestMode ||
-      spec?.gameType !== 'ADVENTURE' ||
-      !isQuestionTimedOut ||
-      !currentQuestion ||
-      questionFeedback
-    ) {
+    if (!isQuestionTimedOut || !currentQuestion || questionFeedback || inlineEditOpen) {
       return;
     }
-    const rawQ =
-      spec.questions[currentQuestion.questionIndex] ||
-      spec.questions.find((item) => item.id === currentQuestion.id);
-    if (!rawQ) return;
-    const effectiveType = rawQ.type || spec.gameType;
-    const displayCorrectAnswer =
-      effectiveType === 'CROSSWORD'
-        ? rawQ.crosswordAnswer || rawQ.correctAnswer
-        : effectiveType === 'SLIDER' && rawQ.sliderConfig
-          ? `${rawQ.sliderConfig.correctValue}${rawQ.sliderConfig.unit ? ` ${rawQ.sliderConfig.unit}` : ''}`
-          : rawQ.correctAnswer;
-    const timeoutRes: PracticeQuestionResult = {
-      questionId: currentQuestion.id,
-      answer: '',
-      isCorrect: false,
-      pointsEarned: 0,
-      responseTimeMs: (currentQuestion.timePerQuestion || spec.settings?.timePerQuestion || 20) * 1000,
-      answeredAt: new Date().toISOString(),
-      correctAnswer: displayCorrectAnswer,
-      explanation:
-        rawQ.explanation ||
-        'Đã hết thời gian trả lời tại trạm kiểm tra (+0 điểm). Hãy nhấn Tiếp tục hành trình để mở cổng đi tiếp.',
-      sourceReference: rawQ.sourceReference,
-    };
-    answeredQuestionIdsRef.current.add(currentQuestion.id);
-    setQuestionFeedback(timeoutRes);
-    setIsQuestionTimedOut(false);
-    setPlayerStreak(0);
-    setPlayerWrongCount((prev) => prev + 1);
-  }, [playtestMode, loadedSpec, initialSpec, isQuestionTimedOut, currentQuestion, questionFeedback]);
+    const spec = loadedSpec || initialSpec;
+    if (playtestMode) {
+      const rawQ =
+        spec?.questions[currentQuestion.questionIndex] ||
+        spec?.questions.find((item) => item.id === currentQuestion.id);
+      if (!spec || !rawQ) return;
+      const effectiveType = rawQ.type || spec.gameType;
+      const displayCorrectAnswer =
+        effectiveType === 'CROSSWORD'
+          ? rawQ.crosswordAnswer || rawQ.correctAnswer
+          : effectiveType === 'SLIDER' && rawQ.sliderConfig
+            ? `${rawQ.sliderConfig.correctValue}${rawQ.sliderConfig.unit ? ` ${rawQ.sliderConfig.unit}` : ''}`
+            : rawQ.correctAnswer;
+      const timeoutRes: PracticeQuestionResult = {
+        questionId: currentQuestion.id,
+        answer: '',
+        isCorrect: false,
+        timedOut: true,
+        pointsEarned: 0,
+        responseTimeMs: (currentQuestion.timePerQuestion || spec.settings?.timePerQuestion || 20) * 1000,
+        answeredAt: new Date().toISOString(),
+        correctAnswer: displayCorrectAnswer,
+        explanation:
+          rawQ.explanation ||
+          'Đã hết thời gian trả lời cho câu hỏi này (+0 điểm).',
+        sourceReference: rawQ.sourceReference,
+      };
+      answeredQuestionIdsRef.current.add(currentQuestion.id);
+      soundManager.playTimeout();
+      setQuestionFeedback(timeoutRes);
+      setIsQuestionTimedOut(false);
+      setPlayerStreak(0);
+      setPlayerWrongCount((prev) => prev + 1);
+      return;
+    }
+
+    // Live session: call backend recordPracticeTimeout idempotently
+    if (sessionId && !answeredQuestionIdsRef.current.has(currentQuestion.id)) {
+      answeredQuestionIdsRef.current.add(currentQuestion.id);
+      soundManager.playTimeout();
+      recordPracticeTimeout(sessionId, currentQuestion.id)
+        .then((res) => {
+          setQuestionFeedback(res);
+          setIsQuestionTimedOut(false);
+          setPlayerStreak(0);
+          setPlayerWrongCount((prev) => prev + 1);
+        })
+        .catch(() => {
+          const fallbackTimeout: PracticeQuestionResult = {
+            questionId: currentQuestion.id,
+            answer: '',
+            isCorrect: false,
+            timedOut: true,
+            pointsEarned: 0,
+            responseTimeMs: (currentQuestion.timePerQuestion || 20) * 1000,
+            answeredAt: new Date().toISOString(),
+          };
+          setQuestionFeedback(fallbackTimeout);
+          setIsQuestionTimedOut(false);
+          setPlayerStreak(0);
+          setPlayerWrongCount((prev) => prev + 1);
+        });
+    }
+  }, [playtestMode, loadedSpec, initialSpec, isQuestionTimedOut, currentQuestion, questionFeedback, inlineEditOpen, sessionId]);
 
   const handleSubmitAnswer = async (answerVal?: string) => {
     if (
@@ -661,8 +850,6 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           nextStreak
         );
         const nextScore = playerScore + pointsEarned;
-        const nextIndex = currentQuestion.questionIndex + 1;
-        const isLastQuestion = nextIndex >= spec.questions.length;
         const effectiveType = rawQ.type || spec.gameType;
         const displayCorrectAnswer =
           effectiveType === 'CROSSWORD'
@@ -684,6 +871,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         };
 
         answeredQuestionIdsRef.current.add(currentQuestion.id);
+        if (isCorrect) soundManager.playCorrect();
+        else soundManager.playWrong();
         setQuestionFeedback(localRes);
         setIsQuestionTimedOut(false);
         setPlayerScore(nextScore);
@@ -705,6 +894,16 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         answer: finalAnswer,
       });
       answeredQuestionIdsRef.current.add(currentQuestion.id);
+      const spec = loadedSpec || initialSpec;
+      const isExamUnpublished =
+        spec?.settings?.sessionMode === 'EXAM' && !spec?.settings?.answersPublished;
+      if (isExamUnpublished) {
+        soundManager.playAnswerRecorded();
+      } else if (res.isCorrect) {
+        soundManager.playCorrect();
+      } else {
+        soundManager.playWrong();
+      }
       setQuestionFeedback(res);
       setIsQuestionTimedOut(false);
       setPlayerScore((prev) => prev + res.pointsEarned);
@@ -715,8 +914,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       if (err.message?.includes('abandoned') || err.message?.includes('đã bị kết thúc')) {
         toast.warning('Phiên luyện tập này đã được kết thúc bởi người tạo. Đang chuyển hướng...', 'Phiên đã đóng');
         setTimeout(() => handleLeave(), 1500);
-      } else {
-      if (
+      } else if (
         err.code === 'ANSWER_TIMEOUT' ||
         err.message?.includes('time limit expired') ||
         err.message?.includes('ANSWER_TIMEOUT')
@@ -727,7 +925,6 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       } else {
         toast.error(err.message || 'Không thể gửi câu trả lời.', 'Lỗi nộp bài');
       }
-      }
     } finally {
       submittingLockRef.current = false;
       setIsSubmitting(false);
@@ -735,15 +932,17 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   };
 
   const handleNextQuestion = async () => {
-    if (!sessionId) return;
+    if (!sessionId || advancingLockRef.current) return;
+    advancingLockRef.current = true;
+    clearAutoAdvanceTimer();
     setIsLoading(true);
+    const wasTimedOut = isQuestionTimedOut && !questionFeedback;
     setQuestionFeedback(null);
     setIsQuestionTimedOut(false);
     setSelectedChoice(null);
     setTextAnswerInput('');
 
     try {
-      const wasTimedOut = isQuestionTimedOut && !questionFeedback;
       if (playtestMode) {
         const spec = loadedSpec || initialSpec;
         const nextWrongCount = wasTimedOut ? playerWrongCount + 1 : playerWrongCount;
@@ -754,7 +953,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         const nextIdx = playtestQuestionIndexRef.current + 1;
         if (!spec || nextIdx >= spec.questions.length) {
           const totalQ = spec?.questions.length || 1;
-          const accuracyPct = Math.round((playerCorrectCount / totalQ) * 100);
+          const maxScore = calculateFrontendMaxPossibleScore(totalQ, spec?.settings?.scoringMode);
+          const perfEval = evaluateFrontendPerformance({
+            correctAnswers: playerCorrectCount,
+            totalQuestions: totalQ,
+            sessionMode: spec?.settings?.sessionMode,
+            passThresholdPercent: spec?.settings?.passThresholdPercent,
+          });
           const durationSeconds = Math.max(
             1,
             Math.round((Date.now() - playtestStartedAtRef.current) / 1000)
@@ -764,20 +969,24 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             gameId: spec?.gameId || 'playtest-game',
             title: spec?.title || 'Chơi thử',
             gameType: spec?.gameType || 'MIXED',
+            sessionMode: spec?.settings?.sessionMode || 'PLAY',
             totalScore: playerScore,
             score: playerScore,
-            maxPossibleScore: totalQ * 100,
+            maxPossibleScore: maxScore,
             maxStreak: playtestMaxStreakRef.current,
             totalQuestions: totalQ,
             correctAnswers: playerCorrectCount,
             correctCount: playerCorrectCount,
             wrongCount: nextWrongCount,
             wrongAnswers: nextWrongCount,
-            accuracy: accuracyPct,
+            accuracy: perfEval.accuracyPercentage,
+            performanceEvaluation: perfEval,
             durationMs: durationSeconds * 1000,
             finishedAt: new Date().toISOString(),
             questionResults: [],
           };
+          soundManager.stopAll();
+          soundManager.playVictory();
           setFinalResult(localFinal);
           setCurrentQuestion(null);
           stopTimer();
@@ -802,14 +1011,21 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         setPlayerWrongCount((prev) => prev + 1);
       }
       if (advanceRes.finished && advanceRes.result) {
+        soundManager.stopAll();
+        soundManager.playVictory();
         setFinalResult(advanceRes.result);
         setCurrentQuestion(null);
         stopTimer();
         const targetGameId = gameId || initialSpec?.gameId;
-        if (targetGameId && !playtestMode) sessionStorage.removeItem(`active_solo_session_${targetGameId}`);
+        if (targetGameId && !playtestMode) {
+          sessionStorage.removeItem(`active_solo_session_${targetGameId}`);
+        }
       } else if (advanceRes.question) {
         setCurrentQuestion(advanceRes.question);
-        const qTime = advanceRes.question.timePerQuestion || 20;
+        const qTime =
+          typeof advanceRes.question.remainingTimeSeconds === 'number'
+            ? advanceRes.question.remainingTimeSeconds
+            : advanceRes.question.timePerQuestion || 20;
         startCountdown(qTime);
       }
     } catch (err: any) {
@@ -820,9 +1036,726 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         toast.error(err.message || 'Không thể tải câu hỏi tiếp theo.', 'Lỗi chuyển câu');
       }
     } finally {
+      advancingLockRef.current = false;
       setIsLoading(false);
     }
   };
+
+  // Auto-advance after questionFeedback (3500ms in PLAY mode, 1500ms in EXAM mode) for non-Adventure modes
+  useEffect(() => {
+    clearAutoAdvanceTimer();
+    const spec = loadedSpec || initialSpec;
+    if (!questionFeedback || inlineEditOpen || finalResult || spec?.gameType === 'ADVENTURE') {
+      return;
+    }
+    const isExamMode = spec?.settings?.sessionMode === 'EXAM';
+    const delayMs =
+      typeof spec?.settings?.autoAdvanceDelayMs === 'number' && spec.settings.autoAdvanceDelayMs >= 500
+        ? spec.settings.autoAdvanceDelayMs
+        : isExamMode
+          ? 1500
+          : 3500;
+    autoAdvanceTimerRef.current = window.setTimeout(() => {
+      handleNextQuestion();
+    }, delayMs);
+    return () => {
+      clearAutoAdvanceTimer();
+    };
+  }, [questionFeedback, inlineEditOpen, finalResult, loadedSpec, initialSpec]);
+
+  // Open Inline Question Editor during Playtest
+  const handleOpenInlineEditor = (targetIdx?: number) => {
+    if (!playtestMode) return;
+    const spec = loadedSpec || initialSpec;
+    if (!spec || !Array.isArray(spec.questions)) return;
+    const idx =
+      typeof targetIdx === 'number'
+        ? targetIdx
+        : currentQuestion?.questionIndex ?? playtestQuestionIndexRef.current;
+    const q = spec.questions[idx];
+    if (!q) return;
+
+    stopTimer();
+    clearAutoAdvanceTimer();
+    setInlineEditIndex(idx);
+    setEditDraft({
+      question: q.question || '',
+      choices: Array.isArray(q.choices) && q.choices.length > 0 ? [...q.choices] : ['', '', '', ''],
+      correctAnswer: q.correctAnswer || '',
+      explanation: q.explanation || '',
+      timeLimitSeconds:
+        q.timeLimitSeconds || currentQuestion?.timePerQuestion || spec.settings?.timePerQuestion || 20,
+      crosswordClue: q.crosswordClue,
+      crosswordAnswer: q.crosswordAnswer,
+    });
+    setInlineEditOpen(true);
+  };
+
+  const handleCloseInlineEditor = () => {
+    setInlineEditOpen(false);
+    const spec = loadedSpec || initialSpec;
+    if (!questionFeedback && currentQuestion && spec?.gameType !== 'ADVENTURE') {
+      startCountdown(Math.max(1, timeLeft));
+    }
+  };
+
+  const handleSaveInlineEditor = async () => {
+    const spec = loadedSpec || initialSpec;
+    if (!spec || !Array.isArray(spec.questions)) return;
+    const trimmedQ = editDraft.question.trim();
+    const trimmedAns = editDraft.correctAnswer.trim();
+    if (!trimmedQ || !trimmedAns) {
+      toast.warning('Nội dung câu hỏi và đáp án đúng không được để trống.', 'Thiếu thông tin');
+      return;
+    }
+
+    setSavingInlineEdit(true);
+    try {
+      const updatedQuestions: GameQuestion[] = spec.questions.map((item, idx) => {
+        if (idx !== inlineEditIndex) return item;
+        const effectiveType = item.type || spec.gameType;
+        const cleanedChoices = editDraft.choices.map((c) => c.trim()).filter(Boolean);
+        return {
+          ...item,
+          question: trimmedQ,
+          choices:
+            effectiveType === 'MULTIPLE_CHOICE' ||
+            effectiveType === 'QUIZ' ||
+            effectiveType === 'QUICK_BUTTON' ||
+            effectiveType === 'TRUE_FALSE' ||
+            effectiveType === 'PUZZLE'
+              ? cleanedChoices.length > 0
+                ? cleanedChoices
+                : item.choices
+              : item.choices,
+          correctAnswer: trimmedAns,
+          explanation: editDraft.explanation.trim(),
+          timeLimitSeconds: Math.max(5, Math.min(300, Number(editDraft.timeLimitSeconds) || 20)),
+          crosswordClue: editDraft.crosswordClue ?? item.crosswordClue,
+          crosswordAnswer:
+            effectiveType === 'CROSSWORD'
+              ? editDraft.crosswordAnswer?.trim() || trimmedAns
+              : item.crosswordAnswer,
+        };
+      });
+
+      let updatedSpec: GameSpecification = {
+        ...spec,
+        questions: updatedQuestions,
+      };
+
+      // Persist to backend on the SAME gameId if already saved in DB
+      if (
+        spec.gameId &&
+        spec.gameId !== 'playtest-game' &&
+        !spec.gameId.startsWith('temp_') &&
+        !spec.gameId.startsWith('local_')
+      ) {
+        try {
+          const persisted = await saveEditedQuestions(spec.gameId, updatedQuestions);
+          updatedSpec = {
+            ...persisted,
+            questions: updatedQuestions,
+          };
+        } catch {
+          // Keep local spec update if offline/unauthenticated
+        }
+      }
+
+      setLoadedSpec(updatedSpec);
+      onSpecUpdated?.(updatedSpec);
+
+      if (currentQuestion && currentQuestion.questionIndex === inlineEditIndex) {
+        const refreshedQ = buildPlaytestClientQuestion(updatedSpec, inlineEditIndex);
+        setCurrentQuestion(refreshedQ);
+        setTimeLeft(refreshedQ.timePerQuestion || 20);
+        if (!questionFeedback && updatedSpec.gameType !== 'ADVENTURE') {
+          startCountdown(refreshedQ.timePerQuestion || 20);
+        }
+      }
+
+      setInlineEditOpen(false);
+      toast.success(`Đã cập nhật Câu #${inlineEditIndex + 1} ngay trong phiên chơi thử.`, 'Đã lưu câu hỏi');
+    } finally {
+      setSavingInlineEdit(false);
+    }
+  };
+
+  const activeGameSpec = loadedSpec || initialSpec;
+  const isExamMode = activeGameSpec?.settings?.sessionMode === 'EXAM';
+  const isExamUnpublished =
+    isExamMode && !activeGameSpec?.settings?.answersPublished && !playtestMode;
+
+  const inlineEditModalNode = inlineEditOpen ? (
+    <div
+      data-testid="playtest-inline-edit-modal"
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 9999,
+        backgroundColor: 'rgba(9, 13, 22, 0.85)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '1rem',
+        overflowY: 'auto',
+      }}
+    >
+      <div
+        style={{
+          width: '100%',
+          maxWidth: '640px',
+          backgroundColor: 'var(--bg-surface)',
+          border: '1.5px solid var(--primary)',
+          borderRadius: '18px',
+          padding: '1.5rem',
+          color: 'var(--text-primary)',
+          boxShadow: 'var(--shadow-xl)',
+          textAlign: 'left',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '0.75rem',
+            marginBottom: '1rem',
+          }}
+        >
+          <div>
+            <span
+              style={{
+                fontSize: '0.75rem',
+                fontWeight: 900,
+                color: '#f59e0b',
+                textTransform: 'uppercase',
+              }}
+            >
+              Chỉnh sửa trực tiếp trong Chơi thử · Câu #{inlineEditIndex + 1}
+            </span>
+            <h3 style={{ margin: '0.2rem 0 0 0', fontSize: '1.15rem', fontWeight: 900 }}>
+              Cập nhật nội dung câu hỏi (Đồng hồ đã tạm dừng)
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={handleCloseInlineEditor}
+            style={{
+              width: '36px',
+              height: '36px',
+              borderRadius: '10px',
+              border: '1px solid var(--border-strong)',
+              backgroundColor: 'var(--bg-input)',
+              color: 'var(--text-secondary)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <XMarkIcon size={18} />
+          </button>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
+              Nội dung câu hỏi:
+            </label>
+            <textarea
+              data-testid="playtest-inline-question-input"
+              rows={2}
+              value={editDraft.question}
+              onChange={(e) => setEditDraft((prev) => ({ ...prev, question: e.target.value }))}
+              style={{
+                width: '100%',
+                padding: '0.65rem 0.85rem',
+                borderRadius: '10px',
+                border: '1.5px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontSize: '0.95rem',
+                fontWeight: 700,
+              }}
+            />
+          </div>
+
+          {Array.isArray(activeGameSpec?.questions?.[inlineEditIndex]?.choices) &&
+            (activeGameSpec?.questions?.[inlineEditIndex]?.choices?.length || 0) > 0 && (
+              <div>
+                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
+                  Các lựa chọn:
+                </label>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                  {editDraft.choices.map((ch, cIdx) => (
+                    <input
+                      key={cIdx}
+                      type="text"
+                      data-testid={`playtest-inline-choice-${cIdx}`}
+                      value={ch}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setEditDraft((prev) => {
+                          const next = [...prev.choices];
+                          next[cIdx] = val;
+                          return { ...prev, choices: next };
+                        });
+                      }}
+                      placeholder={`Lựa chọn ${cIdx + 1}`}
+                      style={{
+                        padding: '0.55rem 0.75rem',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-input)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.88rem',
+                        fontWeight: 600,
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.75rem' }}>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
+                Đáp án đúng:
+              </label>
+              <input
+                type="text"
+                data-testid="playtest-inline-correct-input"
+                value={editDraft.correctAnswer}
+                onChange={(e) => setEditDraft((prev) => ({ ...prev, correctAnswer: e.target.value }))}
+                style={{
+                  width: '100%',
+                  padding: '0.6rem 0.85rem',
+                  borderRadius: '10px',
+                  border: '1.5px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.92rem',
+                  fontWeight: 800,
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
+                Thời gian (giây):
+              </label>
+              <input
+                type="number"
+                min={5}
+                max={300}
+                data-testid="playtest-inline-time-input"
+                value={editDraft.timeLimitSeconds}
+                onChange={(e) =>
+                  setEditDraft((prev) => ({
+                    ...prev,
+                    timeLimitSeconds: Math.max(5, Math.min(300, Number(e.target.value) || 20)),
+                  }))
+                }
+                style={{
+                  width: '100%',
+                  padding: '0.6rem 0.85rem',
+                  borderRadius: '10px',
+                  border: '1.5px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.92rem',
+                  fontWeight: 800,
+                }}
+              />
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
+              Giải thích đáp án:
+            </label>
+            <textarea
+              data-testid="playtest-inline-explanation-input"
+              rows={2}
+              value={editDraft.explanation}
+              onChange={(e) => setEditDraft((prev) => ({ ...prev, explanation: e.target.value }))}
+              style={{
+                width: '100%',
+                padding: '0.6rem 0.85rem',
+                borderRadius: '10px',
+                border: '1px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontSize: '0.88rem',
+              }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.65rem', marginTop: '0.5rem' }}>
+            <button
+              type="button"
+              onClick={handleCloseInlineEditor}
+              style={{
+                minHeight: '42px',
+                padding: '0.55rem 1.15rem',
+                borderRadius: '10px',
+                border: '1px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Hủy
+            </button>
+            <button
+              type="button"
+              data-testid="playtest-inline-save-btn"
+              disabled={savingInlineEdit}
+              onClick={handleSaveInlineEditor}
+              style={{
+                minHeight: '42px',
+                padding: '0.55rem 1.35rem',
+                borderRadius: '10px',
+                border: 'none',
+                backgroundColor: 'var(--primary)',
+                color: '#ffffff',
+                fontWeight: 800,
+                cursor: savingInlineEdit ? 'wait' : 'pointer',
+              }}
+            >
+              {savingInlineEdit ? 'Đang lưu...' : 'Lưu câu hỏi & Tiếp tục chơi thử'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  // ROSTER GATE SCREEN (Solo Live Mode with PRECONFIGURED / HYBRID Roster)
+  if (rosterGateOpen && !playtestMode) {
+    const rosterMode = activeGameSpec?.settings?.rosterMode || 'PRECONFIGURED';
+    const filteredRoster = rosterItems.filter((item) => {
+      const q = rosterSearch.trim().toLowerCase();
+      if (!q) return true;
+      return (
+        item.fullName.toLowerCase().includes(q) ||
+        (item.departmentUnit || '').toLowerCase().includes(q) ||
+        (item.employeeCode || '').toLowerCase().includes(q)
+      );
+    });
+    const selectedParticipant =
+      rosterItems.find((p) => (p.id || p.participantId) === selectedParticipantId) || null;
+
+    const handleConfirmRosterIdentity = () => {
+      const targetGameId = gameId || initialSpec?.gameId;
+      const identityKey = targetGameId ? `solo_roster_identity_${targetGameId}` : null;
+      if (hybridFreeTextMode && rosterMode === 'HYBRID') {
+        const cleanName = freeTextPlayerName.trim();
+        if (!cleanName) {
+          toast.warning('Vui lòng nhập họ tên của bạn trước khi bắt đầu.', 'Thiếu họ tên');
+          return;
+        }
+        const ident = {
+          playerName: cleanName,
+          departmentUnit: freeTextDepartment.trim() || undefined,
+        };
+        confirmedIdentityRef.current = ident;
+        if (identityKey) sessionStorage.setItem(identityKey, JSON.stringify(ident));
+        setRosterGateOpen(false);
+        initializeSession(true);
+        return;
+      }
+
+      if (!selectedParticipant) {
+        toast.warning('Vui lòng chọn đúng tên của bạn trong danh sách thí sinh.', 'Chưa chọn tên');
+        return;
+      }
+      const ident = {
+        participantId: selectedParticipant.id || selectedParticipant.participantId,
+        playerName: selectedParticipant.fullName,
+        departmentUnit: selectedParticipant.departmentUnit,
+      };
+      confirmedIdentityRef.current = ident;
+      if (identityKey) sessionStorage.setItem(identityKey, JSON.stringify(ident));
+      setConfirmingIdentity(false);
+      setRosterGateOpen(false);
+      initializeSession(true);
+    };
+
+    return (
+      <div
+        data-testid="solo-roster-gate"
+        style={{
+          maxWidth: '580px',
+          margin: '2rem auto',
+          padding: '2rem',
+          backgroundColor: 'var(--bg-surface)',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: '20px',
+          boxShadow: 'var(--shadow-lg)',
+        }}
+      >
+        <h2 style={{ margin: '0 0 0.4rem 0', fontSize: '1.4rem', fontWeight: 900 }}>
+          Xác Nhận Danh Tính Thí Sinh
+        </h2>
+        <p style={{ margin: '0 0 1.25rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
+          {activeGameSpec?.title || 'Bài thi / Kiểm tra'} — Vui lòng chọn đúng tên và đơn vị của bạn để ghi nhận kết quả chính thức.
+        </p>
+
+        {rosterMode === 'HYBRID' && (
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+            <button
+              type="button"
+              onClick={() => setHybridFreeTextMode(false)}
+              style={{
+                flex: 1,
+                padding: '0.55rem',
+                borderRadius: '10px',
+                border: `1.5px solid ${!hybridFreeTextMode ? 'var(--primary)' : 'var(--border-strong)'}`,
+                backgroundColor: !hybridFreeTextMode ? 'var(--primary-subtle)' : 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              Chọn từ danh sách BTC
+            </button>
+            <button
+              type="button"
+              data-testid="roster-hybrid-freetext-toggle"
+              onClick={() => setHybridFreeTextMode(true)}
+              style={{
+                flex: 1,
+                padding: '0.55rem',
+                borderRadius: '10px',
+                border: `1.5px solid ${hybridFreeTextMode ? 'var(--primary)' : 'var(--border-strong)'}`,
+                backgroundColor: hybridFreeTextMode ? 'var(--primary-subtle)' : 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              Nhập tên ngoài danh sách
+            </button>
+          </div>
+        )}
+
+        {hybridFreeTextMode ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', marginBottom: '1.25rem' }}>
+            <input
+              type="text"
+              data-testid="roster-freetext-name-input"
+              placeholder="Nhập họ và tên của bạn..."
+              value={freeTextPlayerName}
+              onChange={(e) => setFreeTextPlayerName(e.target.value)}
+              style={{
+                padding: '0.75rem 1rem',
+                borderRadius: '10px',
+                border: '1.5px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontWeight: 700,
+              }}
+            />
+            <input
+              type="text"
+              data-testid="roster-freetext-unit-input"
+              placeholder="Đơn vị / Phòng ban (tùy chọn)..."
+              value={freeTextDepartment}
+              onChange={(e) => setFreeTextDepartment(e.target.value)}
+              style={{
+                padding: '0.75rem 1rem',
+                borderRadius: '10px',
+                border: '1.5px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontWeight: 600,
+              }}
+            />
+            <button
+              type="button"
+              data-testid="confirm-participant-identity-btn"
+              onClick={handleConfirmRosterIdentity}
+              style={{
+                minHeight: '46px',
+                borderRadius: '12px',
+                border: 'none',
+                backgroundColor: 'var(--primary)',
+                color: '#ffffff',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              Xác nhận & Bắt đầu làm bài
+            </button>
+          </div>
+        ) : (
+          <>
+            <input
+              type="text"
+              data-testid="roster-search-input"
+              placeholder="Tìm nhanh theo họ tên, mã nhân viên hoặc đơn vị..."
+              value={rosterSearch}
+              onChange={(e) => setRosterSearch(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '0.7rem 1rem',
+                borderRadius: '10px',
+                border: '1.5px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontWeight: 700,
+                marginBottom: '0.85rem',
+              }}
+            />
+
+            <div
+              style={{
+                maxHeight: '260px',
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
+                marginBottom: '1.25rem',
+              }}
+            >
+              {filteredRoster.map((p) => {
+                const pid = p.id || p.participantId;
+                const retakesGranted = p.retakesGranted ?? Math.max(0, (p.allowedAttempts ?? 1) - 1);
+                const attemptsUsed = p.attemptsUsed ?? p.usedAttempts ?? 0;
+                const canRetake = p.canStartAttempt ?? (retakesGranted > 0 && attemptsUsed <= retakesGranted);
+                const isBlocked =
+                  p.isLocked &&
+                  !canRetake &&
+                  (p.lockStatus === 'IN_PROGRESS' ||
+                    (isExamMode && p.lockStatus === 'COMPLETED'));
+                const isSelected = selectedParticipantId === pid;
+                return (
+                  <button
+                    key={pid}
+                    type="button"
+                    data-testid={`roster-participant-option-${pid}`}
+                    disabled={isBlocked}
+                    onClick={() => {
+                      setSelectedParticipantId(pid);
+                      setConfirmingIdentity(true);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '0.75rem 1rem',
+                      borderRadius: '12px',
+                      border: `1.5px solid ${
+                        isSelected ? 'var(--primary)' : 'var(--border-subtle)'
+                      }`,
+                      backgroundColor: isSelected
+                        ? 'var(--primary-subtle)'
+                        : 'var(--bg-input)',
+                      color: 'var(--text-primary)',
+                      textAlign: 'left',
+                      cursor: isBlocked ? 'not-allowed' : 'pointer',
+                      opacity: isBlocked ? 0.55 : 1,
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '0.95rem' }}>{p.fullName}</div>
+                      {p.departmentUnit && (
+                        <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                          Đơn vị: {p.departmentUnit}
+                        </div>
+                      )}
+                    </div>
+                    <span
+                      style={{
+                        fontSize: '0.75rem',
+                        fontWeight: 800,
+                        padding: '0.2rem 0.6rem',
+                        borderRadius: '999px',
+                        backgroundColor: isBlocked
+                          ? 'rgba(239, 68, 68, 0.15)'
+                          : canRetake
+                            ? 'rgba(56, 189, 248, 0.15)'
+                            : 'rgba(16, 185, 129, 0.15)',
+                        color: isBlocked ? '#ef4444' : canRetake ? '#0284c7' : '#10b981',
+                      }}
+                    >
+                      {p.lockStatus === 'IN_PROGRESS'
+                        ? 'Đang thi'
+                        : canRetake
+                          ? 'Được cấp thi lại'
+                          : isBlocked
+                            ? 'Đã hoàn thành'
+                            : 'Sẵn sàng'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {confirmingIdentity && selectedParticipant && (
+              <div
+                data-testid="roster-confirm-card"
+                style={{
+                  padding: '1rem',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                  border: '1.5px solid var(--primary)',
+                  marginBottom: '1rem',
+                }}
+              >
+                <div style={{ fontWeight: 800, fontSize: '0.95rem', marginBottom: '0.35rem' }}>
+                  Xác nhận: Bạn là <strong>{selectedParticipant.fullName}</strong>
+                  {selectedParticipant.departmentUnit
+                    ? ` (${selectedParticipant.departmentUnit})`
+                    : ''}
+                  ?
+                </div>
+                <div style={{ fontSize: '0.82rem', color: 'var(--text-secondary)', marginBottom: '0.75rem' }}>
+                  Sau khi xác nhận, tên này sẽ được khóa cho phiên làm bài của bạn để tránh trùng lặp.
+                </div>
+                <button
+                  type="button"
+                  data-testid="confirm-participant-identity-btn"
+                  onClick={handleConfirmRosterIdentity}
+                  style={{
+                    width: '100%',
+                    minHeight: '44px',
+                    borderRadius: '10px',
+                    border: 'none',
+                    backgroundColor: 'var(--primary)',
+                    color: '#ffffff',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ✓ Đây là tôi — Bắt đầu ngay
+                </button>
+              </div>
+            )}
+          </>
+        )}
+
+        <button
+          type="button"
+          onClick={handleLeave}
+          style={{
+            width: '100%',
+            minHeight: '42px',
+            borderRadius: '10px',
+            border: '1px solid var(--border-strong)',
+            backgroundColor: 'var(--bg-surface)',
+            color: 'var(--text-secondary)',
+            fontWeight: 700,
+            cursor: 'pointer',
+          }}
+        >
+          Quay lại
+        </button>
+      </div>
+    );
+  }
 
   if (isLoading && !currentQuestion && !finalResult) {
     return (
@@ -932,7 +1865,6 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     );
   }
 
-  const activeGameSpec = loadedSpec || initialSpec;
   const playtestBanner = playtestMode ? (
     <div
       data-testid="playtest-mode-banner"
@@ -950,7 +1882,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         color: 'var(--text-primary)',
       }}
     >
-      <div style={{ display: ' flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
         <span
           style={{
             display: 'inline-flex',
@@ -971,33 +1903,57 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           Trải nghiệm kiểm thử — Không ghi điểm, lịch sử hay thống kê thật
         </span>
       </div>
-      <button
-        type="button"
-        data-testid="exit-playtest-btn"
-        onClick={handleLeave}
-        style={{
-          minHeight: '36px',
-          padding: '0.35rem 0.9rem',
-          borderRadius: '10px',
-          border: '1.5px solid rgba(245, 158, 11, 0.5)',
-          backgroundColor: 'var(--bg-surface)',
-          color: 'var(--text-primary)',
-          fontSize: '0.82rem',
-          fontWeight: 800,
-          cursor: 'pointer',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '0.35rem',
-        }}
-      >
-        <XMarkIcon size={15} />
-        <span>Thoát chơi thử</span>
-      </button>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+        {currentQuestion && (
+          <button
+            type="button"
+            data-testid="playtest-inline-edit-btn"
+            onClick={() => handleOpenInlineEditor(currentQuestion.questionIndex)}
+            style={{
+              minHeight: '36px',
+              padding: '0.35rem 0.85rem',
+              borderRadius: '10px',
+              border: '1.5px solid var(--primary)',
+              backgroundColor: 'var(--primary-subtle)',
+              color: 'var(--primary)',
+              fontSize: '0.82rem',
+              fontWeight: 800,
+              cursor: 'pointer',
+            }}
+          >
+            ✎ Chỉnh sửa câu này
+          </button>
+        )}
+        <button
+          type="button"
+          data-testid="exit-playtest-btn"
+          onClick={handleLeave}
+          style={{
+            minHeight: '36px',
+            padding: '0.35rem 0.9rem',
+            borderRadius: '10px',
+            border: '1.5px solid rgba(245, 158, 11, 0.5)',
+            backgroundColor: 'var(--bg-surface)',
+            color: 'var(--text-primary)',
+            fontSize: '0.82rem',
+            fontWeight: 800,
+            cursor: 'pointer',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.35rem',
+          }}
+        >
+          <XMarkIcon size={15} />
+          <span>Thoát chơi thử</span>
+        </button>
+      </div>
     </div>
   ) : null;
+
   if (activeGameSpec && activeGameSpec.gameType === 'ADVENTURE') {
     return (
       <div className="w-full h-full">
+        {inlineEditModalNode}
         <AdventureGameEngine
           key={activeGameSpec.gameId}
           game={activeGameSpec}
@@ -1024,6 +1980,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           onExit={handleLeave}
           isPlaytest={playtestMode}
           onCheckpointModalChange={handleAdventureCheckpointModalChange}
+          onEditCheckpointQuestion={(stageIdx) => handleOpenInlineEditor(stageIdx)}
+          audioMuted={audioMuted}
+          onToggleAudioMute={handleToggleAudioMute}
         />
       </div>
     );
@@ -1031,23 +1990,28 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
   // FINISH SCREEN
   if (finalResult) {
-    const accuracy =
-      finalResult.accuracy ??
-      (finalResult.totalQuestions > 0
-        ? Math.round(
-            (((finalResult.correctAnswers ?? finalResult.correctCount ?? 0) /
-              finalResult.totalQuestions)) *
-              100
-          )
-        : 0);
-
     const totalPts = finalResult.totalScore ?? finalResult.score ?? 0;
     const correctCount = finalResult.correctAnswers ?? finalResult.correctCount ?? 0;
+    const maxScore =
+      finalResult.maxPossibleScore ||
+      calculateFrontendMaxPossibleScore(
+        finalResult.totalQuestions,
+        activeGameSpec?.settings?.scoringMode
+      );
+    const perfEval =
+      finalResult.performanceEvaluation ||
+      evaluateFrontendPerformance({
+        correctAnswers: correctCount,
+        totalQuestions: finalResult.totalQuestions,
+        sessionMode: finalResult.sessionMode || activeGameSpec?.settings?.sessionMode,
+        passThresholdPercent: activeGameSpec?.settings?.passThresholdPercent,
+      });
 
     return (
       <div
+        data-testid="solo-finish-screen"
         style={{
-          maxWidth: '560px',
+          maxWidth: '580px',
           margin: '2rem auto',
           padding: '2.5rem 2rem',
           backgroundColor: 'var(--bg-surface)',
@@ -1068,25 +2032,85 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            marginBottom: '1.25rem',
+            marginBottom: '1rem',
           }}
         >
           <TrophyIcon size={34} />
         </div>
 
+        {perfEval.isPassed !== null && (
+          <div style={{ marginBottom: '0.65rem' }}>
+            <span
+              data-testid="exam-pass-status-badge"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '0.3rem 0.9rem',
+                borderRadius: '999px',
+                fontSize: '0.82rem',
+                fontWeight: 900,
+                backgroundColor: perfEval.isPassed
+                  ? 'rgba(16, 185, 129, 0.16)'
+                  : 'rgba(239, 68, 68, 0.16)',
+                border: `1.5px solid ${
+                  perfEval.isPassed ? 'var(--accent-emerald)' : 'var(--accent-rose)'
+                }`,
+                color: perfEval.isPassed ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+              }}
+            >
+              {perfEval.isPassed ? '✓ ĐẠT YÊU CẦU' : '✕ CHƯA ĐẠT'} (Ngưỡng {perfEval.passThresholdPercent}%)
+            </span>
+          </div>
+        )}
+
         <h2 style={{ margin: '0 0 0.35rem 0', fontSize: '1.75rem', fontWeight: 900 }}>
-          {playtestMode ? 'Hoàn Thành Chơi Thử!' : 'Hoàn Thành Trận Đấu!'}
+          {playtestMode
+            ? 'Hoàn Thành Chơi Thử!'
+            : isExamMode
+              ? 'Hoàn Thành Bài Thi!'
+              : 'Hoàn Thành Trận Đấu!'}
         </h2>
-        <p style={{ margin: '0 0 1.75rem 0', color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
-          Bạn đã xuất sắc vượt qua tất cả các câu hỏi của bộ đề.
+        <p style={{ margin: '0 0 1.25rem 0', color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
+          {activeGameSpec?.title || finalResult.title}
         </p>
 
         {playtestBanner}
+
+        {/* Unified 4-Tier Evaluation Card */}
+        <div
+          data-testid="solo-result-evaluation"
+          style={{
+            padding: '1rem 1.25rem',
+            borderRadius: '16px',
+            backgroundColor: 'var(--bg-input)',
+            border: '1.5px solid var(--primary)',
+            marginBottom: '1.5rem',
+            textAlign: 'left',
+          }}
+        >
+          <div
+            data-testid="result-tier-label"
+            style={{ fontSize: '1.05rem', fontWeight: 900, color: 'var(--primary)' }}
+          >
+            Mức đánh giá: {perfEval.tierLabel} ({perfEval.accuracyPercentage}%)
+          </div>
+          <div
+            style={{
+              fontSize: '0.88rem',
+              color: 'var(--text-secondary)',
+              marginTop: '0.35rem',
+              lineHeight: 1.45,
+            }}
+          >
+            {perfEval.comment}
+          </div>
+        </div>
+
         {/* Score cards */}
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
             gap: '0.85rem',
             marginBottom: '2rem',
           }}
@@ -1099,11 +2123,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               border: '1px solid var(--border-subtle)',
             }}
           >
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.35rem' }}>
-              TỔNG ĐIỂM
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.35rem' }}>
+              ĐIỂM ĐẠT / TỐI ĐA
             </div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 900, color: 'var(--primary)' }}>
-              {totalPts.toLocaleString()}
+            <div
+              data-testid="solo-result-score-ratio"
+              style={{ fontSize: '1.45rem', fontWeight: 900, color: 'var(--primary)' }}
+            >
+              {totalPts.toLocaleString()} / {maxScore.toLocaleString()}
             </div>
           </div>
 
@@ -1115,10 +2142,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               border: '1px solid var(--border-subtle)',
             }}
           >
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.35rem' }}>
-              ĐÚNG
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.35rem' }}>
+              SỐ CÂU ĐÚNG
             </div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 900, color: 'var(--accent-emerald)' }}>
+            <div
+              data-testid="solo-result-correct-ratio"
+              style={{ fontSize: '1.45rem', fontWeight: 900, color: 'var(--accent-emerald)' }}
+            >
               {correctCount} / {finalResult.totalQuestions}
             </div>
           </div>
@@ -1131,39 +2161,44 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               border: '1px solid var(--border-subtle)',
             }}
           >
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.35rem' }}>
-              CHÍNH XÁC
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.35rem' }}>
+              TỶ LỆ ĐÚNG
             </div>
-            <div style={{ fontSize: '1.75rem', fontWeight: 900, color: '#f59e0b' }}>
-              {accuracy}%
+            <div
+              data-testid="solo-result-accuracy"
+              style={{ fontSize: '1.45rem', fontWeight: 900, color: '#f59e0b' }}
+            >
+              {perfEval.accuracyPercentage}%
             </div>
           </div>
         </div>
 
         {/* Buttons */}
-        <div style={{ display: 'flex', gap: '0.85rem', justifyContent: 'center' }}>
-          <button
-            type="button"
-            onClick={initializeSession}
-            style={{
-              minHeight: '48px',
-              padding: '0.75rem 1.5rem',
-              borderRadius: '12px',
-              border: 'none',
-              backgroundColor: 'var(--primary)',
-              color: 'var(--primary-ink)',
-              fontWeight: 800,
-              fontSize: '0.95rem',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              boxShadow: '0 0 16px var(--primary-subtle)',
-            }}
-          >
-            <RefreshIcon size={18} />
-            <span>Chơi Lại Trận Này</span>
-          </button>
+        <div style={{ display: 'flex', gap: '0.85rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+          {(!isExamMode || playtestMode) && (
+            <button
+              type="button"
+              onClick={() => initializeSession('RESTART')}
+              style={{
+                minHeight: '48px',
+                padding: '0.75rem 1.5rem',
+                borderRadius: '12px',
+                border: 'none',
+                backgroundColor: 'var(--primary)',
+                color: 'var(--primary-ink)',
+                fontWeight: 800,
+                fontSize: '0.95rem',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                boxShadow: '0 0 16px var(--primary-subtle)',
+              }}
+            >
+              <RefreshIcon size={18} />
+              <span>Chơi Lại Trận Này</span>
+            </button>
+          )}
 
           <button
             type="button"
@@ -1192,7 +2227,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
   return (
     <div style={{ maxWidth: '820px', margin: '0 auto', padding: '1rem 1rem 3rem' }}>
-      {/* Top Bar: Question Index, Score, Streak, Timer, Leave */}
+      {inlineEditModalNode}
+      {/* Top Bar: Question Index, Score, Streak, Audio, Timer, Leave */}
       {playtestBanner}
       <div
         style={{
@@ -1209,7 +2245,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           marginBottom: '1.5rem',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
           <span
             style={{
               fontWeight: 800,
@@ -1222,6 +2258,23 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           >
             Câu {currentQuestion.questionIndex + 1} / {currentQuestion.totalQuestions}
           </span>
+
+          {isExamMode && (
+            <span
+              data-testid="solo-exam-mode-badge"
+              style={{
+                fontWeight: 900,
+                fontSize: '0.75rem',
+                color: '#ef4444',
+                backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                padding: '0.22rem 0.55rem',
+                borderRadius: '999px',
+              }}
+            >
+              CHẾ ĐỘ THI
+            </span>
+          )}
 
           <div
             style={{
@@ -1257,9 +2310,57 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+          {/* Audio Mute & Volume Controls */}
+          <div
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              padding: '0.25rem 0.6rem',
+              borderRadius: '10px',
+              backgroundColor: 'var(--bg-input)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            <button
+              type="button"
+              data-testid="audio-mute-toggle-btn"
+              onClick={handleToggleAudioMute}
+              title={audioMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: audioMuted ? 'var(--text-muted)' : 'var(--primary)',
+                fontWeight: 800,
+                fontSize: '0.82rem',
+                cursor: 'pointer',
+                padding: '0.15rem 0.25rem',
+              }}
+            >
+              {audioMuted ? '🔇' : '🔊'}
+            </button>
+            <input
+              type="range"
+              data-testid="audio-volume-slider"
+              min={0}
+              max={100}
+              step={5}
+              value={audioMuted ? 0 : Math.round(audioVolume * 100)}
+              onChange={(e) => handleAudioVolumeChange(Number(e.target.value) / 100)}
+              aria-label="Âm lượng"
+              style={{
+                width: '64px',
+                height: '6px',
+                accentColor: 'var(--primary)',
+                cursor: 'pointer',
+              }}
+            />
+          </div>
+
           {/* Timer Badge */}
           <div
+            data-testid="solo-question-timer-badge"
             style={{
               display: 'inline-flex',
               alignItems: 'center',
@@ -1316,6 +2417,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         }}
       >
         <h2
+          data-testid="solo-active-question-text"
           style={{
             fontSize: 'clamp(1.25rem, 3vw, 1.85rem)',
             fontWeight: 800,
@@ -1328,71 +2430,125 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           {currentQuestion.question}
         </h2>
 
-        {/* FEEDBACK STATE: Reveal Answer and Explanation */}
+        {/* FEEDBACK STATE: Reveal Answer and Explanation (or Redacted in EXAM Mode) */}
         {questionFeedback ? (
           <div
+            data-testid="solo-question-feedback"
             style={{
               padding: '1.75rem',
               borderRadius: '18px',
-              backgroundColor: questionFeedback.isCorrect
-                ? 'rgba(16, 185, 129, 0.12)'
-                : 'rgba(239, 68, 68, 0.12)',
+              backgroundColor: isExamUnpublished
+                ? 'rgba(56, 189, 248, 0.1)'
+                : questionFeedback.isCorrect
+                  ? 'rgba(16, 185, 129, 0.12)'
+                  : 'rgba(239, 68, 68, 0.12)',
               border: `2px solid ${
-                questionFeedback.isCorrect ? 'var(--accent-emerald)' : 'var(--accent-rose)'
+                isExamUnpublished
+                  ? '#38bdf8'
+                  : questionFeedback.isCorrect
+                    ? 'var(--accent-emerald)'
+                    : 'var(--accent-rose)'
               }`,
               marginBottom: '1.5rem',
               animation: 'popIn 0.2s ease',
             }}
           >
-            <div
-              style={{
-                fontSize: '1.4rem',
-                fontWeight: 900,
-                color: questionFeedback.isCorrect
-                  ? 'var(--accent-emerald)'
-                  : 'var(--accent-rose)',
-                marginBottom: '0.5rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.5rem',
-              }}
-            >
-              {questionFeedback.isCorrect ? (
-                <>
-                  <CheckIcon size={26} />
-                  <span>Chính Xác! +{questionFeedback.pointsEarned} điểm</span>
-                </>
-              ) : (
-                <>
-                  <XMarkIcon size={26} />
-                  <span>Chưa Đúng!</span>
-                </>
-              )}
-            </div>
+            {isExamUnpublished ? (
+              <div data-testid="exam-feedback-recorded">
+                <div
+                  style={{
+                    fontSize: '1.3rem',
+                    fontWeight: 900,
+                    color: '#0284c7',
+                    marginBottom: '0.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                  }}
+                >
+                  {questionFeedback.timedOut ? (
+                    <>
+                      <ClockIcon size={24} />
+                      <span>Hết thời gian trả lời — Đã ghi nhận tự động (+0 điểm)</span>
+                    </>
+                  ) : (
+                    <>
+                      <CheckIcon size={24} />
+                      <span>Đã ghi nhận câu trả lời của bạn</span>
+                    </>
+                  )}
+                </div>
+                <p
+                  style={{
+                    margin: '0.35rem auto 0 auto',
+                    fontSize: '0.88rem',
+                    color: 'var(--text-secondary)',
+                    maxWidth: '540px',
+                  }}
+                >
+                  Chế độ Thi nghiêm túc: Đáp án và giải thích được bảo mật cho đến khi kết thúc kỳ thi. Hệ thống tự động chuyển câu sau 1.5 giây...
+                </p>
+              </div>
+            ) : (
+              <>
+                <div
+                  style={{
+                    fontSize: '1.4rem',
+                    fontWeight: 900,
+                    color: questionFeedback.isCorrect
+                      ? 'var(--accent-emerald)'
+                      : 'var(--accent-rose)',
+                    marginBottom: '0.5rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                  }}
+                >
+                  {questionFeedback.isCorrect ? (
+                    <>
+                      <CheckIcon size={26} />
+                      <span>Chính Xác! +{questionFeedback.pointsEarned} điểm</span>
+                    </>
+                  ) : questionFeedback.timedOut ? (
+                    <>
+                      <ClockIcon size={26} />
+                      <span>Hết Thời Gian Trả Lời! (+0 điểm)</span>
+                    </>
+                  ) : (
+                    <>
+                      <XMarkIcon size={26} />
+                      <span>Chưa Đúng!</span>
+                    </>
+                  )}
+                </div>
 
-            {questionFeedback.correctAnswer && (
-              <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.95rem', fontWeight: 700 }}>
-                Đáp án chính xác: <strong>{questionFeedback.correctAnswer}</strong>
-              </p>
-            )}
+                {questionFeedback.correctAnswer && (
+                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.95rem', fontWeight: 700 }}>
+                    Đáp án chính xác: <strong>{questionFeedback.correctAnswer}</strong>
+                  </p>
+                )}
 
-            {questionFeedback.explanation && (
-              <p
-                style={{
-                  margin: '0.5rem auto 0 auto',
-                  fontSize: '0.88rem',
-                  color: 'var(--text-secondary)',
-                  lineHeight: 1.5,
-                  maxWidth: '600px',
-                }}
-              >
-                {questionFeedback.explanation}
-              </p>
+                {questionFeedback.explanation && (
+                  <p
+                    style={{
+                      margin: '0.5rem auto 0 auto',
+                      fontSize: '0.88rem',
+                      color: 'var(--text-secondary)',
+                      lineHeight: 1.5,
+                      maxWidth: '600px',
+                    }}
+                  >
+                    {questionFeedback.explanation}
+                  </p>
+                )}
+              </>
             )}
 
             <button
               type="button"
+              data-testid="solo-next-question-btn"
               onClick={handleNextQuestion}
               style={{
                 marginTop: '1.25rem',
@@ -1411,7 +2567,11 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 boxShadow: '0 0 16px var(--primary-subtle)',
               }}
             >
-              <span>Tiếp Tục Câu Kế Tiếp</span>
+              <span>
+                {currentQuestion.questionIndex + 1 < currentQuestion.totalQuestions
+                  ? 'Tiếp Tục Câu Kế Tiếp'
+                  : 'Tiếp Tục — Xem Kết Quả'}
+              </span>
               <ArrowRightIcon size={16} />
             </button>
           </div>
@@ -1476,7 +2636,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               <span>
                 {currentQuestion.questionIndex + 1 < currentQuestion.totalQuestions
                   ? 'Tiếp Tục Câu Kế Tiếp'
-                  : 'Hoàn Tất & Xem Kết Quả'}
+                  : 'Tiếp Tục — Xem Kết Quả'}
               </span>
               <ArrowRightIcon size={16} />
             </button>

@@ -272,6 +272,7 @@ export const BaseQuestionSchema = z.object({
   crosswordClue: z.string().optional(),
   crosswordAnswer: z.string().optional(),
   sliderConfig: SliderQuestionConfigSchema.optional(),
+  timeLimitSeconds: z.number().int().min(5).max(300).optional(),
 });
 
 export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => {
@@ -541,13 +542,55 @@ export const MixedQuestionDistributionSchema = z
   );
 export type MixedQuestionDistribution = z.infer<typeof MixedQuestionDistributionSchema>;
 
+export const SessionModeEnum = z.enum(['PLAY', 'EXAM']);
+export type SessionMode = z.infer<typeof SessionModeEnum>;
+
+export const TimerModeEnum = z.enum(['PER_QUESTION', 'TOTAL_EXAM', 'UNLIMITED']);
+export type TimerMode = z.infer<typeof TimerModeEnum>;
+
+export const RosterModeEnum = z.enum(['FREE_TEXT', 'PRECONFIGURED', 'HYBRID']);
+export type RosterMode = z.infer<typeof RosterModeEnum>;
+
+export const OfficialAttemptPolicyEnum = z.enum(['LATEST_ATTEMPT', 'HIGHEST_SCORE']);
+export type OfficialAttemptPolicy = z.infer<typeof OfficialAttemptPolicyEnum>;
+
+export const AudioPresetIdEnum = z.enum([
+  'NONE',
+  'ENERGETIC_ARENA',
+  'EXAM_FOCUS',
+  'ADVENTURE_QUEST',
+  'CORPORATE_CALM',
+  'CUSTOM',
+]);
+export type AudioPresetId = z.infer<typeof AudioPresetIdEnum>;
+
+export const GameAudioConfigSchema = z.object({
+  enabled: z.boolean().default(true).optional(),
+  presetId: AudioPresetIdEnum.default('ENERGETIC_ARENA').optional(),
+  customAudioUrl: z.string().nullable().optional(),
+  customAudioName: z.string().nullable().optional(),
+  volume: z.number().min(0).max(1).default(0.6).optional(),
+  countdownTriggerSeconds: z.number().int().min(0).max(60).default(5).optional(),
+});
+export type GameAudioConfig = z.infer<typeof GameAudioConfigSchema>;
+
 export const GameSettingsSchema = z.object({
   questionCount: z.number().int().min(1).max(100).default(5),
-  timePerQuestion: z.number().int().min(5).max(120).default(20),
+  timePerQuestion: z.number().int().min(5).max(300).default(20),
   scoringMode: ScoringModeEnum.default('STANDARD'),
   adventureConfig: AdventureConfigSchema.optional(),
   mixedDistribution: MixedQuestionDistributionSchema.optional(),
-
+  sessionMode: SessionModeEnum.optional(),
+  timerMode: TimerModeEnum.optional(),
+  totalExamDurationSeconds: z.number().int().min(10).max(14400).nullable().optional(),
+  autoAdvanceDelayMs: z.number().int().min(500).max(15000).optional(),
+  passThresholdPercent: z.number().min(0).max(100).optional(),
+  officialAttemptPolicy: OfficialAttemptPolicyEnum.optional(),
+  rosterMode: RosterModeEnum.optional(),
+  answersPublished: z.boolean().optional(),
+  answersPublishedAt: z.string().nullable().optional(),
+  showExamLeaderboardToPlayers: z.boolean().optional(),
+  audioConfig: GameAudioConfigSchema.optional(),
 });
 export type GameSettings = z.infer<typeof GameSettingsSchema>;
 
@@ -586,7 +629,7 @@ export const GenerateGameRequestSchema = z.object({
   difficulty: DifficultyEnum.optional(),
   scoringMode: ScoringModeEnum.optional(),
   questionCount: z.number().int().min(1).max(100).default(5).optional(),
-  timePerQuestion: z.number().int().min(5).max(120).default(20).optional(),
+  timePerQuestion: z.number().int().min(5).max(300).default(20).optional(),
   title: z.string().trim().min(1, 'Tên game không được để trống').max(100, 'Tên game không được vượt quá 100 ký tự').optional(),
   topicFocus: z.string().trim().max(300).optional(),
   sectionFilter: z.array(z.string().trim().min(1)).optional(),
@@ -596,6 +639,14 @@ export const GenerateGameRequestSchema = z.object({
   adventureSelectionMode: z.enum(['AI_DETECT', 'MANUAL']).optional(),
   adventureConfig: GenerateAdventureConfigInputSchema.optional(),
   isPublic: z.boolean().optional(),
+  sessionMode: SessionModeEnum.optional(),
+  timerMode: TimerModeEnum.optional(),
+  totalExamDurationSeconds: z.number().int().min(10).max(14400).nullable().optional(),
+  autoAdvanceDelayMs: z.number().int().min(500).max(15000).optional(),
+  passThresholdPercent: z.number().min(0).max(100).optional(),
+  officialAttemptPolicy: OfficialAttemptPolicyEnum.optional(),
+  rosterMode: RosterModeEnum.optional(),
+  audioConfig: GameAudioConfigSchema.optional(),
 }).refine(
   data => {
     const hasValidSourceId =
@@ -622,11 +673,21 @@ export const UpdateGameQuestionsRequestSchema = z.object({
   questions: z.array(GameQuestionSchema).min(1).max(100),
   settings: z
     .object({
-      timePerQuestion: z.number().int().min(5).max(120).optional(),
+      timePerQuestion: z.number().int().min(5).max(300).optional(),
       adventureConfig: GenerateAdventureConfigInputSchema.optional(),
       scoringMode: ScoringModeEnum.optional(),
       mixedDistribution: MixedQuestionDistributionSchema.optional(),
-    
+      sessionMode: SessionModeEnum.optional(),
+      timerMode: TimerModeEnum.optional(),
+      totalExamDurationSeconds: z.number().int().min(10).max(14400).nullable().optional(),
+      autoAdvanceDelayMs: z.number().int().min(500).max(15000).optional(),
+      passThresholdPercent: z.number().min(0).max(100).optional(),
+      officialAttemptPolicy: OfficialAttemptPolicyEnum.optional(),
+      rosterMode: RosterModeEnum.optional(),
+      answersPublished: z.boolean().optional(),
+      answersPublishedAt: z.string().nullable().optional(),
+      showExamLeaderboardToPlayers: z.boolean().optional(),
+      audioConfig: GameAudioConfigSchema.optional(),
     })
     .optional(),
   isPublic: z.boolean().optional(),
