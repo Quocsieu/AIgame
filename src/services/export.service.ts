@@ -649,8 +649,16 @@ export class ExportService {
             q.questionIndex,
             q.questionText,
             q.playerAnswer,
-            q.timedOut ? 'Hết giờ / Thu bài' : q.isCorrect ? 'Đúng' : 'Sai',
-            q.pointsEarned,
+            q.timedOut
+              ? 'Hết giờ / Thu bài'
+              : q.isCorrect === null || q.isCorrect === undefined
+                ? '[Bảo mật cho đến khi công bố]'
+                : q.isCorrect
+                  ? 'Đúng'
+                  : 'Sai',
+            q.pointsEarned !== null && q.pointsEarned !== undefined
+              ? q.pointsEarned
+              : '[Bảo mật cho đến khi công bố]',
             q.responseTimeMs,
             q.correctAnswer !== null ? q.correctAnswer : '[Bảo mật cho đến khi công bố]',
             q.explanation !== null ? q.explanation : '',
@@ -666,6 +674,100 @@ export class ExportService {
     return {
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       filename: `${safeSlug}_history.xlsx`,
+      body: xlsxBuffer,
+    };
+  }
+
+  /**
+   * Exports Admin AI Usage Logs in CSV (with UTF-8 BOM) or Excel (.xlsx) format.
+   * Never converts null/unreported token counts or costs to 0 — marks them clearly as 'Chưa xác định'.
+   * Neutralizes Formula Injection in all cells.
+   */
+  public exportAdminAiUsageLogs(
+    logs: Record<string, any>[],
+    format: 'csv' | 'xlsx'
+  ): { contentType: string; filename: string; body: string | Buffer } {
+    if (logs.length > LIMITS.EXPORT_MAX_ROWS) {
+      throw new AppError(
+        'EXPORT_LIMIT_EXCEEDED',
+        `AI usage log row count (${logs.length}) exceeds maximum allowed (${LIMITS.EXPORT_MAX_ROWS}).`,
+        400
+      );
+    }
+
+    const headers = [
+      'STT',
+      'Mã Log',
+      'Thời Gian (UTC)',
+      'Mã Game',
+      'Tên Game',
+      'Provider',
+      'Model',
+      'Thao Tác (Operation)',
+      'Hạng Mục Ảnh (Slot)',
+      'Trạng Thái',
+      'Mã Lỗi',
+      'Độ Trễ (ms)',
+      'Input Tokens',
+      'Output Tokens',
+      'Tổng Tokens',
+      'Chi Phí Ước Tính (USD)',
+      'Số Câu Tạo',
+      'Số Câu Hợp Lệ',
+    ];
+
+    const formatNullableMetric = (val: unknown): number | string => {
+      if (val === null || val === undefined || val === '') {
+        return 'Chưa xác định';
+      }
+      const num = Number(val);
+      return Number.isFinite(num) ? num : 'Chưa xác định';
+    };
+
+    const rows: unknown[][] = logs.map((r, idx) => [
+      idx + 1,
+      r.log_id || '',
+      r.created_at || '',
+      r.game_id || 'Chưa gắn game',
+      r.game_title || 'Chưa xác định',
+      r.provider || '',
+      r.model || '',
+      r.operation || '',
+      r.asset_slot || '',
+      r.status || '',
+      r.error_code || '',
+      typeof r.latency_ms === 'number' ? r.latency_ms : Number(r.latency_ms || 0),
+      formatNullableMetric(r.input_tokens),
+      formatNullableMetric(r.output_tokens),
+      formatNullableMetric(r.total_tokens),
+      formatNullableMetric(r.estimated_cost_usd),
+      typeof r.generated_questions === 'number' ? r.generated_questions : Number(r.generated_questions || 0),
+      typeof r.valid_questions === 'number' ? r.valid_questions : Number(r.valid_questions || 0),
+    ]);
+
+    const dateStamp = new Date().toISOString().slice(0, 10);
+
+    if (format === 'csv') {
+      return {
+        contentType: 'text/csv; charset=utf-8',
+        filename: `ai_usage_logs_${dateStamp}.csv`,
+        body: buildCsvDocument(headers, rows),
+      };
+    }
+
+    const workbook = XLSX.utils.book_new();
+    const sanitizedAoA: Array<Array<string | number | boolean>> = [
+      headers.map(h => sanitizeSpreadsheetText(h)),
+      ...rows.map(row => row.map(cell => sanitizeSpreadsheetText(cell))),
+    ];
+    const wsLogs = XLSX.utils.aoa_to_sheet(sanitizedAoA);
+    XLSX.utils.book_append_sheet(workbook, wsLogs, 'Nhat Ky AI Usage');
+
+    const xlsxBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+
+    return {
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      filename: `ai_usage_logs_${dateStamp}.xlsx`,
       body: xlsxBuffer,
     };
   }

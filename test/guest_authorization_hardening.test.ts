@@ -389,6 +389,7 @@ describe('GUEST AUTHORIZATION HARDENING — Regression & Security Tests', () => 
       .send({
         gameId: publishedGame.gameId,
         publicPlay: true,
+        playerName: 'Người chơi Ẩn danh',
       });
     assert.equal(anonSessionRes.status, 200);
   });

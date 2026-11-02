@@ -218,13 +218,19 @@ describe('NO-PASSWORD ARCHITECTURE & DIRECT LINK/QR JOIN TEST SUITE', () => {
       assert.equal(gameStore.get(gameId)?.title, 'Game Của User A');
     });
 
-    it('8. Người quản lý Kho Game (User B) ĐƯỢC PHÉP chủ động xóa game khỏi kho (HTTP 200 OK)', async () => {
+    it('8. User B bị chặn xóa game của User A (403), còn User A xóa thành công (HTTP 200 OK)', async () => {
       const gameId = `game_owner_guard_del_${Date.now()}`;
       createSampleGame({ gameId, title: 'Game Của User A', ownerUserId: userIdA });
 
-      const res = await request(app)
+      const crossRes = await request(app)
         .delete(`/api/games/${gameId}`)
         .set('Authorization', `Bearer ${userTokenB}`);
+      assert.equal(crossRes.status, 403);
+      assert.equal(crossRes.body.error.code, 'ACCESS_DENIED');
+
+      const res = await request(app)
+        .delete(`/api/games/${gameId}`)
+        .set('Authorization', `Bearer ${userTokenA}`);
 
       assert.equal(res.status, 200);
       assert.equal(res.body.success, true);
@@ -232,9 +238,9 @@ describe('NO-PASSWORD ARCHITECTURE & DIRECT LINK/QR JOIN TEST SUITE', () => {
       assert.equal(gameStore.get(gameId), undefined);
     });
 
-    it('9. Guest Token bị chặn sửa game (403), nhưng tại Kho Game được phép chủ động xóa (200)', async () => {
+    it('9. Guest Token bị chặn sửa/xóa game của User A (403), chỉ được phép xóa game của chính Guest (200)', async () => {
       const gameId = `game_guest_guard_${Date.now()}`;
-      const game = createSampleGame({ gameId, title: 'Game Khách Quản Lý' });
+      const game = createSampleGame({ gameId, title: 'Game Của User A', ownerUserId: userIdA });
 
       const patchRes = await request(app)
         .patch(`/api/games/${gameId}`)
@@ -243,11 +249,25 @@ describe('NO-PASSWORD ARCHITECTURE & DIRECT LINK/QR JOIN TEST SUITE', () => {
       assert.equal(patchRes.status, 403);
       assert.equal(patchRes.body.error.code, 'ACCESS_DENIED');
 
-      const delRes = await request(app)
+      const blockedDelRes = await request(app)
         .delete(`/api/games/${gameId}`)
         .set('X-Guest-Token', guestToken);
-      assert.equal(delRes.status, 200);
-      assert.equal(delRes.body.data.deleted, true);
+      assert.equal(blockedDelRes.status, 403);
+      assert.equal(blockedDelRes.body.error.code, 'ACCESS_DENIED');
+
+      const guestOwnedId = `game_guest_owned_${Date.now()}`;
+      createSampleGame({ gameId: guestOwnedId, title: 'Game Do Khách Tạo', ownerUserId: `guest:${guestToken}` });
+      const guestDelRes = await request(app)
+        .delete(`/api/games/${guestOwnedId}`)
+        .set('X-Guest-Token', guestToken);
+      assert.equal(guestDelRes.status, 403);
+      assert.equal(guestDelRes.body.error.code, 'ACCESS_DENIED');
+
+      const adminDelRes = await request(app)
+        .delete(`/api/games/${guestOwnedId}`)
+        .set('Authorization', `Bearer ${adminToken}`);
+      assert.equal(adminDelRes.status, 200);
+      assert.equal(adminDelRes.body.data.deleted, true);
     });
 
     it('10. Player Token (X-Player-Token) bị chặn sửa và xóa game (HTTP 403 ACCESS_DENIED)', async () => {
@@ -315,12 +335,15 @@ describe('NO-PASSWORD ARCHITECTURE & DIRECT LINK/QR JOIN TEST SUITE', () => {
       // Create session
       const sessionRes = await request(app)
         .post('/api/games/sessions')
-        .send({ gameId, publicPlay: true });
+        .send({ gameId, publicPlay: true, playerName: 'Người chơi Kiểm thử' });
       assert.equal(sessionRes.status, 200);
       const sessionId = sessionRes.body.data.sessionId;
+      const lockToken = sessionRes.body.data.lockToken;
 
       // Start session
-      const startRes = await request(app).post(`/api/games/sessions/${sessionId}/start`);
+      const startRes = await request(app)
+        .post(`/api/games/sessions/${sessionId}/start`)
+        .set('X-Participant-Token', lockToken);
       assert.equal(startRes.status, 200);
       assert.equal(startRes.body.data.question.question, 'Thủ đô của Việt Nam là thành phố nào?');
     });

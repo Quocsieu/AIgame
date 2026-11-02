@@ -1628,7 +1628,131 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     previewFinished,
   ]);
 
+  const [isLightTheme, setIsLightTheme] = useState<boolean>(() => {
+    try {
+      return (
+        document.documentElement.getAttribute('data-theme') === 'light' ||
+        localStorage.getItem('app_theme') === 'light' ||
+        localStorage.getItem('ai_game_theme') === 'light'
+      );
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    const syncTheme = () => {
+      try {
+        const attr = document.documentElement.getAttribute('data-theme');
+        if (attr === 'light' || attr === 'dark') {
+          setIsLightTheme(attr === 'light');
+        }
+      } catch {
+        // ignore
+      }
+    };
+    syncTheme();
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    });
+    return () => observer.disconnect();
+  }, []);
+
   const accentHex = effectiveConfig.palette.accentColor || '#38bdf8';
+  const getReadableAccentInk = (hex: string): string => {
+    const clean = (hex || '').replace('#', '').trim();
+    if (clean.length !== 6) return '#ffffff';
+    const r = parseInt(clean.slice(0, 2), 16) / 255;
+    const g = parseInt(clean.slice(2, 4), 16) / 255;
+    const b = parseInt(clean.slice(4, 6), 16) / 255;
+    const toLin = (c: number) => (c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+    const lum = 0.2126 * toLin(r) + 0.7152 * toLin(g) + 0.0722 * toLin(b);
+    return lum > 0.42 ? '#090d16' : '#ffffff';
+  };
+  const accentInk = getReadableAccentInk(accentHex);
+
+  const uiTheme = isLightTheme
+    ? {
+        backdropBg: 'rgba(15, 23, 42, 0.58)',
+        cardBg: '#ffffff',
+        cardBorder: '#cbd5e1',
+        cardShadow: '0 24px 60px rgba(15, 23, 42, 0.28)',
+        subCardBg: '#f8fafc',
+        subCardBorder: '#cbd5e1',
+        inputBg: '#ffffff',
+        inputBorder: '#94a3b8',
+        textPrimary: '#0f172a',
+        textSecondary: '#334155',
+        textMuted: '#475569',
+        choiceBg: '#f8fafc',
+        choiceBorder: '#cbd5e1',
+        choiceText: '#0f172a',
+        choiceSelectedBg: '#eff6ff',
+        choiceCorrectBg: '#dcfce7',
+        choiceCorrectBorder: '#16a34a',
+        choiceCorrectText: '#14532d',
+        choiceWrongBg: '#ffe4e6',
+        choiceWrongBorder: '#e11d48',
+        choiceWrongText: '#881337',
+        choiceBadgeBg: '#e2e8f0',
+        choiceBadgeText: '#0f172a',
+        typeBadgeBg: '#e0f2fe',
+        typeBadgeBorder: '#7dd3fc',
+        typeBadgeText: '#0369a1',
+        timerNormalBg: '#fef3c7',
+        timerNormalBorder: '#d97706',
+        timerNormalText: '#92400e',
+        timerUrgentBg: '#ffe4e6',
+        timerUrgentBorder: '#e11d48',
+        timerUrgentText: '#9f1239',
+        feedbackExamBg: '#e0f2fe',
+        feedbackExamBorder: '#0284c7',
+        feedbackExamText: '#0c4a6e',
+        continueBtnBg: '#0f172a',
+        continueBtnText: '#ffffff',
+      }
+    : {
+        backdropBg: 'rgba(9, 13, 22, 0.88)',
+        cardBg: '#111726',
+        cardBorder: '#26334d',
+        cardShadow: '0 20px 50px rgba(0, 0, 0, 0.65)',
+        subCardBg: '#0b0f19',
+        subCardBorder: '#26334d',
+        inputBg: '#161f30',
+        inputBorder: '#26334d',
+        textPrimary: '#f8fafc',
+        textSecondary: '#e2e8f0',
+        textMuted: '#94a3b8',
+        choiceBg: '#161f30',
+        choiceBorder: '#26334d',
+        choiceText: '#f8fafc',
+        choiceSelectedBg: '#1e293b',
+        choiceCorrectBg: '#143321',
+        choiceCorrectBorder: '#3fc07a',
+        choiceCorrectText: '#86efac',
+        choiceWrongBg: '#3b1822',
+        choiceWrongBorder: '#f43f5e',
+        choiceWrongText: '#fda4af',
+        choiceBadgeBg: '#0b0f19',
+        choiceBadgeText: '#cbd5e1',
+        typeBadgeBg: 'rgba(56, 189, 248, 0.14)',
+        typeBadgeBorder: 'rgba(56, 189, 248, 0.35)',
+        typeBadgeText: '#38bdf8',
+        timerNormalBg: 'rgba(245, 158, 11, 0.18)',
+        timerNormalBorder: '#f59e0b',
+        timerNormalText: '#fde68a',
+        timerUrgentBg: 'rgba(239, 68, 68, 0.2)',
+        timerUrgentBorder: '#ef4444',
+        timerUrgentText: '#fca5a5',
+        feedbackExamBg: '#161f30',
+        feedbackExamBorder: '#38bdf8',
+        feedbackExamText: '#38bdf8',
+        continueBtnBg: '#f8fafc',
+        continueBtnText: '#090d16',
+      };
+
   const displayedTotalScore =
     mode === 'LIVE_SESSION'
       ? (effectiveFinalResult?.totalScore ??
@@ -1811,8 +1935,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               data-testid="audio-mute-toggle-btn"
               onClick={onToggleAudioMute}
               style={{
-                height: '38px',
-                padding: '0 12px',
+                minHeight: '44px',
+                minWidth: '44px',
+                padding: '0 14px',
                 borderRadius: '10px',
                 backgroundColor: 'rgba(15, 23, 42, 0.88)',
                 border: '1px solid rgba(148, 163, 184, 0.3)',
@@ -1832,12 +1957,13 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               data-testid="hud-pause-button"
               onClick={() => setIsPaused(p => !p)}
               style={{
-                height: '38px',
+                minHeight: '44px',
+                minWidth: '44px',
                 padding: '0 14px',
                 borderRadius: '10px',
                 backgroundColor: isPaused ? accentHex : 'rgba(15, 23, 42, 0.88)',
                 border: '1px solid rgba(148, 163, 184, 0.3)',
-                color: isPaused ? '#090d16' : '#f8fafc',
+                color: isPaused ? accentInk : '#f8fafc',
                 fontSize: '12.5px',
                 fontWeight: 800,
                 cursor: 'pointer',
@@ -1852,7 +1978,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               data-testid="exit-playtest-btn"
               onClick={handleExitGame}
               style={{
-                height: '38px',
+                minHeight: '44px',
+                minWidth: '44px',
                 padding: '0 14px',
                 borderRadius: '10px',
                 backgroundColor: 'rgba(15, 23, 42, 0.92)',
@@ -1871,7 +1998,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             data-testid="hud-exit-button"
             onClick={handleExitGame}
             style={{
-              height: '38px',
+              minHeight: '44px',
+              minWidth: '44px',
               padding: '0 14px',
               borderRadius: '10px',
               backgroundColor: 'rgba(15, 23, 42, 0.88)',
@@ -2059,7 +2187,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               position: 'absolute',
               inset: 0,
               zIndex: 40,
-              backgroundColor: 'rgba(9, 13, 22, 0.84)',
+              backgroundColor: uiTheme.backdropBg,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -2070,12 +2198,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               style={{
                 width: '100%',
                 maxWidth: '480px',
-                backgroundColor: '#111726',
-                border: `1.5px solid ${accentHex}`,
+                backgroundColor: uiTheme.cardBg,
+                border: `2px solid ${accentHex}`,
                 borderRadius: '16px',
                 padding: '26px 24px',
-                color: '#f8fafc',
-                boxShadow: '0 20px 48px rgba(0, 0, 0, 0.6)',
+                color: uiTheme.textPrimary,
+                boxShadow: uiTheme.cardShadow,
                 textAlign: 'center',
               }}
             >
@@ -2095,7 +2223,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   margin: '8px 0 12px 0',
                   fontSize: '21px',
                   fontWeight: 800,
-                  color: '#f8fafc',
+                  color: uiTheme.textPrimary,
                   lineHeight: 1.3,
                 }}
               >
@@ -2107,11 +2235,11 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   margin: '0 0 22px 0',
                   padding: '12px 14px',
                   borderRadius: '10px',
-                  backgroundColor: '#0b0f19',
-                  border: '1px solid #1e293b',
+                  backgroundColor: uiTheme.subCardBg,
+                  border: `1px solid ${uiTheme.subCardBorder}`,
                   fontSize: '14.5px',
                   fontWeight: 600,
-                  color: '#e2e8f0',
+                  color: uiTheme.textSecondary,
                   lineHeight: 1.5,
                 }}
               >
@@ -2124,12 +2252,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 onClick={handleStartJourney}
                 style={{
                   width: '100%',
-                  height: '46px',
+                  minHeight: '46px',
                   borderRadius: '10px',
                   backgroundColor:
                     assetLoadStatus === 'READY' && !startingSession ? accentHex : '#334155',
                   border: 'none',
-                  color: '#090d16',
+                  color: assetLoadStatus === 'READY' && !startingSession ? accentInk : '#ffffff',
                   fontSize: '15px',
                   fontWeight: 800,
                   cursor: assetLoadStatus === 'READY' ? 'pointer' : 'wait',
@@ -2151,7 +2279,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               position: 'absolute',
               inset: 0,
               zIndex: 38,
-              backgroundColor: 'rgba(9, 13, 22, 0.82)',
+              backgroundColor: uiTheme.backdropBg,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -2162,32 +2290,33 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               style={{
                 width: '100%',
                 maxWidth: '400px',
-                backgroundColor: '#111726',
-                border: '1px solid #26334d',
+                backgroundColor: uiTheme.cardBg,
+                border: `1.5px solid ${uiTheme.cardBorder}`,
                 borderRadius: '14px',
                 padding: '24px',
                 textAlign: 'center',
-                color: '#f8fafc',
+                color: uiTheme.textPrimary,
+                boxShadow: uiTheme.cardShadow,
               }}
             >
-              <h3 style={{ margin: '0 0 8px 0', fontSize: '19px', fontWeight: 800 }}>
+              <h3 style={{ margin: '0 0 8px 0', fontSize: '19px', fontWeight: 800, color: uiTheme.textPrimary }}>
                 Đang tạm dừng màn chơi
               </h3>
-              <p style={{ margin: '0 0 18px 0', fontSize: '13.5px', color: '#94a3b8' }}>
+              <p style={{ margin: '0 0 18px 0', fontSize: '13.5px', color: uiTheme.textMuted }}>
                 Tiến trình hiện tại tại Chặng {Math.min(activeStageIndex + 1, totalStages)}/{totalStages} được giữ nguyên.
               </p>
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   data-testid="resume-adventure-btn"
                   onClick={() => setIsPaused(false)}
                   style={{
-                    height: '42px',
+                    minHeight: '44px',
                     padding: '0 20px',
                     borderRadius: '8px',
                     backgroundColor: accentHex,
                     border: 'none',
-                    color: '#090d16',
+                    color: accentInk,
                     fontSize: '14px',
                     fontWeight: 800,
                     cursor: 'pointer',
@@ -2199,12 +2328,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   type="button"
                   onClick={handleExitGame}
                   style={{
-                    height: '42px',
+                    minHeight: '44px',
                     padding: '0 18px',
                     borderRadius: '8px',
-                    backgroundColor: '#161f30',
-                    border: '1px solid #26334d',
-                    color: '#f8fafc',
+                    backgroundColor: uiTheme.choiceBg,
+                    border: `1px solid ${uiTheme.choiceBorder}`,
+                    color: uiTheme.textPrimary,
                     fontSize: '14px',
                     fontWeight: 700,
                     cursor: 'pointer',
@@ -2225,7 +2354,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               position: 'absolute',
               inset: 0,
               zIndex: 42,
-              backgroundColor: 'rgba(9, 13, 22, 0.88)',
+              backgroundColor: uiTheme.backdropBg,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -2236,15 +2365,17 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             <div
               data-testid="ingame-challenge-popup"
               data-question-type={activeQuestion.type}
+              data-theme-mode={isLightTheme ? 'light' : 'dark'}
               style={{
                 width: '100%',
                 maxWidth: '680px',
-                backgroundColor: '#111726',
-                border: `1.5px solid ${accentHex}`,
+                backgroundColor: uiTheme.cardBg,
+                border: `2px solid ${accentHex}`,
                 borderRadius: '14px',
-                padding: '20px 22px',
-                color: '#f8fafc',
-                boxShadow: '0 20px 50px rgba(0, 0, 0, 0.65)',
+                padding: 'clamp(16px, 3vw, 22px)',
+                color: uiTheme.textPrimary,
+                boxShadow: uiTheme.cardShadow,
+                boxSizing: 'border-box',
               }}
             >
               <div
@@ -2278,9 +2409,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       borderRadius: '12px',
                       fontSize: '11px',
                       fontWeight: 800,
-                      backgroundColor: 'rgba(56, 189, 248, 0.14)',
-                      border: '1px solid rgba(56, 189, 248, 0.35)',
-                      color: '#38bdf8',
+                      backgroundColor: uiTheme.typeBadgeBg,
+                      border: `1px solid ${uiTheme.typeBadgeBorder}`,
+                      color: uiTheme.typeBadgeText,
                     }}
                   >
                     {activeQuestion.type === 'MULTIPLE_CHOICE' || activeQuestion.type === 'QUIZ'
@@ -2301,13 +2432,14 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       data-testid="playtest-inline-edit-btn"
                       onClick={() => onEditCheckpointQuestion(activeStageIndex)}
                       style={{
-                        padding: '3px 10px',
+                        padding: '6px 12px',
+                        minHeight: '44px',
                         borderRadius: '8px',
                         fontSize: '11.5px',
                         fontWeight: 800,
-                        backgroundColor: 'rgba(245, 158, 11, 0.18)',
-                        border: '1px solid rgba(245, 158, 11, 0.6)',
-                        color: '#fde68a',
+                        backgroundColor: uiTheme.timerNormalBg,
+                        border: `1px solid ${uiTheme.timerNormalBorder}`,
+                        color: uiTheme.timerNormalText,
                         cursor: 'pointer',
                       }}
                     >
@@ -2324,17 +2456,17 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                         fontWeight: 900,
                         backgroundColor:
                           timeRemaining <= 5
-                            ? 'rgba(239, 68, 68, 0.2)'
-                            : 'rgba(245, 158, 11, 0.18)',
-                        border: `1px solid ${timeRemaining <= 5 ? '#ef4444' : '#f59e0b'}`,
-                        color: timeRemaining <= 5 ? '#fca5a5' : '#fde68a',
+                            ? uiTheme.timerUrgentBg
+                            : uiTheme.timerNormalBg,
+                        border: `1px solid ${timeRemaining <= 5 ? uiTheme.timerUrgentBorder : uiTheme.timerNormalBorder}`,
+                        color: timeRemaining <= 5 ? uiTheme.timerUrgentText : uiTheme.timerNormalText,
                         fontVariantNumeric: 'tabular-nums',
                       }}
                     >
                       ⏱ {timeRemaining}s
                     </span>
                   )}
-                  <span style={{ fontSize: '12px', color: '#94a3b8', fontWeight: 600 }}>
+                  <span style={{ fontSize: '12px', color: uiTheme.textMuted, fontWeight: 600 }}>
                     Nhân vật đã dừng — Trả lời để mở cổng đi tiếp
                   </span>
                 </div>
@@ -2345,7 +2477,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 style={{
                   fontSize: '17px',
                   fontWeight: 700,
-                  color: '#f8fafc',
+                  color: uiTheme.textPrimary,
                   lineHeight: 1.45,
                 }}
               >
@@ -2370,8 +2502,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                           style={{
                             padding: '14px 16px',
                             borderRadius: '10px',
-                            backgroundColor: '#0b0f19',
-                            border: '1px solid #26334d',
+                            backgroundColor: uiTheme.subCardBg,
+                            border: `1px solid ${uiTheme.subCardBorder}`,
                             display: 'flex',
                             flexDirection: 'column',
                             gap: '12px',
@@ -2386,7 +2518,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                               gap: '8px',
                             }}
                           >
-                            <span style={{ fontSize: '12.5px', fontWeight: 700, color: '#94a3b8' }}>
+                            <span style={{ fontSize: '12.5px', fontWeight: 700, color: uiTheme.textMuted }}>
                               Kéo thanh trượt hoặc nhập số ({min}
                               {unit} → {max}
                               {unit}):
@@ -2407,12 +2539,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                                 }}
                                 style={{
                                   width: '100px',
-                                  height: '36px',
+                                  minHeight: '44px',
                                   padding: '0 10px',
                                   borderRadius: '8px',
-                                  backgroundColor: '#161f30',
+                                  backgroundColor: uiTheme.inputBg,
                                   border: `1.5px solid ${accentHex}`,
-                                  color: '#f8fafc',
+                                  color: uiTheme.textPrimary,
                                   fontSize: '15px',
                                   fontWeight: 800,
                                   textAlign: 'center',
@@ -2446,12 +2578,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                               disabled={submittingAnswer}
                               onClick={() => handleAnswerSubmit(String(clampVal(currentVal)))}
                               style={{
-                                height: '42px',
+                                minHeight: '44px',
                                 padding: '0 20px',
                                 borderRadius: '8px',
                                 backgroundColor: accentHex,
                                 border: 'none',
-                                color: '#090d16',
+                                color: accentInk,
                                 fontSize: '14px',
                                 fontWeight: 800,
                                 cursor: submittingAnswer ? 'not-allowed' : 'pointer',
@@ -2469,7 +2601,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   Array.isArray(activeQuestion.choices) &&
                   activeQuestion.choices.length > 0 ? (
                   <div style={{ marginTop: '14px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    <div style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8' }}>
+                    <div style={{ fontSize: '12px', fontWeight: 700, color: uiTheme.textMuted }}>
                       Sắp xếp các bước theo đúng thứ tự từ trên xuống dưới:
                     </div>
                     {(puzzleOrder.length > 0 ? puzzleOrder : activeQuestion.choices).map(
@@ -2482,17 +2614,17 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                             gap: '10px',
                             padding: '10px 12px',
                             borderRadius: '8px',
-                            backgroundColor: '#161f30',
-                            border: '1.5px solid #26334d',
-                            color: '#f8fafc',
+                            backgroundColor: uiTheme.choiceBg,
+                            border: `1.5px solid ${uiTheme.choiceBorder}`,
+                            color: uiTheme.textPrimary,
                           }}
                         >
                           <span
                             style={{
-                              width: '26px',
-                              height: '26px',
+                              width: '28px',
+                              height: '28px',
                               borderRadius: '6px',
-                              backgroundColor: '#0b0f19',
+                              backgroundColor: uiTheme.choiceBadgeBg,
                               color: accentHex,
                               display: 'flex',
                               alignItems: 'center',
@@ -2507,18 +2639,18 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                           <span style={{ flex: 1, fontSize: '13.5px', fontWeight: 600 }}>
                             {item}
                           </span>
-                          <div style={{ display: 'flex', gap: '4px' }}>
+                          <div style={{ display: 'flex', gap: '6px' }}>
                             <button
                               type="button"
                               disabled={Boolean(activeFeedback) || submittingAnswer || idx === 0}
                               onClick={() => handleMovePuzzleItem(idx, -1)}
                               style={{
-                                width: '32px',
-                                height: '32px',
+                                minWidth: '44px',
+                                minHeight: '44px',
                                 borderRadius: '6px',
-                                border: '1px solid #26334d',
-                                backgroundColor: '#0b0f19',
-                                color: idx === 0 ? '#475569' : '#f8fafc',
+                                border: `1px solid ${uiTheme.choiceBorder}`,
+                                backgroundColor: uiTheme.subCardBg,
+                                color: idx === 0 ? uiTheme.textMuted : uiTheme.textPrimary,
                                 fontWeight: 800,
                                 cursor:
                                   Boolean(activeFeedback) || submittingAnswer || idx === 0
@@ -2537,12 +2669,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                               }
                               onClick={() => handleMovePuzzleItem(idx, 1)}
                               style={{
-                                width: '32px',
-                                height: '32px',
+                                minWidth: '44px',
+                                minHeight: '44px',
                                 borderRadius: '6px',
-                                border: '1px solid #26334d',
-                                backgroundColor: '#0b0f19',
-                                color: idx === arr.length - 1 ? '#475569' : '#f8fafc',
+                                border: `1px solid ${uiTheme.choiceBorder}`,
+                                backgroundColor: uiTheme.subCardBg,
+                                color: idx === arr.length - 1 ? uiTheme.textMuted : uiTheme.textPrimary,
                                 fontWeight: 800,
                                 cursor:
                                   Boolean(activeFeedback) ||
@@ -2572,12 +2704,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                         }
                         style={{
                           marginTop: '4px',
-                          height: '42px',
+                          minHeight: '44px',
                           padding: '0 20px',
                           borderRadius: '8px',
                           backgroundColor: accentHex,
                           border: 'none',
-                          color: '#090d16',
+                          color: accentInk,
                           fontSize: '14px',
                           fontWeight: 800,
                           cursor: submittingAnswer ? 'not-allowed' : 'pointer',
@@ -2610,8 +2742,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                           marginTop: '14px',
                           padding: '14px 16px',
                           borderRadius: '10px',
-                          backgroundColor: '#0b0f19',
-                          border: '1px solid #26334d',
+                          backgroundColor: uiTheme.subCardBg,
+                          border: `1px solid ${uiTheme.subCardBorder}`,
                           display: 'flex',
                           flexDirection: 'column',
                           gap: '12px',
@@ -2620,13 +2752,13 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                         {clueText && (
                           <div
                             data-testid="checkpoint-crossword-clue"
-                            style={{ fontSize: '13.5px', color: '#cbd5e1', lineHeight: 1.45 }}
+                            style={{ fontSize: '13.5px', color: uiTheme.textSecondary, lineHeight: 1.45 }}
                           >
                             <strong style={{ color: accentHex }}>Gợi ý ô chữ:</strong> {clueText}
                           </div>
                         )}
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-                          <span style={{ fontSize: '12px', fontWeight: 700, color: '#94a3b8' }}>
+                          <span style={{ fontSize: '12px', fontWeight: 700, color: uiTheme.textMuted }}>
                             Từ khóa gồm {wordLen > 0 ? `${wordLen} chữ cái` : 'các chữ cái viết liền không dấu'}:
                           </span>
                         </div>
@@ -2649,9 +2781,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                                     width: '34px',
                                     height: '38px',
                                     borderRadius: '6px',
-                                    backgroundColor: ch ? '#161f30' : '#090d16',
-                                    border: `1.5px solid ${ch ? accentHex : '#334155'}`,
-                                    color: '#f8fafc',
+                                    backgroundColor: ch ? uiTheme.choiceBg : uiTheme.inputBg,
+                                    border: `1.5px solid ${ch ? accentHex : uiTheme.choiceBorder}`,
+                                    color: uiTheme.textPrimary,
                                     display: 'inline-flex',
                                     alignItems: 'center',
                                     justifyContent: 'center',
@@ -2682,12 +2814,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                             placeholder="Nhập từ khóa ô chữ (VD:ANTOAN)..."
                             style={{
                               flex: '1 1 220px',
-                              height: '42px',
+                              minHeight: '44px',
                               padding: '0 14px',
                               borderRadius: '8px',
-                              backgroundColor: '#161f30',
+                              backgroundColor: uiTheme.inputBg,
                               border: `1.5px solid ${accentHex}`,
-                              color: '#f8fafc',
+                              color: uiTheme.textPrimary,
                               fontSize: '15px',
                               fontWeight: 800,
                               letterSpacing: '0.08em',
@@ -2705,12 +2837,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                                 )
                               }
                               style={{
-                                height: '42px',
+                                minHeight: '44px',
                                 padding: '0 20px',
                                 borderRadius: '8px',
                                 backgroundColor: accentHex,
                                 border: 'none',
-                                color: '#090d16',
+                                color: accentInk,
                                 fontSize: '14px',
                                 fontWeight: 800,
                                 cursor:
@@ -2732,7 +2864,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     data-testid="checkpoint-quick-button-group"
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: 'repeat(2, 1fr)',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 160px), 1fr))',
                       gap: '10px',
                       marginTop: '14px',
                     }}
@@ -2744,20 +2876,20 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       const isWrongSelected =
                         activeFeedback && isSelected && !activeFeedback.isCorrect;
 
-                      let bg = '#161f30';
-                      let border = '#26334d';
-                      let textColor = '#f8fafc';
+                      let bg = uiTheme.choiceBg;
+                      let border = uiTheme.choiceBorder;
+                      let textColor = uiTheme.choiceText;
 
                       if (isCorrectChoice) {
-                        bg = '#172a1d';
-                        border = '#3fc07a';
-                        textColor = '#3fc07a';
+                        bg = uiTheme.choiceCorrectBg;
+                        border = uiTheme.choiceCorrectBorder;
+                        textColor = uiTheme.choiceCorrectText;
                       } else if (isWrongSelected) {
-                        bg = '#2c1a20';
-                        border = '#e5566f';
-                        textColor = '#e5566f';
+                        bg = uiTheme.choiceWrongBg;
+                        border = uiTheme.choiceWrongBorder;
+                        textColor = uiTheme.choiceWrongText;
                       } else if (isSelected) {
-                        bg = '#1e293b';
+                        bg = uiTheme.choiceSelectedBg;
                         border = accentHex;
                       }
 
@@ -2800,7 +2932,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     data-testid="checkpoint-multiple-choice-group"
                     style={{
                       display: 'grid',
-                      gridTemplateColumns: 'repeat(auto-fit, minmax(230px, 1fr))',
+                      gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 230px), 1fr))',
                       gap: '8px',
                       marginTop: '14px',
                     }}
@@ -2812,20 +2944,20 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       const isWrongSelected =
                         activeFeedback && isSelected && !activeFeedback.isCorrect;
 
-                      let bg = '#161f30';
-                      let border = '#26334d';
-                      let textColor = '#f8fafc';
+                      let bg = uiTheme.choiceBg;
+                      let border = uiTheme.choiceBorder;
+                      let textColor = uiTheme.choiceText;
 
                       if (isCorrectChoice) {
-                        bg = '#172a1d';
-                        border = '#3fc07a';
-                        textColor = '#3fc07a';
+                        bg = uiTheme.choiceCorrectBg;
+                        border = uiTheme.choiceCorrectBorder;
+                        textColor = uiTheme.choiceCorrectText;
                       } else if (isWrongSelected) {
-                        bg = '#2c1a20';
-                        border = '#e5566f';
-                        textColor = '#e5566f';
+                        bg = uiTheme.choiceWrongBg;
+                        border = uiTheme.choiceWrongBorder;
+                        textColor = uiTheme.choiceWrongText;
                       } else if (isSelected) {
-                        bg = '#1e293b';
+                        bg = uiTheme.choiceSelectedBg;
                         border = accentHex;
                       }
 
@@ -2860,8 +2992,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                             style={{
                               padding: '2px 7px',
                               borderRadius: '4px',
-                              backgroundColor: '#0b0f19',
-                              color: '#94a3b8',
+                              backgroundColor: uiTheme.choiceBadgeBg,
+                              color: uiTheme.choiceBadgeText,
                               fontSize: '11.5px',
                               fontWeight: 800,
                               flexShrink: 0,
@@ -2899,12 +3031,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       placeholder="Nhập từ khóa còn thiếu..."
                       style={{
                         flex: '1 1 220px',
-                        height: '42px',
+                        minHeight: '44px',
                         padding: '0 14px',
                         borderRadius: '8px',
-                        backgroundColor: '#0b0f19',
-                        border: '1px solid #26334d',
-                        color: '#f8fafc',
+                        backgroundColor: uiTheme.inputBg,
+                        border: `1.5px solid ${uiTheme.inputBorder}`,
+                        color: uiTheme.textPrimary,
                         fontSize: '14px',
                       }}
                     />
@@ -2915,12 +3047,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                         disabled={!textAnswer.trim() || submittingAnswer}
                         onClick={() => handleAnswerSubmit(textAnswer.trim())}
                         style={{
-                          height: '42px',
+                          minHeight: '44px',
                           padding: '0 20px',
                           borderRadius: '8px',
                           backgroundColor: accentHex,
                           border: 'none',
-                          color: '#090d16',
+                          color: accentInk,
                           fontSize: '14px',
                           fontWeight: 700,
                           cursor:
@@ -2951,16 +3083,16 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     padding: '12px 14px',
                     borderRadius: '8px',
                     backgroundColor: isExamUnpublished
-                      ? '#161f30'
+                      ? uiTheme.feedbackExamBg
                       : activeFeedback.isCorrect
-                        ? '#172a1d'
-                        : '#2c1a20',
-                    border: `1px solid ${
+                        ? uiTheme.choiceCorrectBg
+                        : uiTheme.choiceWrongBg,
+                    border: `1.5px solid ${
                       isExamUnpublished
-                        ? '#38bdf8'
+                        ? uiTheme.feedbackExamBorder
                         : activeFeedback.isCorrect
-                          ? '#3fc07a'
-                          : '#e5566f'
+                          ? uiTheme.choiceCorrectBorder
+                          : uiTheme.choiceWrongBorder
                     }`,
                     display: 'flex',
                     alignItems: 'center',
@@ -2975,10 +3107,10 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                         fontSize: '13.5px',
                         fontWeight: 700,
                         color: isExamUnpublished
-                          ? '#38bdf8'
+                          ? uiTheme.feedbackExamText
                           : activeFeedback.isCorrect
-                            ? '#3fc07a'
-                            : '#e5566f',
+                            ? uiTheme.choiceCorrectText
+                            : uiTheme.choiceWrongText,
                       }}
                     >
                       {isExamUnpublished
@@ -2994,7 +3126,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                         style={{
                           marginTop: '4px',
                           fontSize: '12px',
-                          color: '#e2e8f0',
+                          color: uiTheme.textSecondary,
                           lineHeight: 1.4,
                         }}
                       >
@@ -3007,12 +3139,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     data-testid="checkpoint-continue-btn"
                     onClick={handleContinueJourney}
                     style={{
-                      height: '38px',
+                      minHeight: '44px',
                       padding: '0 16px',
                       borderRadius: '6px',
-                      backgroundColor: '#f8fafc',
+                      backgroundColor: uiTheme.continueBtnBg,
                       border: 'none',
-                      color: '#090d16',
+                      color: uiTheme.continueBtnText,
                       fontSize: '13px',
                       fontWeight: 800,
                       cursor: 'pointer',
@@ -3055,7 +3187,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               position: 'absolute',
               inset: 0,
               zIndex: 45,
-              backgroundColor: 'rgba(9, 13, 22, 0.92)',
+              backgroundColor: uiTheme.backdropBg,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -3067,15 +3199,16 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               style={{
                 width: '100%',
                 maxWidth: '580px',
-                backgroundColor: '#111726',
-                border: '1px solid #26334d',
+                backgroundColor: uiTheme.cardBg,
+                border: `1.5px solid ${uiTheme.cardBorder}`,
                 borderRadius: '12px',
                 padding: '26px 24px',
-                color: '#f8fafc',
+                color: uiTheme.textPrimary,
+                boxShadow: uiTheme.cardShadow,
               }}
             >
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
-                <div style={{ fontSize: '12px', color: '#3fc07a', fontWeight: 700 }}>
+                <div style={{ fontSize: '12px', color: uiTheme.choiceCorrectText, fontWeight: 700 }}>
                   HOÀN THÀNH MÀN CHƠI · {effectiveConfig.industryLabel}
                 </div>
                 {victoryEval.isPassed !== null && (
@@ -3086,9 +3219,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       borderRadius: '999px',
                       fontSize: '11.5px',
                       fontWeight: 900,
-                      backgroundColor: victoryEval.isPassed ? 'rgba(34, 197, 94, 0.2)' : 'rgba(239, 68, 68, 0.2)',
-                      border: `1.5px solid ${victoryEval.isPassed ? '#22c55e' : '#ef4444'}`,
-                      color: victoryEval.isPassed ? '#4ade80' : '#fca5a5',
+                      backgroundColor: victoryEval.isPassed ? uiTheme.choiceCorrectBg : uiTheme.choiceWrongBg,
+                      border: `1.5px solid ${victoryEval.isPassed ? uiTheme.choiceCorrectBorder : uiTheme.choiceWrongBorder}`,
+                      color: victoryEval.isPassed ? uiTheme.choiceCorrectText : uiTheme.choiceWrongText,
                     }}
                   >
                     {victoryEval.isPassed ? '✓ ĐẠT YÊU CẦU' : '✕ CHƯA ĐẠT'} (Ngưỡng {victoryEval.passThresholdPercent}%)
@@ -3100,7 +3233,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   margin: '4px 0 14px 0',
                   fontSize: '23px',
                   fontWeight: 700,
-                  color: '#f8fafc',
+                  color: uiTheme.textPrimary,
                 }}
               >
                 {game.title || effectiveConfig.environmentTitle}
@@ -3111,7 +3244,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 style={{
                   padding: '12px 14px',
                   borderRadius: '10px',
-                  backgroundColor: '#161f30',
+                  backgroundColor: uiTheme.choiceBg,
                   border: `1px solid ${accentHex}`,
                   marginBottom: '16px',
                 }}
@@ -3122,7 +3255,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 >
                   Đánh giá: {victoryEval.tierLabel} ({victoryEval.accuracyPercentage}%)
                 </div>
-                <div style={{ fontSize: '12.5px', color: '#cbd5e1', marginTop: '4px', lineHeight: 1.45 }}>
+                <div style={{ fontSize: '12.5px', color: uiTheme.textSecondary, marginTop: '4px', lineHeight: 1.45 }}>
                   {victoryEval.comment}
                 </div>
               </div>
@@ -3131,16 +3264,16 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 style={{
                   display: 'grid',
                   gridTemplateColumns: 'repeat(3, 1fr)',
-                  backgroundColor: '#0b0f19',
-                  border: '1px solid #222d42',
+                  backgroundColor: uiTheme.subCardBg,
+                  border: `1px solid ${uiTheme.subCardBorder}`,
                   borderRadius: '8px',
                   overflow: 'hidden',
                   fontVariantNumeric: 'tabular-nums',
                   marginBottom: '22px',
                 }}
               >
-                <div style={{ padding: '14px 16px', borderRight: '1px solid #222d42' }}>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>
+                <div style={{ padding: '14px 16px', borderRight: `1px solid ${uiTheme.subCardBorder}` }}>
+                  <div style={{ fontSize: '12px', color: uiTheme.textMuted }}>
                     Tổng điểm (Tối đa: <span data-testid="victory-max-score">{victoryMaxScore}</span>)
                   </div>
                   <div
@@ -3156,13 +3289,13 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   </div>
                 </div>
 
-                <div style={{ padding: '14px 16px', borderRight: '1px solid #222d42' }}>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>Trạm đúng ({victoryEval.accuracyPercentage}%)</div>
+                <div style={{ padding: '14px 16px', borderRight: `1px solid ${uiTheme.subCardBorder}` }}>
+                  <div style={{ fontSize: '12px', color: uiTheme.textMuted }}>Trạm đúng ({victoryEval.accuracyPercentage}%)</div>
                   <div
                     style={{
                       fontSize: '21px',
                       fontWeight: 700,
-                      color: '#f8fafc',
+                      color: uiTheme.textPrimary,
                       marginTop: '4px',
                     }}
                   >
@@ -3171,12 +3304,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 </div>
 
                 <div style={{ padding: '14px 16px' }}>
-                  <div style={{ fontSize: '12px', color: '#94a3b8' }}>Vật cản vượt qua</div>
+                  <div style={{ fontSize: '12px', color: uiTheme.textMuted }}>Vật cản vượt qua</div>
                   <div
                     style={{
                       fontSize: '21px',
                       fontWeight: 700,
-                      color: '#3fc07a',
+                      color: uiTheme.choiceCorrectText,
                       marginTop: '4px',
                     }}
                   >
@@ -3185,18 +3318,18 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                 <button
                   type="button"
                   data-testid="victory-restart-btn"
                   onClick={handleRestartPreview}
                   style={{
-                    height: '40px',
+                    minHeight: '44px',
                     padding: '0 18px',
                     borderRadius: '8px',
                     backgroundColor: accentHex,
                     border: 'none',
-                    color: '#090d16',
+                    color: accentInk,
                     fontSize: '14px',
                     fontWeight: 700,
                     cursor: 'pointer',
@@ -3209,12 +3342,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   data-testid="victory-exit-btn"
                   onClick={handleExitGame}
                   style={{
-                    height: '40px',
+                    minHeight: '44px',
                     padding: '0 18px',
                     borderRadius: '8px',
-                    backgroundColor: '#161f30',
-                    border: '1px solid #26334d',
-                    color: '#f8fafc',
+                    backgroundColor: uiTheme.choiceBg,
+                    border: `1px solid ${uiTheme.choiceBorder}`,
+                    color: uiTheme.textPrimary,
                     fontSize: '14px',
                     fontWeight: 600,
                     cursor: 'pointer',

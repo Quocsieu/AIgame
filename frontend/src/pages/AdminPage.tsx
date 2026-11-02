@@ -20,6 +20,7 @@ import {
 import { useToast } from '../components/ToastContext.js';
 import {
   deleteAdminGame,
+  downloadAdminAiLogsExport,
   fetchAdminAiLogs,
   fetchAdminGames,
   fetchAdminOverview,
@@ -69,6 +70,12 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [, setActiveRooms] = useState<any[]>([]);
   const [, setHistoricalRooms] = useState<any[]>([]);
   const [aiLogs, setAiLogs] = useState<AdminAiLogRecord[]>([]);
+  const [aiFilterFrom, setAiFilterFrom] = useState('');
+  const [aiFilterTo, setAiFilterTo] = useState('');
+  const [aiFilterGameId, setAiFilterGameId] = useState('');
+  const [aiFilterModel, setAiFilterModel] = useState('ALL');
+  const [aiFilterOperation, setAiFilterOperation] = useState('ALL');
+  const [isExportingAiLogs, setIsExportingAiLogs] = useState(false);
 
   const isUserAdmin = currentUser?.role === 'ADMIN';
 
@@ -140,13 +147,27 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
   };
 
-  const loadOps = async () => {
+  const loadOps = async (overrideFilters?: {
+    from?: string;
+    to?: string;
+    gameId?: string;
+    model?: string;
+    operation?: string;
+  }) => {
     setIsLoading(true);
     setErrorMessage(null);
     try {
+      const activeFilters = {
+        from: (overrideFilters?.from ?? aiFilterFrom).trim() || undefined,
+        to: (overrideFilters?.to ?? aiFilterTo).trim() || undefined,
+        gameId: (overrideFilters?.gameId ?? aiFilterGameId).trim() || undefined,
+        model: overrideFilters?.model ?? aiFilterModel,
+        operation: overrideFilters?.operation ?? aiFilterOperation,
+        limit: 100,
+      };
       const [roomsData, logsData] = await Promise.all([
         fetchAdminRooms(),
-        fetchAdminAiLogs(),
+        fetchAdminAiLogs(activeFilters),
       ]);
       setActiveRooms(roomsData.activeRooms || []);
       setHistoricalRooms(roomsData.historicalRooms || []);
@@ -155,6 +176,27 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       setErrorMessage(err.message || 'Không thể tải dữ liệu vận hành.');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleExportAiLogs = async (format: 'csv' | 'xlsx') => {
+    setIsExportingAiLogs(true);
+    try {
+      await downloadAdminAiLogsExport(format, {
+        from: aiFilterFrom.trim() || undefined,
+        to: aiFilterTo.trim() || undefined,
+        gameId: aiFilterGameId.trim() || undefined,
+        model: aiFilterModel,
+        operation: aiFilterOperation,
+      });
+      toast.success(
+        `Đã xuất nhật ký AI định dạng ${format.toUpperCase()} thành công.`,
+        'Xuất báo cáo AI'
+      );
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể xuất nhật ký AI.', 'Lỗi xuất báo cáo');
+    } finally {
+      setIsExportingAiLogs(false);
     }
   };
 
@@ -822,55 +864,280 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               padding: '1.5rem',
             }}
           >
-            <h3 style={{ margin: '0 0 1rem 0', fontSize: '1.15rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <CpuIcon size={20} style={{ color: 'var(--accent-sky)' }} />
-              <span>Nhật Ký Hoạt Động AI Gần Đây ({aiLogs.length})</span>
-            </h3>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                flexWrap: 'wrap',
+                gap: '0.75rem',
+                marginBottom: '1rem',
+              }}
+            >
+              <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <CpuIcon size={20} style={{ color: 'var(--accent-sky)' }} />
+                <span>Nhật Ký Hoạt Động AI & Token Usage ({aiLogs.length})</span>
+              </h3>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  disabled={isExportingAiLogs}
+                  onClick={() => handleExportAiLogs('csv')}
+                  data-testid="admin-export-ai-csv"
+                  style={{
+                    minHeight: '44px',
+                    padding: '0.55rem 1rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    fontWeight: 700,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                  }}
+                >
+                  <FileTextIcon size={15} />
+                  <span>Xuất CSV</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={isExportingAiLogs}
+                  onClick={() => handleExportAiLogs('xlsx')}
+                  data-testid="admin-export-ai-xlsx"
+                  style={{
+                    minHeight: '44px',
+                    padding: '0.55rem 1rem',
+                    borderRadius: '8px',
+                    border: 'none',
+                    backgroundColor: 'var(--primary)',
+                    color: 'var(--primary-ink)',
+                    fontWeight: 800,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.4rem',
+                  }}
+                >
+                  <FileTextIcon size={15} />
+                  <span>Xuất Excel (.xlsx)</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Bar */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))',
+                gap: '0.65rem',
+                marginBottom: '1.15rem',
+                padding: '0.85rem',
+                borderRadius: '10px',
+                backgroundColor: 'var(--bg-input)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <input
+                type="text"
+                value={aiFilterGameId}
+                onChange={(e) => setAiFilterGameId(e.target.value)}
+                placeholder="Lọc theo Mã / Tên Game..."
+                style={{
+                  minHeight: '44px',
+                  padding: '0.45rem 0.75rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.82rem',
+                }}
+              />
+              <select
+                value={aiFilterOperation}
+                onChange={(e) => setAiFilterOperation(e.target.value)}
+                style={{
+                  minHeight: '44px',
+                  padding: '0.45rem 0.75rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.82rem',
+                  fontWeight: 600,
+                }}
+              >
+                <option value="ALL">Tất cả thao tác AI</option>
+                <option value="GENERATE_QUESTIONS">Tạo câu hỏi (GENERATE_QUESTIONS)</option>
+                <option value="GENERATE_COVER_IMAGE">Tạo ảnh bìa (GENERATE_COVER_IMAGE)</option>
+                <option value="GENERATE_ADVENTURE_SPRITE">Tạo sprite 2D (GENERATE_ADVENTURE_SPRITE)</option>
+              </select>
+              <input
+                type="text"
+                value={aiFilterModel === 'ALL' ? '' : aiFilterModel}
+                onChange={(e) => setAiFilterModel(e.target.value.trim() ? e.target.value : 'ALL')}
+                placeholder="Lọc theo Model (vd: gemini-2.5)..."
+                style={{
+                  minHeight: '44px',
+                  padding: '0.45rem 0.75rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.82rem',
+                }}
+              />
+              <input
+                type="date"
+                value={aiFilterFrom}
+                onChange={(e) => setAiFilterFrom(e.target.value)}
+                aria-label="Từ ngày"
+                style={{
+                  minHeight: '44px',
+                  padding: '0.45rem 0.75rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.82rem',
+                }}
+              />
+              <input
+                type="date"
+                value={aiFilterTo}
+                onChange={(e) => setAiFilterTo(e.target.value)}
+                aria-label="Đến ngày"
+                style={{
+                  minHeight: '44px',
+                  padding: '0.45rem 0.75rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.82rem',
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => loadOps()}
+                style={{
+                  minHeight: '44px',
+                  padding: '0.5rem 0.9rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontWeight: 800,
+                  fontSize: '0.82rem',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.4rem',
+                }}
+              >
+                <RefreshIcon size={14} />
+                <span>Lọc Nhật Ký</span>
+              </button>
+            </div>
+
             {aiLogs.length > 0 ? (
               <div style={{ width: '100%', overflowX: 'auto', WebkitOverflowScrolling: 'touch' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' }}>
                   <thead>
                     <tr style={{ borderBottom: '1px solid var(--border-subtle)', textAlign: 'left', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                       <th style={{ padding: '0.6rem' }}>Thời Gian</th>
+                      <th style={{ padding: '0.6rem' }}>Game</th>
                       <th style={{ padding: '0.6rem' }}>Model / Provider</th>
                       <th style={{ padding: '0.6rem' }}>Thao Tác</th>
                       <th style={{ padding: '0.6rem' }}>Trạng Thái</th>
+                      <th style={{ padding: '0.6rem' }}>Tokens (In / Out / Tổng)</th>
+                      <th style={{ padding: '0.6rem' }}>Chi Phí (USD)</th>
                       <th style={{ padding: '0.6rem' }}>Độ Trễ</th>
-                      <th style={{ padding: '0.6rem' }}>Số Câu Tạo</th>
+                      <th style={{ padding: '0.6rem' }}>Số Câu</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {aiLogs.map((log) => (
-                      <tr key={log.log_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                        <td style={{ padding: '0.6rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
-                          {new Date(log.created_at).toLocaleTimeString('vi-VN')}
-                        </td>
-                        <td style={{ padding: '0.6rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{log.model}</td>
-                        <td style={{ padding: '0.6rem', whiteSpace: 'nowrap' }}>{log.operation}</td>
-                        <td style={{ padding: '0.6rem', whiteSpace: 'nowrap' }}>
-                          <span
-                            style={{
-                              padding: '0.15rem 0.5rem',
-                              borderRadius: '4px',
-                              fontSize: '0.72rem',
-                              fontWeight: 800,
-                              backgroundColor: log.status === 'SUCCESS' ? 'rgba(52, 211, 153, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                              color: log.status === 'SUCCESS' ? 'var(--accent-emerald)' : 'var(--accent-rose)',
-                            }}
-                          >
-                            {log.status}
-                          </span>
-                        </td>
-                        <td style={{ padding: '0.6rem', whiteSpace: 'nowrap' }}>{log.latency_ms} ms</td>
-                        <td style={{ padding: '0.6rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{log.generated_questions}</td>
-                      </tr>
-                    ))}
+                    {aiLogs.map((log) => {
+                      const hasTokens =
+                        log.total_tokens !== null && log.total_tokens !== undefined;
+                      const hasCost =
+                        log.estimated_cost_usd !== null && log.estimated_cost_usd !== undefined;
+                      return (
+                        <tr key={log.log_id} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                          <td style={{ padding: '0.6rem', color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+                            {new Date(log.created_at).toLocaleString('vi-VN')}
+                          </td>
+                          <td style={{ padding: '0.6rem', maxWidth: '200px' }}>
+                            {log.game_id ? (
+                              <div>
+                                <div style={{ fontWeight: 700, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                  {log.game_title || log.game_id}
+                                </div>
+                                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
+                                  {log.game_id}
+                                </div>
+                              </div>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontSize: '0.76rem' }}>Chưa gắn game</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.6rem', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                            <div>{log.model}</div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 600 }}>{log.provider}</div>
+                          </td>
+                          <td style={{ padding: '0.6rem', whiteSpace: 'nowrap' }}>
+                            <div style={{ fontWeight: 700 }}>{log.operation}</div>
+                            {log.asset_slot && (
+                              <div style={{ fontSize: '0.72rem', color: 'var(--accent-sky)', fontWeight: 700 }}>
+                                Slot: {log.asset_slot}
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.6rem', whiteSpace: 'nowrap' }}>
+                            <span
+                              style={{
+                                padding: '0.15rem 0.5rem',
+                                borderRadius: '4px',
+                                fontSize: '0.72rem',
+                                fontWeight: 800,
+                                backgroundColor: log.status === 'SUCCESS' ? 'rgba(52, 211, 153, 0.15)' : 'rgba(239, 68, 68, 0.15)',
+                                color: log.status === 'SUCCESS' ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                              }}
+                            >
+                              {log.status}
+                            </span>
+                          </td>
+                          <td style={{ padding: '0.6rem', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>
+                            {hasTokens ? (
+                              <span>
+                                {log.input_tokens ?? '?'} / {log.output_tokens ?? '?'} / <strong>{log.total_tokens}</strong>
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>Chưa xác định</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.6rem', whiteSpace: 'nowrap', fontFamily: 'var(--font-mono)' }}>
+                            {hasCost ? (
+                              <span>${Number(log.estimated_cost_usd).toFixed(6)}</span>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-sans)' }}>Chưa xác định</span>
+                            )}
+                          </td>
+                          <td style={{ padding: '0.6rem', whiteSpace: 'nowrap' }}>{log.latency_ms} ms</td>
+                          <td style={{ padding: '0.6rem', fontWeight: 700, whiteSpace: 'nowrap' }}>{log.generated_questions}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             ) : (
               <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
-                Chưa có nhật ký AI được ghi nhận.
+                Chưa có nhật ký AI được ghi nhận theo bộ lọc hiện tại.
               </p>
             )}
           </div>

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { LIMITS } from '../config/limits.js';
@@ -293,6 +294,22 @@ export const MIGRATIONS: MigrationDefinition[] = [
       ALTER TABLE room_history ADD COLUMN submitted_reason TEXT;
     `,
   },
+  {
+    version: 6,
+    name: '006_v3_question_points',
+    upSql: `
+      ALTER TABLE game_questions ADD COLUMN points INTEGER;
+    `,
+  },
+  {
+    version: 7,
+    name: '007_v3_ai_usage_game_id_and_slot',
+    upSql: `
+      ALTER TABLE ai_usage_logs ADD COLUMN game_id TEXT;
+      ALTER TABLE ai_usage_logs ADD COLUMN asset_slot TEXT;
+      CREATE INDEX IF NOT EXISTS idx_ai_usage_logs_game_id ON ai_usage_logs(game_id, created_at DESC);
+    `,
+  },
 ];
 
 let dbInstance: DatabaseSync | null = null;
@@ -302,6 +319,9 @@ export function resolveDefaultDatabasePath(): string {
   const configured = (process.env.DATABASE_PATH || LIMITS.DATABASE_PATH || '').trim();
   if (configured) {
     return configured;
+  }
+  if (process.env.NODE_TEST_CONTEXT) {
+    return path.join(os.tmpdir(), `ai_game_platform_test_${process.pid}.sqlite`);
   }
   return path.resolve(process.cwd(), 'data', 'platform.sqlite');
 }
@@ -317,7 +337,7 @@ export function applyMigrations(db: DatabaseSync): void {
 
   const checkStmt = db.prepare('SELECT version FROM schema_migrations WHERE version = ?');
   const insertStmt = db.prepare(
-    'INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)'
+    'INSERT OR IGNORE INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)'
   );
 
   for (const migration of MIGRATIONS) {
@@ -328,8 +348,18 @@ export function applyMigrations(db: DatabaseSync): void {
 
     db.exec('BEGIN IMMEDIATE');
     try {
-      db.exec(migration.upSql);
-      insertStmt.run(migration.version, migration.name, new Date().toISOString());
+      const existingInTx = checkStmt.get(migration.version) as { version: number } | undefined;
+      if (!existingInTx) {
+        try {
+          db.exec(migration.upSql);
+        } catch (sqlErr) {
+          const msg = sqlErr instanceof Error ? sqlErr.message : String(sqlErr);
+          if (!msg.toLowerCase().includes('duplicate column name')) {
+            throw sqlErr;
+          }
+        }
+        insertStmt.run(migration.version, migration.name, new Date().toISOString());
+      }
       db.exec('COMMIT');
     } catch (err) {
       db.exec('ROLLBACK');

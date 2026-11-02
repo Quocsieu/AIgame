@@ -156,20 +156,22 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
   };
 
   const loadAllStatistics = useCallback(
-    async (selectedRange: ActivityRange = activityRange) => {
+    async (_selectedRange: ActivityRange = activityRange, alsoReloadHistory: boolean = false) => {
       setIsLoading(true);
       setErrorMessage(null);
       try {
-        const bounds = computeRangeBounds(selectedRange);
-        const [allTimeRes, filteredRes, sessionsRes] = await Promise.all([
-          fetchLearningAnalytics(),
-          selectedRange === 'all' ? Promise.resolve(null) : fetchLearningAnalytics(bounds),
-          fetchPracticeHistory(25),
-        ]);
+        const allTimeRes = await fetchLearningAnalytics();
         setAnalytics(allTimeRes);
-        setRangeAnalytics(filteredRes || allTimeRes);
-        setSessions(Array.isArray(sessionsRes) ? sessionsRes : []);
-        loadHistoryActivities();
+        setRangeAnalytics(allTimeRes);
+        if (Array.isArray(allTimeRes.recentPracticeSessions)) {
+          setSessions(allTimeRes.recentPracticeSessions);
+        } else {
+          const sessionsRes = await fetchPracticeHistory(25);
+          setSessions(Array.isArray(sessionsRes) ? sessionsRes : []);
+        }
+        if (alsoReloadHistory) {
+          loadHistoryActivities();
+        }
       } catch (err: any) {
         setErrorMessage(err?.message || 'Không thể tải dữ liệu thống kê hoạt động.');
       } finally {
@@ -180,25 +182,13 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
   );
 
   useEffect(() => {
-    loadAllStatistics(activityRange);
+    loadAllStatistics(activityRange, false);
   }, [currentUser?.userId]);
 
-  const handleSelectRange = async (nextRange: ActivityRange) => {
+  const handleSelectRange = (nextRange: ActivityRange) => {
     setActivityRange(nextRange);
-    if (!analytics) return;
-    if (nextRange === 'all') {
+    if (analytics) {
       setRangeAnalytics(analytics);
-      return;
-    }
-    setIsChartLoading(true);
-    try {
-      const bounds = computeRangeBounds(nextRange);
-      const filtered = await fetchLearningAnalytics(bounds);
-      setRangeAnalytics(filtered);
-    } catch {
-      setRangeAnalytics(analytics);
-    } finally {
-      setIsChartLoading(false);
     }
   };
 
@@ -417,7 +407,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
           <button
             type="button"
-            onClick={() => loadAllStatistics(activityRange)}
+            onClick={() => loadAllStatistics(activityRange, true)}
             disabled={isLoading}
             style={{
               backgroundColor: 'var(--bg-surface)',
@@ -425,7 +415,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
               border: '1px solid var(--border-strong)',
               borderRadius: '8px',
               padding: '0 14px',
-              height: '38px',
+              minHeight: '44px',
               fontSize: '0.82rem',
               fontWeight: 700,
               cursor: isLoading ? 'not-allowed' : 'pointer',
@@ -448,7 +438,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 border: '1px solid var(--border-strong)',
                 borderRadius: '8px',
                 padding: '0 14px',
-                height: '38px',
+                minHeight: '44px',
                 fontSize: '0.82rem',
                 fontWeight: 700,
                 cursor: 'pointer',
@@ -472,7 +462,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 border: '1px solid var(--primary)',
                 borderRadius: '8px',
                 padding: '0 16px',
-                height: '38px',
+                minHeight: '44px',
                 fontSize: '0.83rem',
                 fontWeight: 800,
                 cursor: 'pointer',
@@ -533,8 +523,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         aria-label="Các chỉ số tổng quan"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))',
           gap: '14px',
+          minWidth: 0,
         }}
       >
         {/* 1. Tổng game */}
@@ -856,9 +847,10 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 310px), 1fr))',
               gap: '20px',
               alignItems: 'stretch',
+              minWidth: 0,
             }}
           >
             {/* 1. Phân tích Tỷ lệ phiên chơi hoàn thành */}
@@ -869,11 +861,14 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 backgroundColor: 'var(--bg-surface)',
                 border: '1px solid var(--border-subtle)',
                 borderRadius: '10px',
-                padding: '18px 20px',
+                padding: 'clamp(14px, 3vw, 18px) clamp(14px, 3vw, 20px)',
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
                 gap: '16px',
+                minWidth: 0,
+                maxWidth: '100%',
+                boxSizing: 'border-box',
               }}
             >
               <div>
@@ -1056,11 +1051,14 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 backgroundColor: 'var(--bg-surface)',
                 border: '1px solid var(--border-subtle)',
                 borderRadius: '10px',
-                padding: '18px 20px',
+                padding: 'clamp(14px, 3vw, 18px) clamp(14px, 3vw, 20px)',
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
                 gap: '14px',
+                minWidth: 0,
+                maxWidth: '100%',
+                boxSizing: 'border-box',
               }}
             >
               <div>
@@ -1125,6 +1123,12 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 </div>
 
                 {/* Bảng so sánh chi tiết Solo vs Multiplayer */}
+                <div
+                  role="region"
+                  aria-label="Bảng đối chiếu Solo và Multiplayer"
+                  tabIndex={0}
+                  style={{ overflowX: 'auto', maxWidth: '100%', WebkitOverflowScrolling: 'touch' }}
+                >
                 <table
                   style={{
                     width: '100%',
@@ -1199,6 +1203,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                     </tr>
                   </tbody>
                 </table>
+                </div>
               </div>
             </section>
           </div>
@@ -1241,11 +1246,13 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 aria-label="Chọn khoảng thời gian thống kê"
                 style={{
                   display: 'inline-flex',
+                  flexWrap: 'wrap',
                   backgroundColor: 'var(--bg-input)',
                   border: '1px solid var(--border-subtle)',
                   borderRadius: '8px',
                   padding: '3px',
                   gap: '3px',
+                  maxWidth: '100%',
                 }}
               >
                 {(
@@ -1265,7 +1272,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                       style={{
                         border: 'none',
                         borderRadius: '6px',
-                        padding: '5px 11px',
+                        padding: '8px 11px',
+                        minHeight: '44px',
                         fontSize: '0.76rem',
                         fontWeight: active ? 800 : 600,
                         backgroundColor: active ? 'var(--bg-surface)' : 'transparent',
@@ -1469,9 +1477,10 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 310px), 1fr))',
               gap: '20px',
               alignItems: 'start',
+              minWidth: 0,
             }}
           >
             {/* Lịch sử phiên chơi đơn gần đây */}
@@ -1481,6 +1490,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 border: '1px solid var(--border-subtle)',
                 borderRadius: '10px',
                 overflow: 'hidden',
+                minWidth: 0,
+                maxWidth: '100%',
               }}
             >
               <div
@@ -1623,6 +1634,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 border: '1px solid var(--border-subtle)',
                 borderRadius: '10px',
                 overflow: 'hidden',
+                minWidth: 0,
+                maxWidth: '100%',
               }}
             >
               <div
@@ -1731,10 +1744,13 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           backgroundColor: 'var(--bg-surface)',
           border: '1px solid var(--border-subtle)',
           borderRadius: '12px',
-          padding: '20px',
+          padding: 'clamp(14px, 3vw, 20px)',
           display: 'flex',
           flexDirection: 'column',
           gap: '16px',
+          minWidth: 0,
+          maxWidth: '100%',
+          boxSizing: 'border-box',
         }}
       >
         <div
@@ -1795,9 +1811,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
             border: '1px solid var(--border-subtle)',
           }}
         >
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', minWidth: 0, maxWidth: '100%' }}>
             {/* Filter Chế độ: Tất cả / Chơi / Thi */}
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+            <div style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' }}>
               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginRight: '4px' }}>
                 Chế độ:
               </span>
@@ -1819,7 +1835,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                       setHistoryPage(1);
                     }}
                     style={{
-                      padding: '5px 10px',
+                      padding: '8px 12px',
+                      minHeight: '44px',
+                      minWidth: '44px',
                       borderRadius: '6px',
                       fontSize: '0.76rem',
                       fontWeight: 700,
@@ -1836,7 +1854,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
             </div>
 
             {/* Filter Hình thức: Tất cả / Cá nhân / Nhóm */}
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginLeft: '6px' }}>
+            <div style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' }}>
               <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginRight: '4px' }}>
                 Hình thức:
               </span>
@@ -1858,7 +1876,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                       setHistoryPage(1);
                     }}
                     style={{
-                      padding: '5px 10px',
+                      padding: '8px 12px',
+                      minHeight: '44px',
+                      minWidth: '44px',
                       borderRadius: '6px',
                       fontSize: '0.76rem',
                       fontWeight: 700,
@@ -1876,7 +1896,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           </div>
 
           {/* Search & Sort */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', flex: '1 1 260px', justifyContent: 'flex-end' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', flex: '1 1 240px', minWidth: 0, maxWidth: '100%', justifyContent: 'flex-end' }}>
             <input
               type="search"
               data-testid="history-search-input"
@@ -1887,15 +1907,17 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
               }}
               placeholder="Tìm theo tên game hoặc mã phiên..."
               style={{
-                padding: '6px 12px',
+                padding: '8px 12px',
+                minHeight: '44px',
                 borderRadius: '7px',
                 border: '1px solid var(--border-strong)',
                 backgroundColor: 'var(--bg-surface)',
                 color: 'var(--text-primary)',
                 fontSize: '0.8rem',
-                minWidth: '200px',
+                minWidth: 'min(100%, 180px)',
                 flex: '1 1 180px',
-                maxWidth: '300px',
+                maxWidth: '100%',
+                boxSizing: 'border-box',
               }}
             />
             <select
@@ -1907,7 +1929,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 setHistoryPage(1);
               }}
               style={{
-                padding: '6px 10px',
+                padding: '8px 10px',
+                minHeight: '44px',
                 borderRadius: '7px',
                 border: '1px solid var(--border-strong)',
                 backgroundColor: 'var(--bg-surface)',
@@ -1915,6 +1938,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 fontSize: '0.78rem',
                 fontWeight: 700,
                 cursor: 'pointer',
+                boxSizing: 'border-box',
               }}
             >
               <option value="NEWEST">Mới nhất</option>
@@ -2179,7 +2203,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                             data-testid={`history-view-detail-${item.historyId}`}
                             onClick={() => handleOpenHistoryDetail(item.historyId)}
                             style={{
-                              padding: '5px 10px',
+                              padding: '8px 12px',
+                              minHeight: '44px',
+                              minWidth: '44px',
                               borderRadius: '6px',
                               border: '1px solid var(--primary)',
                               backgroundColor: 'var(--primary-subtle)',
@@ -2197,7 +2223,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                             disabled={isExportingCsv}
                             onClick={() => handleExportHistory(item.historyId, 'csv')}
                             style={{
-                              padding: '5px 9px',
+                              padding: '8px 11px',
+                              minHeight: '44px',
+                              minWidth: '44px',
                               borderRadius: '6px',
                               border: '1px solid var(--border-strong)',
                               backgroundColor: 'var(--bg-surface)',
@@ -2215,7 +2243,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                             disabled={isExportingXlsx}
                             onClick={() => handleExportHistory(item.historyId, 'xlsx')}
                             style={{
-                              padding: '5px 9px',
+                              padding: '8px 11px',
+                              minHeight: '44px',
+                              minWidth: '44px',
                               borderRadius: '6px',
                               border: '1px solid var(--border-strong)',
                               backgroundColor: 'var(--bg-surface)',
@@ -2259,7 +2289,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 disabled={historyPage <= 1}
                 onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
                 style={{
-                  padding: '5px 12px',
+                  padding: '8px 14px',
+                  minHeight: '44px',
+                  minWidth: '44px',
                   borderRadius: '6px',
                   border: '1px solid var(--border-strong)',
                   backgroundColor: 'var(--bg-surface)',
@@ -2276,7 +2308,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 disabled={historyPage >= Math.ceil(historyData.total / historyLimit)}
                 onClick={() => setHistoryPage((p) => p + 1)}
                 style={{
-                  padding: '5px 12px',
+                  padding: '8px 14px',
+                  minHeight: '44px',
+                  minWidth: '44px',
                   borderRadius: '6px',
                   border: '1px solid var(--border-strong)',
                   backgroundColor: 'var(--bg-surface)',
@@ -2384,7 +2418,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                       disabled={exportingKey === `${selectedHistoryDetail.historyId}:csv`}
                       onClick={() => handleExportHistory(selectedHistoryDetail.historyId, 'csv')}
                       style={{
-                        padding: '6px 12px',
+                        padding: '8px 14px',
+                        minHeight: '44px',
+                        minWidth: '44px',
                         borderRadius: '7px',
                         border: '1px solid var(--border-strong)',
                         backgroundColor: 'var(--bg-subtle)',
@@ -2404,7 +2440,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                       disabled={exportingKey === `${selectedHistoryDetail.historyId}:xlsx`}
                       onClick={() => handleExportHistory(selectedHistoryDetail.historyId, 'xlsx')}
                       style={{
-                        padding: '6px 12px',
+                        padding: '8px 14px',
+                        minHeight: '44px',
+                        minWidth: '44px',
                         borderRadius: '7px',
                         border: '1px solid var(--primary)',
                         backgroundColor: 'var(--primary)',
@@ -2429,7 +2467,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                     setDetailLoading(false);
                   }}
                   style={{
-                    padding: '6px 12px',
+                    padding: '8px 14px',
+                    minHeight: '44px',
+                    minWidth: '44px',
                     borderRadius: '7px',
                     border: '1px solid var(--border-strong)',
                     backgroundColor: 'var(--bg-surface)',
@@ -2592,12 +2632,25 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                                 style={{
                                   padding: '8px',
                                   fontWeight: 700,
-                                  color: q.isCorrect ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                                  color:
+                                    q.isCorrect === null || q.isCorrect === undefined
+                                      ? 'var(--text-secondary)'
+                                      : q.isCorrect
+                                        ? 'var(--accent-emerald)'
+                                        : 'var(--accent-rose)',
                                 }}
                               >
-                                {q.isCorrect ? 'Đúng' : 'Sai'}
+                                {q.isCorrect === null || q.isCorrect === undefined
+                                  ? 'Chưa công bố'
+                                  : q.isCorrect
+                                    ? 'Đúng'
+                                    : 'Sai'}
                               </td>
-                              <td style={{ padding: '8px', fontWeight: 700 }}>{q.pointsEarned} đ</td>
+                              <td style={{ padding: '8px', fontWeight: 700 }}>
+                                {q.pointsEarned === null || q.pointsEarned === undefined
+                                  ? '—'
+                                  : `${q.pointsEarned} đ`}
+                              </td>
                             </tr>
                           ))}
                         </tbody>

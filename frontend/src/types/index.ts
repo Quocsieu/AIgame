@@ -243,31 +243,41 @@ export interface PerformanceEvaluation {
 }
 
 export function calculateFrontendMaxPossibleScore(
-  questionCount: number,
+  questionsOrCount: number | ReadonlyArray<{ points?: number | null }>,
   scoringMode: ScoringMode = 'SPEED_BONUS'
 ): number {
-  const count = Math.max(0, Math.floor(Number(questionCount) || 0));
-  if (count === 0) return 0;
-  const basePoints = 100;
   const maxSpeedBonus = 50;
   const streakBonusStep = 20;
   const maxStreakMultiplier = 5;
 
+  const basePointsList: number[] = Array.isArray(questionsOrCount)
+    ? questionsOrCount.map((q) =>
+        typeof q?.points === 'number' && Number.isFinite(q.points) && q.points >= 10
+          ? Math.round(q.points)
+          : 100
+      )
+    : Array.from(
+        { length: Math.max(0, Math.floor(Number(questionsOrCount) || 0)) },
+        () => 100
+      );
+
+  if (basePointsList.length === 0) return 0;
+
   switch (scoringMode) {
     case 'STANDARD':
-      return count * basePoints;
+      return basePointsList.reduce((sum, bp) => sum + bp, 0);
     case 'SPEED_BONUS':
-      return count * (basePoints + maxSpeedBonus);
+      return basePointsList.reduce((sum, bp) => sum + bp + maxSpeedBonus, 0);
     case 'STREAK': {
       let total = 0;
-      for (let i = 0; i < count; i++) {
+      for (let i = 0; i < basePointsList.length; i++) {
         const effectiveStreak = Math.min(i, maxStreakMultiplier);
-        total += basePoints + maxSpeedBonus + effectiveStreak * streakBonusStep;
+        total += basePointsList[i] + maxSpeedBonus + effectiveStreak * streakBonusStep;
       }
       return total;
     }
     default:
-      return count * basePoints;
+      return basePointsList.reduce((sum, bp) => sum + bp, 0);
   }
 }
 
@@ -535,6 +545,7 @@ export interface GameQuestion {
   explanation?: string;
   difficulty: Difficulty;
   timeLimitSeconds?: number;
+  points?: number;
   crosswordClue?: string;
   crosswordAnswer?: string;
   sourceReference: ProvenanceReference;
@@ -1061,6 +1072,7 @@ export interface LearningAnalyticsSummary {
   byGameTopic: OwnedGameAnalyticsItem[];
   ownedGames?: OwnedGameAnalyticsItem[];
   recentMultiplayerRooms?: MultiplayerRoomAnalyticsItem[];
+  recentPracticeSessions?: PersistedPracticeSessionRecord[];
 }
 
 export interface AiObservabilitySummary {
@@ -1119,13 +1131,22 @@ export interface AdminUserRecord {
 export interface AdminAiLogRecord {
   log_id: string;
   user_id: string | null;
+  game_id?: string | null;
+  game_title?: string | null;
+  asset_slot?: string | null;
   provider: string;
   model: string;
   operation: string;
   status: string;
   error_code: string | null;
   latency_ms: number;
+  input_tokens?: number | null;
+  output_tokens?: number | null;
   total_tokens: number | null;
+  usage_is_estimated?: number | boolean;
+  estimated_cost_usd?: number | null;
+  requested_questions?: number;
   generated_questions: number;
+  valid_questions?: number;
   created_at: string;
 }

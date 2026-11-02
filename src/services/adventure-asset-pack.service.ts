@@ -990,9 +990,11 @@ export async function generateRuntimeAdventureAssetsForGame(
         const usage = payload.usageMetadata ?? provider.getLastUsageMetadata?.() ?? null;
         aiObservabilityService.recordAiCall({
           userId: options.userId ?? spec.ownerUserId ?? null,
+          gameId: spec.gameId,
+          assetSlot: item.type,
           provider: usage?.provider || 'gemini',
           model: usage?.model || 'gemini-2.5-flash-image',
-          operation: 'GENERATE_COVER_IMAGE',
+          operation: 'GENERATE_ADVENTURE_SPRITE',
           status: 'SUCCESS',
           latencyMs: Date.now() - startedAt,
           inputTokens: usage?.inputTokens ?? null,
@@ -1013,9 +1015,11 @@ export async function generateRuntimeAdventureAssetsForGame(
         const errCode = apiErr instanceof AppError ? apiErr.code : 'AI_PROVIDER_ERROR';
         aiObservabilityService.recordAiCall({
           userId: options.userId ?? spec.ownerUserId ?? null,
+          gameId: spec.gameId,
+          assetSlot: item.type,
           provider: usage?.provider || 'gemini',
           model: usage?.model || 'gemini-2.5-flash-image',
-          operation: 'GENERATE_COVER_IMAGE',
+          operation: 'GENERATE_ADVENTURE_SPRITE',
           status: 'FAILED',
           errorCode: errCode,
           latencyMs: Date.now() - startedAt,

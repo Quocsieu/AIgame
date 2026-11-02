@@ -274,6 +274,7 @@ describe('KHO GAME DELETE — Dedicated Business Authorization & Security Suite'
   });
 
   it('7. Regular user calling DELETE /api/games ONLY deletes their own games and NEVER deletes other users games; ADMIN can delete across warehouse', async () => {
+    resetAllRateLimiters();
     // Clear any previous games as ADMIN
     await request(app)
       .delete('/api/games')

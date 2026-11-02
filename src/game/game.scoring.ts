@@ -21,6 +21,7 @@ export interface ScoreCalculationInput {
   responseTimeMs: number;
   timeLimitMs: number;
   currentStreak: number;
+  basePoints?: number;
 }
 
 export interface ScoreCalculationResult {
@@ -35,22 +36,26 @@ export interface ScoreCalculationResult {
  *
  * 1. STANDARD:
  *    - Incorrect: 0 points
- *    - Correct: BASE_POINTS (100)
+ *    - Correct: basePoints (default 100)
  *
  * 2. SPEED_BONUS:
  *    - Incorrect: 0 points
- *    - Correct: BASE_POINTS + round(MAX_SPEED_BONUS * (remainingTimeMs / timeLimitMs))
- *      Bounded range: [100, 150]
+ *    - Correct: basePoints + round(MAX_SPEED_BONUS * (remainingTimeMs / timeLimitMs))
  *
  * 3. STREAK:
  *    - Incorrect: 0 points, streak resets to 0
  *    - Correct: newStreak = currentStreak + 1
  *      streakBonus = min((newStreak - 1) * STREAK_BONUS_PER_STEP, MAX_STREAK_BONUS)
- *      points = BASE_POINTS + streakBonus
- *      Bounded range: [100, 200]
+ *      points = basePoints + streakBonus
  */
 export function calculateScore(input: ScoreCalculationInput): ScoreCalculationResult {
   const { isCorrect, scoringMode, responseTimeMs, timeLimitMs, currentStreak } = input;
+  const effectiveBasePoints =
+    typeof input.basePoints === 'number' &&
+    Number.isFinite(input.basePoints) &&
+    input.basePoints >= 10
+      ? Math.round(input.basePoints)
+      : SCORING_CONSTANTS.BASE_POINTS;
 
   if (!isCorrect) {
     return {
@@ -60,18 +65,18 @@ export function calculateScore(input: ScoreCalculationInput): ScoreCalculationRe
   }
 
   const newStreak = currentStreak + 1;
-  let pointsEarned = SCORING_CONSTANTS.BASE_POINTS;
+  let pointsEarned = effectiveBasePoints;
 
   switch (scoringMode) {
     case 'STANDARD':
-      pointsEarned = SCORING_CONSTANTS.BASE_POINTS;
+      pointsEarned = effectiveBasePoints;
       break;
 
     case 'SPEED_BONUS': {
       const remainingMs = Math.max(0, timeLimitMs - responseTimeMs);
       const ratio = timeLimitMs > 0 ? Math.min(1, Math.max(0, remainingMs / timeLimitMs)) : 0;
       const speedBonus = Math.round(SCORING_CONSTANTS.MAX_SPEED_BONUS * ratio);
-      pointsEarned = SCORING_CONSTANTS.BASE_POINTS + speedBonus;
+      pointsEarned = effectiveBasePoints + speedBonus;
       break;
     }
 
@@ -81,12 +86,12 @@ export function calculateScore(input: ScoreCalculationInput): ScoreCalculationRe
         streakMultiplier * SCORING_CONSTANTS.STREAK_BONUS_PER_STEP,
         SCORING_CONSTANTS.MAX_STREAK_BONUS
       );
-      pointsEarned = SCORING_CONSTANTS.BASE_POINTS + streakBonus;
+      pointsEarned = effectiveBasePoints + streakBonus;
       break;
     }
 
     default:
-      pointsEarned = SCORING_CONSTANTS.BASE_POINTS;
+      pointsEarned = effectiveBasePoints;
   }
 
   return {
@@ -97,34 +102,48 @@ export function calculateScore(input: ScoreCalculationInput): ScoreCalculationRe
 
 /**
  * Calculates the theoretical maximum possible score for a game.
+ * Supports either a question count or an array of questions with optional per-question `points`.
  */
 export function calculateMaxPossibleScore(
-  questionCount: number,
+  questionsOrCount: number | ReadonlyArray<{ points?: number | null }>,
   scoringMode: ScoringMode
 ): number {
-  if (questionCount <= 0) return 0;
+  const basePointsList: number[] = Array.isArray(questionsOrCount)
+    ? questionsOrCount.map((q) =>
+        typeof q?.points === 'number' && Number.isFinite(q.points) && q.points >= 10
+          ? Math.round(q.points)
+          : SCORING_CONSTANTS.BASE_POINTS
+      )
+    : Array.from({ length: Math.max(0, Math.floor(Number(questionsOrCount) || 0)) }, () =>
+        SCORING_CONSTANTS.BASE_POINTS
+      );
+
+  if (basePointsList.length === 0) return 0;
 
   switch (scoringMode) {
     case 'STANDARD':
-      return questionCount * SCORING_CONSTANTS.BASE_POINTS;
+      return basePointsList.reduce((sum, bp) => sum + bp, 0);
 
     case 'SPEED_BONUS':
-      return questionCount * (SCORING_CONSTANTS.BASE_POINTS + SCORING_CONSTANTS.MAX_SPEED_BONUS);
+      return basePointsList.reduce(
+        (sum, bp) => sum + bp + SCORING_CONSTANTS.MAX_SPEED_BONUS,
+        0
+      );
 
     case 'STREAK': {
       let maxScore = 0;
-      for (let i = 1; i <= questionCount; i++) {
+      for (let i = 1; i <= basePointsList.length; i++) {
         const streakBonus = Math.min(
           (i - 1) * SCORING_CONSTANTS.STREAK_BONUS_PER_STEP,
           SCORING_CONSTANTS.MAX_STREAK_BONUS
         );
-        maxScore += SCORING_CONSTANTS.BASE_POINTS + streakBonus;
+        maxScore += basePointsList[i - 1] + streakBonus;
       }
       return maxScore;
     }
 
     default:
-      return questionCount * SCORING_CONSTANTS.BASE_POINTS;
+      return basePointsList.reduce((sum, bp) => sum + bp, 0);
   }
 }
 

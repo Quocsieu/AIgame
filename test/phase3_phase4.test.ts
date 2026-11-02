@@ -108,11 +108,23 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
 
   it('Batch 1: SQLite Persistence survives full in-memory store wipe & DB reconnect (Server Restart Simulation)', async () => {
     // 1. Ingest a large text file (> 5,000 chars) to verify bounded excerpt storage
+    const regBatch1 = await request(app)
+      .post('/api/auth/register')
+      .send({
+        email: `batch1_creator_${Date.now()}@example.com`,
+        password: 'Password123!',
+        displayName: 'Batch 1 Creator',
+      });
+    assert.equal(regBatch1.status, 201);
+    const batch1Token = regBatch1.body.data.token as string;
+    const batch1Auth = { Authorization: `Bearer ${batch1Token}` };
+
     const longParagraph = 'Kiến thức bảo dưỡng động cơ đốt trong và hệ thống làm mát tiêu chuẩn kỹ thuật. ';
     const largeTextBuffer = Buffer.from(longParagraph.repeat(120), 'utf-8');
 
     const ingestRes = await request(app)
       .post('/api/content/ingest')
+      .set(batch1Auth)
       .attach('files', largeTextBuffer, 'engine_manual.txt');
 
     assert.equal(ingestRes.status, 200);
@@ -150,6 +162,7 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
 
     const genRes = await request(app)
       .post('/api/games/generate')
+      .set(batch1Auth)
       .send({
         sourceId,
         gameType: 'MULTIPLE_CHOICE',
@@ -173,9 +186,11 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
 
     const patchRes = await request(app)
       .patch(`/api/games/${gameId}/questions`)
+      .set(batch1Auth)
       .send({
         title: 'Bảo Dưỡng Động Cơ (Đã Chỉnh Sửa)',
         questions: updatedQuestions,
+        isPublic: true,
       });
 
     assert.equal(patchRes.status, 200);
@@ -193,6 +208,7 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
     // 5. Play and complete a multiplayer room
     const createRoomRes = await request(app)
       .post('/api/rooms')
+      .set(batch1Auth)
       .send({ gameId });
     assert.equal(createRoomRes.status, 200);
     const roomCode = createRoomRes.body.data.roomCode;
@@ -218,7 +234,7 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
     initDatabase(tempDbPath);
 
     // 7. Verify all persisted entities are recovered from SQLite after restart
-    const listGamesAfterRestart = await request(app).get('/api/games');
+    const listGamesAfterRestart = await request(app).get('/api/games').set(batch1Auth);
     assert.equal(listGamesAfterRestart.status, 200);
     assert.ok(
       listGamesAfterRestart.body.data.games.some(
@@ -227,7 +243,7 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
       'Saved game must be listed after server restart'
     );
 
-    const getGameAfterRestart = await request(app).get(`/api/games/${gameId}`);
+    const getGameAfterRestart = await request(app).get(`/api/games/${gameId}`).set(batch1Auth);
     assert.equal(getGameAfterRestart.status, 200);
     assert.equal(
       getGameAfterRestart.body.data.questions[0].question,
@@ -238,11 +254,15 @@ describe('PHASE 3 & PHASE 4 — Persistence, Export, AI Observability, Auth, Quo
     assert.equal(getSessionResultAfterRestart.status, 200);
     assert.equal(getSessionResultAfterRestart.body.data.correctAnswers, 2);
 
-    const listSessionsAfterRestart = await request(app).get('/api/history/sessions');
+    // Unauthenticated history call must be rejected with 401 (AUD-004 security hardening)
+    const unauthSessionsRes = await request(app).get('/api/history/sessions');
+    assert.equal(unauthSessionsRes.status, 401);
+
+    const listSessionsAfterRestart = await request(app).get('/api/history/sessions').set(batch1Auth);
     assert.equal(listSessionsAfterRestart.status, 200);
     assert.ok(listSessionsAfterRestart.body.data.some((s: any) => s.sessionId === sessionId));
 
-    const getRoomHistoryAfterRestart = await request(app).get(`/api/games/${gameId}/history`);
+    const getRoomHistoryAfterRestart = await request(app).get(`/api/games/${gameId}/history`).set(batch1Auth);
     assert.equal(getRoomHistoryAfterRestart.status, 200);
     assert.equal(getRoomHistoryAfterRestart.body.data.roomHistory.length, 1);
     assert.equal(getRoomHistoryAfterRestart.body.data.roomHistory[0].roomCode, roomCode);

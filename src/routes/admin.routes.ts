@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { gameStore } from '../game/game.store.js';
 import { requireAdminMiddleware } from '../middleware/auth.middleware.js';
 import { roomStore } from '../multiplayer/room.store.js';
+import { exportService } from '../services/export.service.js';
 import { persistenceRepo } from '../storage/persistence.repository.js';
 import { AppError, createSuccessResponse } from '../utils/errors.js';
 
@@ -172,12 +173,58 @@ adminRouter.get('/rooms', (req: Request, res: Response, next: NextFunction) => {
 
 /**
  * GET /api/admin/ai-logs
- * View real AI operational logs
+ * View real AI operational logs with optional filtering
  */
 adminRouter.get('/ai-logs', (req: Request, res: Response, next: NextFunction) => {
   try {
-    const logs = persistenceRepo.getAdminAiLogs(50);
+    const limit = typeof req.query.limit === 'string' ? Number(req.query.limit) : 100;
+    const from = typeof req.query.from === 'string' ? req.query.from.trim() : undefined;
+    const to = typeof req.query.to === 'string' ? req.query.to.trim() : undefined;
+    const gameId = typeof req.query.gameId === 'string' ? req.query.gameId.trim() : undefined;
+    const model = typeof req.query.model === 'string' ? req.query.model.trim() : undefined;
+    const operation = typeof req.query.operation === 'string' ? req.query.operation.trim() : undefined;
+
+    const logs = persistenceRepo.getAdminAiLogs({
+      limit: Number.isFinite(limit) && limit > 0 ? limit : 100,
+      from,
+      to,
+      gameId,
+      model,
+      operation,
+    });
     res.status(200).json(createSuccessResponse({ logs, count: logs.length }));
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /api/admin/ai-logs/export
+ * Export AI usage logs in CSV or Excel (.xlsx) format
+ */
+adminRouter.get('/ai-logs/export', (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const rawFormat = typeof req.query.format === 'string' ? req.query.format.trim().toLowerCase() : 'csv';
+    const format: 'csv' | 'xlsx' = rawFormat === 'xlsx' ? 'xlsx' : 'csv';
+    const from = typeof req.query.from === 'string' ? req.query.from.trim() : undefined;
+    const to = typeof req.query.to === 'string' ? req.query.to.trim() : undefined;
+    const gameId = typeof req.query.gameId === 'string' ? req.query.gameId.trim() : undefined;
+    const model = typeof req.query.model === 'string' ? req.query.model.trim() : undefined;
+    const operation = typeof req.query.operation === 'string' ? req.query.operation.trim() : undefined;
+
+    const logs = persistenceRepo.getAdminAiLogs({
+      limit: 1000,
+      from,
+      to,
+      gameId,
+      model,
+      operation,
+    });
+
+    const exported = exportService.exportAdminAiUsageLogs(logs, format);
+    res.setHeader('Content-Type', exported.contentType);
+    res.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
+    res.status(200).send(exported.body);
   } catch (err) {
     next(err);
   }

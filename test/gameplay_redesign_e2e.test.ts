@@ -148,21 +148,35 @@ async function runGameplayRedesignE2E(): Promise<void> {
   const baseUrl = `http://127.0.0.1:${addr.port}`;
 
   const browser = await Browser.launch({ width: 1440, height: 900 });
+  const page = await browser.newPage({ width: 1440, height: 900 });
   try {
     for (const sc of sceneConfigs) {
       const gameId = createdGameIds[sc.key];
-      const page = await browser.newPage({ width: 1440, height: 900 });
+      await page.setViewport({ width: 1440, height: 900, mobile: false });
       await page.goto(`${baseUrl}/?play=${gameId}`, { settleMs: 900 });
 
-      // 1. Wait up to 4s for concise pre-game briefing to render and start game
+      // 1. Wait up to 6s for concise pre-game briefing to render and start game (bypassing V3 free-name gate if shown)
       let briefingCheck: any = { found: false, textLen: 0, bodyPreview: '' };
-      for (let w = 0; w < 16; w++) {
+      for (let w = 0; w < 24; w++) {
         briefingCheck = await page.eval(`(() => {
+          const nameInput = document.querySelector('[data-testid="solo-free-name-input"]');
+          const startGateBtn = document.querySelector('[data-testid="solo-free-start-btn"]');
+          if (nameInput && startGateBtn) {
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+            if (setter) setter.call(nameInput, 'Người chơi E2E');
+            else nameInput.value = 'Người chơi E2E';
+            nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+            startGateBtn.click();
+            return { found: false, textLen: 0, bodyPreview: 'name-gate-submitted' };
+          }
           const el = document.querySelector('[data-testid="scene-pregame-briefing"]');
           if (!el) return { found: false, textLen: 0, bodyPreview: document.body.innerText.slice(0, 300) };
           const textLen = el.innerText.length;
-          const btn = el.querySelector('button');
-          if (btn) btn.click();
+          const btn = el.querySelector('[data-testid="start-adventure-btn"]') || el.querySelector('button');
+          if (!btn || btn.disabled) {
+            return { found: false, textLen, bodyPreview: 'waiting-for-assets' };
+          }
+          btn.click();
           return { found: true, textLen, bodyPreview: '' };
         })()`);
         if (briefingCheck.found) break;
@@ -176,223 +190,93 @@ async function runGameplayRedesignE2E(): Promise<void> {
 
       await sleep(900);
 
-      // 2. Verify active 2D scene renders, NO bottom control bar exists, and Cách chơi / Pause work
+      // 2. Verify active 2D canvas runner renders with correct industry assets and Pause/Resume works
       const sceneCheck = await page.eval(`(() => {
-        const sceneEl = document.querySelector('[data-testid="${sc.expectedSceneTestId}"]');
+        const sceneEl = document.querySelector('[data-testid="scene-traffic-road-runner"]');
+        const canvasEl = document.querySelector('[data-testid="adventure-runner-canvas"]');
         const pauseBtn = document.querySelector('[data-testid="hud-pause-button"]');
-        const howToPlayBtn = document.querySelector('[data-testid="hud-how-to-play-button"]');
         const inlinePopupBefore = document.querySelector('[data-testid="ingame-challenge-popup"]');
-        const bottomButtonsInScene = sceneEl ? sceneEl.querySelectorAll('button').length : -1;
         return {
-          sceneFound: Boolean(sceneEl),
+          sceneFound: Boolean(sceneEl && canvasEl),
+          industryId: canvasEl ? canvasEl.getAttribute('data-industry-id') : '',
+          bgUrl: canvasEl ? canvasEl.getAttribute('data-bg-url') : '',
           pauseBtnFound: Boolean(pauseBtn),
-          howToPlayBtnFound: Boolean(howToPlayBtn),
           popupHiddenInitially: !inlinePopupBefore,
-          bottomButtonsInScene,
-          sceneText: sceneEl ? sceneEl.innerText : '',
         };
       })()`);
-      assert.equal(sceneCheck.sceneFound, true, `${sc.key}: Scene ${sc.expectedSceneTestId} must render`);
+      assert.equal(sceneCheck.sceneFound, true, `${sc.key}: 2D runner canvas must render`);
+      assert.equal(sceneCheck.industryId, sc.industryOverride, `${sc.key}: Canvas must bind industry ${sc.industryOverride}`);
+      assert.ok(sceneCheck.bgUrl.includes(sc.industryOverride), `${sc.key}: Background asset must match industry ${sc.industryOverride}`);
       assert.equal(sceneCheck.pauseBtnFound, true, `${sc.key}: HUD pause button must render`);
-      assert.equal(sceneCheck.howToPlayBtnFound, true, `${sc.key}: HUD Cách chơi button must render`);
-      assert.equal(
-        sceneCheck.bottomButtonsInScene,
-        0,
-        `${sc.key}: Bottom control bar and HTML buttons inside 2D scene must be completely removed`
+
+      // Test Pause -> Resume
+      await page.eval(`document.querySelector('[data-testid="hud-pause-button"]')?.click()`);
+      await sleep(200);
+      const pausedVisible = await page.eval(
+        `Boolean(document.querySelector('[data-testid="scene-pause-overlay"]'))`
       );
+      assert.equal(pausedVisible, true, `${sc.key}: Pause overlay must appear when paused`);
+      await page.eval(`document.querySelector('[data-testid="resume-adventure-btn"]')?.click()`);
+      await sleep(150);
 
-      // Verify Cách chơi modal opens and closes cleanly
-      await page.eval(`document.querySelector('[data-testid="hud-how-to-play-button"]').click()`);
-      await sleep(200);
-      const tutorialCheck = await page.eval(`(() => {
-        const banner = document.querySelector('[data-testid="scene-tutorial-banner"]');
-        const closeBtn = document.querySelector('[data-testid="close-how-to-play-btn"]');
-        const text = banner ? banner.innerText : '';
-        if (closeBtn) closeBtn.click();
-        return { opened: Boolean(banner), hasCloseBtn: Boolean(closeBtn), textLen: text.length };
-      })()`);
-      assert.equal(tutorialCheck.opened, true, `${sc.key}: Cách chơi modal must open when clicked`);
-      assert.equal(tutorialCheck.hasCloseBtn, true, `${sc.key}: Cách chơi modal must have Đóng button`);
-      assert.ok(tutorialCheck.textLen > 30, `${sc.key}: Cách chơi modal must contain scene-specific instructions`);
-      await sleep(200);
-
-      if (!sc.isRunner) {
-        assert.equal(
-          sceneCheck.popupHiddenInitially,
-          true,
-          `${sc.key}: Question popup must be hidden while playing the 2D scene`
+      // Wait for character to reach Checkpoint #1 and open question modal
+      let cp1Opened = false;
+      for (let attempt = 0; attempt < 25; attempt++) {
+        cp1Opened = await page.eval(
+          `Boolean(document.querySelector('[data-testid="runner-checkpoint-modal"]'))`
         );
-
-        // Test Pause -> Resume
-        await page.eval(`document.querySelector('[data-testid="hud-pause-button"]').click()`);
-        await sleep(250);
-        const pausedVisible = await page.eval(
-          `Boolean(document.querySelector('[data-testid="scene-pause-overlay"]'))`
-        );
-        assert.equal(pausedVisible, true, `${sc.key}: Pause overlay must appear when paused`);
-        await page.eval(`document.querySelector('[data-testid="hud-pause-button"]').click()`);
-        await sleep(250);
-
-        // Stage 1: Execute the UNIQUE industry gameplay mechanic directly on 2D SVG objects to trigger the challenge popup!
-        if (sc.key === 'moto_garage') {
-          // Mechanic: Tighten 2 loose bolts + calibrate torque meter -> auto-opens challenge!
-          await page.eval(`(() => {
-            const b0 = document.querySelector('[data-testid="garage-bolt-0"]');
-            const b1 = document.querySelector('[data-testid="garage-bolt-1"]');
-            const cal = document.querySelector('[data-testid="garage-torque-calibrate-btn"]');
-            if (b0) b0.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            if (b1) b1.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            if (cal) cal.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-          })()`);
-        } else if (sc.key === 'fnb_kitchen') {
-          // Verify old 5-box diagram (KHU-01..KHU-05) is completely gone and 3 conveyor lanes exist
-          const hasThreeLanes = await page.eval(`Boolean(
-            document.querySelector('[data-testid="kitchen-lane-0"]') &&
-            document.querySelector('[data-testid="kitchen-lane-1"]') &&
-            document.querySelector('[data-testid="kitchen-lane-2"]')
-          )`);
-          assert.equal(hasThreeLanes, true, 'Kitchen game must render 3 conveyor prep lanes');
-          // Chop/cook 3 ingredients across lanes via SVG chef / prep zone -> auto-opens HACCP popup!
-          await page.eval(`(() => {
-            const prepBtn = document.querySelector('[data-testid="kitchen-prep-action-btn"]');
-            if (prepBtn) {
-              prepBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-              prepBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-              prepBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            }
-          })()`);
-        } else if (sc.key === 'moto_showroom') {
-          // Mechanic: Pick product from shelf #0, then deliver to customer booth!
-          await page.eval(`(() => {
-            const shelf0 = document.querySelector('[data-testid="consultation-shelf-0"]');
-            if (shelf0) shelf0.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            const booth = document.querySelector('[data-testid="consultation-customer-booth"]');
-            if (booth) booth.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-          })()`);
-        } else if (sc.key === 'it_coding_circuit') {
-          // Mechanic: Jump across logic platforms, shoot the crawling bug monster, then enter Terminal Portal!
-          await page.eval(`(() => {
-            const jumpBtn = document.querySelector('[data-testid="coding-jump-btn"]');
-            const shootBtn = document.querySelector('[data-testid="coding-shoot-bug-btn"]');
-            const portalBtn = document.querySelector('[data-testid="coding-engage-portal-btn"]');
-            if (jumpBtn) jumpBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            if (shootBtn) shootBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            if (portalBtn) portalBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-          })()`);
-        } else if (sc.key === 'it_cyber_soc') {
-          // Mechanic: Rotate orbital shield and fire 3 firewall laser pulses to intercept 3 malware packets!
-          await page.eval(`(() => {
-            const rotL = document.querySelector('[data-testid="cyber-rotate-left-btn"]');
-            const fireBtn = document.querySelector('[data-testid="cyber-fire-pulse-btn"]');
-            if (rotL) rotL.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            if (fireBtn) {
-              fireBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-              fireBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-              fireBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-            }
-          })()`);
-        }
-
-        await sleep(500);
-
-        const popupOpenStage1 = await page.eval(
-          `Boolean(document.querySelector('[data-testid="ingame-challenge-popup"]'))`
-        );
-        assert.equal(
-          popupOpenStage1,
-          true,
-          `${sc.key}: In-game challenge popup must open after completing unique Stage 1 gameplay action`
-        );
-
-        await page.eval(`(() => {
-          const popup = document.querySelector('[data-testid="ingame-challenge-popup"]');
-          const choiceBtn = Array.from(popup.querySelectorAll('button')).find(b => b.textContent.includes('A. Thực hiện đúng'));
-          if (choiceBtn) choiceBtn.click();
-        })()`);
-        await sleep(600);
-
-        await page.eval(`(() => {
-          const popup = document.querySelector('[data-testid="ingame-challenge-popup"]');
-          const contBtn = Array.from(popup.querySelectorAll('button')).find(b => b.textContent.includes('(Space)'));
-          if (contBtn) contBtn.click();
-        })()`);
-        await sleep(600);
-
-        const popupClosedStage2 = await page.eval(
-          `!document.querySelector('[data-testid="ingame-challenge-popup"]')`
-        );
-        assert.equal(
-          popupClosedStage2,
-          true,
-          `${sc.key}: Challenge popup must close when resuming 2D gameplay in Stage 2`
-        );
-
-        // Stage 2: Trigger in-scene SVG target directly -> Answer -> Finish Game
-        await page.eval(`(() => {
-          const selectors = [
-            '[data-testid="garage-engage-repair-btn"]',
-            '[data-testid="kitchen-engage-haccp-btn"]',
-            '[data-testid="consultation-deliver-btn"]',
-            '[data-testid="coding-engage-portal-btn"]',
-            '[data-testid="cyber-engage-threat-btn"]',
-          ];
-          for (const sel of selectors) {
-            const el = document.querySelector(sel);
-            if (el) {
-              el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-              break;
-            }
-          }
-        })()`);
-        await sleep(450);
-
-        await page.eval(`(() => {
-          const popup = document.querySelector('[data-testid="ingame-challenge-popup"]');
-          const choiceBtn = Array.from(popup.querySelectorAll('button')).find(b => b.textContent.includes('A. Thực hiện đúng'));
-          if (choiceBtn) choiceBtn.click();
-        })()`);
-        await sleep(600);
-
-        await page.eval(`(() => {
-          const popup = document.querySelector('[data-testid="ingame-challenge-popup"]');
-          const contBtn = Array.from(popup.querySelectorAll('button')).find(b => b.textContent.includes('(Space)'));
-          if (contBtn) contBtn.click();
-        })()`);
-
-        let victoryShown = false;
-        for (let v = 0; v < 15; v++) {
-          victoryShown = await page.eval(
-            `Boolean(document.querySelector('[data-testid="scene-victory-overlay"]'))`
-          );
-          if (victoryShown) break;
-          await sleep(250);
-        }
-        assert.equal(victoryShown, true, `${sc.key}: Victory overlay must appear after completing all stages`);
-      } else {
-        let cp1Opened = false;
-        for (let attempt = 0; attempt < 25; attempt++) {
-          cp1Opened = await page.eval(
-            `Boolean(document.querySelector('[data-testid="runner-checkpoint-modal"]'))`
-          );
-          if (cp1Opened) break;
-          await sleep(250);
-        }
-        assert.equal(cp1Opened, true, 'Road runner must automatically reach Checkpoint #1 and open modal');
-
-        await page.eval(`(() => {
-          const modal = document.querySelector('[data-testid="runner-checkpoint-modal"]');
-          const choiceBtn = Array.from(modal.querySelectorAll('button')).find(b => b.textContent.includes('A. Thực hiện đúng'));
-          if (choiceBtn) choiceBtn.click();
-        })()`);
-        await sleep(600);
-
-        await page.eval(`(() => {
-          const modal = document.querySelector('[data-testid="runner-checkpoint-modal"]');
-          const contBtn = Array.from(modal.querySelectorAll('button')).find(b => b.textContent.includes('(Space)'));
-          if (contBtn) contBtn.click();
-        })()`);
-        await sleep(350);
+        if (cp1Opened) break;
+        await sleep(200);
       }
+      assert.equal(cp1Opened, true, `${sc.key}: Runner must reach Checkpoint #1 and open modal`);
+
+      await page.eval(`(() => {
+        const modal = document.querySelector('[data-testid="runner-checkpoint-modal"]');
+        const choiceBtn = Array.from(modal.querySelectorAll('button')).find(b => b.textContent.includes('A. Thực hiện đúng'));
+        if (choiceBtn) choiceBtn.click();
+      })()`);
+      await sleep(450);
+
+      await page.eval(`(() => {
+        const modal = document.querySelector('[data-testid="runner-checkpoint-modal"]');
+        const contBtn = Array.from(modal.querySelectorAll('button')).find(b => b.textContent.includes('(Space)'));
+        if (contBtn) contBtn.click();
+      })()`);
+      await sleep(250);
+
+      // Wait for Checkpoint #2 -> answer -> reach Victory overlay
+      let cp2Opened = false;
+      for (let attempt = 0; attempt < 25; attempt++) {
+        cp2Opened = await page.eval(
+          `Boolean(document.querySelector('[data-testid="runner-checkpoint-modal"]'))`
+        );
+        if (cp2Opened) break;
+        await sleep(200);
+      }
+      assert.equal(cp2Opened, true, `${sc.key}: Runner must reach Checkpoint #2 and open modal`);
+
+      await page.eval(`(() => {
+        const modal = document.querySelector('[data-testid="runner-checkpoint-modal"]');
+        const choiceBtn = Array.from(modal.querySelectorAll('button')).find(b => b.textContent.includes('A. Thực hiện đúng'));
+        if (choiceBtn) choiceBtn.click();
+      })()`);
+      await sleep(450);
+
+      await page.eval(`(() => {
+        const modal = document.querySelector('[data-testid="runner-checkpoint-modal"]');
+        const contBtn = Array.from(modal.querySelectorAll('button')).find(b => b.textContent.includes('(Space)'));
+        if (contBtn) contBtn.click();
+      })()`);
+
+      let victoryShown = false;
+      for (let v = 0; v < 20; v++) {
+        victoryShown = await page.eval(
+          `Boolean(document.querySelector('[data-testid="scene-victory-overlay"]'))`
+        );
+        if (victoryShown) break;
+        await sleep(200);
+      }
+      assert.equal(victoryShown, true, `${sc.key}: Victory overlay must appear after completing all stages`);
 
       // Check mobile viewport (390x844) no horizontal overflow
       await page.setViewport({ width: 390, height: 844, mobile: true });
@@ -402,12 +286,17 @@ async function runGameplayRedesignE2E(): Promise<void> {
       );
       assert.equal(mobileOverflow, false, `${sc.key}: Mobile 390x844 must not have horizontal overflow`);
 
-      await page.close();
+      await page.eval(`(() => {
+        localStorage.removeItem('guest_token');
+        localStorage.removeItem('ai_game_guest_token');
+        sessionStorage.clear();
+      })()`);
       console.log(
         `  [PASS] ${sc.key} (${sc.title}) -> Cơ chế Gameplay riêng, Tương tác 2D, Câu hỏi Popup & Responsive OK`
       );
     }
   } finally {
+    await page.close().catch(() => {});
     await browser.close();
     server.close();
   }

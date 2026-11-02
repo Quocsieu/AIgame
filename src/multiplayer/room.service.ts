@@ -89,7 +89,7 @@ export class MultiplayerRoom {
 
   public getMaxPossibleScore(): number {
     return calculateMaxPossibleScore(
-      this.gameSpecification.questions.length,
+      this.gameSpecification.questions,
       this.gameSpecification.settings.scoringMode
     );
   }
@@ -531,6 +531,7 @@ export class MultiplayerRoom {
       responseTimeMs,
       timeLimitMs,
       currentStreak: player.currentStreak,
+      basePoints: activeQuestion.points,
     });
 
     player.score += scoreResult.pointsEarned;

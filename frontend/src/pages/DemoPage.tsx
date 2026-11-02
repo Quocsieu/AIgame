@@ -1110,18 +1110,24 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }
   };
 
-  const handleConfirmCreatorRosterImport = () => {
+  const handleConfirmCreatorRosterImport = (mode: 'APPEND' | 'REPLACE' = 'APPEND') => {
     if (!creatorRosterImportPreview || creatorRosterImportPreview.participants.length === 0) {
       return;
     }
     const importedBlock = formatParticipantsToPasteText(creatorRosterImportPreview.participants);
-    const nextText = btcRosterPasteText.trim()
-      ? `${btcRosterPasteText.replace(/\s+$/, '')}\n${importedBlock}`
-      : importedBlock;
+    const nextText =
+      mode === 'REPLACE' || !btcRosterPasteText.trim()
+        ? importedBlock
+        : `${btcRosterPasteText.replace(/\s+$/, '')}\n${importedBlock}`;
     applyUpdatedRosterPasteText(nextText);
     const addedCount = creatorRosterImportPreview.participants.length;
     setCreatorRosterImportPreview(null);
-    toast.success(`Đã nhập ${addedCount} người vào danh sách tham gia!`, 'Nhập danh sách thành công');
+    toast.success(
+      mode === 'REPLACE'
+        ? `Đã thay thế danh sách bằng ${addedCount} người từ tệp!`
+        : `Đã gộp thêm ${addedCount} người vào danh sách tham gia!`,
+      'Nhập danh sách thành công'
+    );
   };
 
   const loadBtcRosterAndScoreboard = async (targetGameId?: string) => {
@@ -4986,7 +4992,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                             </div>
                           )}
 
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.4rem' }}>
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.4rem', flexWrap: 'wrap' }}>
                             <button
                               type="button"
                               data-testid="roster-cancel-import-btn"
@@ -5004,11 +5010,34 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                             >
                               Hủy
                             </button>
+                            {btcRosterPasteText.trim().length > 0 && (
+                              <button
+                                type="button"
+                                data-testid="roster-replace-import-btn"
+                                disabled={creatorRosterImportPreview.participants.length === 0}
+                                onClick={() => handleConfirmCreatorRosterImport('REPLACE')}
+                                style={{
+                                  padding: '0.3rem 0.65rem',
+                                  borderRadius: '5px',
+                                  border: '1px solid var(--accent-amber)',
+                                  backgroundColor: 'rgba(245, 158, 11, 0.14)',
+                                  color: 'var(--accent-amber)',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 800,
+                                  cursor:
+                                    creatorRosterImportPreview.participants.length === 0
+                                      ? 'not-allowed'
+                                      : 'pointer',
+                                }}
+                              >
+                                Thay thế danh sách
+                              </button>
+                            )}
                             <button
                               type="button"
                               data-testid="roster-confirm-import-btn"
                               disabled={creatorRosterImportPreview.participants.length === 0}
-                              onClick={handleConfirmCreatorRosterImport}
+                              onClick={() => handleConfirmCreatorRosterImport('APPEND')}
                               style={{
                                 padding: '0.3rem 0.7rem',
                                 borderRadius: '5px',
@@ -5023,7 +5052,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                     : 'pointer',
                               }}
                             >
-                              ✓ Xác nhận nhập ({creatorRosterImportPreview.participants.length})
+                              ✓ {btcRosterPasteText.trim().length > 0 ? 'Gộp vào danh sách' : 'Xác nhận nhập'} ({creatorRosterImportPreview.participants.length})
                             </button>
                           </div>
                         </div>
@@ -6208,6 +6237,20 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                         >
                                           {formatGameTypeLabel(effectiveQType)}
                                         </span>
+                                        <span
+                                          data-testid={`question-points-badge-${idx}`}
+                                          style={{
+                                            fontSize: '0.7rem',
+                                            fontWeight: 800,
+                                            padding: '0.12rem 0.45rem',
+                                            borderRadius: '4px',
+                                            backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                                            color: 'var(--accent-emerald)',
+                                            border: '1px solid rgba(16, 185, 129, 0.35)',
+                                          }}
+                                        >
+                                          {activeQ.points || 100} điểm · {activeQ.timeLimitSeconds || timePerQuestion}s
+                                        </span>
                                       </div>
 
                                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -6903,39 +6946,77 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                           />
                                         </div>
 
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                                          <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                                            Thời gian riêng câu này (giây, để trống dùng mặc định {timePerQuestion}s):
-                                          </label>
-                                          <input
-                                            type="number"
-                                            data-testid={`edit-question-time-${idx}`}
-                                            min={5}
-                                            max={300}
-                                            placeholder={`${timePerQuestion}`}
-                                            value={editingQuestionDraft.timeLimitSeconds ?? ''}
-                                            onChange={(e) => {
-                                              const rawVal = e.target.value.trim();
-                                              const numVal = rawVal
-                                                ? Math.min(300, Math.max(5, parseInt(rawVal, 10) || timePerQuestion))
-                                                : undefined;
-                                              handleUpdateQuestionDraft((prev) => ({
-                                                ...prev,
-                                                timeLimitSeconds: numVal,
-                                              }));
-                                            }}
-                                            style={{
-                                              width: '90px',
-                                              backgroundColor: 'var(--bg-input)',
-                                              border: '1px solid var(--border-strong)',
-                                              borderRadius: '6px',
-                                              padding: '0.35rem 0.5rem',
-                                              color: 'var(--text-primary)',
-                                              fontSize: '0.82rem',
-                                              fontWeight: 700,
-                                              boxSizing: 'border-box',
-                                            }}
-                                          />
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                            <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                                              Thời gian riêng câu này (giây, để trống dùng mặc định {timePerQuestion}s):
+                                            </label>
+                                            <input
+                                              type="number"
+                                              data-testid={`edit-question-time-${idx}`}
+                                              min={5}
+                                              max={300}
+                                              placeholder={`${timePerQuestion}`}
+                                              value={editingQuestionDraft.timeLimitSeconds ?? ''}
+                                              onChange={(e) => {
+                                                const rawVal = e.target.value.trim();
+                                                const numVal = rawVal
+                                                  ? Math.min(300, Math.max(5, parseInt(rawVal, 10) || timePerQuestion))
+                                                  : undefined;
+                                                handleUpdateQuestionDraft((prev) => ({
+                                                  ...prev,
+                                                  timeLimitSeconds: numVal,
+                                                }));
+                                              }}
+                                              style={{
+                                                width: '90px',
+                                                backgroundColor: 'var(--bg-input)',
+                                                border: '1px solid var(--border-strong)',
+                                                borderRadius: '6px',
+                                                padding: '0.35rem 0.5rem',
+                                                color: 'var(--text-primary)',
+                                                fontSize: '0.82rem',
+                                                fontWeight: 700,
+                                                boxSizing: 'border-box',
+                                              }}
+                                            />
+                                          </div>
+
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                                            <label style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                                              Điểm câu hỏi (10–1000, mặc định 100):
+                                            </label>
+                                            <input
+                                              type="number"
+                                              data-testid={`edit-question-points-${idx}`}
+                                              min={10}
+                                              max={1000}
+                                              step={10}
+                                              placeholder="100"
+                                              value={editingQuestionDraft.points ?? ''}
+                                              onChange={(e) => {
+                                                const rawVal = e.target.value.trim();
+                                                const numVal = rawVal
+                                                  ? Math.min(1000, Math.max(10, parseInt(rawVal, 10) || 100))
+                                                  : undefined;
+                                                handleUpdateQuestionDraft((prev) => ({
+                                                  ...prev,
+                                                  points: numVal,
+                                                }));
+                                              }}
+                                              style={{
+                                                width: '90px',
+                                                backgroundColor: 'var(--bg-input)',
+                                                border: '1px solid var(--border-strong)',
+                                                borderRadius: '6px',
+                                                padding: '0.35rem 0.5rem',
+                                                color: 'var(--text-primary)',
+                                                fontSize: '0.82rem',
+                                                fontWeight: 700,
+                                                boxSizing: 'border-box',
+                                              }}
+                                            />
+                                          </div>
                                         </div>
 
                                         <div
@@ -7772,6 +7853,11 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           } else {
             handleStartSoloPlay(spec);
           }
+        }}
+        onStartPlaytest={(spec) => {
+          setIsModeModalOpen(false);
+          setPlaytestSpec(spec);
+          setIsPlaytestOpen(true);
         }}
         onCreateMultiplayerRoom={async (spec) => {
           const room = await handleCreateRoom(spec);

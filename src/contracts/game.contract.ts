@@ -61,10 +61,10 @@ export type GameType = z.infer<typeof GameTypeEnum>;
 
 /**
  * Danh sách loại game được phép tạo mới qua POST /api/games/generate:
- * - Các dạng cơ sở: QUIZ (MULTIPLE_CHOICE), TRUE_FALSE (QUICK_BUTTON),
- *   TYPE_ANSWER (FILL_IN_THE_BLANK), CROSSWORD, PUZZLE, SLIDER
- * - Chế độ hỗn hợp: MIXED (phân bổ tỷ lệ 4 loại cơ sở: MULTIPLE_CHOICE, QUICK_BUTTON, FILL_IN_THE_BLANK, CROSSWORD)
+ * - 5 dạng cơ sở chuẩn hóa: QUIZ (MULTIPLE_CHOICE), TRUE_FALSE (QUICK_BUTTON),
+ *   TYPE_ANSWER (FILL_IN_THE_BLANK), PUZZLE, SLIDER
  * - Dạng giả lập đi cảnh tương tác: ADVENTURE
+ * (CROSSWORD và MIXED vẫn được giữ trong GameTypeEnum / QuestionTypeEnum để tương thích ngược cho các game đã lưu)
  */
 export const CreatableGameTypeEnum = z.enum([
   'QUIZ',
@@ -75,8 +75,6 @@ export const CreatableGameTypeEnum = z.enum([
   'MULTIPLE_CHOICE',
   'QUICK_BUTTON',
   'FILL_IN_THE_BLANK',
-  'CROSSWORD',
-  'MIXED',
   'ADVENTURE',
 ]);
 export type CreatableGameType = z.infer<typeof CreatableGameTypeEnum>;
@@ -273,6 +271,7 @@ export const BaseQuestionSchema = z.object({
   crosswordAnswer: z.string().optional(),
   sliderConfig: SliderQuestionConfigSchema.optional(),
   timeLimitSeconds: z.number().int().min(5).max(300).optional(),
+  points: z.number().int().min(10).max(1000).optional(),
 });
 
 export const GameQuestionSchema = BaseQuestionSchema.superRefine((data, ctx) => {

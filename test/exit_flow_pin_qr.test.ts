@@ -230,19 +230,22 @@ describe('EXIT FLOW, PIN NAVIGATION & QR/PIN SYNCHRONIZATION SUITE', () => {
     // Create solo session
     const sessRes = await request(app)
       .post('/api/games/sessions')
-      .send({ gameId, publicPlay: true });
+      .send({ gameId, publicPlay: true, playerName: 'Người chơi Kiểm thử' });
     assert.equal(sessRes.status, 200);
     const sessionId = sessRes.body.data.sessionId;
+    const lockToken = sessRes.body.data.lockToken;
 
     // Start session
     const startRes = await request(app)
-      .post(`/api/games/sessions/${sessionId}/start`);
+      .post(`/api/games/sessions/${sessionId}/start`)
+      .set('X-Participant-Token', lockToken);
     assert.equal(startRes.status, 200);
     assert.equal(startRes.body.data.session.state, 'QUESTION_ACTIVE');
 
     // Complete session
     const finishRes = await request(app)
       .post(`/api/games/sessions/${sessionId}/answer`)
+      .set('X-Participant-Token', lockToken)
       .send({ questionId: `${gameId}_q1`, answer: 'A. Hà Nội' });
     assert.equal(finishRes.status, 200);
   });

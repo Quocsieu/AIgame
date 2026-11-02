@@ -566,6 +566,8 @@ export class AiImageService {
 
       aiObservabilityService.recordAiCall({
         userId: options.userId ?? spec.ownerUserId ?? null,
+        gameId: spec.gameId,
+        assetSlot: 'COVER',
         provider: usage?.provider || 'gemini',
         model: usage?.model || process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image',
         operation: 'GENERATE_COVER_IMAGE',
@@ -601,6 +603,8 @@ export class AiImageService {
 
       aiObservabilityService.recordAiCall({
         userId: options.userId ?? spec.ownerUserId ?? null,
+        gameId: spec.gameId,
+        assetSlot: 'COVER',
         provider: usage?.provider || 'gemini',
         model: usage?.model || process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image',
         operation: 'GENERATE_COVER_IMAGE',

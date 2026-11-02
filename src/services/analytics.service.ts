@@ -125,6 +125,28 @@ export interface LearningAnalyticsSummary {
   byGameTopic: OwnedGameAnalyticsItem[];
   ownedGames: OwnedGameAnalyticsItem[];
   recentMultiplayerRooms: MultiplayerRoomAnalyticsItem[];
+  recentPracticeSessions?: Array<{
+    sessionId: string;
+    gameId: string;
+    ownerUserId: string | null;
+    gameTitle: string;
+    gameType: string;
+    scoringMode: string;
+    state: string;
+    totalQuestions: number;
+    answeredQuestions: number;
+    correctAnswers: number;
+    wrongAnswers: number;
+    totalScore: number;
+    maxPossibleScore: number;
+    maxStreak: number;
+    durationMs: number;
+    questionResults: any[];
+    startedAt: string | null;
+    finishedAt: string | null;
+    createdAt: string;
+    updatedAt: string;
+  }>;
 }
 
 export class AnalyticsService {
@@ -901,6 +923,28 @@ export class AnalyticsService {
       byGameTopic: ownedGamesList.slice(0, 30),
       ownedGames: ownedGamesList,
       recentMultiplayerRooms: parsedRooms.slice(0, 20),
+      recentPracticeSessions: sessionRows.slice(0, 25).map(sRow => ({
+        sessionId: String(sRow.session_id),
+        gameId: String(sRow.game_id),
+        ownerUserId: sRow.owner_user_id ? String(sRow.owner_user_id) : null,
+        gameTitle: String(sRow.game_title || ''),
+        gameType: String(sRow.game_type || 'MULTIPLE_CHOICE'),
+        scoringMode: String(sRow.scoring_mode || 'STANDARD'),
+        state: String(sRow.state || 'IN_PROGRESS'),
+        totalQuestions: Number(sRow.total_questions || 0),
+        answeredQuestions: Number(sRow.answered_questions || 0),
+        correctAnswers: Number(sRow.correct_answers || 0),
+        wrongAnswers: Number(sRow.wrong_answers || 0),
+        totalScore: Number(sRow.total_score || 0),
+        maxPossibleScore: Number(sRow.max_possible_score || 0),
+        maxStreak: Number(sRow.max_streak || 0),
+        durationMs: Number(sRow.duration_ms || 0),
+        questionResults: [],
+        startedAt: sRow.started_at ? String(sRow.started_at) : null,
+        finishedAt: sRow.finished_at ? String(sRow.finished_at) : null,
+        createdAt: String(sRow.created_at || ''),
+        updatedAt: String(sRow.finished_at || sRow.created_at || ''),
+      })),
     };
   }
 }

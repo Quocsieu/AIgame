@@ -118,10 +118,16 @@ historyRouter.get(
   '/sessions',
   (req: Request, res: Response, next: NextFunction) => {
     try {
+      rejectGuestOrPlayerWrite(req, 'xem lịch sử phiên luyện tập');
+      if (!req.user || !req.user.userId) {
+        throw new AppError('UNAUTHORIZED', 'Yêu cầu đăng nhập để xem lịch sử phiên luyện tập.', 401);
+      }
+
       const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
       const gameId = typeof req.query.gameId === 'string' && req.query.gameId.trim() ? req.query.gameId.trim() : undefined;
       const sessions = persistenceRepo.listPracticeSessions({
-        userId: req.user?.userId ?? null,
+        userId: req.user.userId,
+        isAdmin: req.user.role === 'ADMIN',
         gameId,
         limit,
       });
@@ -140,13 +146,19 @@ historyRouter.get(
   '/rooms',
   (req: Request, res: Response, next: NextFunction) => {
     try {
+      rejectGuestOrPlayerWrite(req, 'xem lịch sử phòng chơi');
+      if (!req.user || !req.user.userId) {
+        throw new AppError('UNAUTHORIZED', 'Yêu cầu đăng nhập để xem lịch sử phòng chơi.', 401);
+      }
+
       const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
       const gameId =
         typeof req.query.gameId === 'string' && req.query.gameId.trim()
           ? req.query.gameId.trim()
           : undefined;
       const rooms = persistenceRepo.listRoomHistory({
-        userId: req.user?.userId ?? null,
+        userId: req.user.userId,
+        isAdmin: req.user.role === 'ADMIN',
         gameId,
         limit,
       });
@@ -165,8 +177,17 @@ historyRouter.get(
   '/sources',
   (req: Request, res: Response, next: NextFunction) => {
     try {
+      rejectGuestOrPlayerWrite(req, 'xem lịch sử nguồn tài liệu');
+      if (!req.user || !req.user.userId) {
+        throw new AppError('UNAUTHORIZED', 'Yêu cầu đăng nhập để xem nguồn tài liệu.', 401);
+      }
+
       const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
-      const sources = persistenceRepo.listSources(req.user?.userId ?? null, limit);
+      const sources = persistenceRepo.listSources(
+        req.user.userId,
+        limit,
+        req.user.role === 'ADMIN'
+      );
       res.status(200).json(createSuccessResponse(sources));
     } catch (err) {
       next(err);
@@ -184,6 +205,9 @@ historyRouter.get(
   (req: Request, res: Response, next: NextFunction) => {
     try {
       rejectGuestOrPlayerWrite(req, 'xem lịch sử quản trị của BTC');
+      if (!req.user || !req.user.userId) {
+        throw new AppError('UNAUTHORIZED', 'Yêu cầu đăng nhập để xem lịch sử quản trị của BTC.', 401);
+      }
 
       const sessionMode =
         typeof req.query.sessionMode === 'string' ? req.query.sessionMode.trim() : 'ALL';
@@ -210,8 +234,8 @@ historyRouter.get(
           : undefined;
 
       const result = persistenceRepo.listPlayExamHistory({
-        userId: req.user?.userId ?? null,
-        isAdmin: req.user?.role === 'ADMIN',
+        userId: req.user.userId,
+        isAdmin: req.user.role === 'ADMIN',
         gameId,
         sessionMode,
         deliveryMode,
@@ -239,6 +263,9 @@ historyRouter.get(
   (req: Request, res: Response, next: NextFunction) => {
     try {
       rejectGuestOrPlayerWrite(req, 'xem chi tiết lịch sử quản trị của BTC');
+      if (!req.user || !req.user.userId) {
+        throw new AppError('UNAUTHORIZED', 'Yêu cầu đăng nhập để xem chi tiết lịch sử.', 401);
+      }
 
       const historyId = String(req.params.historyId || '').trim();
       const detail = persistenceRepo.getPlayExamHistoryDetail(historyId);
@@ -247,6 +274,17 @@ historyRouter.get(
           'HISTORY_NOT_FOUND',
           `Không tìm thấy bản ghi lịch sử "${historyId}".`,
           404
+        );
+      }
+
+      if (
+        (!detail.ownerUserId || detail.ownerUserId === 'legacy_local') &&
+        req.user.role !== 'ADMIN'
+      ) {
+        throw new AppError(
+          'ACCESS_DENIED',
+          'Bạn không có quyền truy cập bản ghi lịch sử chưa định danh chủ sở hữu này.',
+          403
         );
       }
 
@@ -275,6 +313,9 @@ historyRouter.get(
   (req: Request, res: Response, next: NextFunction) => {
     try {
       rejectGuestOrPlayerWrite(req, 'xuất dữ liệu lịch sử quản trị của BTC');
+      if (!req.user || !req.user.userId) {
+        throw new AppError('UNAUTHORIZED', 'Yêu cầu đăng nhập để xuất dữ liệu lịch sử.', 401);
+      }
 
       const historyId = String(req.params.historyId || '').trim();
       const detail = persistenceRepo.getPlayExamHistoryDetail(historyId);
@@ -283,6 +324,17 @@ historyRouter.get(
           'HISTORY_NOT_FOUND',
           `Không tìm thấy bản ghi lịch sử "${historyId}".`,
           404
+        );
+      }
+
+      if (
+        (!detail.ownerUserId || detail.ownerUserId === 'legacy_local') &&
+        req.user.role !== 'ADMIN'
+      ) {
+        throw new AppError(
+          'ACCESS_DENIED',
+          'Bạn không có quyền xuất dữ liệu lịch sử chưa định danh chủ sở hữu này.',
+          403
         );
       }
 

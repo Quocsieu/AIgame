@@ -192,7 +192,10 @@ export interface InvalidParticipantRow {
 export interface RosterParseDiagnosticsResult {
   totalRows: number;
   validCount: number;
+  invalidCount: number;
   duplicateCount: number;
+  duplicateNameCount: number;
+  duplicateCodeCount: number;
   duplicateNames: string[];
   invalidRows: InvalidParticipantRow[];
   participants: ParsedParticipantDraft[];
@@ -310,9 +313,41 @@ export function parseParticipantsWithDiagnostics(options: {
 
   if (options.fileBuffer && options.fileBuffer.length > 0) {
     const ext = path.extname(options.fileName || '').toLowerCase();
+    const allowedExts = new Set(['.xlsx', '.xls', '.csv', '.txt', '']);
+    if (!allowedExts.has(ext)) {
+      throw new AppError(
+        'UNSUPPORTED_ROSTER_FILE',
+        `Định dạng tệp "${ext}" không được hỗ trợ cho danh sách thí sinh. Vui lòng chọn tệp .xlsx, .xls, .csv hoặc .txt.`,
+        400
+      );
+    }
     if (ext === '.xlsx' || ext === '.xls') {
+      // Verify file is a valid ZIP (PK\x03\x04) or OLE2 (\xD0\xCF\x11\xE0) workbook, not a corrupted/disguised binary
+      const b0 = options.fileBuffer[0];
+      const b1 = options.fileBuffer[1];
+      const b2 = options.fileBuffer[2];
+      const b3 = options.fileBuffer[3];
+      const isZip = b0 === 0x50 && b1 === 0x4b && (b2 === 0x03 || b2 === 0x05 || b2 === 0x07);
+      const isOle2 = b0 === 0xd0 && b1 === 0xcf && b2 === 0x11 && b3 === 0xe0;
+      if (!isZip && !isOle2) {
+        throw new AppError(
+          'CORRUPTED_ROSTER_FILE',
+          `Tệp Excel "${options.fileName || 'roster.xlsx'}" bị hỏng hoặc không đúng định dạng .xlsx/.xls hợp lệ.`,
+          400
+        );
+      }
+      let workbook: XLSX.WorkBook;
+      try {
+        const xlsxLib: typeof XLSX = (XLSX as any).default ?? XLSX;
+        workbook = xlsxLib.read(options.fileBuffer, { type: 'buffer', codepage: 65001 });
+      } catch {
+        throw new AppError(
+          'CORRUPTED_ROSTER_FILE',
+          `Không thể đọc cấu trúc bảng tính từ tệp "${options.fileName || 'roster.xlsx'}".`,
+          400
+        );
+      }
       const xlsxLib: typeof XLSX = (XLSX as any).default ?? XLSX;
-      const workbook = xlsxLib.read(options.fileBuffer, { type: 'buffer', codepage: 65001 });
       const firstSheetName = workbook.SheetNames[0];
       if (firstSheetName) {
         const sheet = workbook.Sheets[firstSheetName];
@@ -403,10 +438,26 @@ export function parseParticipantsWithDiagnostics(options: {
     }
   }
 
+  const codeCounts = new Map<string, number>();
+  for (const p of participants) {
+    const code = (p.employeeCode || '').trim().toLowerCase();
+    if (!code) continue;
+    codeCounts.set(code, (codeCounts.get(code) || 0) + 1);
+  }
+  let duplicateCodeCount = 0;
+  for (const [, count] of codeCounts.entries()) {
+    if (count > 1) {
+      duplicateCodeCount += count - 1;
+    }
+  }
+
   return {
     totalRows,
     validCount: participants.length,
+    invalidCount: invalidRows.length,
     duplicateCount,
+    duplicateNameCount: duplicateCount,
+    duplicateCodeCount,
     duplicateNames,
     invalidRows,
     participants,
@@ -812,9 +863,9 @@ gameRouter.post(
           ? false
           : requestData.isPublic !== undefined
             ? Boolean(requestData.isPublic)
-            : true;
+            : false;
 
-      // Save generated specification in store and SQLite persistence (public by default for newly created games)
+      // Save generated specification in store and SQLite persistence (draft by default until explicitly published)
       const incomingParticipants = Array.isArray(requestData.participants)
         ? requestData.participants.filter(p => p && typeof p.fullName === 'string' && p.fullName.trim().length > 0)
         : [];
@@ -2618,11 +2669,13 @@ gameRouter.get(
 /**
  * GET /api/games/:gameId/history
  * Retrieve practice sessions and multiplayer room history for a specific game.
+ * Restricted to game owner, active room hostToken, or Admin (prevents IDOR and exam answer leakage).
  */
 gameRouter.get(
   '/:gameId/history',
   (req: Request, res: Response, next: NextFunction) => {
     try {
+      rejectGuestOrPlayerWrite(req, 'xem lịch sử bộ câu hỏi');
       const gameId = String(req.params.gameId || '');
       const spec = gameStore.get(gameId);
       if (!spec) {
@@ -2631,25 +2684,41 @@ gameRouter.get(
 
       const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
       const ownerUserId = spec.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
-      const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
 
-      authService.assertResourceAccess({
-        resourceType: 'lịch sử bộ câu hỏi',
-        ownerUserId,
-        currentUser: req.user,
-        mode: 'read',
-        isPublic,
-      });
+      if (!hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+        if (!req.user || !req.user.userId) {
+          throw new AppError(
+            'UNAUTHORIZED',
+            'Yêu cầu đăng nhập để xem lịch sử của bộ câu hỏi.',
+            401
+          );
+        }
+        if (!ownerUserId || ownerUserId === 'legacy_local') {
+          throw new AppError(
+            'ACCESS_DENIED',
+            'Bạn không có quyền xem lịch sử của bộ câu hỏi chưa định danh chủ sở hữu này.',
+            403
+          );
+        }
+        authService.assertResourceAccess({
+          resourceType: 'lịch sử bộ câu hỏi',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      }
 
       const practiceSessions = persistenceRepo.listPracticeSessions({
         gameId,
         userId: ownerUserId ?? null,
+        isAdmin: true,
         limit: 50,
       });
 
       const roomHistory = persistenceRepo.listRoomHistory({
         gameId,
         userId: ownerUserId ?? null,
+        isAdmin: true,
         limit: 50,
       });
 

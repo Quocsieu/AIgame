@@ -203,18 +203,22 @@ export class PersistenceRepository {
 
   public listSources(
     ownerUserId?: string | null,
-    limit: number = 50
+    limit: number = 50,
+    isAdmin: boolean = false
   ): PersistedSourceMetadata[] {
     const db = getDatabase();
     const safeLimit = Math.min(100, Math.max(1, limit));
+    if (!isAdmin && (!ownerUserId || ownerUserId === 'legacy_local')) {
+      return [];
+    }
     const rows = (
-      ownerUserId
+      isAdmin && !ownerUserId
         ? db
-            .prepare('SELECT * FROM sources WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT ?')
-            .all(ownerUserId, safeLimit)
-        : db
-            .prepare('SELECT * FROM sources WHERE owner_user_id IS NULL ORDER BY created_at DESC LIMIT ?')
+            .prepare('SELECT * FROM sources ORDER BY created_at DESC LIMIT ?')
             .all(safeLimit)
+        : db
+            .prepare('SELECT * FROM sources WHERE owner_user_id = ? ORDER BY created_at DESC LIMIT ?')
+            .all(ownerUserId ?? null, safeLimit)
     ) as Record<string, any>[];
 
     return rows.map((row) => {
@@ -330,8 +334,8 @@ export class PersistenceRepository {
         `INSERT INTO game_questions (
           game_id, question_id, position, question_type, question_text,
           choices_json, slider_config_json, correct_answer, accepted_alternatives_json, explanation,
-          difficulty, source_reference_json, crossword_clue, crossword_answer, time_limit_seconds
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          difficulty, source_reference_json, crossword_clue, crossword_answer, time_limit_seconds, points
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
 
       spec.questions.forEach((q, idx) => {
@@ -352,6 +356,9 @@ export class PersistenceRepository {
           q.crosswordAnswer ?? null,
           typeof q.timeLimitSeconds === 'number' && Number.isFinite(q.timeLimitSeconds)
             ? Math.round(q.timeLimitSeconds)
+            : null,
+          typeof q.points === 'number' && Number.isFinite(q.points) && q.points >= 10
+            ? Math.round(q.points)
             : null
         );
       });
@@ -498,6 +505,12 @@ export class PersistenceRepository {
         const parsedLimit = Number(row.time_limit_seconds);
         if (Number.isFinite(parsedLimit) && parsedLimit >= 5) {
           q.timeLimitSeconds = Math.round(parsedLimit);
+        }
+      }
+      if (row.points !== null && row.points !== undefined) {
+        const parsedPoints = Number(row.points);
+        if (Number.isFinite(parsedPoints) && parsedPoints >= 10) {
+          q.points = Math.round(parsedPoints);
         }
       }
       return q;
@@ -878,8 +891,50 @@ export class PersistenceRepository {
     return this.mapPracticeSessionRow(row);
   }
 
+  public getAttemptTokenHashBySessionId(sessionId: string): string | null {
+    const db = getDatabase();
+    const row = db
+      .prepare(
+        'SELECT participant_token_hash FROM game_participant_attempts WHERE session_id = ? ORDER BY created_at DESC LIMIT 1'
+      )
+      .get(sessionId) as { participant_token_hash: string | null } | undefined;
+    return row?.participant_token_hash ? String(row.participant_token_hash) : null;
+  }
+
+  private sanitizePracticeSessionRecord(
+    mapped: PersistedPracticeSessionRecord,
+    metaCache?: Map<string, ReturnType<typeof this.resolveGameSettingsMeta>>
+  ): PersistedPracticeSessionRecord {
+    let meta = metaCache?.get(mapped.gameId);
+    if (!meta) {
+      meta = this.resolveGameSettingsMeta(mapped.gameId);
+      metaCache?.set(mapped.gameId, meta);
+    }
+    const isExam = mapped.sessionMode === 'EXAM' || meta.sessionMode === 'EXAM';
+    const canRevealAnswers = !isExam || meta.answersPublished;
+    if (canRevealAnswers) {
+      return mapped;
+    }
+    const safeResults = Array.isArray(mapped.questionResults)
+      ? mapped.questionResults.map(qr => ({
+          ...qr,
+          isCorrect: null as any,
+          pointsEarned: null as any,
+          correctAnswer: null as any,
+          explanation: undefined,
+          sourceReference: undefined,
+        }))
+      : [];
+    return {
+      ...mapped,
+      sessionMode: 'EXAM',
+      questionResults: safeResults,
+    };
+  }
+
   public listPracticeSessions(options: {
     userId?: string | null;
+    isAdmin?: boolean;
     gameId?: string;
     onlyFinished?: boolean;
     includeOwnedGames?: boolean;
@@ -890,12 +945,18 @@ export class PersistenceRepository {
     const limit = Math.min(100, Math.max(1, options.limit ?? 30));
     const offset = Math.max(0, options.offset ?? 0);
 
+    if (!options.isAdmin && (!options.userId || options.userId === 'legacy_local') && !options.gameId) {
+      return [];
+    }
+
     const conditions: string[] = [];
     const params: any[] = [];
 
-    if (options.userId !== undefined) {
-      if (options.userId === null) {
-        conditions.push('owner_user_id IS NULL');
+    if (!options.isAdmin && options.userId !== undefined) {
+      if (options.userId === null || options.userId === 'legacy_local') {
+        if (!options.gameId) {
+          return [];
+        }
       } else if (options.includeOwnedGames !== false) {
         conditions.push(
           '(owner_user_id = ? OR game_id IN (SELECT game_id FROM games WHERE owner_user_id = ?))'
@@ -923,8 +984,10 @@ export class PersistenceRepository {
       )
       .all(...params, limit, offset) as Record<string, any>[];
 
+    const metaCache = new Map<string, ReturnType<typeof this.resolveGameSettingsMeta>>();
+
     return rows.map(r => {
-      const mapped = this.mapPracticeSessionRow(r);
+      const mapped = this.sanitizePracticeSessionRecord(this.mapPracticeSessionRow(r), metaCache);
       if (options.userId && mapped.ownerUserId && mapped.ownerUserId !== options.userId) {
         // Redact foreign player's userId when creator views plays on their owned game
         return {
@@ -1109,6 +1172,7 @@ export class PersistenceRepository {
 
   public listRoomHistory(options: {
     userId?: string | null;
+    isAdmin?: boolean;
     gameId?: string;
     includeOwnedGames?: boolean;
     limit?: number;
@@ -1118,12 +1182,18 @@ export class PersistenceRepository {
     const limit = Math.min(100, Math.max(1, options.limit ?? 30));
     const offset = Math.max(0, options.offset ?? 0);
 
+    if (!options.isAdmin && (!options.userId || options.userId === 'legacy_local') && !options.gameId) {
+      return [];
+    }
+
     const conditions: string[] = [];
     const params: any[] = [];
 
-    if (options.userId !== undefined) {
-      if (options.userId === null) {
-        conditions.push('owner_user_id IS NULL');
+    if (!options.isAdmin && options.userId !== undefined) {
+      if (options.userId === null || options.userId === 'legacy_local') {
+        if (!options.gameId) {
+          return [];
+        }
       } else if (options.includeOwnedGames !== false) {
         conditions.push(
           '(owner_user_id = ? OR game_id IN (SELECT game_id FROM games WHERE owner_user_id = ?))'
@@ -1214,15 +1284,89 @@ export class PersistenceRepository {
     }));
   }
 
-  public getAdminAiLogs(limit: number = 50): Record<string, any>[] {
+  public getAdminAiLogs(
+    optionsOrLimit:
+      | number
+      | {
+          limit?: number;
+          from?: string;
+          to?: string;
+          gameId?: string;
+          model?: string;
+          operation?: string;
+        } = 50
+  ): Record<string, any>[] {
     const db = getDatabase();
-    const rows = db.prepare(`
-      SELECT log_id, user_id, provider, model, operation, status, error_code, latency_ms,
-             total_tokens, generated_questions, created_at
-      FROM ai_usage_logs
-      ORDER BY created_at DESC
-      LIMIT ?
-    `).all(limit) as Record<string, any>[];
+    const opts =
+      typeof optionsOrLimit === 'number' ? { limit: optionsOrLimit } : optionsOrLimit || {};
+    const limit = Math.min(2000, Math.max(1, Number(opts.limit || 50)));
+
+    const conditions: string[] = [];
+    const params: any[] = [];
+
+    if (opts.from && opts.from.trim()) {
+      conditions.push('l.created_at >= ?');
+      params.push(opts.from.trim());
+    }
+    if (opts.to && opts.to.trim()) {
+      conditions.push('l.created_at <= ?');
+      params.push(opts.to.trim());
+    }
+    if (opts.gameId && opts.gameId.trim()) {
+      const q = `%${opts.gameId.trim().toLowerCase()}%`;
+      conditions.push('(LOWER(l.game_id) LIKE ? OR LOWER(COALESCE(g.title, \'\')) LIKE ?)');
+      params.push(q, q);
+    }
+    if (opts.model && opts.model.trim() && opts.model !== 'ALL') {
+      conditions.push('LOWER(l.model) LIKE ?');
+      params.push(`%${opts.model.trim().toLowerCase()}%`);
+    }
+    if (opts.operation && opts.operation.trim() && opts.operation !== 'ALL') {
+      const op = opts.operation.trim();
+      if (op === 'GENERATE_QUESTIONS') {
+        conditions.push("(l.operation = 'GENERATE_QUESTIONS' OR l.operation = 'generateGame')");
+      } else {
+        conditions.push('l.operation = ?');
+        params.push(op);
+      }
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const rows = db
+      .prepare(
+        `SELECT
+          l.log_id,
+          l.user_id,
+          l.game_id,
+          g.title AS game_title,
+          l.asset_slot,
+          l.provider,
+          l.model,
+          l.operation,
+          l.status,
+          l.error_code,
+          l.latency_ms,
+          l.input_tokens,
+          l.output_tokens,
+          l.total_tokens,
+          l.usage_is_estimated,
+          l.estimated_cost_usd,
+          l.requested_questions,
+          l.generated_questions,
+          l.valid_questions,
+          l.rejected_questions,
+          l.duplicate_questions,
+          l.game_type,
+          l.difficulty,
+          l.created_at
+        FROM ai_usage_logs l
+        LEFT JOIN games g ON g.game_id = l.game_id
+        ${whereClause}
+        ORDER BY l.created_at DESC
+        LIMIT ?`
+      )
+      .all(...params, limit) as Record<string, any>[];
     return rows;
   }
 
@@ -1459,46 +1603,123 @@ export class PersistenceRepository {
           updated_at = excluded.updated_at`
       );
 
-      // When replaceAll=true and items lack explicit participantId, match existing rows 1-to-1 in order
-      // by (normalized_name, department_unit, employee_code) without merging duplicate names.
-      const existingRows = replaceAll
-        ? (db
-            .prepare(
-              'SELECT participant_id, normalized_name, department_unit, employee_code FROM game_participants WHERE game_id = ? ORDER BY created_at ASC'
-            )
-            .all(gameId) as Array<{
-            participant_id: string;
-            normalized_name: string;
-            department_unit: string;
-            employee_code: string;
-          }>)
-        : [];
+      // Always load existing rows to match 1-to-1 by participantId, employeeCode, or (normalized_name, department_unit)
+      // without merging duplicate names and without losing identity when re-adding or replacing roster.
+      const existingRows = db
+        .prepare(
+          `SELECT gp.participant_id, gp.normalized_name, gp.department_unit, gp.employee_code,
+                  gp.used_attempts, gp.status,
+                  (SELECT COUNT(*) FROM game_participant_attempts gpa WHERE gpa.game_id = gp.game_id AND gpa.participant_id = gp.participant_id) AS attempt_count
+           FROM game_participants gp
+           WHERE gp.game_id = ?
+           ORDER BY gp.used_attempts DESC, attempt_count DESC, gp.created_at ASC`
+        )
+        .all(gameId) as Array<{
+        participant_id: string;
+        normalized_name: string;
+        department_unit: string;
+        employee_code: string;
+        used_attempts: number;
+        status: string;
+        attempt_count: number;
+      }>;
+
+      const orphanedAttempts = db
+        .prepare(
+          `SELECT attempt_id, display_name, department_unit, employee_code, state, score,
+                  correct_answers, total_questions, accuracy_percent, duration_ms, is_passed
+           FROM game_participant_attempts
+           WHERE game_id = ? AND participant_id IS NULL
+           ORDER BY attempt_number ASC, created_at ASC`
+        )
+        .all(gameId) as Array<{
+        attempt_id: string;
+        display_name: string;
+        department_unit: string;
+        employee_code: string;
+        state: string;
+        score: number;
+        correct_answers: number;
+        total_questions: number;
+        accuracy_percent: number;
+        duration_ms: number;
+        is_passed: number | null;
+      }>;
+      const usedOrphanAttemptIds = new Set<string>();
+
       const usedExistingPids = new Set<string>();
       const keptPids: string[] = [];
 
-      for (const raw of items) {
-        const cleanName = String(raw.fullName || '').trim().replace(/\s+/g, ' ').slice(0, 120);
-        if (!cleanName) continue;
+      // Pre-normalize incoming items so fallback name matching never steals an exact department/code match
+      const normalizedIncoming = items
+        .map(raw => {
+          const cleanName = String(raw.fullName || '')
+            .trim()
+            .replace(/\s+/g, ' ')
+            .slice(0, 120);
+          if (!cleanName) return null;
+          return {
+            raw,
+            cleanName,
+            normName: this.normalizeParticipantName(cleanName),
+            dept: String(raw.departmentUnit || '').trim().slice(0, 120),
+            empCode: String(raw.employeeCode || '').trim().slice(0, 80),
+            contact: String(raw.contactInfo || '').trim().slice(0, 160),
+            allowed: Math.max(1, Math.min(50, Math.floor(Number(raw.allowedAttempts) || 1))),
+          };
+        })
+        .filter((x): x is NonNullable<typeof x> => x !== null);
 
-        const normName = this.normalizeParticipantName(cleanName);
-        const dept = String(raw.departmentUnit || '').trim().slice(0, 120);
-        const empCode = String(raw.employeeCode || '').trim().slice(0, 80);
-        const contact = String(raw.contactInfo || '').trim().slice(0, 160);
-        const allowed = Math.max(1, Math.min(50, Math.floor(Number(raw.allowedAttempts) || 1)));
+      for (let idx = 0; idx < normalizedIncoming.length; idx++) {
+        const { raw, cleanName, normName, dept, empCode, contact, allowed } = normalizedIncoming[idx];
 
         let pid = raw.participantId && raw.participantId.trim() ? raw.participantId.trim() : '';
         if (pid && usedExistingPids.has(pid)) {
           // Never reuse the same participantId twice in the same batch (e.g. duplicate names)
           pid = '';
         }
-        if (!pid && replaceAll && existingRows.length > 0) {
-          const matched = existingRows.find(
-            r =>
-              !usedExistingPids.has(r.participant_id) &&
-              r.normalized_name === normName &&
-              String(r.department_unit || '') === dept &&
-              (empCode === '' || String(r.employee_code || '') === empCode)
-          );
+        if (!pid && existingRows.length > 0) {
+          // 1. Match by non-empty employeeCode first (unique employee identifier)
+          let matched =
+            empCode !== ''
+              ? existingRows.find(
+                  r =>
+                    !usedExistingPids.has(r.participant_id) &&
+                    String(r.employee_code || '').trim().toLowerCase() === empCode.toLowerCase()
+                )
+              : undefined;
+
+          // 2. Match by (normalized_name, department_unit) when employeeCode does not conflict
+          if (!matched) {
+            matched = existingRows.find(
+              r =>
+                !usedExistingPids.has(r.participant_id) &&
+                r.normalized_name === normName &&
+                String(r.department_unit || '').trim().toLowerCase() === dept.toLowerCase() &&
+                (empCode === '' ||
+                  !String(r.employee_code || '').trim() ||
+                  String(r.employee_code || '').trim().toLowerCase() === empCode.toLowerCase())
+            );
+          }
+
+          // 3. Fallback match by normalized_name if department was edited/omitted, no employeeCode conflict exists,
+          // and no other remaining item in this batch has the same normalized_name
+          if (!matched) {
+            const otherSameNameInBatch = normalizedIncoming.some(
+              (other, otherIdx) => otherIdx !== idx && other.normName === normName
+            );
+            if (!otherSameNameInBatch) {
+              matched = existingRows.find(
+                r =>
+                  !usedExistingPids.has(r.participant_id) &&
+                  r.normalized_name === normName &&
+                  (empCode === '' ||
+                    !String(r.employee_code || '').trim() ||
+                    String(r.employee_code || '').trim().toLowerCase() === empCode.toLowerCase())
+              );
+            }
+          }
+
           if (matched) {
             pid = matched.participant_id;
           }
@@ -1511,16 +1732,105 @@ export class PersistenceRepository {
         keptPids.push(pid);
 
         insertStmt.run(pid, gameId, cleanName, normName, dept, empCode, contact, allowed, nowIso, nowIso);
+
+        // If this participant was previously deleted and re-added, re-link their historical attempts and restore used_attempts
+        if (orphanedAttempts.length > 0) {
+          const matchingOrphans = orphanedAttempts.filter(oa => {
+            if (usedOrphanAttemptIds.has(oa.attempt_id)) return false;
+            const oaCode = String(oa.employee_code || '').trim().toLowerCase();
+            if (empCode !== '' && oaCode !== '') {
+              return oaCode === empCode.toLowerCase();
+            }
+            const oaNormName = this.normalizeParticipantName(oa.display_name);
+            if (oaNormName !== normName) return false;
+            const oaDept = String(oa.department_unit || '').trim().toLowerCase();
+            if (dept !== '' && oaDept !== '' && oaDept !== dept.toLowerCase()) {
+              return false;
+            }
+            return true;
+          });
+
+          if (matchingOrphans.length > 0) {
+            for (const oa of matchingOrphans) {
+              usedOrphanAttemptIds.add(oa.attempt_id);
+              db.prepare(
+                'UPDATE game_participant_attempts SET participant_id = ?, updated_at = ? WHERE attempt_id = ?'
+              ).run(pid, nowIso, oa.attempt_id);
+            }
+            db.prepare(
+              'UPDATE practice_sessions SET participant_id = ?, updated_at = ? WHERE game_id = ? AND participant_id IS NULL AND LOWER(player_name) = LOWER(?)'
+            ).run(pid, nowIso, gameId, cleanName);
+
+            const finishedOrphans = matchingOrphans.filter(oa => oa.state === 'FINISHED');
+            const usedCount = Math.max(matchingOrphans.length, finishedOrphans.length);
+            const latestOrphan =
+              finishedOrphans.length > 0
+                ? finishedOrphans[finishedOrphans.length - 1]
+                : matchingOrphans[matchingOrphans.length - 1];
+            const bestScore =
+              finishedOrphans.length > 0
+                ? Math.max(...finishedOrphans.map(oa => Number(oa.score || 0)))
+                : Number(latestOrphan.score || 0);
+
+            db.prepare(
+              `UPDATE game_participants
+               SET used_attempts = CASE WHEN used_attempts > ? THEN used_attempts ELSE ? END,
+                   status = CASE WHEN ? > 0 THEN 'COMPLETED' ELSE status END,
+                   best_score = COALESCE(best_score, ?),
+                   latest_score = COALESCE(latest_score, ?),
+                   latest_correct_answers = COALESCE(latest_correct_answers, ?),
+                   latest_total_questions = COALESCE(latest_total_questions, ?),
+                   latest_accuracy_percent = COALESCE(latest_accuracy_percent, ?),
+                   latest_duration_ms = COALESCE(latest_duration_ms, ?),
+                   latest_is_passed = COALESCE(latest_is_passed, ?),
+                   updated_at = ?
+               WHERE game_id = ? AND participant_id = ?`
+            ).run(
+              usedCount,
+              usedCount,
+              finishedOrphans.length,
+              bestScore,
+              Number(latestOrphan.score || 0),
+              Number(latestOrphan.correct_answers || 0),
+              Number(latestOrphan.total_questions || 0),
+              Number(latestOrphan.accuracy_percent || 0),
+              Number(latestOrphan.duration_ms || 0),
+              latestOrphan.is_passed,
+              nowIso,
+              gameId,
+              pid
+            );
+          }
+        }
       }
 
       if (replaceAll) {
+        // Protect any participant who has already started/submitted an attempt (used_attempts > 0, status != 'PENDING',
+        // active session/room, or linked records in game_participant_attempts / practice_sessions)
+        const protectedCondition = `
+          used_attempts = 0
+          AND status = 'PENDING'
+          AND active_session_id IS NULL
+          AND active_room_code IS NULL
+          AND participant_id NOT IN (
+            SELECT participant_id FROM game_participant_attempts WHERE game_id = ? AND participant_id IS NOT NULL
+          )
+          AND participant_id NOT IN (
+            SELECT participant_id FROM practice_sessions WHERE game_id = ? AND participant_id IS NOT NULL
+          )
+        `;
         if (keptPids.length === 0) {
-          db.prepare('DELETE FROM game_participants WHERE game_id = ?').run(gameId);
+          db.prepare(
+            `DELETE FROM game_participants WHERE game_id = ? AND ${protectedCondition}`
+          ).run(gameId, gameId, gameId);
         } else {
           const placeholders = keptPids.map(() => '?').join(', ');
           db.prepare(
-            `DELETE FROM game_participants WHERE game_id = ? AND participant_id NOT IN (${placeholders})`
-          ).run(gameId, ...keptPids);
+            `DELETE FROM game_participants
+             WHERE game_id = ?
+               AND participant_id NOT IN (${placeholders})
+               AND ${protectedCondition}`
+          ).run(gameId, ...keptPids, gameId, gameId);
         }
       }
 
@@ -1598,6 +1908,49 @@ export class PersistenceRepository {
 
   public deleteParticipant(gameId: string, participantId: string): boolean {
     const db = getDatabase();
+    const existing = db
+      .prepare('SELECT * FROM game_participants WHERE game_id = ? AND participant_id = ?')
+      .get(gameId, participantId) as Record<string, any> | undefined;
+    if (!existing) return false;
+
+    const activeLockedAt = existing.active_locked_at ? Date.parse(String(existing.active_locked_at)) : 0;
+    const isLockStale = activeLockedAt > 0 && Date.now() - activeLockedAt > 2 * 60 * 60 * 1000;
+    if (
+      (existing.status === 'IN_PROGRESS' || existing.active_session_id || existing.active_room_code) &&
+      !isLockStale
+    ) {
+      throw new AppError(
+        'PARTICIPANT_IN_PROGRESS',
+        `Không thể xóa thí sinh "${existing.full_name}" khi đang trong quá trình làm bài thi.`,
+        409
+      );
+    }
+
+    const attemptCountRow = db
+      .prepare(
+        'SELECT COUNT(*) as cnt FROM game_participant_attempts WHERE game_id = ? AND participant_id = ?'
+      )
+      .get(gameId, participantId) as { cnt: number } | undefined;
+    const practiceCountRow = db
+      .prepare(
+        'SELECT COUNT(*) as cnt FROM practice_sessions WHERE game_id = ? AND participant_id = ?'
+      )
+      .get(gameId, participantId) as { cnt: number } | undefined;
+
+    if (
+      Number(existing.used_attempts || 0) > 0 ||
+      existing.status === 'COMPLETED' ||
+      existing.status === 'AUTO_SUBMITTED' ||
+      Number(attemptCountRow?.cnt || 0) > 0 ||
+      Number(practiceCountRow?.cnt || 0) > 0
+    ) {
+      throw new AppError(
+        'PARTICIPANT_HAS_ATTEMPTS',
+        `Không thể xóa thí sinh "${existing.full_name}" vì đã có lượt làm bài hoặc kết quả thi. Vui lòng giữ lại bản ghi để bảo toàn lịch sử kỳ thi.`,
+        409
+      );
+    }
+
     const res = db
       .prepare('DELETE FROM game_participants WHERE game_id = ? AND participant_id = ?')
       .run(gameId, participantId);
@@ -1606,7 +1959,23 @@ export class PersistenceRepository {
 
   public clearParticipants(gameId: string): number {
     const db = getDatabase();
-    const res = db.prepare('DELETE FROM game_participants WHERE game_id = ?').run(gameId);
+    // Protect participants who are currently IN_PROGRESS or already have submitted attempts
+    const res = db
+      .prepare(
+        `DELETE FROM game_participants
+         WHERE game_id = ?
+           AND used_attempts = 0
+           AND status = 'PENDING'
+           AND active_session_id IS NULL
+           AND active_room_code IS NULL
+           AND participant_id NOT IN (
+             SELECT participant_id FROM game_participant_attempts WHERE game_id = ? AND participant_id IS NOT NULL
+           )
+           AND participant_id NOT IN (
+             SELECT participant_id FROM practice_sessions WHERE game_id = ? AND participant_id IS NOT NULL
+           )`
+      )
+      .run(gameId, gameId, gameId);
     return Number(res.changes || 0);
   }
 
@@ -2244,6 +2613,8 @@ export class PersistenceRepository {
     participantId?: string
   ): PersistedParticipantAttemptRecord[] {
     const db = getDatabase();
+    const meta = this.resolveGameSettingsMeta(gameId);
+    const canRevealAnswers = meta.sessionMode !== 'EXAM' || meta.answersPublished;
     const rows = (
       participantId
         ? db
@@ -2257,15 +2628,28 @@ export class PersistenceRepository {
             )
             .all(gameId)
     ) as Record<string, any>[];
-    return rows.map(r => this.mapParticipantAttemptRow(r));
+    return rows.map(r => this.mapParticipantAttemptRow(r, canRevealAnswers));
   }
 
-  private mapParticipantAttemptRow(row: Record<string, any>): PersistedParticipantAttemptRecord {
+  private mapParticipantAttemptRow(
+    row: Record<string, any>,
+    canRevealAnswers: boolean = true
+  ): PersistedParticipantAttemptRecord {
     let answers: any[] = [];
     try {
       answers = JSON.parse(String(row.answers_json || '[]'));
     } catch {
       answers = [];
+    }
+    const isExamRow = String(row.session_mode || 'PLAY') === 'EXAM';
+    if (isExamRow && !canRevealAnswers && Array.isArray(answers)) {
+      answers = answers.map(ans => ({
+        ...ans,
+        isCorrect: null,
+        pointsEarned: null,
+        correctAnswer: null,
+        explanation: null,
+      }));
     }
     return {
       attemptId: String(row.attempt_id),
@@ -2335,7 +2719,9 @@ export class PersistenceRepository {
       .prepare('SELECT * FROM game_participant_attempts WHERE game_id = ? ORDER BY attempt_number ASC, created_at ASC')
       .all(gameId) as Record<string, any>[];
 
-    const attempts = attemptRows.map(r => this.mapParticipantAttemptRow(r));
+    const attempts = attemptRows.map(r =>
+      this.mapParticipantAttemptRow(r, sessionMode !== 'EXAM' || Boolean(spec?.settings?.answersPublished))
+    );
     const attemptsByParticipantId = new Map<string, PersistedParticipantAttemptRecord[]>();
     const adhocAttemptsByKey = new Map<string, PersistedParticipantAttemptRecord[]>();
 
@@ -2345,7 +2731,7 @@ export class PersistenceRepository {
         list.push(att);
         attemptsByParticipantId.set(att.participantId, list);
       } else {
-        const key = `${att.displayName.trim().toLowerCase()}::${att.departmentUnit.trim().toLowerCase()}`;
+        const key = `${att.displayName.trim().toLowerCase()}::${att.departmentUnit.trim().toLowerCase()}::${att.employeeCode.trim().toLowerCase()}`;
         const list = adhocAttemptsByKey.get(key) || [];
         list.push(att);
         adhocAttemptsByKey.set(key, list);
@@ -2599,18 +2985,19 @@ export class PersistenceRepository {
     }
 
     const qRows = db
-      .prepare('SELECT question_id, position, question_text, correct_answer, explanation FROM game_questions WHERE game_id = ? ORDER BY position ASC')
+      .prepare('SELECT question_id, position, question_text, correct_answer, explanation, points FROM game_questions WHERE game_id = ? ORDER BY position ASC')
       .all(gameId) as Array<{
       question_id: string;
       position: number;
       question_text: string;
       correct_answer: string;
       explanation: string | null;
+      points: number | null;
     }>;
 
     const questionMap = new Map<
       string,
-      { index: number; question: string; correctAnswer: string; explanation?: string }
+      { index: number; question: string; correctAnswer: string; explanation?: string; points?: number }
     >();
     qRows.forEach((q, idx) => {
       questionMap.set(String(q.question_id), {
@@ -2618,6 +3005,7 @@ export class PersistenceRepository {
         question: String(q.question_text || ''),
         correctAnswer: String(q.correct_answer || ''),
         ...(q.explanation ? { explanation: String(q.explanation) } : {}),
+        ...(typeof q.points === 'number' && q.points >= 10 ? { points: Math.round(q.points) } : {}),
       });
     });
 
@@ -2634,8 +3022,20 @@ export class PersistenceRepository {
         ? Math.max(0, Math.min(100, settings.passThresholdPercent))
         : 50;
     const scoringMode = settings.scoringMode || 'STANDARD';
-    const perQuestionMax = scoringMode === 'SPEED_BONUS' ? 150 : 100;
     const totalQuestions = qRows.length || Number(settings.questionCount || 0);
+    const basePointsList =
+      qRows.length > 0
+        ? qRows.map(q =>
+            typeof q.points === 'number' && Number.isFinite(q.points) && q.points >= 10
+              ? Math.round(q.points)
+              : 100
+          )
+        : Array.from({ length: totalQuestions }, () => 100);
+    const computedMaxPossibleScore = basePointsList.reduce((sum, bp, idx) => {
+      if (scoringMode === 'SPEED_BONUS') return sum + bp + 50;
+      if (scoringMode === 'STREAK') return sum + bp + Math.min(idx * 20, 100);
+      return sum + bp;
+    }, 0);
 
     return {
       ownerUserId: row?.owner_user_id ? String(row.owner_user_id) : null,
@@ -2643,7 +3043,7 @@ export class PersistenceRepository {
       officialAttemptPolicy,
       passThresholdPercent,
       answersPublished: Boolean(settings.answersPublished),
-      maxPossibleScore: totalQuestions * perQuestionMax,
+      maxPossibleScore: computedMaxPossibleScore,
       totalQuestions,
       questionMap,
     };
@@ -2676,7 +3076,7 @@ export class PersistenceRepository {
     const soloParams: any[] = [];
 
     if (!options.isAdmin) {
-      if (options.userId) {
+      if (options.userId && options.userId !== 'legacy_local') {
         roomConditions.push(
           '(rh.owner_user_id = ? OR rh.game_id IN (SELECT game_id FROM games WHERE owner_user_id = ?))'
         );
@@ -2686,12 +3086,22 @@ export class PersistenceRepository {
         );
         soloParams.push(options.userId, options.userId);
       } else {
-        roomConditions.push(
-          '(rh.owner_user_id IS NULL AND rh.game_id NOT IN (SELECT game_id FROM games WHERE owner_user_id IS NOT NULL))'
-        );
-        soloConditions.push(
-          '(ps.owner_user_id IS NULL AND ps.game_id NOT IN (SELECT game_id FROM games WHERE owner_user_id IS NOT NULL))'
-        );
+        return {
+          items: [],
+          total: 0,
+          page,
+          limit,
+          offset,
+          hasMore: false,
+          summary: {
+            totalRuns: 0,
+            playRuns: 0,
+            examRuns: 0,
+            soloRuns: 0,
+            multiplayerRuns: 0,
+            totalParticipants: 0,
+          },
+        };
       }
     }
 
@@ -3340,7 +3750,7 @@ export class PersistenceRepository {
       finishedAt: mapped.finishedAt || mapped.updatedAt,
     };
 
-    // Build questionBreakdown safely: never expose unrevealed EXAM correctAnswer/explanation
+    // Build questionBreakdown safely: never expose unrevealed EXAM correctAnswer/explanation/isCorrect/pointsEarned
     const canRevealAnswers = sessionMode === 'PLAY' || meta.answersPublished;
     const rawResults = Array.isArray(mapped.questionResults) ? mapped.questionResults : [];
     const questionBreakdown: PlayExamHistoryQuestionRow[] = rawResults.map((qr, idx) => {
@@ -3350,8 +3760,8 @@ export class PersistenceRepository {
         questionId: String(qr.questionId || `q_${idx + 1}`),
         questionText: qMeta?.question || `Câu hỏi ${idx + 1}`,
         playerAnswer: String(qr.answer ?? ''),
-        isCorrect: Boolean(qr.isCorrect),
-        pointsEarned: Number(qr.pointsEarned || 0),
+        isCorrect: canRevealAnswers ? Boolean(qr.isCorrect) : null,
+        pointsEarned: canRevealAnswers ? Number(qr.pointsEarned || 0) : null,
         responseTimeMs: Number(qr.responseTimeMs || 0),
         timedOut: Boolean((qr as any).timedOut),
         correctAnswer: canRevealAnswers
@@ -3456,8 +3866,8 @@ export interface PlayExamHistoryQuestionRow {
   questionId: string;
   questionText: string;
   playerAnswer: string;
-  isCorrect: boolean;
-  pointsEarned: number;
+  isCorrect: boolean | null;
+  pointsEarned: number | null;
   responseTimeMs: number;
   timedOut: boolean;
   correctAnswer: string | null;

@@ -105,8 +105,9 @@ function sanitizeGameResultForClient(
       sessionMode: examState.sessionMode,
       examStatus: examState.examStatus || 'OPEN',
       answersPublished: examState.answersPublished,
+      canRevealAnswers: true,
       evaluation,
-    };
+    } as any;
   }
 
   return {
@@ -114,12 +115,13 @@ function sanitizeGameResultForClient(
     sessionMode: examState.sessionMode,
     examStatus: examState.examStatus || 'OPEN',
     answersPublished: examState.answersPublished,
+    canRevealAnswers: false,
     evaluation,
     questionResults: (result.questionResults || []).map(qr => ({
       questionId: qr.questionId,
       answer: qr.answer,
-      isCorrect: qr.isCorrect,
-      pointsEarned: qr.pointsEarned,
+      isCorrect: null as any,
+      pointsEarned: null as any,
       responseTimeMs: qr.responseTimeMs,
       answeredAt: qr.answeredAt,
       timedOut: qr.timedOut,
@@ -127,7 +129,124 @@ function sanitizeGameResultForClient(
       explanation: undefined,
       sourceReference: undefined,
     })),
-  };
+  } as any;
+}
+
+function assertSessionAccess(
+  req: Request,
+  target: {
+    sessionId: string;
+    gameId: string;
+    ownerUserId: string | null;
+    lockToken?: string | null;
+    participantId?: string | null;
+  },
+  mode: 'read' | 'write'
+): void {
+  if ((req as any).hasPlayerTokenHeader) {
+    throw new AppError(
+      'ACCESS_DENIED',
+      'Mã người chơi phòng nhóm không có quyền truy cập phiên cá nhân.',
+      403
+    );
+  }
+
+  const storedSpec = gameStore.get(target.gameId);
+  const ownerInfo = persistenceRepo.getGameOwnerInfo(target.gameId);
+  const gameOwnerUserId = storedSpec?.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+  const isExamMode = storedSpec?.settings?.sessionMode === 'EXAM';
+
+  const isAdmin = req.user?.role === 'ADMIN';
+  const isGameOwner = Boolean(
+    !req.isGuest &&
+      gameOwnerUserId &&
+      gameOwnerUserId !== 'legacy_local' &&
+      req.user?.userId === gameOwnerUserId
+  );
+
+  const providedLockToken =
+    (typeof req.headers['x-participant-token'] === 'string'
+      ? req.headers['x-participant-token'].trim()
+      : '') ||
+    (typeof req.query?.lockToken === 'string' ? req.query.lockToken.trim() : '') ||
+    (typeof req.body?.lockToken === 'string' ? req.body.lockToken.trim() : '');
+
+  if (providedLockToken && !(mode === 'read' && (isAdmin || isGameOwner))) {
+    if (target.lockToken) {
+      if (providedLockToken !== target.lockToken) {
+        throw new AppError(
+          'ACCESS_DENIED',
+          'Mã xác thực phiên làm bài (lockToken) không khớp với phiên này.',
+          403
+        );
+      }
+    } else {
+      const expectedHash = persistenceRepo.getAttemptTokenHashBySessionId(target.sessionId);
+      if (expectedHash) {
+        const providedHash = crypto.createHash('sha256').update(providedLockToken).digest('hex');
+        if (providedHash !== expectedHash) {
+          throw new AppError(
+            'ACCESS_DENIED',
+            'Mã xác thực phiên làm bài (lockToken) không khớp với phiên này.',
+            403
+          );
+        }
+      }
+    }
+  }
+
+  if (mode === 'read' && (isAdmin || isGameOwner)) {
+    return;
+  }
+
+  const expectedHash = !target.lockToken
+    ? persistenceRepo.getAttemptTokenHashBySessionId(target.sessionId)
+    : null;
+  const hasSessionLock = Boolean(target.lockToken || expectedHash);
+
+  if (hasSessionLock && isExamMode) {
+    const isMatchedSessionOwner = Boolean(
+      target.ownerUserId &&
+        target.ownerUserId !== 'legacy_local' &&
+        req.user?.userId === target.ownerUserId
+    );
+    if (!providedLockToken && !isMatchedSessionOwner && !isAdmin) {
+      throw new AppError(
+        'UNAUTHORIZED',
+        'Yêu cầu mã xác thực phiên làm bài (X-Participant-Token) để truy cập phiên thi này.',
+        401
+      );
+    }
+  }
+
+  if (target.ownerUserId === 'legacy_local') {
+    if (!isAdmin) {
+      throw new AppError(
+        'ACCESS_DENIED',
+        'Bạn không có quyền truy cập bản ghi phiên chưa định danh chủ sở hữu này.',
+        403
+      );
+    }
+    return;
+  }
+
+  if (!target.ownerUserId) {
+    if (req.user && !isAdmin && !providedLockToken) {
+      throw new AppError(
+        'ACCESS_DENIED',
+        'Bạn không có quyền truy cập phiên luyện tập của người chơi khác.',
+        403
+      );
+    }
+    return;
+  }
+
+  authService.assertResourceAccess({
+    resourceType: 'phiên luyện tập',
+    ownerUserId: target.ownerUserId,
+    currentUser: req.user,
+    mode,
+  });
 }
 
 /**
@@ -350,7 +469,7 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
     if (storedSpec || participantId || resolvedParticipantName) {
       try {
         const maxPossibleScore = calculateMaxPossibleScore(
-          session.specification.questions.length,
+          session.specification.questions,
           session.specification.settings.scoringMode
         );
         const attempt = persistenceRepo.recordParticipantAttemptStart({
@@ -383,6 +502,7 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
         displayName: session.displayName,
         departmentUnit: session.departmentUnit,
         lockToken: effectiveLockToken,
+        participantLockToken: effectiveLockToken,
         totalQuestions: session.specification.questions.length,
         isPreview: !resolvedIsPublic,
       })
@@ -400,12 +520,17 @@ sessionRouter.post('/:sessionId/start', (req: Request, res: Response, next: Next
   try {
     const sessionId = String(req.params.sessionId);
     const session = gameEngine.getSession(sessionId);
-    authService.assertResourceAccess({
-      resourceType: 'phiên luyện tập',
-      ownerUserId: session.ownerUserId,
-      currentUser: req.user,
-      mode: 'write',
-    });
+    assertSessionAccess(
+      req,
+      {
+        sessionId: session.sessionId,
+        gameId: session.specification.gameId,
+        ownerUserId: session.ownerUserId,
+        lockToken: session.lockToken,
+        participantId: session.participantId,
+      },
+      'write'
+    );
 
     // If session is already active (e.g. client refreshed browser during Solo Exam), return current state & question without resetting deadline!
     if (session.state === 'QUESTION_ACTIVE' || session.state === 'QUESTION_ANSWERED') {
@@ -435,12 +560,17 @@ sessionRouter.post('/:sessionId/checkpoint', (req: Request, res: Response, next:
   try {
     const sessionId = String(req.params.sessionId);
     const session = gameEngine.getSession(sessionId);
-    authService.assertResourceAccess({
-      resourceType: 'phiên luyện tập',
-      ownerUserId: session.ownerUserId,
-      currentUser: req.user,
-      mode: 'write',
-    });
+    assertSessionAccess(
+      req,
+      {
+        sessionId: session.sessionId,
+        gameId: session.specification.gameId,
+        ownerUserId: session.ownerUserId,
+        lockToken: session.lockToken,
+        participantId: session.participantId,
+      },
+      'write'
+    );
 
     const questionIndex =
       typeof req.body?.questionIndex === 'number' ? req.body.questionIndex : undefined;
@@ -459,12 +589,17 @@ sessionRouter.get('/:sessionId', (req: Request, res: Response, next: NextFunctio
   try {
     const sessionId = String(req.params.sessionId);
     const session = gameEngine.getSession(sessionId);
-    authService.assertResourceAccess({
-      resourceType: 'phiên luyện tập',
-      ownerUserId: session.ownerUserId,
-      currentUser: req.user,
-      mode: 'read',
-    });
+    assertSessionAccess(
+      req,
+      {
+        sessionId: session.sessionId,
+        gameId: session.specification.gameId,
+        ownerUserId: session.ownerUserId,
+        lockToken: session.lockToken,
+        participantId: session.participantId,
+      },
+      'read'
+    );
 
     const examState = resolveGameExamState(
       session.specification.gameId,
@@ -491,12 +626,17 @@ sessionRouter.get('/:sessionId/question', (req: Request, res: Response, next: Ne
   try {
     const sessionId = String(req.params.sessionId);
     const session = gameEngine.getSession(sessionId);
-    authService.assertResourceAccess({
-      resourceType: 'phiên luyện tập',
-      ownerUserId: session.ownerUserId,
-      currentUser: req.user,
-      mode: 'read',
-    });
+    assertSessionAccess(
+      req,
+      {
+        sessionId: session.sessionId,
+        gameId: session.specification.gameId,
+        ownerUserId: session.ownerUserId,
+        lockToken: session.lockToken,
+        participantId: session.participantId,
+      },
+      'read'
+    );
 
     const question = gameEngine.getCurrentQuestion(sessionId);
 
@@ -514,12 +654,17 @@ sessionRouter.post('/:sessionId/timeout', (req: Request, res: Response, next: Ne
   try {
     const sessionId = String(req.params.sessionId);
     const session = gameEngine.getSession(sessionId);
-    authService.assertResourceAccess({
-      resourceType: 'phiên luyện tập',
-      ownerUserId: session.ownerUserId,
-      currentUser: req.user,
-      mode: 'write',
-    });
+    assertSessionAccess(
+      req,
+      {
+        sessionId: session.sessionId,
+        gameId: session.specification.gameId,
+        ownerUserId: session.ownerUserId,
+        lockToken: session.lockToken,
+        participantId: session.participantId,
+      },
+      'write'
+    );
 
     const questionId =
       typeof req.body?.questionId === 'string' ? req.body.questionId.trim() : undefined;
@@ -565,12 +710,17 @@ sessionRouter.post('/:sessionId/answer', (req: Request, res: Response, next: Nex
   try {
     const sessionId = String(req.params.sessionId);
     const session = gameEngine.getSession(sessionId);
-    authService.assertResourceAccess({
-      resourceType: 'phiên luyện tập',
-      ownerUserId: session.ownerUserId,
-      currentUser: req.user,
-      mode: 'write',
-    });
+    assertSessionAccess(
+      req,
+      {
+        sessionId: session.sessionId,
+        gameId: session.specification.gameId,
+        ownerUserId: session.ownerUserId,
+        lockToken: session.lockToken,
+        participantId: session.participantId,
+      },
+      'write'
+    );
 
     const parseResult = SubmitAnswerRequestSchema.safeParse(req.body);
 
@@ -658,12 +808,17 @@ sessionRouter.post('/:sessionId/next', (req: Request, res: Response, next: NextF
   try {
     const sessionId = String(req.params.sessionId);
     const session = gameEngine.getSession(sessionId);
-    authService.assertResourceAccess({
-      resourceType: 'phiên luyện tập',
-      ownerUserId: session.ownerUserId,
-      currentUser: req.user,
-      mode: 'write',
-    });
+    assertSessionAccess(
+      req,
+      {
+        sessionId: session.sessionId,
+        gameId: session.specification.gameId,
+        ownerUserId: session.ownerUserId,
+        lockToken: session.lockToken,
+        participantId: session.participantId,
+      },
+      'write'
+    );
 
     const advanceResult = gameEngine.advance(sessionId);
     if (advanceResult.finished && advanceResult.result) {
@@ -700,9 +855,28 @@ function handleEndSession(req: Request, res: Response, next: NextFunction) {
 
     const currentUserId = req.user?.userId ?? null;
     const isAdmin = req.user?.role === 'ADMIN';
-    const isSessionOwner = Boolean(session.ownerUserId && currentUserId === session.ownerUserId);
+    const providedLockToken =
+      (typeof req.headers['x-participant-token'] === 'string'
+        ? req.headers['x-participant-token'].trim()
+        : '') ||
+      (typeof req.query?.lockToken === 'string' ? req.query.lockToken.trim() : '') ||
+      (typeof req.body?.lockToken === 'string' ? req.body.lockToken.trim() : '');
+    const isMatchedLockToken = Boolean(
+      session.lockToken && providedLockToken && providedLockToken === session.lockToken
+    );
+    const isSessionOwner =
+      isMatchedLockToken ||
+      Boolean(session.ownerUserId && currentUserId === session.ownerUserId);
     const isGameOwner = Boolean(gameOwnerUserId && currentUserId === gameOwnerUserId);
-    const isUnowned = !session.ownerUserId && !gameOwnerUserId;
+    const isUnowned = !session.ownerUserId && !gameOwnerUserId && !session.lockToken;
+
+    if (session.lockToken && providedLockToken && providedLockToken !== session.lockToken && !isAdmin && !isGameOwner) {
+      throw new AppError(
+        'ACCESS_DENIED',
+        'Mã xác thực phiên làm bài (lockToken) không khớp với phiên này.',
+        403
+      );
+    }
 
     if (!isAdmin && !isSessionOwner && !isGameOwner && !isUnowned) {
       throw new AppError(
@@ -736,12 +910,17 @@ sessionRouter.get('/:sessionId/result', (req: Request, res: Response, next: Next
     const sessionId = String(req.params.sessionId);
     try {
       const activeSession = gameEngine.getSession(sessionId);
-      authService.assertResourceAccess({
-        resourceType: 'kết quả phiên luyện tập',
-        ownerUserId: activeSession.ownerUserId,
-        currentUser: req.user,
-        mode: 'read',
-      });
+      assertSessionAccess(
+        req,
+        {
+          sessionId: activeSession.sessionId,
+          gameId: activeSession.specification.gameId,
+          ownerUserId: activeSession.ownerUserId,
+          lockToken: activeSession.lockToken,
+          participantId: activeSession.participantId,
+        },
+        'read'
+      );
       const rawResult = gameEngine.getResult(sessionId);
       const examState = resolveGameExamState(
         activeSession.specification.gameId,
@@ -762,12 +941,16 @@ sessionRouter.get('/:sessionId/result', (req: Request, res: Response, next: Next
     if (!persisted) {
       throw new AppError('SESSION_NOT_FOUND', `Game session "${sessionId}" was not found.`, 404);
     }
-    authService.assertResourceAccess({
-      resourceType: 'kết quả phiên luyện tập',
-      ownerUserId: persisted.ownerUserId,
-      currentUser: req.user,
-      mode: 'read',
-    });
+    assertSessionAccess(
+      req,
+      {
+        sessionId: persisted.sessionId,
+        gameId: persisted.gameId,
+        ownerUserId: persisted.ownerUserId,
+        participantId: persisted.participantId,
+      },
+      'read'
+    );
 
     if (persisted.state !== 'FINISHED') {
       throw new AppError('GAME_NOT_FINISHED', 'Game session is not finished yet.', 400);
@@ -788,11 +971,11 @@ sessionRouter.get('/:sessionId/result', (req: Request, res: Response, next: Next
       : (persisted.questionResults || []).map(qr => ({
           questionId: qr.questionId,
           answer: qr.answer,
-          isCorrect: qr.isCorrect,
-          pointsEarned: qr.pointsEarned,
+          isCorrect: null as any,
+          pointsEarned: null as any,
           responseTimeMs: qr.responseTimeMs,
           answeredAt: qr.answeredAt,
-          correctAnswer: '[Đáp án sẽ được công bố sau khi kết thúc kỳ thi]',
+          correctAnswer: undefined,
           explanation: undefined,
           sourceReference: undefined,
         }));
@@ -805,6 +988,7 @@ sessionRouter.get('/:sessionId/result', (req: Request, res: Response, next: Next
         gameType: persisted.gameType,
         sessionMode: examState.sessionMode,
         answersPublished: examState.answersPublished,
+        canRevealAnswers: examState.canRevealAnswers,
         state: 'FINISHED',
         totalScore: persisted.totalScore,
         score: persisted.totalScore,
@@ -843,12 +1027,17 @@ sessionRouter.get('/:sessionId/export', (req: Request, res: Response, next: Next
       // Check if session exists in active memory
       try {
         const activeSession = gameEngine.getSession(sessionId);
-        authService.assertResourceAccess({
-          resourceType: 'phiên luyện tập',
-          ownerUserId: activeSession.ownerUserId,
-          currentUser: req.user,
-          mode: 'read',
-        });
+        assertSessionAccess(
+          req,
+          {
+            sessionId: activeSession.sessionId,
+            gameId: activeSession.specification.gameId,
+            ownerUserId: activeSession.ownerUserId,
+            lockToken: activeSession.lockToken,
+            participantId: activeSession.participantId,
+          },
+          'read'
+        );
         if (activeSession.state !== 'FINISHED') {
           throw new AppError('SESSION_NOT_FINISHED', 'Cannot export session before it is finished.', 400);
         }
@@ -860,15 +1049,19 @@ sessionRouter.get('/:sessionId/export', (req: Request, res: Response, next: Next
       throw new AppError('SESSION_NOT_FOUND', `Completed practice session "${sessionId}" not found.`, 404);
     }
 
-    authService.assertResourceAccess({
-      resourceType: 'kết quả phiên luyện tập',
-      ownerUserId: persisted.ownerUserId,
-      currentUser: req.user,
-      mode: 'read',
-    });
+    assertSessionAccess(
+      req,
+      {
+        sessionId: persisted.sessionId,
+        gameId: persisted.gameId,
+        ownerUserId: persisted.ownerUserId,
+        participantId: persisted.participantId,
+      },
+      'read'
+    );
 
     const examState = resolveGameExamState(persisted.gameId, undefined, req.user);
-    if (!examState.canRevealAnswers && !(examState as any).isOwnerOrAdmin) {
+    if (!examState.canRevealAnswers) {
       throw new AppError(
         'EXAM_ANSWERS_LOCKED',
         'Đáp án kỳ thi chưa được Ban Tổ Chức công bố nên chưa thể xuất chi tiết bài làm.',

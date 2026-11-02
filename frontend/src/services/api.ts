@@ -64,6 +64,34 @@ export const getStoredAuthToken = getSessionAuthToken;
 export const setStoredAuthToken = setSessionAuthToken;
 
 let inMemoryGuestToken: string | null = null;
+const inMemorySessionLockTokens = new Map<string, string>();
+
+export function setSessionLockToken(sessionId: string, lockToken?: string | null): void {
+  if (!sessionId || !lockToken || !lockToken.trim()) return;
+  const cleanToken = lockToken.trim();
+  inMemorySessionLockTokens.set(sessionId, cleanToken);
+  try {
+    sessionStorage.setItem(`solo_lock_token_${sessionId}`, cleanToken);
+  } catch {
+    // ignore storage errors
+  }
+}
+
+export function getSessionLockToken(sessionId?: string | null): string | null {
+  if (!sessionId) return null;
+  const mem = inMemorySessionLockTokens.get(sessionId);
+  if (mem) return mem;
+  try {
+    const stored = sessionStorage.getItem(`solo_lock_token_${sessionId}`);
+    if (stored && stored.trim()) {
+      inMemorySessionLockTokens.set(sessionId, stored.trim());
+      return stored.trim();
+    }
+  } catch {
+    // ignore storage errors
+  }
+  return null;
+}
 
 function generateCsprngGuestToken(): string {
   const bytes = new Uint8Array(16);
@@ -93,7 +121,7 @@ export function getOrCreateGuestToken(): string {
 
 export function buildAuthHeaders(
   extraHeaders?: Record<string, string>,
-  options?: { isGuestPlayer?: boolean }
+  options?: { isGuestPlayer?: boolean; sessionId?: string | null }
 ): Record<string, string> {
   const headers: Record<string, string> = { ...(extraHeaders || {}) };
   const token = getSessionAuthToken();
@@ -101,6 +129,12 @@ export function buildAuthHeaders(
     headers.Authorization = `Bearer ${token}`;
   } else if (options?.isGuestPlayer) {
     headers['X-Guest-Token'] = getOrCreateGuestToken();
+  }
+  if (options?.sessionId && !headers['X-Participant-Token'] && !headers['x-participant-token']) {
+    const lockToken = getSessionLockToken(options.sessionId);
+    if (lockToken) {
+      headers['X-Participant-Token'] = lockToken;
+    }
   }
   return headers;
 }
@@ -150,6 +184,24 @@ export async function fetchCurrentUser(): Promise<{
   user: AuthenticatedUser;
   quotas?: UserQuotaSummary;
 } | null> {
+  const token = getSessionAuthToken();
+  if (!token) {
+    return null;
+  }
+  try {
+    const res = await fetch(`${API_BASE_URL}/auth/me`, {
+      headers: buildAuthHeaders(),
+    });
+    if (!res.ok) {
+      return null;
+    }
+    const data = await res.json();
+    if (data.success && data.data?.user) {
+      return data.data;
+    }
+  } catch {
+    // ignore network error
+  }
   return null;
 }
 
@@ -421,7 +473,7 @@ export async function fetchGameActiveStatus(gameId: string): Promise<GameActiveS
 export async function endPracticeSession(sessionId: string): Promise<{ ended: boolean; session: any }> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${encodeURIComponent(sessionId)}/end`, {
     method: 'POST',
-    headers: buildAuthHeaders(),
+    headers: buildAuthHeaders(undefined, { isGuestPlayer: true, sessionId }),
   });
   const data = await res.json();
   if (!data.success) {
@@ -1241,9 +1293,13 @@ export async function createPracticeSession(params: {
     ...params,
     displayName: params.displayName || params.playerName,
   };
+  const extraHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (params.lockToken && params.lockToken.trim()) {
+    extraHeaders['X-Participant-Token'] = params.lockToken.trim();
+  }
   const res = await fetch(`${API_BASE_URL}/games/sessions`, {
     method: 'POST',
-    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { isGuestPlayer: true }),
+    headers: buildAuthHeaders(extraHeaders, { isGuestPlayer: true }),
     body: JSON.stringify(payload),
   });
   const data = await res.json();
@@ -1251,6 +1307,9 @@ export async function createPracticeSession(params: {
     const err = new Error(data.error?.message || 'Không thể khởi tạo phiên luyện tập cá nhân.');
     (err as any).code = data.error?.code;
     throw err;
+  }
+  if (data.data?.sessionId && (data.data?.lockToken || params.lockToken)) {
+    setSessionLockToken(data.data.sessionId, data.data.lockToken || params.lockToken);
   }
   return data.data;
 }
@@ -1263,7 +1322,7 @@ export async function activatePracticeCheckpoint(sessionId: string): Promise<{
     `${API_BASE_URL}/games/sessions/${encodeURIComponent(sessionId)}/checkpoint`,
     {
       method: 'POST',
-      headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { isGuestPlayer: true }),
+      headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { isGuestPlayer: true, sessionId }),
     }
   );
   const data = await res.json();
@@ -1281,7 +1340,7 @@ export async function recordPracticeTimeout(
     `${API_BASE_URL}/games/sessions/${encodeURIComponent(sessionId)}/timeout`,
     {
       method: 'POST',
-      headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { isGuestPlayer: true }),
+      headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { isGuestPlayer: true, sessionId }),
       body: JSON.stringify(questionId ? { questionId } : {}),
     }
   );
@@ -1306,7 +1365,7 @@ export async function startPracticeSession(sessionId: string): Promise<{
 }> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${sessionId}/start`, {
     method: 'POST',
-    headers: buildAuthHeaders(undefined, { isGuestPlayer: true }),
+    headers: buildAuthHeaders(undefined, { isGuestPlayer: true, sessionId }),
   });
   const data = await res.json();
   if (!data.success) {
@@ -1321,7 +1380,7 @@ export async function submitPracticeAnswer(
 ): Promise<PracticeQuestionResult> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${sessionId}/answer`, {
     method: 'POST',
-    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { isGuestPlayer: true }),
+    headers: buildAuthHeaders({ 'Content-Type': 'application/json' }, { isGuestPlayer: true, sessionId }),
     body: JSON.stringify({
       ...params,
       clientTimestamp: Date.now(),
@@ -1344,7 +1403,7 @@ export async function advancePracticeSession(sessionId: string): Promise<{
 }> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${sessionId}/next`, {
     method: 'POST',
-    headers: buildAuthHeaders(undefined, { isGuestPlayer: true }),
+    headers: buildAuthHeaders(undefined, { isGuestPlayer: true, sessionId }),
   });
   const data = await res.json();
   if (!data.success) {
@@ -1368,7 +1427,7 @@ export async function fetchPracticeSessionSummary(sessionId: string): Promise<{
   currentStreak: number;
 }> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${encodeURIComponent(sessionId)}`, {
-    headers: buildAuthHeaders(undefined, { isGuestPlayer: true }),
+    headers: buildAuthHeaders(undefined, { isGuestPlayer: true, sessionId }),
   });
   const data = await res.json();
   if (!data.success) {
@@ -1379,7 +1438,7 @@ export async function fetchPracticeSessionSummary(sessionId: string): Promise<{
 
 export async function fetchPracticeSessionQuestion(sessionId: string): Promise<SanitizedQuestion> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${encodeURIComponent(sessionId)}/question`, {
-    headers: buildAuthHeaders(undefined, { isGuestPlayer: true }),
+    headers: buildAuthHeaders(undefined, { isGuestPlayer: true, sessionId }),
   });
   const data = await res.json();
   if (!data.success) {
@@ -1390,7 +1449,7 @@ export async function fetchPracticeSessionQuestion(sessionId: string): Promise<S
 
 export async function fetchPracticeResult(sessionId: string): Promise<PracticeFinalResult> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${sessionId}/result`, {
-    headers: buildAuthHeaders(undefined, { isGuestPlayer: true }),
+    headers: buildAuthHeaders(undefined, { isGuestPlayer: true, sessionId }),
   });
   const data = await res.json();
   if (!data.success) {
@@ -1590,8 +1649,28 @@ export async function fetchAdminRooms(): Promise<{
   return data.data;
 }
 
-export async function fetchAdminAiLogs(): Promise<AdminAiLogRecord[]> {
-  const res = await fetch(`${API_BASE_URL}/admin/ai-logs`, {
+export interface AdminAiLogFilters {
+  from?: string;
+  to?: string;
+  gameId?: string;
+  model?: string;
+  operation?: string;
+  limit?: number;
+}
+
+export async function fetchAdminAiLogs(
+  filters?: AdminAiLogFilters
+): Promise<AdminAiLogRecord[]> {
+  const query = new URLSearchParams();
+  if (filters?.from) query.set('from', filters.from);
+  if (filters?.to) query.set('to', filters.to);
+  if (filters?.gameId) query.set('gameId', filters.gameId);
+  if (filters?.model && filters.model !== 'ALL') query.set('model', filters.model);
+  if (filters?.operation && filters.operation !== 'ALL') query.set('operation', filters.operation);
+  if (filters?.limit) query.set('limit', String(filters.limit));
+  const qs = query.toString();
+
+  const res = await fetch(`${API_BASE_URL}/admin/ai-logs${qs ? `?${qs}` : ''}`, {
     headers: buildAuthHeaders(),
   });
   const data = await res.json();
@@ -1601,6 +1680,44 @@ export async function fetchAdminAiLogs(): Promise<AdminAiLogRecord[]> {
     throw err;
   }
   return data.data.logs || [];
+}
+
+export async function downloadAdminAiLogsExport(
+  format: 'csv' | 'xlsx',
+  filters?: AdminAiLogFilters
+): Promise<void> {
+  const query = new URLSearchParams();
+  query.set('format', format);
+  if (filters?.from) query.set('from', filters.from);
+  if (filters?.to) query.set('to', filters.to);
+  if (filters?.gameId) query.set('gameId', filters.gameId);
+  if (filters?.model && filters.model !== 'ALL') query.set('model', filters.model);
+  if (filters?.operation && filters.operation !== 'ALL') query.set('operation', filters.operation);
+
+  const res = await fetch(`${API_BASE_URL}/admin/ai-logs/export?${query.toString()}`, {
+    headers: buildAuthHeaders(),
+  });
+  if (!res.ok) {
+    let message = 'Không thể xuất nhật ký AI.';
+    try {
+      const errJson = await res.json();
+      message = errJson.error?.message || message;
+    } catch {
+      // ignore
+    }
+    throw new Error(message);
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  a.download = `ai_usage_logs_${dateStamp}.${format}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 // ==========================================
@@ -1664,8 +1781,8 @@ export interface PlayExamHistoryQuestionRow {
   questionId: string;
   questionText: string;
   playerAnswer: string;
-  isCorrect: boolean;
-  pointsEarned: number;
+  isCorrect: boolean | null;
+  pointsEarned: number | null;
   responseTimeMs: number;
   timedOut: boolean;
   correctAnswer: string | null;

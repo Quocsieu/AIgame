@@ -21,6 +21,7 @@ import {
   fetchPracticeSessionSummary,
   recordPracticeTimeout,
   saveEditedQuestions,
+  setSessionLockToken,
   startPracticeSession,
   submitPracticeAnswer,
 } from '../services/api.js';
@@ -263,10 +264,14 @@ function calculatePlaytestPoints(
   scoringMode: string | undefined,
   responseTimeMs: number,
   timeLimitMs: number,
-  newStreak: number
+  newStreak: number,
+  basePoints?: number
 ): number {
   if (!isCorrect) return 0;
-  const BASE_POINTS = 100;
+  const BASE_POINTS =
+    typeof basePoints === 'number' && Number.isFinite(basePoints) && basePoints >= 10
+      ? Math.round(basePoints)
+      : 100;
   const MAX_SPEED_BONUS = 50;
   const STREAK_STEP_BONUS = 20;
   const MAX_STREAK_BONUS = 100;
@@ -343,6 +348,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     correctAnswer: string;
     explanation: string;
     timeLimitSeconds: number;
+    points: number;
     crosswordClue?: string;
     crosswordAnswer?: string;
   }>({
@@ -351,6 +357,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     correctAnswer: '',
     explanation: '',
     timeLimitSeconds: 20,
+    points: 100,
   });
 
   useEffect(() => {
@@ -576,6 +583,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
     // Reload recovery: check if previous in-progress session exists BEFORE showing roster gate
     if (savedSessionId) {
+      if (confirmedIdentityRef.current?.lockToken) {
+        setSessionLockToken(savedSessionId, confirmedIdentityRef.current.lockToken);
+      }
       try {
         const summary = await fetchPracticeSessionSummary(savedSessionId);
         if (summary.state === 'FINISHED') {
@@ -699,9 +709,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           lockToken: ident?.lockToken,
         });
         activeSessionId = sessionRes.sessionId;
-        if (sessionRes.lockToken && ident) {
-          ident.lockToken = sessionRes.lockToken;
-          if (identityKey) sessionStorage.setItem(identityKey, JSON.stringify(ident));
+        if (sessionRes.lockToken) {
+          setSessionLockToken(activeSessionId, sessionRes.lockToken);
+          if (ident) {
+            ident.lockToken = sessionRes.lockToken;
+            if (identityKey) sessionStorage.setItem(identityKey, JSON.stringify(ident));
+          }
         }
       } else if (initialSpec?.gameId) {
         const sessionRes = await createPracticeSession({
@@ -713,6 +726,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           lockToken: ident?.lockToken,
         });
         activeSessionId = sessionRes.sessionId;
+        if (sessionRes.lockToken) {
+          setSessionLockToken(activeSessionId, sessionRes.lockToken);
+        }
       } else {
         throw new Error('Không tìm thấy thông tin bộ câu hỏi để bắt đầu chơi.');
       }
@@ -949,7 +965,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           spec.settings?.scoringMode,
           responseTimeMs,
           timeLimitMs,
-          nextStreak
+          nextStreak,
+          rawQ.points
         );
         const nextScore = playerScore + pointsEarned;
         const effectiveType = rawQ.type || spec.gameType;
@@ -1079,7 +1096,10 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         const nextIdx = playtestQuestionIndexRef.current + 1;
         if (!spec || nextIdx >= spec.questions.length) {
           const totalQ = spec?.questions.length || 1;
-          const maxScore = calculateFrontendMaxPossibleScore(totalQ, spec?.settings?.scoringMode);
+          const maxScore = calculateFrontendMaxPossibleScore(
+            spec?.questions || totalQ,
+            spec?.settings?.scoringMode
+          );
           const perfEval = evaluateFrontendPerformance({
             correctAnswers: playerCorrectCount,
             totalQuestions: totalQ,
@@ -1211,6 +1231,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       explanation: q.explanation || '',
       timeLimitSeconds:
         q.timeLimitSeconds || currentQuestion?.timePerQuestion || spec.settings?.timePerQuestion || 20,
+      points: typeof q.points === 'number' && q.points >= 10 ? q.points : 100,
       crosswordClue: q.crosswordClue,
       crosswordAnswer: q.crosswordAnswer,
     });
@@ -1257,6 +1278,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           correctAnswer: trimmedAns,
           explanation: editDraft.explanation.trim(),
           timeLimitSeconds: Math.max(5, Math.min(300, Number(editDraft.timeLimitSeconds) || 20)),
+          points: Math.max(10, Math.min(1000, Math.round(Number(editDraft.points) || 100))),
           crosswordClue: editDraft.crosswordClue ?? item.crosswordClue,
           crosswordAnswer:
             effectiveType === 'CROSSWORD'
@@ -1444,7 +1466,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               </div>
             )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '0.75rem' }}>
             <div>
               <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
                 Đáp án đúng:
@@ -1480,6 +1502,35 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                   setEditDraft((prev) => ({
                     ...prev,
                     timeLimitSeconds: Math.max(5, Math.min(300, Number(e.target.value) || 20)),
+                  }))
+                }
+                style={{
+                  width: '100%',
+                  padding: '0.6rem 0.85rem',
+                  borderRadius: '10px',
+                  border: '1.5px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.92rem',
+                  fontWeight: 800,
+                }}
+              />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
+                Điểm (10-1000):
+              </label>
+              <input
+                type="number"
+                min={10}
+                max={1000}
+                step={10}
+                data-testid="playtest-inline-points-input"
+                value={editDraft.points}
+                onChange={(e) =>
+                  setEditDraft((prev) => ({
+                    ...prev,
+                    points: Math.max(10, Math.min(1000, Math.round(Number(e.target.value) || 100))),
                   }))
                 }
                 style={{
@@ -1619,7 +1670,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   if (freeNameGateOpen && !playtestMode) {
     const handleStartFreeNameSolo = (e: React.FormEvent) => {
       e.preventDefault();
-      const cleanName = freeTextPlayerName.replace(/\s+/g, ' ').trim();
+      const formEl = e.currentTarget as HTMLFormElement | null;
+      const domNameVal =
+        formEl?.querySelector<HTMLInputElement>('[data-testid="solo-free-name-input"]')?.value || '';
+      const domDeptVal =
+        formEl?.querySelector<HTMLInputElement>('[data-testid="solo-free-dept-input"]')?.value || '';
+      const rawName = freeTextPlayerName || domNameVal;
+      const rawDept = freeTextDepartment || domDeptVal;
+      const cleanName = rawName.replace(/\s+/g, ' ').trim();
       if (!cleanName) {
         setFreeNameError('Vui lòng nhập tên của bạn (không được để trống hoặc chỉ chứa khoảng trắng).');
         toast.warning('Vui lòng nhập tên của bạn trước khi bắt đầu chơi.', 'Thiếu tên người chơi');
@@ -1634,12 +1692,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       const identityKey = targetGameId ? `solo_roster_identity_${targetGameId}` : null;
       const ident = {
         playerName: cleanName,
-        departmentUnit: freeTextDepartment.trim() || undefined,
+        departmentUnit: rawDept.trim() || undefined,
       };
       confirmedIdentityRef.current = ident;
       if (identityKey) sessionStorage.setItem(identityKey, JSON.stringify(ident));
       setFreeNameGateOpen(false);
-      initializeSession(true);
+      const isAdventure = (initialSpec?.gameType || loadedSpec?.gameType) === 'ADVENTURE';
+      initializeSession(!isAdventure);
     };
 
     return (
@@ -1813,7 +1872,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         confirmedIdentityRef.current = ident;
         if (identityKey) sessionStorage.setItem(identityKey, JSON.stringify(ident));
         setRosterGateOpen(false);
-        initializeSession(true);
+        const isAdventure = (initialSpec?.gameType || loadedSpec?.gameType) === 'ADVENTURE';
+        initializeSession(!isAdventure);
         return;
       }
 
@@ -1830,7 +1890,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       if (identityKey) sessionStorage.setItem(identityKey, JSON.stringify(ident));
       setConfirmingIdentity(false);
       setRosterGateOpen(false);
-      initializeSession(true);
+      const isAdventure = (initialSpec?.gameType || loadedSpec?.gameType) === 'ADVENTURE';
+      initializeSession(!isAdventure);
     };
 
     return (
@@ -2435,7 +2496,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     const maxScore =
       finalResult.maxPossibleScore ||
       calculateFrontendMaxPossibleScore(
-        finalResult.totalQuestions,
+        activeGameSpec?.questions || finalResult.totalQuestions,
         activeGameSpec?.settings?.scoringMode
       );
     const perfEval =

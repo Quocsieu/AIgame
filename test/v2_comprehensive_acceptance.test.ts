@@ -700,13 +700,16 @@ async function runAllAcceptanceTests(): Promise<void> {
     const activeClaim = claim1Res.status === 200 ? claim1Res.json.data : claim2Res.json.data;
     const examSessionId = activeClaim.sessionId as string;
     const examLockToken = activeClaim.lockToken as string;
+    const examTokenHeaders = { 'X-Participant-Token': examLockToken };
     assert.ok(examSessionId && examLockToken, 'Phải cấp sessionId và lockToken để khôi phục khi refresh');
 
     // 5.4. Bắt đầu câu hỏi số 1 & kiểm tra thời gian riêng của câu 1 (15 giây) + Refresh không reset deadline
     const startExamRes = await requestRaw(
       baseUrl,
       'POST',
-      `/api/games/sessions/${examSessionId}/start`
+      `/api/games/sessions/${examSessionId}/start`,
+      undefined,
+      examTokenHeaders
     );
     assert.equal(startExamRes.status, 200);
     assert.equal(
@@ -730,7 +733,9 @@ async function runAllAcceptanceTests(): Promise<void> {
     const currentQAfterRefresh = await requestRaw(
       baseUrl,
       'GET',
-      `/api/games/sessions/${examSessionId}/question`
+      `/api/games/sessions/${examSessionId}/question`,
+      undefined,
+      examTokenHeaders
     );
     assert.equal(
       currentQAfterRefresh.json.data.deadlineAt,
@@ -747,7 +752,8 @@ async function runAllAcceptanceTests(): Promise<void> {
       {
         questionId: 'q_exam_1',
         answer: 'A. Chỉ khi toàn bộ đợt thi kết thúc và BTC chủ động bấm công bố',
-      }
+      },
+      examTokenHeaders
     );
     assert.equal(ans1Res.status, 200);
     assert.equal(ans1Res.json.data.examAnswerRecorded, true);
@@ -768,22 +774,36 @@ async function runAllAcceptanceTests(): Promise<void> {
     );
 
     // Chuyển câu 2 và trả lời sai
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${examSessionId}/next`);
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${examSessionId}/answer`, {
-      questionId: 'q_exam_2',
-      answer: 'B. Trung bình cộng các lượt',
-    });
+    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${examSessionId}/next`, undefined, examTokenHeaders);
+    await requestRaw(
+      baseUrl,
+      'POST',
+      `/api/games/sessions/${examSessionId}/answer`,
+      {
+        questionId: 'q_exam_2',
+        answer: 'B. Trung bình cộng các lượt',
+      },
+      examTokenHeaders
+    );
 
     // Chuyển câu 3 và trả lời sai -> Kết thúc lượt 1 (1/3 câu đúng = 33%, 100/300 điểm -> Chưa đạt)
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${examSessionId}/next`);
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${examSessionId}/answer`, {
-      questionId: 'q_exam_3',
-      answer: 'B. Chỉ 5 người',
-    });
+    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${examSessionId}/next`, undefined, examTokenHeaders);
+    await requestRaw(
+      baseUrl,
+      'POST',
+      `/api/games/sessions/${examSessionId}/answer`,
+      {
+        questionId: 'q_exam_3',
+        answer: 'B. Chỉ 5 người',
+      },
+      examTokenHeaders
+    );
     const finishAttempt1Res = await requestRaw(
       baseUrl,
       'POST',
-      `/api/games/sessions/${examSessionId}/next`
+      `/api/games/sessions/${examSessionId}/next`,
+      undefined,
+      examTokenHeaders
     );
     assert.equal(finishAttempt1Res.status, 200);
     assert.equal(finishAttempt1Res.json.data.finished, true);
@@ -793,7 +813,9 @@ async function runAllAcceptanceTests(): Promise<void> {
     const resultAttempt1Res = await requestRaw(
       baseUrl,
       'GET',
-      `/api/games/sessions/${examSessionId}/result`
+      `/api/games/sessions/${examSessionId}/result`,
+      undefined,
+      examTokenHeaders
     );
     assert.equal(resultAttempt1Res.status, 200);
     const resultData1 = resultAttempt1Res.json.data;
@@ -855,24 +877,44 @@ async function runAllAcceptanceTests(): Promise<void> {
       }),
     ]);
     assert.deepEqual([retakeClaimA.status, retakeClaimB.status].sort(), [200, 409]);
-    const session2Id = (retakeClaimA.status === 200 ? retakeClaimA : retakeClaimB).json.data.sessionId;
+    const activeRetakeData = (retakeClaimA.status === 200 ? retakeClaimA : retakeClaimB).json.data;
+    const session2Id = activeRetakeData.sessionId;
+    const session2Headers = { 'X-Participant-Token': activeRetakeData.lockToken };
 
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${session2Id}/start`);
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${session2Id}/answer`, {
-      questionId: 'q_exam_1',
-      answer: 'A. Chỉ khi toàn bộ đợt thi kết thúc và BTC chủ động bấm công bố',
-    });
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${session2Id}/next`);
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${session2Id}/answer`, {
-      questionId: 'q_exam_2',
-      answer: 'A. LATEST_ATTEMPT (Lấy kết quả của lượt thi hợp lệ mới nhất)',
-    });
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${session2Id}/next`);
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${session2Id}/answer`, {
-      questionId: 'q_exam_3',
-      answer: 'A. 100 người chơi/thí sinh đồng thời',
-    });
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${session2Id}/next`);
+    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${session2Id}/start`, undefined, session2Headers);
+    await requestRaw(
+      baseUrl,
+      'POST',
+      `/api/games/sessions/${session2Id}/answer`,
+      {
+        questionId: 'q_exam_1',
+        answer: 'A. Chỉ khi toàn bộ đợt thi kết thúc và BTC chủ động bấm công bố',
+      },
+      session2Headers
+    );
+    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${session2Id}/next`, undefined, session2Headers);
+    await requestRaw(
+      baseUrl,
+      'POST',
+      `/api/games/sessions/${session2Id}/answer`,
+      {
+        questionId: 'q_exam_2',
+        answer: 'A. LATEST_ATTEMPT (Lấy kết quả của lượt thi hợp lệ mới nhất)',
+      },
+      session2Headers
+    );
+    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${session2Id}/next`, undefined, session2Headers);
+    await requestRaw(
+      baseUrl,
+      'POST',
+      `/api/games/sessions/${session2Id}/answer`,
+      {
+        questionId: 'q_exam_3',
+        answer: 'A. 100 người chơi/thí sinh đồng thời',
+      },
+      session2Headers
+    );
+    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${session2Id}/next`, undefined, session2Headers);
 
     // Cho candidateFormula thi 1 lượt (đạt 2/3 câu = 200 điểm, 67% -> Đạt) để kiểm tra xuất CSV/XLSX và Formula Injection
     const formulaSessionRes = await requestRaw(baseUrl, 'POST', '/api/games/sessions', {
@@ -881,22 +923,41 @@ async function runAllAcceptanceTests(): Promise<void> {
     });
     assert.equal(formulaSessionRes.status, 200);
     const formulaSessionId = formulaSessionRes.json.data.sessionId;
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${formulaSessionId}/start`);
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${formulaSessionId}/answer`, {
-      questionId: 'q_exam_1',
-      answer: 'A. Chỉ khi toàn bộ đợt thi kết thúc và BTC chủ động bấm công bố',
-    });
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${formulaSessionId}/next`);
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${formulaSessionId}/answer`, {
-      questionId: 'q_exam_2',
-      answer: 'A. LATEST_ATTEMPT (Lấy kết quả của lượt thi hợp lệ mới nhất)',
-    });
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${formulaSessionId}/next`);
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${formulaSessionId}/answer`, {
-      questionId: 'q_exam_3',
-      answer: 'B. Chỉ 5 người',
-    });
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${formulaSessionId}/next`);
+    const formulaHeaders = { 'X-Participant-Token': formulaSessionRes.json.data.lockToken };
+    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${formulaSessionId}/start`, undefined, formulaHeaders);
+    await requestRaw(
+      baseUrl,
+      'POST',
+      `/api/games/sessions/${formulaSessionId}/answer`,
+      {
+        questionId: 'q_exam_1',
+        answer: 'A. Chỉ khi toàn bộ đợt thi kết thúc và BTC chủ động bấm công bố',
+      },
+      formulaHeaders
+    );
+    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${formulaSessionId}/next`, undefined, formulaHeaders);
+    await requestRaw(
+      baseUrl,
+      'POST',
+      `/api/games/sessions/${formulaSessionId}/answer`,
+      {
+        questionId: 'q_exam_2',
+        answer: 'A. LATEST_ATTEMPT (Lấy kết quả của lượt thi hợp lệ mới nhất)',
+      },
+      formulaHeaders
+    );
+    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${formulaSessionId}/next`, undefined, formulaHeaders);
+    await requestRaw(
+      baseUrl,
+      'POST',
+      `/api/games/sessions/${formulaSessionId}/answer`,
+      {
+        questionId: 'q_exam_3',
+        answer: 'B. Chỉ 5 người',
+      },
+      formulaHeaders
+    );
+    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${formulaSessionId}/next`, undefined, formulaHeaders);
 
     // 5.8. Kiểm tra công bố đáp án (Answer Publication):
     // Nếu đang có phiên thi đang diễn ra (ví dụ candidate2 đang làm bài), BTC bấm công bố phải bị chặn 409 EXAM_STILL_ACTIVE
@@ -906,7 +967,8 @@ async function runAllAcceptanceTests(): Promise<void> {
     });
     assert.equal(activeCandidate2Res.status, 200);
     const activeSession2Id = activeCandidate2Res.json.data.sessionId;
-    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${activeSession2Id}/start`);
+    const activeSession2Headers = { 'X-Participant-Token': activeCandidate2Res.json.data.lockToken };
+    await requestRaw(baseUrl, 'POST', `/api/games/sessions/${activeSession2Id}/start`, undefined, activeSession2Headers);
 
     const prematurePublishRes = await requestRaw(
       baseUrl,
@@ -946,7 +1008,9 @@ async function runAllAcceptanceTests(): Promise<void> {
     const resultAfterPublish = await requestRaw(
       baseUrl,
       'GET',
-      `/api/games/sessions/${session2Id}/result`
+      `/api/games/sessions/${session2Id}/result`,
+      undefined,
+      session2Headers
     );
     assert.equal(resultAfterPublish.json.data.answersPublished, true);
     assert.ok(

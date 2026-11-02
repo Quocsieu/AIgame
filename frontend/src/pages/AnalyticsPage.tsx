@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { GameModeSelectionModal } from '../components/GameModeSelectionModal.js';
+import { SoloPlayer } from '../components/SoloPlayer.js';
 import { useToast } from '../components/ToastContext.js';
 import {
   AlertTriangleIcon,
@@ -883,6 +884,10 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const [isModeModalOpen, setIsModeModalOpen] = useState(false);
   const [modeModalSpec, setModeModalSpec] = useState<GameSpecification | null>(null);
 
+  // Chế độ Chơi thử (Playtest) cho game đã lưu trong Thư viện
+  const [isPlaytestOpen, setIsPlaytestOpen] = useState(false);
+  const [playtestSpec, setPlaytestSpec] = useState<GameSpecification | null>(null);
+
   // Modal Kết thúc phiên chơi đơn
   const [confirmEndSessionModal, setConfirmEndSessionModal] = useState<{
     game: PersistedGameSummary;
@@ -1132,11 +1137,34 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     }
     setIsDetailLoading(true);
     try {
-      const spec = await fetchGameById(gameId);
+      const spec = await fetchGameById(gameId, { mode: isLibraryMode ? 'manage' : 'public' });
       setModeModalSpec(spec);
       setIsModeModalOpen(true);
     } catch (err: any) {
       toast.error(err.message || 'Không thể mở bộ câu hỏi.', 'Lỗi tải game');
+    } finally {
+      setIsDetailLoading(false);
+    }
+  };
+
+  const handleStartSavedGamePlaytest = async (gameIdOrSpec: string | GameSpecification) => {
+    try {
+      if (typeof gameIdOrSpec !== 'string') {
+        setPlaytestSpec(gameIdOrSpec);
+        setIsPlaytestOpen(true);
+        return;
+      }
+      if (activeGameSpec && activeGameSpec.gameId === gameIdOrSpec) {
+        setPlaytestSpec(activeGameSpec);
+        setIsPlaytestOpen(true);
+        return;
+      }
+      setIsDetailLoading(true);
+      const spec = await fetchGameById(gameIdOrSpec, { mode: 'manage' });
+      setPlaytestSpec(spec);
+      setIsPlaytestOpen(true);
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể mở chế độ chơi thử.', 'Lỗi chơi thử');
     } finally {
       setIsDetailLoading(false);
     }
@@ -2176,6 +2204,29 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       <>
                         <button
                           type="button"
+                          data-testid="library-detail-playtest-btn"
+                          onClick={() => handleStartSavedGamePlaytest(activeGameSpec)}
+                          style={{
+                            backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                            color: 'var(--accent-sky)',
+                            border: '1px solid rgba(56, 189, 248, 0.45)',
+                            borderRadius: '8px',
+                            padding: '0 14px',
+                            height: '38px',
+                            fontWeight: 800,
+                            fontSize: '0.84rem',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                          title="Chơi thử bộ câu hỏi này (không tính lượt thi, không lưu lịch sử, giữ nguyên trạng thái xuất bản)"
+                        >
+                          <GamepadIcon size={14} />
+                          <span>Chơi thử</span>
+                        </button>
+                        <button
+                          type="button"
                           data-testid="library-detail-edit-game-btn"
                           onClick={() => {
                             syncEditorFromSpec(activeGameSpec);
@@ -2382,6 +2433,20 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         }}
                       >
                         {formatGameTypeName(q.type)}
+                      </span>
+                      <span
+                        data-testid={`library-question-points-badge-${idx}`}
+                        style={{
+                          fontSize: '0.74rem',
+                          fontWeight: 800,
+                          padding: '2px 8px',
+                          borderRadius: '6px',
+                          backgroundColor: 'rgba(16, 185, 129, 0.14)',
+                          color: 'var(--accent-emerald)',
+                          border: '1px solid rgba(16, 185, 129, 0.35)',
+                        }}
+                      >
+                        {q.points || 100} điểm · {q.timeLimitSeconds || activeGameSpec.settings?.timePerQuestion || 15}s
                       </span>
                     </div>
 
@@ -2797,6 +2862,87 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                               backgroundColor: 'var(--bg-surface)',
                               color: 'var(--text-primary)',
                               fontSize: '0.84rem',
+                              boxSizing: 'border-box',
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label
+                            style={{
+                              display: 'block',
+                              fontSize: '0.76rem',
+                              fontWeight: 600,
+                              color: 'var(--text-secondary)',
+                              marginBottom: '4px',
+                            }}
+                          >
+                            Thời gian câu này (giây, 5–300)
+                          </label>
+                          <input
+                            type="number"
+                            data-testid={`library-edit-question-time-${idx}`}
+                            min={5}
+                            max={300}
+                            placeholder={String(activeGameSpec.settings?.timePerQuestion || 15)}
+                            value={q.timeLimitSeconds ?? ''}
+                            onChange={(e) => {
+                              const rawVal = e.target.value.trim();
+                              const numVal = rawVal
+                                ? Math.min(300, Math.max(5, parseInt(rawVal, 10) || 15))
+                                : undefined;
+                              handleUpdateEditQuestion(idx, { timeLimitSeconds: numVal });
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: '8px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border-strong)',
+                              backgroundColor: 'var(--bg-surface)',
+                              color: 'var(--text-primary)',
+                              fontSize: '0.84rem',
+                              fontWeight: 700,
+                              boxSizing: 'border-box',
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <label
+                            style={{
+                              display: 'block',
+                              fontSize: '0.76rem',
+                              fontWeight: 600,
+                              color: 'var(--accent-emerald)',
+                              marginBottom: '4px',
+                            }}
+                          >
+                            Điểm câu hỏi (10–1000, mặc định 100)
+                          </label>
+                          <input
+                            type="number"
+                            data-testid={`library-edit-question-points-${idx}`}
+                            min={10}
+                            max={1000}
+                            step={10}
+                            placeholder="100"
+                            value={q.points ?? ''}
+                            onChange={(e) => {
+                              const rawVal = e.target.value.trim();
+                              const numVal = rawVal
+                                ? Math.min(1000, Math.max(10, parseInt(rawVal, 10) || 100))
+                                : undefined;
+                              handleUpdateEditQuestion(idx, { points: numVal });
+                            }}
+                            style={{
+                              width: '100%',
+                              padding: '8px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border-strong)',
+                              backgroundColor: 'var(--bg-surface)',
+                              color: 'var(--text-primary)',
+                              fontSize: '0.84rem',
+                              fontWeight: 700,
                               boxSizing: 'border-box',
                             }}
                           />
@@ -4415,56 +4561,88 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       )}
                     </div>
 
-                    {/* Chỉ giữ lại 2 nút: Mở game và Chi tiết */}
+                    {/* Hành động trên thẻ: Mở game, Chơi thử (Thư viện) và Chi tiết */}
                     <div
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: '1fr 1fr',
-                        gap: '8px',
+                        gridTemplateColumns:
+                          isLibraryMode && canManageGame(g) ? '1fr 1fr 1fr' : '1fr 1fr',
+                        gap: '6px',
                         paddingTop: '10px',
                         borderTop: '1px solid var(--border-subtle)',
                       }}
                     >
                       <button
                         type="button"
+                        data-testid={`library-card-open-btn-${g.gameId}`}
                         onClick={() => handleOpenModeModal(g.gameId)}
                         style={{
                           backgroundColor: 'var(--primary)',
                           color: 'var(--primary-ink, #08090e)',
                           border: '1px solid var(--primary)',
                           borderRadius: '6px',
-                          padding: '0 10px',
+                          padding: '0 8px',
                           height: '36px',
                           fontWeight: 800,
-                          fontSize: '0.8rem',
+                          fontSize: '0.78rem',
                           cursor: 'pointer',
                           display: 'inline-flex',
                           alignItems: 'center',
                           justifyContent: 'center',
-                          gap: '6px',
+                          gap: '5px',
+                          whiteSpace: 'nowrap',
                         }}
                       >
                         <GamepadIcon size={14} />
                         <span>Mở game</span>
                       </button>
 
+                      {isLibraryMode && canManageGame(g) && (
+                        <button
+                          type="button"
+                          data-testid={`library-card-playtest-btn-${g.gameId}`}
+                          onClick={() => handleStartSavedGamePlaytest(g.gameId)}
+                          style={{
+                            backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                            color: 'var(--accent-sky)',
+                            border: '1px solid rgba(56, 189, 248, 0.45)',
+                            borderRadius: '6px',
+                            padding: '0 8px',
+                            height: '36px',
+                            fontWeight: 800,
+                            fontSize: '0.78rem',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '5px',
+                            whiteSpace: 'nowrap',
+                          }}
+                          title="Chơi thử không tạo dữ liệu thật và không xuất bản nháp"
+                        >
+                          <span>Chơi thử</span>
+                        </button>
+                      )}
+
                       <button
                         type="button"
+                        data-testid={`library-card-detail-btn-${g.gameId}`}
                         onClick={() => handleViewOrEditGame(g.gameId, false)}
                         style={{
                           backgroundColor: 'var(--bg-input)',
                           color: 'var(--text-primary)',
                           border: '1px solid var(--border-strong)',
                           borderRadius: '6px',
-                          padding: '0 10px',
+                          padding: '0 8px',
                           height: '36px',
                           fontWeight: 700,
-                          fontSize: '0.8rem',
+                          fontSize: '0.78rem',
                           cursor: 'pointer',
                           display: 'inline-flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           gap: '5px',
+                          whiteSpace: 'nowrap',
                         }}
                       >
                         <span>Chi tiết</span>
@@ -4559,6 +4737,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                       <button
                         type="button"
+                        data-testid={`library-row-open-btn-${g.gameId}`}
                         onClick={() => handleOpenModeModal(g.gameId)}
                         style={{
                           backgroundColor: 'var(--primary)',
@@ -4578,8 +4757,30 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         <GamepadIcon size={14} />
                         <span>Mở game</span>
                       </button>
+                      {isLibraryMode && canManageGame(g) && (
+                        <button
+                          type="button"
+                          data-testid={`library-row-playtest-btn-${g.gameId}`}
+                          onClick={() => handleStartSavedGamePlaytest(g.gameId)}
+                          style={{
+                            backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                            color: 'var(--accent-sky)',
+                            border: '1px solid rgba(56, 189, 248, 0.45)',
+                            borderRadius: '6px',
+                            padding: '0 12px',
+                            height: '34px',
+                            fontWeight: 800,
+                            fontSize: '0.8rem',
+                            cursor: 'pointer',
+                          }}
+                          title="Chơi thử không tạo dữ liệu thật và không xuất bản nháp"
+                        >
+                          Chơi thử
+                        </button>
+                      )}
                       <button
                         type="button"
+                        data-testid={`library-row-detail-btn-${g.gameId}`}
                         onClick={() => handleViewOrEditGame(g.gameId, false)}
                         style={{
                           backgroundColor: 'var(--bg-input)',
@@ -5580,6 +5781,10 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
             handlePlaySavedGame(spec.gameId, true);
           }
         }}
+        onStartPlaytest={(spec) => {
+          setIsModeModalOpen(false);
+          handleStartSavedGamePlaytest(spec);
+        }}
         onCreateMultiplayerRoom={async (spec) => {
           try {
             const roomData = await createRoom({
@@ -5601,6 +5806,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           try {
             await publishGame(gameId);
             toast.success('Đã xuất bản game công khai thành công!', 'Xuất bản thành công');
+            if (activeGameSpec?.gameId === gameId) {
+              setActiveGameSpec({ ...activeGameSpec, isPublic: true });
+            }
             loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter, discoverTab);
             return true;
           } catch (err: any) {
@@ -5611,6 +5819,42 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         onNavigateToHost={onNavigateToHost}
         isOwner={canManageGame(modeModalSpec)}
       />
+
+      {/* CHẾ ĐỘ CHƠI THỬ (PLAYTEST OVERLAY TRONG THƯ VIỆN — 100% TÁCH BIỆT DỮ LIỆU THẬT) */}
+      {isPlaytestOpen && playtestSpec && (
+        <div
+          data-testid="library-playtest-overlay"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            backgroundColor: 'var(--bg-body, #0f172a)',
+            color: 'var(--text-primary)',
+            overflowY: 'auto',
+            overscrollBehavior: 'contain',
+            padding: '1rem',
+            boxSizing: 'border-box',
+          }}
+        >
+          <SoloPlayer
+            key={`library_playtest_${playtestSpec.gameId}`}
+            initialSpec={playtestSpec}
+            playtestMode={true}
+            onLeave={() => {
+              setIsPlaytestOpen(false);
+              setPlaytestSpec(null);
+            }}
+            onSpecUpdated={(updatedSpec) => {
+              setPlaytestSpec(updatedSpec);
+              if (activeGameSpec?.gameId === updatedSpec.gameId) {
+                setActiveGameSpec(updatedSpec);
+                syncEditorFromSpec(updatedSpec);
+              }
+              loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter, discoverTab);
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };

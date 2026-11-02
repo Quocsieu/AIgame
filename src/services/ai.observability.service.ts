@@ -16,6 +16,8 @@ export interface AiProviderUsageMetadata {
 
 export interface RecordAiCallInput {
   userId?: string | null;
+  gameId?: string | null;
+  assetSlot?: string | null;
   provider: string;
   model: string;
   operation: string;
@@ -78,6 +80,8 @@ export interface AiObservabilitySummary {
   }>;
   recentLogs: Array<{
     logId: string;
+    gameId: string | null;
+    assetSlot: string | null;
     provider: string;
     model: string;
     operation: string;
@@ -167,15 +171,17 @@ export class AiObservabilityService {
 
     db.prepare(
       `INSERT INTO ai_usage_logs (
-        log_id, user_id, provider, model, operation, status, error_code,
+        log_id, user_id, game_id, asset_slot, provider, model, operation, status, error_code,
         latency_ms, input_tokens, output_tokens, total_tokens, usage_is_estimated,
         estimated_cost_usd, requested_questions, generated_questions, valid_questions,
         rejected_questions, duplicate_questions, diagnostics_count, game_type,
         difficulty, source_count, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       logId,
       input.userId ?? null,
+      input.gameId ?? null,
+      input.assetSlot ?? null,
       input.provider,
       input.model,
       input.operation,
@@ -361,6 +367,8 @@ export class AiObservabilityService {
       })),
       recentLogs: recentRows.map(r => ({
         logId: String(r.log_id),
+        gameId: r.game_id ? String(r.game_id) : null,
+        assetSlot: r.asset_slot ? String(r.asset_slot) : null,
         provider: String(r.provider),
         model: String(r.model),
         operation: String(r.operation),

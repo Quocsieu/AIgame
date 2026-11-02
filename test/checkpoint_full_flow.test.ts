@@ -248,11 +248,15 @@ describe('COMPREHENSIVE AUDIT & ACCEPTANCE — AI Game Platform Full Flow & Auth
       .send({
         gameId: game.gameId,
         publicPlay: true,
+        playerName: 'Người chơi Kiểm thử',
       });
     assert.equal(sessionRes.status, 200);
     const sessionId = sessionRes.body.data.sessionId;
+    const lockToken = sessionRes.body.data.lockToken;
 
-    const startRes = await request(app).post(`/api/games/sessions/${sessionId}/start`);
+    const startRes = await request(app)
+      .post(`/api/games/sessions/${sessionId}/start`)
+      .set('X-Participant-Token', lockToken);
     assert.equal(startRes.status, 200);
     assert.ok(startRes.body.data.question.id);
     assert.equal(startRes.body.data.question.correctAnswer, undefined, 'Must not leak correct answer to player');
@@ -328,10 +332,16 @@ describe('COMPREHENSIVE AUDIT & ACCEPTANCE — AI Game Platform Full Flow & Auth
     assert.equal(adminEdit.status, 200);
     assert.equal(adminEdit.body.data.title, 'Admin Audited Game Title');
 
-    // In Kho Game, repository manager can proactively delete game
-    const warehouseDelete = await request(app)
+    // User B cannot delete User A game (403); User A can delete their own game (200)
+    const crossDelete = await request(app)
       .delete(`/api/games/${gameA.gameId}`)
       .set('Authorization', `Bearer ${userBToken}`);
+    assert.equal(crossDelete.status, 403);
+    assert.equal(crossDelete.body.error.code, 'ACCESS_DENIED');
+
+    const warehouseDelete = await request(app)
+      .delete(`/api/games/${gameA.gameId}`)
+      .set('Authorization', `Bearer ${userAToken}`);
     assert.equal(warehouseDelete.status, 200);
     assert.equal(warehouseDelete.body.data.deleted, true);
   });

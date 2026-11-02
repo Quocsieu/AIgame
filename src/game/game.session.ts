@@ -379,6 +379,7 @@ export class GameSession {
       responseTimeMs,
       timeLimitMs,
       currentStreak: this.currentStreak,
+      basePoints: currentQuestion.points,
     });
 
     this.score += scoreResult.pointsEarned;
@@ -680,7 +681,7 @@ export class GameSession {
     const totalQuestions = this.specification.questions.length;
     const accuracy = totalQuestions > 0 ? Math.round((this.correctCount / totalQuestions) * 100) : 0;
     const maxPossibleScore = calculateMaxPossibleScore(
-      totalQuestions,
+      this.specification.questions,
       this.specification.settings.scoringMode
     );
     const sessionMode = this.getSessionMode();

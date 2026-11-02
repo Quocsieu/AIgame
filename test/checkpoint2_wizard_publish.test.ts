@@ -189,7 +189,7 @@ describe('CHECKPOINT 2 — 5-Step Game Creation Wizard, Question Editing/Reorder
     // Public solo play session (publicPlay=true) must reject unpublished draft with 403 GAME_NOT_PUBLISHED
     const publicPlayDraft = await request(app)
       .post('/api/games/sessions')
-      .send({ gameId: game.gameId, publicPlay: true });
+      .send({ gameId: game.gameId, publicPlay: true, playerName: 'Người chơi Công khai' });
     assert.equal(publicPlayDraft.status, 403);
     assert.equal(publicPlayDraft.body.error.code, 'GAME_NOT_PUBLISHED');
 
@@ -275,7 +275,7 @@ describe('CHECKPOINT 2 — 5-Step Game Creation Wizard, Question Editing/Reorder
 
     const publicPlayAfter = await request(app)
       .post('/api/games/sessions')
-      .send({ gameId: game.gameId, publicPlay: true });
+      .send({ gameId: game.gameId, publicPlay: true, playerName: 'Người chơi Công khai' });
     assert.equal(publicPlayAfter.status, 200);
   });
 
@@ -332,11 +332,16 @@ describe('CHECKPOINT 2 — 5-Step Game Creation Wizard, Question Editing/Reorder
       .send({ title: 'Hacked by Anon', questions });
     assert.equal(anonPatch.status, 403);
 
-    // 5. In Kho Game, authorized organizer can delete game from warehouse
+    // 5. Other user cannot delete creator game (403); creator can delete (200)
     const otherDelete = await request(app)
       .delete(`/api/games/${publishedGame.gameId}`)
       .set('Authorization', `Bearer ${otherUserToken}`);
-    assert.equal(otherDelete.status, 200);
+    assert.equal(otherDelete.status, 403);
+
+    const ownerDelete = await request(app)
+      .delete(`/api/games/${publishedGame.gameId}`)
+      .set('Authorization', `Bearer ${creatorToken}`);
+    assert.equal(ownerDelete.status, 200);
   });
 });
 

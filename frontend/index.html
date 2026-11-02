@@ -554,6 +554,19 @@
           grid-template-columns: repeat(2, 1fr);
         }
       }
+
+      /* Mobile Touch Target Accessibility (WCAG 2.5.5 / AUD-011: >= 44x44px) */
+      @media (max-width: 768px), (pointer: coarse) {
+        button,
+        .k-btn,
+        [role="button"],
+        [role="tab"],
+        input[type="button"],
+        input[type="submit"] {
+          min-height: 44px !important;
+          min-width: 44px !important;
+        }
+      }
     </style>
   </head>
   <body>

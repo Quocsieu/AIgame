@@ -502,16 +502,28 @@ async function runAllTests() {
         });
       assert.equal(startRes.status, 200);
       const sessionId = startRes.body.data.sessionId as string;
+      const lockToken = startRes.body.data.lockToken as string;
 
-      await request(app).post(`/api/games/sessions/${sessionId}/start`).send({});
+      await request(app)
+        .post(`/api/games/sessions/${sessionId}/start`)
+        .set('X-Participant-Token', lockToken)
+        .send({});
       await request(app)
         .post(`/api/games/sessions/${sessionId}/answer`)
+        .set('X-Participant-Token', lockToken)
         .send({ questionId: `${soloPlayNoRosterId}_q1`, answer: 'HTTPS' });
-      await request(app).post(`/api/games/sessions/${sessionId}/next`).send({});
+      await request(app)
+        .post(`/api/games/sessions/${sessionId}/next`)
+        .set('X-Participant-Token', lockToken)
+        .send({});
       await request(app)
         .post(`/api/games/sessions/${sessionId}/answer`)
+        .set('X-Participant-Token', lockToken)
         .send({ questionId: `${soloPlayNoRosterId}_q2`, answer: run === 1 ? '443' : '80' });
-      const finRes = await request(app).post(`/api/games/sessions/${sessionId}/next`).send({});
+      const finRes = await request(app)
+        .post(`/api/games/sessions/${sessionId}/next`)
+        .set('X-Participant-Token', lockToken)
+        .send({});
       assert.equal(finRes.status, 200);
       assert.equal(finRes.body.data.finished, true);
     }
@@ -540,15 +552,27 @@ async function runAllTests() {
       });
     assert.equal(startPlayRosterRes.status, 200);
     const sessPlayRosterId = startPlayRosterRes.body.data.sessionId as string;
-    await request(app).post(`/api/games/sessions/${sessPlayRosterId}/start`).send({});
+    const playRosterToken = startPlayRosterRes.body.data.lockToken as string;
+    await request(app)
+      .post(`/api/games/sessions/${sessPlayRosterId}/start`)
+      .set('X-Participant-Token', playRosterToken)
+      .send({});
     await request(app)
       .post(`/api/games/sessions/${sessPlayRosterId}/answer`)
+      .set('X-Participant-Token', playRosterToken)
       .send({ questionId: `${soloPlayRosterId}_q1`, answer: 'HTTPS' });
-    await request(app).post(`/api/games/sessions/${sessPlayRosterId}/next`).send({});
+    await request(app)
+      .post(`/api/games/sessions/${sessPlayRosterId}/next`)
+      .set('X-Participant-Token', playRosterToken)
+      .send({});
     await request(app)
       .post(`/api/games/sessions/${sessPlayRosterId}/answer`)
+      .set('X-Participant-Token', playRosterToken)
       .send({ questionId: `${soloPlayRosterId}_q2`, answer: '443' });
-    const finPlayRoster = await request(app).post(`/api/games/sessions/${sessPlayRosterId}/next`).send({});
+    const finPlayRoster = await request(app)
+      .post(`/api/games/sessions/${sessPlayRosterId}/next`)
+      .set('X-Participant-Token', playRosterToken)
+      .send({});
     assert.equal(finPlayRoster.status, 200);
     assert.equal(finPlayRoster.body.data.finished, true);
     console.log('  ✓ [Integration 2] Chơi cá nhân có danh sách hoàn tất và lưu lịch sử');
@@ -579,15 +603,27 @@ async function runAllTests() {
       .send({ gameId: soloExamId, participantId: pHoa.participantId, playerName: pHoa.fullName });
     assert.equal(startHoa.status, 200);
     const sessHoaId = startHoa.body.data.sessionId as string;
-    await request(app).post(`/api/games/sessions/${sessHoaId}/start`).send({});
+    const hoaToken = startHoa.body.data.lockToken as string;
+    await request(app)
+      .post(`/api/games/sessions/${sessHoaId}/start`)
+      .set('X-Participant-Token', hoaToken)
+      .send({});
     await request(app)
       .post(`/api/games/sessions/${sessHoaId}/answer`)
+      .set('X-Participant-Token', hoaToken)
       .send({ questionId: `${soloExamId}_q1`, answer: 'HTTPS' });
-    await request(app).post(`/api/games/sessions/${sessHoaId}/next`).send({});
+    await request(app)
+      .post(`/api/games/sessions/${sessHoaId}/next`)
+      .set('X-Participant-Token', hoaToken)
+      .send({});
     await request(app)
       .post(`/api/games/sessions/${sessHoaId}/answer`)
+      .set('X-Participant-Token', hoaToken)
       .send({ questionId: `${soloExamId}_q2`, answer: '443' });
-    await request(app).post(`/api/games/sessions/${sessHoaId}/next`).send({});
+    await request(app)
+      .post(`/api/games/sessions/${sessHoaId}/next`)
+      .set('X-Participant-Token', hoaToken)
+      .send({});
 
     // Thí sinh Tuấn đang làm dở câu 1 thì BTC bấm "Kết thúc đợt thi"
     const startTuan = await request(app)
@@ -595,9 +631,14 @@ async function runAllTests() {
       .send({ gameId: soloExamId, participantId: pTuan.participantId, playerName: pTuan.fullName });
     assert.equal(startTuan.status, 200);
     const sessTuanId = startTuan.body.data.sessionId as string;
-    await request(app).post(`/api/games/sessions/${sessTuanId}/start`).send({});
+    const tuanToken = startTuan.body.data.lockToken as string;
+    await request(app)
+      .post(`/api/games/sessions/${sessTuanId}/start`)
+      .set('X-Participant-Token', tuanToken)
+      .send({});
     await request(app)
       .post(`/api/games/sessions/${sessTuanId}/answer`)
+      .set('X-Participant-Token', tuanToken)
       .send({ questionId: `${soloExamId}_q1`, answer: 'HTTPS' });
 
     const closeExamRes = await request(app)

@@ -900,7 +900,7 @@ export class AiQuestionService {
 
     const generationDiagnostics: string[] = [];
     const resolvedMixedDistribution: MixedQuestionDistribution | undefined =
-      gameType === 'MIXED'
+      (gameType as string) === 'MIXED'
         ? request.mixedDistribution || {
             MULTIPLE_CHOICE: 40,
             QUICK_BUTTON: 20,
@@ -909,7 +909,7 @@ export class AiQuestionService {
           }
         : request.mixedDistribution;
 
-    if (gameType === 'MIXED') {
+    if ((gameType as string) === 'MIXED') {
       const distParse = MixedQuestionDistributionSchema.safeParse(resolvedMixedDistribution);
       if (!distParse.success) {
         const issues = distParse.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join('; ');
@@ -951,10 +951,10 @@ export class AiQuestionService {
         : undefined;
 
     const enforceStrictPerTypeCounts =
-      gameType === 'MIXED' || (hasExplicitAdventureQuestionConfig && Boolean(resolvedAdventureDistribution));
+      (gameType as string) === 'MIXED' || (hasExplicitAdventureQuestionConfig && Boolean(resolvedAdventureDistribution));
 
     const targetTypeCounts: Record<BaseDistributionQuestionType, number> | null =
-      gameType === 'MIXED'
+      (gameType as string) === 'MIXED'
         ? calculateMixedTypeCounts(questionCount, resolvedMixedDistribution)
         : resolvedAdventureDistribution
           ? calculateMixedTypeCounts(questionCount, resolvedAdventureDistribution)
@@ -989,9 +989,10 @@ export class AiQuestionService {
       if (!context?.skipObservabilityLog) {
         aiObservabilityService.recordAiCall({
           userId: context?.userId ?? null,
+          gameId,
           provider: usageMeta?.provider || (this.provider instanceof GeminiModelProvider ? 'gemini' : 'custom'),
           model: usageMeta?.model || 'gemini-2.5-flash',
-          operation: 'generateGame',
+          operation: 'GENERATE_QUESTIONS',
           status: 'FAILED',
           errorCode: appErr.code,
           latencyMs,
@@ -1021,9 +1022,10 @@ export class AiQuestionService {
       if (!context?.skipObservabilityLog) {
         aiObservabilityService.recordAiCall({
           userId: context?.userId ?? null,
+          gameId,
           provider: usageMeta?.provider || (this.provider instanceof GeminiModelProvider ? 'gemini' : 'custom'),
           model: usageMeta?.model || 'gemini-2.5-flash',
-          operation: 'generateGame',
+          operation: 'GENERATE_QUESTIONS',
           status: 'FAILED',
           errorCode: 'AI_VALIDATION_ERROR',
           latencyMs,
@@ -1082,7 +1084,7 @@ export class AiQuestionService {
     const resolveConcreteQuestionTypeForBase = (
       baseType: BaseDistributionQuestionType
     ): QuestionType => {
-      if (gameType === 'MIXED') {
+      if ((gameType as string) === 'MIXED') {
         return baseType;
       }
       if (gameType === 'ADVENTURE') {
@@ -1138,7 +1140,7 @@ export class AiQuestionService {
 
         // Resolve concrete question type for this item without silently mutating incompatible types
         let itemQuestionType: QuestionType;
-        if (gameType === 'MIXED') {
+        if ((gameType as string) === 'MIXED') {
           const mappedRaw = rawType ? normalizeToBaseDistributionType(rawType) : null;
           if (mappedRaw) {
             itemQuestionType = mappedRaw;
@@ -1552,9 +1554,10 @@ export class AiQuestionService {
       if (!context?.skipObservabilityLog) {
         aiObservabilityService.recordAiCall({
           userId: context?.userId ?? null,
+          gameId,
           provider: usageMeta?.provider || (this.provider instanceof GeminiModelProvider ? 'gemini' : 'custom'),
           model: usageMeta?.model || 'gemini-2.5-flash',
-          operation: 'generateGame',
+          operation: 'GENERATE_QUESTIONS',
           status: 'FAILED',
           errorCode: rejectedReasons.length > 0 ? 'AI_QUESTION_VALIDATION_FAILED' : 'AI_VALIDATION_ERROR',
           latencyMs,
@@ -1588,9 +1591,10 @@ export class AiQuestionService {
     if (!context?.skipObservabilityLog) {
       aiObservabilityService.recordAiCall({
         userId: context?.userId ?? null,
+        gameId,
         provider: usageMeta?.provider || (this.provider instanceof GeminiModelProvider ? 'gemini' : 'custom'),
         model: usageMeta?.model || 'gemini-2.5-flash',
-        operation: 'generateGame',
+        operation: 'GENERATE_QUESTIONS',
         status: 'SUCCESS',
         latencyMs,
         inputTokens: usageMeta?.inputTokens ?? null,

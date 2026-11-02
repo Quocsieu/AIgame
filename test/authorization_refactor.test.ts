@@ -177,10 +177,16 @@ describe('REFACTOR UX & AUTHORIZATION — Comprehensive 22-Scenario Security & R
     assert.equal(playerDelRes.status, 403);
     assert.equal(playerDelRes.body.error.code, 'ACCESS_DENIED');
 
-    // Kho Game manager (guest/viewer) can delete game
-    const delRes = await request(app)
+    // Guest cannot delete Creator A game (403); Creator A can delete (200)
+    const guestDelRes = await request(app)
       .delete(`/api/games/${spec.gameId}`)
       .set('X-Guest-Token', guestToken);
+    assert.equal(guestDelRes.status, 403);
+    assert.equal(guestDelRes.body.error.code, 'ACCESS_DENIED');
+
+    const delRes = await request(app)
+      .delete(`/api/games/${spec.gameId}`)
+      .set('Authorization', `Bearer ${creatorTokenA}`);
     assert.equal(delRes.status, 200);
     assert.equal(delRes.body.data.deleted, true);
   });
@@ -215,10 +221,16 @@ describe('REFACTOR UX & AUTHORIZATION — Comprehensive 22-Scenario Security & R
     assert.equal(patchRes.status, 403);
     assert.equal(patchRes.body.error.code, 'ACCESS_DENIED');
 
-    // In Kho Game, organizer can proactively delete games
-    const delRes = await request(app)
+    // Creator A cannot delete Creator B game (403); Creator B can delete (200)
+    const crossDelRes = await request(app)
       .delete(`/api/games/${specB.gameId}`)
       .set('Authorization', `Bearer ${creatorTokenA}`);
+    assert.equal(crossDelRes.status, 403);
+    assert.equal(crossDelRes.body.error.code, 'ACCESS_DENIED');
+
+    const delRes = await request(app)
+      .delete(`/api/games/${specB.gameId}`)
+      .set('Authorization', `Bearer ${creatorTokenB}`);
     assert.equal(delRes.status, 200);
     assert.equal(delRes.body.data.deleted, true);
   });
@@ -528,16 +540,19 @@ describe('REFACTOR UX & AUTHORIZATION — Comprehensive 22-Scenario Security & R
 
     const sessRes = await request(app)
       .post('/api/games/sessions')
-      .send({ gameId: pubGame.gameId, publicPlay: true });
+      .send({ gameId: pubGame.gameId, publicPlay: true, playerName: 'Người chơi Kiểm thử' });
     assert.equal(sessRes.status, 200);
     const sessionId = sessRes.body.data.sessionId;
+    const lockToken = sessRes.body.data.lockToken;
 
     const startRes = await request(app)
-      .post(`/api/games/sessions/${sessionId}/start`);
+      .post(`/api/games/sessions/${sessionId}/start`)
+      .set('X-Participant-Token', lockToken);
     assert.equal(startRes.status, 200);
 
     const ansRes = await request(app)
       .post(`/api/games/sessions/${sessionId}/answer`)
+      .set('X-Participant-Token', lockToken)
       .send({
         questionId: `${pubGame.gameId}_q1`,
         answer: 'Hanoi',

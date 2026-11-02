@@ -467,7 +467,7 @@ export const HostPage: React.FC<HostPageProps> = ({
   ];
 
   return (
-    <div style={{ maxWidth: '1180px', margin: '0 auto', padding: '0.75rem 0.5rem 2rem 0.5rem' }}>
+    <div style={{ maxWidth: '1180px', width: '100%', boxSizing: 'border-box', margin: '0 auto', padding: '0.75rem 0.5rem 2rem 0.5rem' }}>
       {/* Reconnect & Connection Status Banners */}
       {connectionStatus === 'reconnecting' && (
         <div
@@ -526,7 +526,7 @@ export const HostPage: React.FC<HostPageProps> = ({
               display: 'inline-flex',
               alignItems: 'center',
               gap: '0.35rem',
-              minHeight: '36px',
+              minHeight: '44px',
             }}
           >
             <RefreshIcon size={14} /> Kết nối lại
@@ -541,9 +541,11 @@ export const HostPage: React.FC<HostPageProps> = ({
             backgroundColor: 'var(--bg-surface)',
             border: '2px solid var(--accent-sky)',
             borderRadius: '24px',
-            padding: '2rem 1.5rem',
+            padding: 'clamp(1rem, 3vw, 2rem) clamp(0.75rem, 2.5vw, 1.5rem)',
             textAlign: 'center',
             boxShadow: '0 20px 50px -10px rgba(56, 189, 248, 0.25)',
+            maxWidth: '100%',
+            boxSizing: 'border-box',
           }}
         >
           {/* Top Bar Điều Khiển Trình Chiếu */}
@@ -697,34 +699,38 @@ export const HostPage: React.FC<HostPageProps> = ({
           <h1
             style={{
               color: 'var(--accent-sky)',
-              fontSize: 'clamp(2rem, 4vw, 2.8rem)',
+              fontSize: 'clamp(1.45rem, 4.2vw, 2.8rem)',
               fontWeight: 900,
               margin: '0 0 1.5rem 0',
               letterSpacing: '-0.02em',
+              overflowWrap: 'anywhere',
+              wordBreak: 'break-word',
             }}
           >
             {gameTitle || 'Phòng Thi Đấu'}
           </h1>
 
           {/* Khu vực trung tâm: QR Trọng Tâm & Mã Phòng */}
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap', gap: '3rem', margin: '2rem 0' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', flexWrap: 'wrap', gap: 'clamp(1.25rem, 4vw, 3rem)', margin: 'clamp(1rem, 3vw, 2rem) 0', maxWidth: '100%' }}>
             {/* Cột Trọng Tâm: Mã QR Lớn để quét ngay */}
             {qrDataUrl && (
-              <div style={{ textAlign: 'center' }}>
+              <div style={{ textAlign: 'center', maxWidth: '100%' }}>
                 <div
                   style={{
                     display: 'inline-block',
-                    padding: '16px',
+                    padding: 'clamp(10px, 2.5vw, 16px)',
                     backgroundColor: '#ffffff',
                     borderRadius: '24px',
                     boxShadow: '0 20px 45px rgba(0, 0, 0, 0.4)',
                     border: '3px solid var(--accent-sky)',
+                    maxWidth: '100%',
+                    boxSizing: 'border-box',
                   }}
                 >
                   <img
                     src={qrDataUrl}
                     alt="Mã QR tham gia phòng"
-                    style={{ width: 'clamp(240px, 30vw, 310px)', height: 'clamp(240px, 30vw, 310px)', display: 'block' }}
+                    style={{ width: 'clamp(190px, 55vw, 310px)', height: 'clamp(190px, 55vw, 310px)', maxWidth: '100%', display: 'block' }}
                   />
                 </div>
                 <div style={{ color: 'var(--text-primary)', fontWeight: 800, fontSize: '1.05rem', marginTop: '1rem', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.4rem' }}>
@@ -735,21 +741,23 @@ export const HostPage: React.FC<HostPageProps> = ({
             )}
 
             {/* Cột Phụ: Mã phòng & Đường dẫn thứ cấp */}
-            <div style={{ minWidth: '280px', maxWidth: '420px', textAlign: 'center' }}>
+            <div style={{ flex: '1 1 250px', minWidth: 0, width: '100%', maxWidth: '420px', textAlign: 'center', boxSizing: 'border-box' }}>
               <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '3px', marginBottom: '0.5rem' }}>
                 MÃ PHÒNG THI ĐẤU
               </div>
               <div
                 style={{
-                  fontSize: 'clamp(3rem, 7vw, 4.8rem)',
+                  fontSize: 'clamp(1.85rem, 6.5vw, 4.8rem)',
                   fontWeight: 900,
-                  letterSpacing: '8px',
+                  letterSpacing: 'clamp(3px, 1.2vw, 8px)',
                   color: 'var(--accent-sky)',
                   backgroundColor: 'var(--bg-input)',
-                  padding: '0.65rem 1.8rem',
+                  padding: '0.55rem clamp(0.75rem, 3vw, 1.8rem)',
                   borderRadius: '20px',
                   border: '3px dashed var(--accent-sky)',
                   display: 'inline-block',
+                  maxWidth: '100%',
+                  boxSizing: 'border-box',
                   boxShadow: '0 10px 30px rgba(0, 0, 0, 0.3)',
                 }}
               >
@@ -760,10 +768,12 @@ export const HostPage: React.FC<HostPageProps> = ({
                 style={{
                   marginTop: '1.5rem',
                   backgroundColor: 'var(--bg-card)',
-                  padding: '1rem 1.25rem',
+                  padding: '1rem clamp(0.75rem, 2.5vw, 1.25rem)',
                   borderRadius: '16px',
                   border: '1px solid var(--border-subtle)',
                   textAlign: 'left',
+                  maxWidth: '100%',
+                  boxSizing: 'border-box',
                 }}
               >
                 <div
@@ -772,6 +782,8 @@ export const HostPage: React.FC<HostPageProps> = ({
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     marginBottom: '0.45rem',
+                    flexWrap: 'wrap',
+                    gap: '0.4rem',
                   }}
                 >
                   <span
@@ -792,9 +804,11 @@ export const HostPage: React.FC<HostPageProps> = ({
                       backgroundColor: 'transparent',
                       color: 'var(--text-secondary)',
                       border: '1px solid var(--border-strong)',
-                      borderRadius: '6px',
-                      padding: '0.2rem 0.55rem',
-                      fontSize: '0.76rem',
+                      borderRadius: '8px',
+                      padding: '0.4rem 0.75rem',
+                      minHeight: '44px',
+                      minWidth: '44px',
+                      fontSize: '0.78rem',
                       fontWeight: 700,
                       cursor: 'pointer',
                       display: 'inline-flex',
@@ -867,6 +881,7 @@ export const HostPage: React.FC<HostPageProps> = ({
                     border: 'none',
                     borderRadius: '8px',
                     padding: '0.65rem 1rem',
+                    minHeight: '44px',
                     fontWeight: 800,
                     fontSize: '0.88rem',
                     cursor: 'pointer',
@@ -956,12 +971,14 @@ export const HostPage: React.FC<HostPageProps> = ({
             backgroundColor: 'var(--bg-surface)',
             border: '1px solid var(--border-subtle)',
             borderRadius: '20px',
-            padding: '2.5rem',
+            padding: 'clamp(1rem, 3.5vw, 2.5rem)',
             boxShadow: 'var(--card-shadow)',
+            maxWidth: '100%',
+            boxSizing: 'border-box',
           }}
         >
           {/* Top question bar */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border-subtle)' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.75rem', marginBottom: '1.5rem', paddingBottom: '1rem', borderBottom: '1px solid var(--border-subtle)' }}>
             <span
               style={{
                 color: 'var(--accent-sky)',
@@ -1010,7 +1027,7 @@ export const HostPage: React.FC<HostPageProps> = ({
           <div
             style={{
               display: 'grid',
-              gridTemplateColumns: 'repeat(2, 1fr)',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
               gap: '1rem',
             }}
           >
@@ -1519,12 +1536,14 @@ export const HostPage: React.FC<HostPageProps> = ({
                             data-testid={`host-grant-retake-btn-${entry.participantId}`}
                             onClick={() => handleHostGrantRetake(entry.participantId, entry.displayName)}
                             style={{
-                              padding: '0.25rem 0.55rem',
-                              borderRadius: '6px',
+                              padding: '0.45rem 0.75rem',
+                              minHeight: '44px',
+                              minWidth: '44px',
+                              borderRadius: '8px',
                               border: '1px solid var(--accent-emerald)',
                               backgroundColor: 'rgba(16, 185, 129, 0.12)',
                               color: 'var(--accent-emerald)',
-                              fontSize: '0.75rem',
+                              fontSize: '0.78rem',
                               fontWeight: 800,
                               cursor: 'pointer',
                             }}
