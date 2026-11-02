@@ -54,6 +54,12 @@ export interface PersistedPracticeSessionRecord {
   gameTitle: string;
   gameType: GameType;
   scoringMode: ScoringMode;
+  sessionMode?: 'PLAY' | 'EXAM';
+  participantId?: string | null;
+  playerName?: string;
+  departmentUnit?: string;
+  isPassed?: boolean | null;
+  submittedReason?: string | null;
   adventureConfig?: AdventureConfig;
   state: string;
   totalQuestions: number;
@@ -80,6 +86,10 @@ export interface PersistedRoomHistoryRecord {
   gameTitle: string;
   gameType: GameType;
   scoringMode: ScoringMode;
+  sessionMode?: 'PLAY' | 'EXAM';
+  maxPossibleScore?: number;
+  passThresholdPercent?: number;
+  submittedReason?: string | null;
   adventureConfig?: AdventureConfig;
   state: string;
   playerCount: number;
@@ -726,6 +736,12 @@ export class PersistenceRepository {
     gameTitle: string;
     gameType: GameType;
     scoringMode: ScoringMode;
+    sessionMode?: 'PLAY' | 'EXAM';
+    participantId?: string | null;
+    playerName?: string;
+    departmentUnit?: string;
+    isPassed?: boolean | null;
+    submittedReason?: string | null;
     adventureConfig?: AdventureConfig;
     state: string;
     totalQuestions: number;
@@ -744,8 +760,21 @@ export class PersistenceRepository {
     const nowIso = new Date().toISOString();
 
     const existing = db
-      .prepare('SELECT owner_user_id, created_at FROM practice_sessions WHERE session_id = ?')
-      .get(record.sessionId) as { owner_user_id: string | null; created_at: string } | undefined;
+      .prepare(
+        'SELECT owner_user_id, session_mode, participant_id, player_name, department_unit, is_passed, submitted_reason, created_at FROM practice_sessions WHERE session_id = ?'
+      )
+      .get(record.sessionId) as
+      | {
+          owner_user_id: string | null;
+          session_mode: string | null;
+          participant_id: string | null;
+          player_name: string | null;
+          department_unit: string | null;
+          is_passed: number | null;
+          submitted_reason: string | null;
+          created_at: string;
+        }
+      | undefined;
 
     const resolvedOwner =
       record.ownerUserId !== undefined
@@ -753,16 +782,50 @@ export class PersistenceRepository {
         : existing
           ? existing.owner_user_id
           : null;
+    const resolvedSessionMode =
+      record.sessionMode ||
+      (existing?.session_mode === 'EXAM' ? 'EXAM' : 'PLAY');
+    const resolvedParticipantId =
+      record.participantId !== undefined
+        ? record.participantId
+        : existing?.participant_id ?? null;
+    const resolvedPlayerName =
+      record.playerName !== undefined && record.playerName.trim()
+        ? record.playerName.trim()
+        : existing?.player_name || '';
+    const resolvedDept =
+      record.departmentUnit !== undefined
+        ? record.departmentUnit.trim()
+        : existing?.department_unit || '';
+    const resolvedIsPassed =
+      record.isPassed !== undefined
+        ? record.isPassed === null
+          ? null
+          : record.isPassed
+            ? 1
+            : 0
+        : existing?.is_passed ?? null;
+    const resolvedSubmittedReason =
+      record.submittedReason !== undefined
+        ? record.submittedReason
+        : existing?.submitted_reason ?? null;
     const createdAt = existing ? existing.created_at : record.startedAt || nowIso;
 
     db.prepare(
       `INSERT INTO practice_sessions (
         session_id, game_id, owner_user_id, game_title, game_type, scoring_mode,
+        session_mode, participant_id, player_name, department_unit, is_passed, submitted_reason,
         state, total_questions, answered_questions, correct_answers, wrong_answers,
         total_score, max_possible_score, max_streak, duration_ms, results_json,
         started_at, finished_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_id) DO UPDATE SET
+        session_mode = excluded.session_mode,
+        participant_id = COALESCE(excluded.participant_id, practice_sessions.participant_id),
+        player_name = CASE WHEN excluded.player_name != '' THEN excluded.player_name ELSE practice_sessions.player_name END,
+        department_unit = CASE WHEN excluded.department_unit != '' THEN excluded.department_unit ELSE practice_sessions.department_unit END,
+        is_passed = COALESCE(excluded.is_passed, practice_sessions.is_passed),
+        submitted_reason = COALESCE(excluded.submitted_reason, practice_sessions.submitted_reason),
         state = excluded.state,
         answered_questions = excluded.answered_questions,
         correct_answers = excluded.correct_answers,
@@ -782,6 +845,12 @@ export class PersistenceRepository {
       record.gameTitle,
       record.gameType,
       record.scoringMode,
+      resolvedSessionMode,
+      resolvedParticipantId,
+      resolvedPlayerName,
+      resolvedDept,
+      resolvedIsPassed,
+      resolvedSubmittedReason,
       record.state,
       record.totalQuestions,
       record.answeredQuestions,
@@ -882,6 +951,13 @@ export class PersistenceRepository {
       gameTitle: String(row.game_title),
       gameType: row.game_type as GameType,
       scoringMode: (row.scoring_mode || 'STANDARD') as ScoringMode,
+      sessionMode: row.session_mode === 'EXAM' ? 'EXAM' : 'PLAY',
+      participantId: row.participant_id ? String(row.participant_id) : null,
+      playerName: row.player_name ? String(row.player_name) : '',
+      departmentUnit: row.department_unit ? String(row.department_unit) : '',
+      isPassed:
+        row.is_passed !== null && row.is_passed !== undefined ? Boolean(row.is_passed) : null,
+      submittedReason: row.submitted_reason ? String(row.submitted_reason) : null,
       state: String(row.state),
       totalQuestions: Number(row.total_questions),
       answeredQuestions: Number(row.answered_questions),
@@ -910,6 +986,10 @@ export class PersistenceRepository {
     gameTitle: string;
     gameType: GameType;
     scoringMode: ScoringMode;
+    sessionMode?: 'PLAY' | 'EXAM';
+    maxPossibleScore?: number;
+    passThresholdPercent?: number;
+    submittedReason?: string | null;
     adventureConfig?: AdventureConfig;
     state: string;
     playerCount: number;
@@ -922,8 +1002,19 @@ export class PersistenceRepository {
     const nowIso = new Date().toISOString();
 
     const existing = db
-      .prepare('SELECT owner_user_id, created_at FROM room_history WHERE room_id = ?')
-      .get(record.roomId) as { owner_user_id: string | null; created_at: string } | undefined;
+      .prepare(
+        'SELECT owner_user_id, session_mode, max_possible_score, pass_threshold_percent, submitted_reason, created_at FROM room_history WHERE room_id = ?'
+      )
+      .get(record.roomId) as
+      | {
+          owner_user_id: string | null;
+          session_mode: string | null;
+          max_possible_score: number | null;
+          pass_threshold_percent: number | null;
+          submitted_reason: string | null;
+          created_at: string;
+        }
+      | undefined;
 
     const resolvedOwner =
       record.ownerUserId !== undefined
@@ -931,6 +1022,20 @@ export class PersistenceRepository {
         : existing
           ? existing.owner_user_id
           : null;
+    const resolvedSessionMode =
+      record.sessionMode || (existing?.session_mode === 'EXAM' ? 'EXAM' : 'PLAY');
+    const resolvedMaxScore =
+      record.maxPossibleScore !== undefined
+        ? Math.max(0, Math.round(record.maxPossibleScore))
+        : Number(existing?.max_possible_score || 0);
+    const resolvedThreshold =
+      record.passThresholdPercent !== undefined
+        ? Math.max(0, Math.min(100, Math.round(record.passThresholdPercent)))
+        : Number(existing?.pass_threshold_percent ?? 50);
+    const resolvedSubmittedReason =
+      record.submittedReason !== undefined
+        ? record.submittedReason
+        : existing?.submitted_reason ?? null;
     const createdAt = existing ? existing.created_at : record.startedAt || nowIso;
 
     // Sanitize leaderboard entries to ensure only aggregate scores/ranks are persisted (no raw answers or tokens)
@@ -938,8 +1043,14 @@ export class PersistenceRepository {
       rank: entry.rank,
       playerId: entry.playerId,
       displayName: entry.displayName,
+      ...(entry.participantId !== undefined ? { participantId: entry.participantId } : {}),
+      ...(entry.departmentUnit !== undefined ? { departmentUnit: entry.departmentUnit } : {}),
       score: entry.score,
+      ...(entry.maxPossibleScore !== undefined ? { maxPossibleScore: entry.maxPossibleScore } : {}),
       correctCount: entry.correctCount,
+      ...(entry.totalQuestions !== undefined ? { totalQuestions: entry.totalQuestions } : {}),
+      ...(entry.accuracyPercent !== undefined ? { accuracyPercent: entry.accuracyPercent } : {}),
+      ...(entry.isPassed !== undefined ? { isPassed: entry.isPassed } : {}),
       streak: entry.streak,
       totalResponseTimeMs: entry.totalResponseTimeMs,
       connected: Boolean(entry.connected),
@@ -948,10 +1059,15 @@ export class PersistenceRepository {
     db.prepare(
       `INSERT INTO room_history (
         room_id, room_code, game_id, owner_user_id, game_title, game_type,
-        scoring_mode, state, player_count, total_questions, leaderboard_json,
+        scoring_mode, session_mode, max_possible_score, pass_threshold_percent, submitted_reason,
+        state, player_count, total_questions, leaderboard_json,
         started_at, finished_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(room_id) DO UPDATE SET
+        session_mode = excluded.session_mode,
+        max_possible_score = CASE WHEN excluded.max_possible_score > 0 THEN excluded.max_possible_score ELSE room_history.max_possible_score END,
+        pass_threshold_percent = excluded.pass_threshold_percent,
+        submitted_reason = COALESCE(excluded.submitted_reason, room_history.submitted_reason),
         state = excluded.state,
         player_count = excluded.player_count,
         leaderboard_json = excluded.leaderboard_json,
@@ -966,6 +1082,10 @@ export class PersistenceRepository {
       record.gameTitle,
       record.gameType,
       record.scoringMode,
+      resolvedSessionMode,
+      resolvedMaxScore,
+      resolvedThreshold,
+      resolvedSubmittedReason,
       record.state,
       record.playerCount,
       record.totalQuestions,
@@ -1125,6 +1245,13 @@ export class PersistenceRepository {
       gameTitle: String(row.game_title),
       gameType: row.game_type as GameType,
       scoringMode: (row.scoring_mode || 'STANDARD') as ScoringMode,
+      sessionMode: row.session_mode === 'EXAM' ? 'EXAM' : 'PLAY',
+      maxPossibleScore: Number(row.max_possible_score || 0),
+      passThresholdPercent:
+        row.pass_threshold_percent !== null && row.pass_threshold_percent !== undefined
+          ? Number(row.pass_threshold_percent)
+          : 50,
+      submittedReason: row.submitted_reason ? String(row.submitted_reason) : null,
       state: String(row.state),
       playerCount: Number(row.player_count),
       totalQuestions: Number(row.total_questions),
@@ -2085,6 +2212,17 @@ export class PersistenceRepository {
         }
       }
 
+      // Also finalize any practice_sessions still in progress for this game
+      db.prepare(
+        `UPDATE practice_sessions
+         SET state = 'FINISHED',
+             session_mode = 'EXAM',
+             submitted_reason = COALESCE(submitted_reason, 'EXAM_CLOSED_BY_HOST'),
+             finished_at = COALESCE(finished_at, ?),
+             updated_at = ?
+         WHERE game_id = ? AND state != 'FINISHED' AND state != 'ABANDONED'`
+      ).run(params.closedAtIso, params.closedAtIso, params.gameId);
+
       // Also unlock any participant row still stuck in IN_PROGRESS without an attempt row
       db.prepare(
         `UPDATE game_participants
@@ -2431,6 +2569,950 @@ export class PersistenceRepository {
       departments,
     };
   }
+
+  // =========================================================================
+  // V3: UNIFIED PLAY / EXAM HISTORY & DETAIL FOR STATISTICS PAGE
+  // =========================================================================
+
+  private resolveGameSettingsMeta(gameId: string): {
+    ownerUserId: string | null;
+    sessionMode: 'PLAY' | 'EXAM';
+    officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
+    passThresholdPercent: number;
+    answersPublished: boolean;
+    maxPossibleScore: number;
+    totalQuestions: number;
+    questionMap: Map<string, { index: number; question: string; correctAnswer: string; explanation?: string }>;
+  } {
+    const db = getDatabase();
+    const row = db
+      .prepare('SELECT owner_user_id, settings_json FROM games WHERE game_id = ?')
+      .get(gameId) as { owner_user_id: string | null; settings_json: string } | undefined;
+
+    let settings: Record<string, any> = {};
+    if (row?.settings_json) {
+      try {
+        settings = JSON.parse(String(row.settings_json)) || {};
+      } catch {
+        settings = {};
+      }
+    }
+
+    const qRows = db
+      .prepare('SELECT question_id, position, question_text, correct_answer, explanation FROM game_questions WHERE game_id = ? ORDER BY position ASC')
+      .all(gameId) as Array<{
+      question_id: string;
+      position: number;
+      question_text: string;
+      correct_answer: string;
+      explanation: string | null;
+    }>;
+
+    const questionMap = new Map<
+      string,
+      { index: number; question: string; correctAnswer: string; explanation?: string }
+    >();
+    qRows.forEach((q, idx) => {
+      questionMap.set(String(q.question_id), {
+        index: idx + 1,
+        question: String(q.question_text || ''),
+        correctAnswer: String(q.correct_answer || ''),
+        ...(q.explanation ? { explanation: String(q.explanation) } : {}),
+      });
+    });
+
+    const sessionMode: 'PLAY' | 'EXAM' = settings.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+    const officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE' =
+      settings.officialAttemptPolicy === 'LATEST_ATTEMPT' ||
+      settings.officialAttemptPolicy === 'HIGHEST_SCORE'
+        ? settings.officialAttemptPolicy
+        : sessionMode === 'EXAM'
+          ? 'LATEST_ATTEMPT'
+          : 'HIGHEST_SCORE';
+    const passThresholdPercent =
+      typeof settings.passThresholdPercent === 'number' && Number.isFinite(settings.passThresholdPercent)
+        ? Math.max(0, Math.min(100, settings.passThresholdPercent))
+        : 50;
+    const scoringMode = settings.scoringMode || 'STANDARD';
+    const perQuestionMax = scoringMode === 'SPEED_BONUS' ? 150 : 100;
+    const totalQuestions = qRows.length || Number(settings.questionCount || 0);
+
+    return {
+      ownerUserId: row?.owner_user_id ? String(row.owner_user_id) : null,
+      sessionMode,
+      officialAttemptPolicy,
+      passThresholdPercent,
+      answersPublished: Boolean(settings.answersPublished),
+      maxPossibleScore: totalQuestions * perQuestionMax,
+      totalQuestions,
+      questionMap,
+    };
+  }
+
+  public listPlayExamHistory(options: {
+    userId?: string | null;
+    isAdmin?: boolean;
+    gameId?: string;
+    sessionMode?: 'ALL' | 'PLAY' | 'EXAM' | string;
+    deliveryMode?: 'ALL' | 'SOLO' | 'MULTIPLAYER' | string;
+    search?: string;
+    sortOrder?: 'NEWEST' | 'OLDEST' | string;
+    page?: number;
+    limit?: number;
+    offset?: number;
+  } = {}): PlayExamHistoryListResult {
+    const db = getDatabase();
+    const limit = Math.min(100, Math.max(1, Number(options.limit) || 20));
+    const page = Math.max(1, Number(options.page) || 1);
+    const offset =
+      options.offset !== undefined && Number.isFinite(Number(options.offset))
+        ? Math.max(0, Number(options.offset))
+        : (page - 1) * limit;
+
+    // Build scope condition for room_history and practice_sessions
+    const roomConditions: string[] = [];
+    const roomParams: any[] = [];
+    const soloConditions: string[] = ["ps.state = 'FINISHED'"];
+    const soloParams: any[] = [];
+
+    if (!options.isAdmin) {
+      if (options.userId) {
+        roomConditions.push(
+          '(rh.owner_user_id = ? OR rh.game_id IN (SELECT game_id FROM games WHERE owner_user_id = ?))'
+        );
+        roomParams.push(options.userId, options.userId);
+        soloConditions.push(
+          '(ps.owner_user_id = ? OR ps.game_id IN (SELECT game_id FROM games WHERE owner_user_id = ?))'
+        );
+        soloParams.push(options.userId, options.userId);
+      } else {
+        roomConditions.push(
+          '(rh.owner_user_id IS NULL AND rh.game_id NOT IN (SELECT game_id FROM games WHERE owner_user_id IS NOT NULL))'
+        );
+        soloConditions.push(
+          '(ps.owner_user_id IS NULL AND ps.game_id NOT IN (SELECT game_id FROM games WHERE owner_user_id IS NOT NULL))'
+        );
+      }
+    }
+
+    if (options.gameId && options.gameId.trim()) {
+      roomConditions.push('rh.game_id = ?');
+      roomParams.push(options.gameId.trim());
+      soloConditions.push('ps.game_id = ?');
+      soloParams.push(options.gameId.trim());
+    }
+
+    const roomWhere = roomConditions.length > 0 ? `WHERE ${roomConditions.join(' AND ')}` : '';
+    const soloWhere = soloConditions.length > 0 ? `WHERE ${soloConditions.join(' AND ')}` : '';
+
+    const roomRows = db
+      .prepare(`SELECT rh.* FROM room_history rh ${roomWhere} ORDER BY rh.created_at DESC LIMIT 500`)
+      .all(...roomParams) as Record<string, any>[];
+
+    const soloRows = db
+      .prepare(`SELECT ps.* FROM practice_sessions ps ${soloWhere} ORDER BY ps.created_at DESC LIMIT 1000`)
+      .all(...soloParams) as Record<string, any>[];
+
+    const gameMetaCache = new Map<string, ReturnType<typeof this.resolveGameSettingsMeta>>();
+    const getGameMeta = (gid: string) => {
+      let cached = gameMetaCache.get(gid);
+      if (!cached) {
+        cached = this.resolveGameSettingsMeta(gid);
+        gameMetaCache.set(gid, cached);
+      }
+      return cached;
+    };
+
+    const allItems: PlayExamHistoryItem[] = [];
+
+    // 1. Map Multiplayer Room runs
+    for (const r of roomRows) {
+      const mapped = this.mapRoomHistoryRow(r);
+      const meta = getGameMeta(mapped.gameId);
+      const roomAttempts = db
+        .prepare('SELECT * FROM game_participant_attempts WHERE room_id = ? ORDER BY score DESC, duration_ms ASC')
+        .all(mapped.roomId) as Record<string, any>[];
+
+      const sessionMode: 'PLAY' | 'EXAM' =
+        r.session_mode === 'EXAM' ||
+        roomAttempts.some(a => a.session_mode === 'EXAM') ||
+        meta.sessionMode === 'EXAM'
+          ? 'EXAM'
+          : 'PLAY';
+
+      const passThreshold = mapped.passThresholdPercent ?? meta.passThresholdPercent ?? 50;
+      const totalQuestions = Math.max(1, mapped.totalQuestions || meta.totalQuestions || 1);
+      const maxPossibleScore =
+        mapped.maxPossibleScore && mapped.maxPossibleScore > 0
+          ? mapped.maxPossibleScore
+          : meta.maxPossibleScore || totalQuestions * 100;
+
+      const leaderboard = Array.isArray(mapped.leaderboard) ? mapped.leaderboard : [];
+      const participantCount = Math.max(
+        mapped.playerCount,
+        leaderboard.length,
+        roomAttempts.length
+      );
+
+      let sumScore = 0;
+      let highestScore = 0;
+      let sumAcc = 0;
+      let passedCount = 0;
+      let failedCount = 0;
+      const metricSourceCount = leaderboard.length > 0 ? leaderboard.length : roomAttempts.length;
+
+      if (leaderboard.length > 0) {
+        for (const entry of leaderboard) {
+          const sc = Number(entry.score || 0);
+          sumScore += sc;
+          if (sc > highestScore) highestScore = sc;
+          const acc =
+            typeof entry.accuracyPercent === 'number'
+              ? entry.accuracyPercent
+              : Math.round((Number(entry.correctCount || 0) / totalQuestions) * 100);
+          sumAcc += acc;
+          if (sessionMode === 'EXAM') {
+            const passed =
+              typeof entry.isPassed === 'boolean' ? entry.isPassed : acc >= passThreshold;
+            if (passed) passedCount++;
+            else failedCount++;
+          }
+        }
+      } else if (roomAttempts.length > 0) {
+        for (const att of roomAttempts) {
+          const sc = Number(att.score || 0);
+          sumScore += sc;
+          if (sc > highestScore) highestScore = sc;
+          const acc = Number(att.accuracy_percent || 0);
+          sumAcc += acc;
+          if (sessionMode === 'EXAM') {
+            const passed =
+              att.is_passed !== null && att.is_passed !== undefined
+                ? Boolean(att.is_passed)
+                : acc >= passThreshold;
+            if (passed) passedCount++;
+            else failedCount++;
+          }
+        }
+      }
+
+      const averageScore = metricSourceCount > 0 ? Math.round(sumScore / metricSourceCount) : 0;
+      const averageAccuracy = metricSourceCount > 0 ? Math.round(sumAcc / metricSourceCount) : 0;
+      const status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'CLOSED' =
+        mapped.submittedReason === 'EXAM_CLOSED_BY_HOST'
+          ? 'AUTO_SUBMITTED'
+          : mapped.state === 'CLOSED'
+            ? 'CLOSED'
+            : 'COMPLETED';
+
+      const startedMs = mapped.startedAt ? Date.parse(mapped.startedAt) : NaN;
+      const finishedMs = mapped.finishedAt ? Date.parse(mapped.finishedAt) : NaN;
+      const durationMs =
+        Number.isFinite(startedMs) && Number.isFinite(finishedMs) && finishedMs >= startedMs
+          ? finishedMs - startedMs
+          : 0;
+
+      allItems.push({
+        historyId: `room:${mapped.roomId}`,
+        gameId: mapped.gameId,
+        gameTitle: mapped.gameTitle,
+        gameType: mapped.gameType,
+        scoringMode: mapped.scoringMode,
+        sessionMode,
+        deliveryMode: 'MULTIPLAYER',
+        roomId: mapped.roomId,
+        roomCode: mapped.roomCode,
+        sessionId: null,
+        playerName: null,
+        departmentUnit: null,
+        participantCount,
+        completedCount: participantCount,
+        passedCount: sessionMode === 'EXAM' ? passedCount : 0,
+        failedCount: sessionMode === 'EXAM' ? failedCount : 0,
+        averageScore,
+        highestScore,
+        maxPossibleScore,
+        averageAccuracy,
+        durationMs,
+        status,
+        submittedReason: mapped.submittedReason ?? null,
+        startedAt: mapped.startedAt || mapped.createdAt,
+        finishedAt: mapped.finishedAt || mapped.updatedAt,
+        createdAt: mapped.createdAt,
+      });
+    }
+
+    // 2. Map Solo Session runs
+    const seenSessionIds = new Set<string>();
+    for (const s of soloRows) {
+      const mapped = this.mapPracticeSessionRow(s);
+      seenSessionIds.add(mapped.sessionId);
+      const meta = getGameMeta(mapped.gameId);
+
+      const attRow = db
+        .prepare('SELECT * FROM game_participant_attempts WHERE session_id = ? ORDER BY created_at DESC LIMIT 1')
+        .get(mapped.sessionId) as Record<string, any> | undefined;
+
+      const sessionMode: 'PLAY' | 'EXAM' =
+        s.session_mode === 'EXAM' ||
+        attRow?.session_mode === 'EXAM' ||
+        meta.sessionMode === 'EXAM'
+          ? 'EXAM'
+          : 'PLAY';
+
+      const playerName =
+        (mapped.playerName && mapped.playerName.trim()) ||
+        (attRow?.display_name && String(attRow.display_name).trim()) ||
+        'Người chơi cá nhân';
+      const departmentUnit =
+        (mapped.departmentUnit && mapped.departmentUnit.trim()) ||
+        (attRow?.department_unit && String(attRow.department_unit).trim()) ||
+        '';
+
+      const totalQuestions = Math.max(1, mapped.totalQuestions || meta.totalQuestions || 1);
+      const accuracyPercent = Math.round((mapped.correctAnswers / totalQuestions) * 100);
+      const passThreshold = meta.passThresholdPercent ?? 50;
+      const isPassed =
+        sessionMode === 'EXAM'
+          ? mapped.isPassed !== null && mapped.isPassed !== undefined
+            ? mapped.isPassed
+            : attRow?.is_passed !== null && attRow?.is_passed !== undefined
+              ? Boolean(attRow.is_passed)
+              : accuracyPercent >= passThreshold
+          : null;
+
+      const status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'CLOSED' =
+        mapped.submittedReason === 'EXAM_CLOSED_BY_HOST' ? 'AUTO_SUBMITTED' : 'COMPLETED';
+
+      allItems.push({
+        historyId: `solo:${mapped.sessionId}`,
+        gameId: mapped.gameId,
+        gameTitle: mapped.gameTitle,
+        gameType: mapped.gameType,
+        scoringMode: mapped.scoringMode,
+        sessionMode,
+        deliveryMode: 'SOLO',
+        roomId: null,
+        roomCode: null,
+        sessionId: mapped.sessionId,
+        playerName,
+        departmentUnit,
+        participantCount: 1,
+        completedCount: 1,
+        passedCount: isPassed === true ? 1 : 0,
+        failedCount: isPassed === false ? 1 : 0,
+        averageScore: mapped.totalScore,
+        highestScore: mapped.totalScore,
+        maxPossibleScore:
+          mapped.maxPossibleScore > 0 ? mapped.maxPossibleScore : meta.maxPossibleScore,
+        averageAccuracy: accuracyPercent,
+        durationMs: mapped.durationMs,
+        status,
+        submittedReason: mapped.submittedReason ?? null,
+        startedAt: mapped.startedAt || mapped.createdAt,
+        finishedAt: mapped.finishedAt || mapped.updatedAt,
+        createdAt: mapped.createdAt,
+      });
+    }
+
+    // 3. Summary metrics before filter
+    const summary = {
+      totalRuns: allItems.length,
+      playRuns: allItems.filter(i => i.sessionMode === 'PLAY').length,
+      examRuns: allItems.filter(i => i.sessionMode === 'EXAM').length,
+      soloRuns: allItems.filter(i => i.deliveryMode === 'SOLO').length,
+      multiplayerRuns: allItems.filter(i => i.deliveryMode === 'MULTIPLAYER').length,
+      totalParticipants: allItems.reduce((sum, i) => sum + i.participantCount, 0),
+    };
+
+    // 4. Filter by sessionMode, deliveryMode, search
+    let filtered = [...allItems];
+    const modeFilter = String(options.sessionMode || 'ALL').toUpperCase();
+    if (modeFilter === 'PLAY' || modeFilter === 'EXAM') {
+      filtered = filtered.filter(i => i.sessionMode === modeFilter);
+    }
+
+    const deliveryFilter = String(options.deliveryMode || 'ALL').toUpperCase();
+    if (deliveryFilter === 'SOLO' || deliveryFilter === 'MULTIPLAYER') {
+      filtered = filtered.filter(i => i.deliveryMode === deliveryFilter);
+    }
+
+    if (options.search && options.search.trim()) {
+      const q = options.search.trim().toLowerCase();
+      filtered = filtered.filter(
+        i =>
+          i.gameTitle.toLowerCase().includes(q) ||
+          (i.roomCode && i.roomCode.toLowerCase().includes(q)) ||
+          (i.playerName && i.playerName.toLowerCase().includes(q)) ||
+          (i.departmentUnit && i.departmentUnit.toLowerCase().includes(q))
+      );
+    }
+
+    // 5. Sort
+    const sortOrder = String(options.sortOrder || 'NEWEST').toUpperCase();
+    filtered.sort((a, b) => {
+      const timeA = Date.parse(a.finishedAt || a.startedAt || a.createdAt) || 0;
+      const timeB = Date.parse(b.finishedAt || b.startedAt || b.createdAt) || 0;
+      if (timeA !== timeB) {
+        return sortOrder === 'OLDEST' ? timeA - timeB : timeB - timeA;
+      }
+      return sortOrder === 'OLDEST'
+        ? a.historyId.localeCompare(b.historyId)
+        : b.historyId.localeCompare(a.historyId);
+    });
+
+    const total = filtered.length;
+    const items = filtered.slice(offset, offset + limit);
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      offset,
+      hasMore: offset + items.length < total,
+      summary,
+    };
+  }
+
+  public getPlayExamHistoryDetail(historyId: string): PlayExamHistoryDetail | undefined {
+    const rawId = String(historyId || '').trim();
+    if (!rawId) return undefined;
+
+    if (rawId.startsWith('room:')) {
+      return this.buildRoomHistoryDetail(rawId.slice(5));
+    }
+    if (rawId.startsWith('solo:')) {
+      return this.buildSoloHistoryDetail(rawId.slice(5));
+    }
+
+    // Fallback auto-detection if prefix omitted
+    const roomCheck = this.getRoomHistoryById(rawId);
+    if (roomCheck) {
+      return this.buildRoomHistoryDetail(rawId);
+    }
+    const soloCheck = this.getPracticeSessionById(rawId);
+    if (soloCheck) {
+      return this.buildSoloHistoryDetail(rawId);
+    }
+
+    return undefined;
+  }
+
+  private buildRoomHistoryDetail(roomId: string): PlayExamHistoryDetail | undefined {
+    const db = getDatabase();
+    const row = db
+      .prepare('SELECT * FROM room_history WHERE room_id = ?')
+      .get(roomId) as Record<string, any> | undefined;
+    if (!row) return undefined;
+
+    const mapped = this.mapRoomHistoryRow(row);
+    const meta = this.resolveGameSettingsMeta(mapped.gameId);
+    const ownerUserId = mapped.ownerUserId ?? meta.ownerUserId ?? null;
+
+    const roomAttemptRows = db
+      .prepare('SELECT * FROM game_participant_attempts WHERE room_id = ? ORDER BY score DESC, duration_ms ASC')
+      .all(roomId) as Record<string, any>[];
+    const roomAttempts = roomAttemptRows.map(r => this.mapParticipantAttemptRow(r));
+
+    const rosterRows = db
+      .prepare('SELECT * FROM game_participants WHERE game_id = ?')
+      .all(mapped.gameId) as Record<string, any>[];
+    const rosterById = new Map<string, PersistedParticipantRecord>();
+    const rosterByNormName = new Map<string, PersistedParticipantRecord>();
+    for (const r of rosterRows) {
+      const p = this.mapParticipantRow(r, true);
+      rosterById.set(p.participantId, p);
+      rosterByNormName.set(this.normalizeParticipantName(p.fullName), p);
+    }
+
+    const sessionMode: 'PLAY' | 'EXAM' =
+      row.session_mode === 'EXAM' ||
+      roomAttempts.some(a => a.sessionMode === 'EXAM') ||
+      meta.sessionMode === 'EXAM'
+        ? 'EXAM'
+        : 'PLAY';
+    const passThresholdPercent = mapped.passThresholdPercent ?? meta.passThresholdPercent ?? 50;
+    const totalQuestions = Math.max(1, mapped.totalQuestions || meta.totalQuestions || 1);
+    const maxPossibleScore =
+      mapped.maxPossibleScore && mapped.maxPossibleScore > 0
+        ? mapped.maxPossibleScore
+        : meta.maxPossibleScore || totalQuestions * 100;
+
+    const status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'CLOSED' =
+      mapped.submittedReason === 'EXAM_CLOSED_BY_HOST'
+        ? 'AUTO_SUBMITTED'
+        : mapped.state === 'CLOSED'
+          ? 'CLOSED'
+          : 'COMPLETED';
+
+    const participants: PlayExamHistoryParticipantRow[] = [];
+    const matchedAttemptIds = new Set<string>();
+
+    const leaderboard = Array.isArray(mapped.leaderboard) ? mapped.leaderboard : [];
+    for (const entry of leaderboard) {
+      const matchAttempt = roomAttempts.find(
+        a =>
+          !matchedAttemptIds.has(a.attemptId) &&
+          ((entry.participantId && a.participantId === entry.participantId) ||
+            this.normalizeParticipantName(a.displayName) ===
+              this.normalizeParticipantName(entry.displayName))
+      );
+      if (matchAttempt) {
+        matchedAttemptIds.add(matchAttempt.attemptId);
+      }
+
+      const pid = entry.participantId || matchAttempt?.participantId || null;
+      const rosterMember = pid
+        ? rosterById.get(pid)
+        : rosterByNormName.get(this.normalizeParticipantName(entry.displayName));
+
+      const correctAnswers = Math.max(
+        0,
+        Number(entry.correctCount ?? matchAttempt?.correctAnswers ?? 0)
+      );
+      const qTotal = Math.max(
+        1,
+        Number(entry.totalQuestions ?? matchAttempt?.totalQuestions ?? totalQuestions)
+      );
+      const wrongAnswers = Math.max(0, qTotal - correctAnswers);
+      const accuracyPercent =
+        typeof entry.accuracyPercent === 'number'
+          ? entry.accuracyPercent
+          : matchAttempt
+            ? matchAttempt.accuracyPercent
+            : Math.round((correctAnswers / qTotal) * 100);
+      const score = Math.max(0, Number(entry.score ?? matchAttempt?.score ?? 0));
+      const maxScore = Math.max(
+        score,
+        Number(entry.maxPossibleScore ?? matchAttempt?.maxPossibleScore ?? maxPossibleScore)
+      );
+      const durationMs = Math.max(
+        0,
+        Number(entry.totalResponseTimeMs ?? matchAttempt?.durationMs ?? 0)
+      );
+      const isPassed =
+        sessionMode === 'EXAM'
+          ? typeof entry.isPassed === 'boolean'
+            ? entry.isPassed
+            : matchAttempt?.isPassed !== null && matchAttempt?.isPassed !== undefined
+              ? matchAttempt.isPassed
+              : accuracyPercent >= passThresholdPercent
+          : null;
+
+      participants.push({
+        rank: entry.rank ?? null,
+        participantId: pid ?? rosterMember?.participantId ?? null,
+        fullName: entry.displayName || matchAttempt?.displayName || 'Người chơi',
+        departmentUnit:
+          entry.departmentUnit ||
+          matchAttempt?.departmentUnit ||
+          rosterMember?.departmentUnit ||
+          '',
+        employeeCode:
+          matchAttempt?.employeeCode || rosterMember?.employeeCode || '',
+        score,
+        maxPossibleScore: maxScore,
+        correctAnswers,
+        wrongAnswers,
+        totalQuestions: qTotal,
+        accuracyPercent,
+        durationMs,
+        isPassed,
+        attemptNumber: matchAttempt?.attemptNumber || 1,
+        usedAttempts: Math.max(
+          rosterMember?.usedAttempts || 1,
+          matchAttempt?.attemptNumber || 1
+        ),
+        allowedAttempts: rosterMember?.allowedAttempts || 1,
+        status: status === 'AUTO_SUBMITTED' ? 'AUTO_SUBMITTED' : 'COMPLETED',
+        submittedReason: mapped.submittedReason ?? null,
+        startedAt: matchAttempt?.startedAt || mapped.startedAt || mapped.createdAt,
+        finishedAt: matchAttempt?.finishedAt || mapped.finishedAt || mapped.updatedAt,
+      });
+    }
+
+    // Add any roomAttempts not in leaderboard_json
+    for (const att of roomAttempts) {
+      if (matchedAttemptIds.has(att.attemptId)) continue;
+      const rosterMember = att.participantId
+        ? rosterById.get(att.participantId)
+        : rosterByNormName.get(this.normalizeParticipantName(att.displayName));
+      const qTotal = Math.max(1, att.totalQuestions || totalQuestions);
+      const wrongAnswers = Math.max(0, qTotal - att.correctAnswers);
+      const isPassed =
+        sessionMode === 'EXAM'
+          ? att.isPassed !== null && att.isPassed !== undefined
+            ? att.isPassed
+            : att.accuracyPercent >= passThresholdPercent
+          : null;
+
+      participants.push({
+        rank: null,
+        participantId: att.participantId ?? rosterMember?.participantId ?? null,
+        fullName: att.displayName || 'Người chơi',
+        departmentUnit: att.departmentUnit || rosterMember?.departmentUnit || '',
+        employeeCode: att.employeeCode || rosterMember?.employeeCode || '',
+        score: att.score,
+        maxPossibleScore: att.maxPossibleScore || maxPossibleScore,
+        correctAnswers: att.correctAnswers,
+        wrongAnswers,
+        totalQuestions: qTotal,
+        accuracyPercent: att.accuracyPercent,
+        durationMs: att.durationMs,
+        isPassed,
+        attemptNumber: att.attemptNumber || 1,
+        usedAttempts: Math.max(rosterMember?.usedAttempts || 1, att.attemptNumber || 1),
+        allowedAttempts: rosterMember?.allowedAttempts || 1,
+        status: status === 'AUTO_SUBMITTED' ? 'AUTO_SUBMITTED' : 'COMPLETED',
+        submittedReason: mapped.submittedReason ?? null,
+        startedAt: att.startedAt || mapped.startedAt || mapped.createdAt,
+        finishedAt: att.finishedAt || mapped.finishedAt || mapped.updatedAt,
+      });
+    }
+
+    // Sort deterministically and assign rank 1..N
+    participants.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (b.correctAnswers !== a.correctAnswers) return b.correctAnswers - a.correctAnswers;
+      const durA = a.durationMs > 0 ? a.durationMs : Number.MAX_SAFE_INTEGER;
+      const durB = b.durationMs > 0 ? b.durationMs : Number.MAX_SAFE_INTEGER;
+      if (durA !== durB) return durA - durB;
+      return a.fullName.localeCompare(b.fullName, 'vi');
+    });
+    participants.forEach((p, idx) => {
+      p.rank = idx + 1;
+    });
+
+    const participantCount = Math.max(mapped.playerCount, participants.length);
+    const completedCount = participants.length;
+    const passedCount =
+      sessionMode === 'EXAM' ? participants.filter(p => p.isPassed === true).length : 0;
+    const failedCount =
+      sessionMode === 'EXAM' ? participants.filter(p => p.isPassed === false).length : 0;
+    const averageScore =
+      participants.length > 0
+        ? Math.round(participants.reduce((s, p) => s + p.score, 0) / participants.length)
+        : 0;
+    const highestScore =
+      participants.length > 0 ? Math.max(...participants.map(p => p.score)) : 0;
+    const averageAccuracy =
+      participants.length > 0
+        ? Math.round(participants.reduce((s, p) => s + p.accuracyPercent, 0) / participants.length)
+        : 0;
+
+    const startedMs = mapped.startedAt ? Date.parse(mapped.startedAt) : NaN;
+    const finishedMs = mapped.finishedAt ? Date.parse(mapped.finishedAt) : NaN;
+    const durationMs =
+      Number.isFinite(startedMs) && Number.isFinite(finishedMs) && finishedMs >= startedMs
+        ? finishedMs - startedMs
+        : participants.reduce((maxD, p) => Math.max(maxD, p.durationMs), 0);
+
+    return {
+      historyId: `room:${mapped.roomId}`,
+      gameId: mapped.gameId,
+      ownerUserId,
+      gameTitle: mapped.gameTitle,
+      gameType: mapped.gameType,
+      scoringMode: mapped.scoringMode,
+      sessionMode,
+      deliveryMode: 'MULTIPLAYER',
+      status,
+      submittedReason: mapped.submittedReason ?? null,
+      roomId: mapped.roomId,
+      roomCode: mapped.roomCode,
+      sessionId: null,
+      startedAt: mapped.startedAt || mapped.createdAt,
+      finishedAt: mapped.finishedAt || mapped.updatedAt,
+      createdAt: mapped.createdAt,
+      durationMs,
+      totalQuestions,
+      maxPossibleScore,
+      officialAttemptPolicy: meta.officialAttemptPolicy,
+      passThresholdPercent,
+      answersPublished: meta.answersPublished,
+      participantCount,
+      completedCount,
+      passedCount,
+      failedCount,
+      averageScore,
+      highestScore,
+      averageAccuracy,
+      participants,
+      questionBreakdown: [],
+    };
+  }
+
+  private buildSoloHistoryDetail(sessionId: string): PlayExamHistoryDetail | undefined {
+    const db = getDatabase();
+    const row = db
+      .prepare('SELECT * FROM practice_sessions WHERE session_id = ?')
+      .get(sessionId) as Record<string, any> | undefined;
+    if (!row) return undefined;
+
+    const mapped = this.mapPracticeSessionRow(row);
+    const meta = this.resolveGameSettingsMeta(mapped.gameId);
+    // For authorization, the game owner (or session owner if unowned game) owns this history record
+    const ownerUserId = meta.ownerUserId ?? mapped.ownerUserId ?? null;
+
+    const attRow = db
+      .prepare('SELECT * FROM game_participant_attempts WHERE session_id = ? ORDER BY created_at DESC LIMIT 1')
+      .get(sessionId) as Record<string, any> | undefined;
+    const attempt = attRow ? this.mapParticipantAttemptRow(attRow) : undefined;
+
+    const sessionMode: 'PLAY' | 'EXAM' =
+      row.session_mode === 'EXAM' ||
+      attempt?.sessionMode === 'EXAM' ||
+      meta.sessionMode === 'EXAM'
+        ? 'EXAM'
+        : 'PLAY';
+    const passThresholdPercent = meta.passThresholdPercent ?? 50;
+    const totalQuestions = Math.max(1, mapped.totalQuestions || meta.totalQuestions || 1);
+    const maxPossibleScore =
+      mapped.maxPossibleScore > 0
+        ? mapped.maxPossibleScore
+        : meta.maxPossibleScore || totalQuestions * 100;
+
+    const pid = mapped.participantId || attempt?.participantId || null;
+    let rosterMember: PersistedParticipantRecord | undefined;
+    if (pid) {
+      rosterMember = this.getParticipantById(mapped.gameId, pid, true);
+    }
+
+    const fullName =
+      (mapped.playerName && mapped.playerName.trim()) ||
+      attempt?.displayName ||
+      rosterMember?.fullName ||
+      'Người chơi cá nhân';
+    const departmentUnit =
+      (mapped.departmentUnit && mapped.departmentUnit.trim()) ||
+      attempt?.departmentUnit ||
+      rosterMember?.departmentUnit ||
+      '';
+    const employeeCode = attempt?.employeeCode || rosterMember?.employeeCode || '';
+
+    let totalUsedAttempts = attempt?.attemptNumber || 1;
+    if (pid) {
+      const cnt = db
+        .prepare("SELECT COUNT(*) as cnt FROM game_participant_attempts WHERE game_id = ? AND participant_id = ? AND state = 'FINISHED'")
+        .get(mapped.gameId, pid) as { cnt: number };
+      totalUsedAttempts = Math.max(totalUsedAttempts, rosterMember?.usedAttempts || 0, Number(cnt?.cnt || 1));
+    } else if (fullName) {
+      const cnt = db
+        .prepare("SELECT COUNT(*) as cnt FROM practice_sessions WHERE game_id = ? AND LOWER(player_name) = LOWER(?) AND state = 'FINISHED'")
+        .get(mapped.gameId, fullName) as { cnt: number };
+      totalUsedAttempts = Math.max(totalUsedAttempts, Number(cnt?.cnt || 1));
+    }
+
+    const accuracyPercent = Math.round((mapped.correctAnswers / totalQuestions) * 100);
+    const isPassed =
+      sessionMode === 'EXAM'
+        ? mapped.isPassed !== null && mapped.isPassed !== undefined
+          ? mapped.isPassed
+          : attempt?.isPassed !== null && attempt?.isPassed !== undefined
+            ? attempt.isPassed
+            : accuracyPercent >= passThresholdPercent
+        : null;
+
+    const status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'CLOSED' =
+      mapped.submittedReason === 'EXAM_CLOSED_BY_HOST' ? 'AUTO_SUBMITTED' : 'COMPLETED';
+
+    const participantEntry: PlayExamHistoryParticipantRow = {
+      rank: 1,
+      participantId: pid,
+      fullName,
+      departmentUnit,
+      employeeCode,
+      score: mapped.totalScore,
+      maxPossibleScore,
+      correctAnswers: mapped.correctAnswers,
+      wrongAnswers: mapped.wrongAnswers,
+      totalQuestions,
+      accuracyPercent,
+      durationMs: mapped.durationMs,
+      isPassed,
+      attemptNumber: attempt?.attemptNumber || 1,
+      usedAttempts: totalUsedAttempts,
+      allowedAttempts: rosterMember?.allowedAttempts || Math.max(1, totalUsedAttempts),
+      status: status === 'AUTO_SUBMITTED' ? 'AUTO_SUBMITTED' : 'COMPLETED',
+      submittedReason: mapped.submittedReason ?? null,
+      startedAt: mapped.startedAt || mapped.createdAt,
+      finishedAt: mapped.finishedAt || mapped.updatedAt,
+    };
+
+    // Build questionBreakdown safely: never expose unrevealed EXAM correctAnswer/explanation
+    const canRevealAnswers = sessionMode === 'PLAY' || meta.answersPublished;
+    const rawResults = Array.isArray(mapped.questionResults) ? mapped.questionResults : [];
+    const questionBreakdown: PlayExamHistoryQuestionRow[] = rawResults.map((qr, idx) => {
+      const qMeta = meta.questionMap.get(String(qr.questionId));
+      return {
+        questionIndex: qMeta?.index ?? idx + 1,
+        questionId: String(qr.questionId || `q_${idx + 1}`),
+        questionText: qMeta?.question || `Câu hỏi ${idx + 1}`,
+        playerAnswer: String(qr.answer ?? ''),
+        isCorrect: Boolean(qr.isCorrect),
+        pointsEarned: Number(qr.pointsEarned || 0),
+        responseTimeMs: Number(qr.responseTimeMs || 0),
+        timedOut: Boolean((qr as any).timedOut),
+        correctAnswer: canRevealAnswers
+          ? String(qr.correctAnswer ?? qMeta?.correctAnswer ?? '')
+          : null,
+        explanation: canRevealAnswers
+          ? qr.explanation ?? qMeta?.explanation ?? null
+          : null,
+      };
+    });
+
+    return {
+      historyId: `solo:${mapped.sessionId}`,
+      gameId: mapped.gameId,
+      ownerUserId,
+      gameTitle: mapped.gameTitle,
+      gameType: mapped.gameType,
+      scoringMode: mapped.scoringMode,
+      sessionMode,
+      deliveryMode: 'SOLO',
+      status,
+      submittedReason: mapped.submittedReason ?? null,
+      roomId: null,
+      roomCode: null,
+      sessionId: mapped.sessionId,
+      startedAt: mapped.startedAt || mapped.createdAt,
+      finishedAt: mapped.finishedAt || mapped.updatedAt,
+      createdAt: mapped.createdAt,
+      durationMs: mapped.durationMs,
+      totalQuestions,
+      maxPossibleScore,
+      officialAttemptPolicy: meta.officialAttemptPolicy,
+      passThresholdPercent,
+      answersPublished: meta.answersPublished,
+      participantCount: 1,
+      completedCount: 1,
+      passedCount: isPassed === true ? 1 : 0,
+      failedCount: isPassed === false ? 1 : 0,
+      averageScore: mapped.totalScore,
+      highestScore: mapped.totalScore,
+      averageAccuracy: accuracyPercent,
+      participants: [participantEntry],
+      questionBreakdown,
+    };
+  }
+}
+
+export interface PlayExamHistoryItem {
+  historyId: string;
+  gameId: string;
+  gameTitle: string;
+  gameType: GameType;
+  scoringMode: ScoringMode;
+  sessionMode: 'PLAY' | 'EXAM';
+  deliveryMode: 'SOLO' | 'MULTIPLAYER';
+  roomId: string | null;
+  roomCode: string | null;
+  sessionId: string | null;
+  playerName: string | null;
+  departmentUnit: string | null;
+  participantCount: number;
+  completedCount: number;
+  passedCount: number;
+  failedCount: number;
+  averageScore: number;
+  highestScore: number;
+  maxPossibleScore: number;
+  averageAccuracy: number;
+  durationMs: number;
+  status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'CLOSED';
+  submittedReason: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+}
+
+export interface PlayExamHistoryParticipantRow {
+  rank: number | null;
+  participantId: string | null;
+  fullName: string;
+  departmentUnit: string;
+  employeeCode: string;
+  score: number;
+  maxPossibleScore: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number;
+  durationMs: number;
+  isPassed: boolean | null;
+  attemptNumber: number;
+  usedAttempts: number;
+  allowedAttempts: number;
+  status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'IN_PROGRESS' | 'PENDING';
+  submittedReason: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface PlayExamHistoryQuestionRow {
+  questionIndex: number;
+  questionId: string;
+  questionText: string;
+  playerAnswer: string;
+  isCorrect: boolean;
+  pointsEarned: number;
+  responseTimeMs: number;
+  timedOut: boolean;
+  correctAnswer: string | null;
+  explanation: string | null;
+}
+
+export interface PlayExamHistoryDetail {
+  historyId: string;
+  gameId: string;
+  ownerUserId: string | null;
+  gameTitle: string;
+  gameType: GameType;
+  scoringMode: ScoringMode;
+  sessionMode: 'PLAY' | 'EXAM';
+  deliveryMode: 'SOLO' | 'MULTIPLAYER';
+  status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'CLOSED';
+  submittedReason: string | null;
+  roomId: string | null;
+  roomCode: string | null;
+  sessionId: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  durationMs: number;
+  totalQuestions: number;
+  maxPossibleScore: number;
+  officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
+  passThresholdPercent: number;
+  answersPublished: boolean;
+  participantCount: number;
+  completedCount: number;
+  passedCount: number;
+  failedCount: number;
+  averageScore: number;
+  highestScore: number;
+  averageAccuracy: number;
+  participants: PlayExamHistoryParticipantRow[];
+  questionBreakdown: PlayExamHistoryQuestionRow[];
+}
+
+export interface PlayExamHistoryListResult {
+  items: PlayExamHistoryItem[];
+  total: number;
+  page: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  summary: {
+    totalRuns: number;
+    playRuns: number;
+    examRuns: number;
+    soloRuns: number;
+    multiplayerRuns: number;
+    totalParticipants: number;
+  };
 }
 
 export interface PersistedParticipantRecord {

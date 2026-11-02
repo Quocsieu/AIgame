@@ -1038,13 +1038,23 @@ export function applyPresetToAdventureConfig(
   }
 
   const archetypeDetails = resolveGameplayArchetypeDetails(preset.presetId, preset.industryId);
+  const preserveCustomIndustry = current.industryId === 'CUSTOM';
+  const targetIndustryId: IndustryId = preserveCustomIndustry ? 'CUSTOM' : preset.industryId;
+  const sameIndustry =
+    current.industryId === targetIndustryId &&
+    (!current.assets || current.assets.background?.industryId === targetIndustryId);
 
-  const sameIndustry = current.industryId === preset.industryId;
   return {
     ...current,
-    industryId: preset.industryId,
+    industryId: targetIndustryId,
+    ...(preserveCustomIndustry
+      ? { industryLabel: current.industryLabel || 'Chuyên ngành khác (Tùy chỉnh)' }
+      : {}),
     themePresetId: preset.presetId,
-    subEnvironment: preset.subEnvironment,
+    subEnvironment:
+      preserveCustomIndustry && current.subEnvironment && current.subEnvironment.trim()
+        ? current.subEnvironment
+        : preset.subEnvironment,
     environmentTitle: preset.environmentTitle,
     environmentSubtitle: preset.environmentSubtitle,
     decorStyle: preset.decorStyle,

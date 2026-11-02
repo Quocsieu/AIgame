@@ -48,6 +48,7 @@ export class MultiplayerRoom {
   public readonly playerIdToToken: Map<string, string> = new Map(); // playerId -> playerToken
   public readonly participantIdToToken: Map<string, string> = new Map(); // participantId -> playerToken
   public timerHandle: NodeJS.Timeout | null = null;
+  public submittedReason: string | null = null;
 
   constructor(
     roomId: string,
@@ -733,6 +734,7 @@ export class MultiplayerRoom {
     this.state = 'FINISHED';
     this.updatedAt = nowMs;
     this.finishedAtIso = nowIso;
+    this.submittedReason = 'EXAM_CLOSED_BY_HOST';
     const finalLeaderboard = this.getLeaderboard();
     this.persistHistory(finalLeaderboard);
     return finalLeaderboard;
@@ -754,6 +756,10 @@ export class MultiplayerRoom {
         gameTitle: this.gameSpecification.title,
         gameType: this.gameSpecification.gameType,
         scoringMode: this.gameSpecification.settings.scoringMode,
+        sessionMode,
+        maxPossibleScore,
+        passThresholdPercent,
+        submittedReason: this.submittedReason,
         state: this.state,
         playerCount: this.players.size,
         totalQuestions,
@@ -792,11 +798,18 @@ export class MultiplayerRoom {
 
   /**
    * Closes and cleans up room resources.
+   * If the room had started and was not yet persisted as finished, persists final history first.
    */
   public close(): void {
     if (this.timerHandle) {
       clearTimeout(this.timerHandle);
       this.timerHandle = null;
+    }
+    if (this.startedAtIso && this.state !== 'FINISHED' && this.state !== 'CLOSED') {
+      this.finishedAtIso = this.finishedAtIso || new Date().toISOString();
+      this.submittedReason = this.submittedReason || 'ROOM_CLOSED_BY_HOST';
+      this.state = 'FINISHED';
+      this.persistHistory();
     }
     this.state = 'CLOSED';
     this.updatedAt = Date.now();

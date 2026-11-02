@@ -1510,7 +1510,14 @@ export class AiQuestionService {
         }))
         .filter(d => d.actual < d.requested);
 
-      if (remainingDeficits.length > 0) {
+      const isSingleTypeAdventurePartialValid =
+        gameType === 'ADVENTURE' &&
+        allowedAdventureTypes.length === 1 &&
+        !request.adventureConfig?.questionDistribution &&
+        validatedQuestions.length > 0 &&
+        rejectedReasons.length === 0;
+
+      if (remainingDeficits.length > 0 && !isSingleTypeAdventurePartialValid) {
         const actualTypeCounts: Record<BaseDistributionQuestionType, number> = {
           MULTIPLE_CHOICE: bucketedQuestions.MULTIPLE_CHOICE.length,
           QUICK_BUTTON: bucketedQuestions.QUICK_BUTTON.length,

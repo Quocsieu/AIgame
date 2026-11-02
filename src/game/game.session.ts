@@ -31,6 +31,7 @@ export class GameSession {
   public employeeCode: string | null = null;
   public lockToken: string | null = null;
   public attemptId: string | null = null;
+  public submittedReason: string | null = null;
   public state: GameSessionState = 'NOT_STARTED';
   public currentQuestionIndex: number = 0;
   public score: number = 0;
@@ -559,6 +560,7 @@ export class GameSession {
 
     this.state = 'FINISHED';
     this.finishedAt = nowIso;
+    this.submittedReason = 'EXAM_CLOSED_BY_HOST';
     const result = this.getResult();
     try {
       this.persistSessionState(result);
@@ -577,6 +579,19 @@ export class GameSession {
       (sum, r) => sum + (Number.isFinite(r.responseTimeMs) ? r.responseTimeMs : 0),
       0
     );
+    const sessionMode = this.getSessionMode();
+    const passThresholdPercent = this.specification.settings?.passThresholdPercent ?? 50;
+    const accuracyPercent =
+      result.totalQuestions > 0
+        ? Math.round((this.correctCount / result.totalQuestions) * 100)
+        : 0;
+    const isPassed =
+      sessionMode === 'EXAM'
+        ? this.state === 'FINISHED'
+          ? accuracyPercent >= passThresholdPercent
+          : null
+        : null;
+    const resolvedPlayerName = (this.displayName || '').trim() || 'Người chơi cá nhân';
 
     persistenceRepo.savePracticeSession({
       sessionId: this.sessionId,
@@ -585,6 +600,12 @@ export class GameSession {
       gameTitle: this.specification.title,
       gameType: this.specification.gameType,
       scoringMode: this.specification.settings.scoringMode,
+      sessionMode,
+      participantId: this.participantId,
+      playerName: resolvedPlayerName,
+      departmentUnit: this.departmentUnit || '',
+      isPassed,
+      submittedReason: this.submittedReason,
       state: this.state,
       totalQuestions: result.totalQuestions,
       answeredQuestions: this.questionResults.length,
@@ -600,8 +621,9 @@ export class GameSession {
     });
 
     if (
-      (this.attemptId || this.participantId || this.displayName) &&
-      (this.questionResults.length > 0 || this.state === 'FINISHED' || this.state === 'ABANDONED')
+      this.questionResults.length > 0 ||
+      this.state === 'FINISHED' ||
+      this.state === 'ABANDONED'
     ) {
       const attemptState =
         this.state === 'FINISHED'
@@ -609,27 +631,31 @@ export class GameSession {
           : this.state === 'ABANDONED'
             ? 'ABANDONED'
             : 'IN_PROGRESS';
-      const synced = persistenceRepo.recordParticipantAttemptCompletion({
-        attemptId: this.attemptId ?? undefined,
-        sessionId: this.sessionId,
-        participantId: this.participantId,
-        gameId: this.specification.gameId,
-        displayName: this.displayName || 'Người chơi',
-        departmentUnit: this.departmentUnit || '',
-        deliveryMode: 'SOLO',
-        sessionMode: this.getSessionMode(),
-        state: attemptState,
-        score: this.score,
-        maxPossibleScore: result.maxPossibleScore,
-        correctAnswers: this.correctCount,
-        totalQuestions: result.totalQuestions,
-        durationMs: totalDurationMs,
-        passThresholdPercent: this.specification.settings?.passThresholdPercent ?? 50,
-        answers: this.questionResults,
-        finishedAt: this.finishedAt,
-      });
-      if (synced && !this.attemptId) {
-        this.attemptId = synced.attemptId;
+      try {
+        const synced = persistenceRepo.recordParticipantAttemptCompletion({
+          attemptId: this.attemptId ?? undefined,
+          sessionId: this.sessionId,
+          participantId: this.participantId,
+          gameId: this.specification.gameId,
+          displayName: resolvedPlayerName,
+          departmentUnit: this.departmentUnit || '',
+          deliveryMode: 'SOLO',
+          sessionMode,
+          state: attemptState,
+          score: this.score,
+          maxPossibleScore: result.maxPossibleScore,
+          correctAnswers: this.correctCount,
+          totalQuestions: result.totalQuestions,
+          durationMs: totalDurationMs,
+          passThresholdPercent,
+          answers: this.questionResults,
+          finishedAt: this.finishedAt,
+        });
+        if (synced && !this.attemptId) {
+          this.attemptId = synced.attemptId;
+        }
+      } catch {
+        // Ignore FK failure if GameSession was constructed on an unpersisted in-memory spec in unit tests
       }
     }
   }

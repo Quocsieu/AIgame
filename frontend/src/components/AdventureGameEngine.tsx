@@ -65,179 +65,99 @@ function isSafeAssetUrl(url: unknown): url is string {
   );
 }
 
+export function buildDefaultFallbackSlotAsset(
+  slotType: 'BACKGROUND' | 'CHARACTER' | 'OBSTACLE',
+  industryId: IndustryId,
+  preferredPresetId?: string
+): AdventureAssetItem {
+  let packIndustry: IndustryId = KNOWN_CONCRETE_INDUSTRIES.has(industryId)
+    ? industryId
+    : 'EDUCATION_GENERAL';
+
+  if (!KNOWN_CONCRETE_INDUSTRIES.has(industryId) && preferredPresetId) {
+    const p = preferredPresetId.toLowerCase();
+    if (p.includes('moto')) packIndustry = 'MOTORCYCLE_TRAFFIC';
+    else if (p.includes('biz')) packIndustry = 'BUSINESS_SALES';
+    else if (p.includes('mfg')) packIndustry = 'MANUFACTURING_INDUSTRIAL';
+    else if (p.includes('it')) packIndustry = 'IT_TECHNOLOGY';
+    else if (p.includes('med')) packIndustry = 'HEALTHCARE_TRAINING';
+    else if (p.includes('fin')) packIndustry = 'FINANCE_BANKING';
+    else if (p.includes('fnb')) packIndustry = 'FNB_HOSPITALITY';
+  }
+
+  const fileName =
+    slotType === 'BACKGROUND'
+      ? 'background.png'
+      : slotType === 'CHARACTER'
+        ? 'character.png'
+        : 'obstacle.png';
+  const basePackPath = `/adventure-assets/packs/${packIndustry}`;
+  const relPackPath = `adventure-assets/packs/${packIndustry}`;
+
+  return {
+    assetType: slotType,
+    industryId,
+    fileName,
+    url: `${basePackPath}/${fileName}`,
+    relativePath: `${relPackPath}/${fileName}`,
+    mimeType: 'image/png',
+    sizeBytes: 1,
+    width: slotType === 'BACKGROUND' ? 1376 : 1024,
+    height: slotType === 'BACKGROUND' ? 768 : 1024,
+    sha256: `fallback-pack-${slotType.toLowerCase()}`,
+    source: 'ANTIGRAVITY_BANANA_PACK',
+    verified: true,
+  };
+}
+
 /**
  * Validates and resolves the 3 required 2D Adventure image assets (background, character, obstacle).
- * Strictly forbids cross-industry fallback (e.g. never uses MOTORCYCLE_TRAFFIC assets for another industry).
+ * Implements mandatory per-slot safe fallback: if any slot is missing, failed, or invalid,
+ * preserves any valid slots and substitutes only the broken/missing slot with a verified default pack asset.
  */
 export function resolveAdventureRuntimeAssets(
   config: AdventureConfig
 ): ResolvedAdventureEngineAssets {
-  const industryId = config.industryId;
+  const industryId = config.industryId || 'EDUCATION_GENERAL';
+  const missingOrInvalid: Array<'BACKGROUND' | 'CHARACTER' | 'OBSTACLE'> = [];
 
-  if (
-    config.assetStatus === 'ASSET_GENERATION_FAILED' ||
-    config.assetStatus === 'ASSET_GENERATION_PENDING'
-  ) {
-    return {
-      valid: false,
-      isLegacyFallback: false,
-      industryId,
-      errorCode: config.assetErrorCode || 'ADVENTURE_ASSETS_NOT_READY',
-      errorMessage:
-        config.assetError ||
-        `Tài nguyên hình ảnh 2D cho ngành "${config.industryLabel || industryId}" chưa sẵn sàng hoặc tạo thất bại.`,
-      missingOrInvalidAssets: ['BACKGROUND', 'CHARACTER', 'OBSTACLE'],
-      assets: null,
-    };
-  }
+  const resolveSlot = (
+    item: AdventureAssetItem | undefined,
+    expectedType: 'BACKGROUND' | 'CHARACTER' | 'OBSTACLE'
+  ): AdventureAssetItem => {
+    const isSlotUsable =
+      Boolean(item) &&
+      config.assetStatus !== 'ASSET_GENERATION_FAILED' &&
+      config.assetStatus !== 'ASSET_GENERATION_PENDING' &&
+      isSafeAssetUrl(item!.url) &&
+      item!.verified !== false &&
+      item!.assetType === expectedType &&
+      (item!.industryId === industryId || industryId === 'CUSTOM');
 
-  if (config.assets) {
-    const rawBg = config.assets.background;
-    const rawChar = config.assets.character;
-    const rawObs = config.assets.obstacle;
-
-    const missingOrInvalid: Array<'BACKGROUND' | 'CHARACTER' | 'OBSTACLE'> = [];
-    const mismatchErrors: string[] = [];
-
-    const checkSlot = (
-      item: AdventureAssetItem | undefined,
-      expectedType: 'BACKGROUND' | 'CHARACTER' | 'OBSTACLE'
-    ) => {
-      if (!item || !isSafeAssetUrl(item.url) || item.verified === false) {
-        missingOrInvalid.push(expectedType);
-        return;
-      }
-      if (item.assetType !== expectedType) {
-        missingOrInvalid.push(expectedType);
-        return;
-      }
-      if (item.industryId !== industryId) {
-        missingOrInvalid.push(expectedType);
-        mismatchErrors.push(
-          `Tài nguyên ${expectedType} thuộc ngành "${item.industryId}" không khớp với ngành của game ("${industryId}").`
-        );
-      }
-    };
-
-    checkSlot(rawBg, 'BACKGROUND');
-    checkSlot(rawChar, 'CHARACTER');
-    checkSlot(rawObs, 'OBSTACLE');
-
-    if (missingOrInvalid.length > 0) {
-      const isCrossIndustry = mismatchErrors.length > 0;
-      return {
-        valid: false,
-        isLegacyFallback: false,
-        industryId,
-        errorCode: isCrossIndustry ? 'CROSS_INDUSTRY_ASSET_MISMATCH' : 'INVALID_ADVENTURE_ASSETS',
-        errorMessage: isCrossIndustry
-          ? mismatchErrors.join(' ')
-          : `Thiếu hoặc không hợp lệ các tài nguyên hình ảnh bắt buộc: ${missingOrInvalid.join(', ')}.`,
-        missingOrInvalidAssets: missingOrInvalid,
-        assets: null,
-      };
+    if (isSlotUsable && item) {
+      return item;
     }
 
-    return {
-      valid: true,
-      isLegacyFallback: false,
-      industryId,
-      errorCode: null,
-      errorMessage: null,
-      missingOrInvalidAssets: [],
-      assets: {
-        background: rawBg,
-        character: rawChar,
-        obstacle: rawObs,
-      },
-    };
-  }
+    missingOrInvalid.push(expectedType);
+    return buildDefaultFallbackSlotAsset(expectedType, industryId, config.themePresetId);
+  };
 
-  // No assets object bound on config:
-  // If this is a Phase 3+ game (version >= 2, assetStatus present, or CUSTOM industry), block gameplay!
-  const isPhase3OrCustom =
-    industryId === 'CUSTOM' ||
-    (config.version ?? 1) >= 2 ||
-    config.assetStatus !== undefined;
-
-  if (isPhase3OrCustom) {
-    return {
-      valid: false,
-      isLegacyFallback: false,
-      industryId,
-      errorCode: 'MISSING_ADVENTURE_ASSETS',
-      errorMessage: `Game Adventure ngành "${config.industryLabel || industryId}" thiếu bộ 3 tài nguyên hình ảnh bắt buộc (background, character, obstacle).`,
-      missingOrInvalidAssets: ['BACKGROUND', 'CHARACTER', 'OBSTACLE'],
-      assets: null,
-    };
-  }
-
-  // Legacy v1 Adventure game created before Phase 3: resolve its own industry's verified static pack
-  if (KNOWN_CONCRETE_INDUSTRIES.has(industryId)) {
-    const basePackPath = `/adventure-assets/packs/${industryId}`;
-    const relPackPath = `adventure-assets/packs/${industryId}`;
-    return {
-      valid: true,
-      isLegacyFallback: true,
-      industryId,
-      errorCode: null,
-      errorMessage: null,
-      missingOrInvalidAssets: [],
-      assets: {
-        background: {
-          assetType: 'BACKGROUND',
-          industryId,
-          fileName: 'background.png',
-          url: `${basePackPath}/background.png`,
-          relativePath: `${relPackPath}/background.png`,
-          mimeType: 'image/png',
-          sizeBytes: 1,
-          width: 1376,
-          height: 768,
-          sha256: 'legacy-pack-bg',
-          source: 'ANTIGRAVITY_BANANA_PACK',
-          verified: true,
-        },
-        character: {
-          assetType: 'CHARACTER',
-          industryId,
-          fileName: 'character.png',
-          url: `${basePackPath}/character.png`,
-          relativePath: `${relPackPath}/character.png`,
-          mimeType: 'image/png',
-          sizeBytes: 1,
-          width: 1024,
-          height: 1024,
-          sha256: 'legacy-pack-char',
-          source: 'ANTIGRAVITY_BANANA_PACK',
-          verified: true,
-        },
-        obstacle: {
-          assetType: 'OBSTACLE',
-          industryId,
-          fileName: 'obstacle.png',
-          url: `${basePackPath}/obstacle.png`,
-          relativePath: `${relPackPath}/obstacle.png`,
-          mimeType: 'image/png',
-          sizeBytes: 1,
-          width: 1024,
-          height: 1024,
-          sha256: 'legacy-pack-obs',
-          source: 'ANTIGRAVITY_BANANA_PACK',
-          verified: true,
-        },
-      },
-    };
-  }
+  const resolvedBg = resolveSlot(config.assets?.background, 'BACKGROUND');
+  const resolvedChar = resolveSlot(config.assets?.character, 'CHARACTER');
+  const resolvedObs = resolveSlot(config.assets?.obstacle, 'OBSTACLE');
 
   return {
-    valid: false,
-    isLegacyFallback: false,
+    valid: true,
+    isLegacyFallback: missingOrInvalid.length > 0,
     industryId,
-    errorCode: 'UNKNOWN_INDUSTRY_PACK',
-    errorMessage: `Không tìm thấy gói tài nguyên hình ảnh hợp lệ cho ngành "${industryId}".`,
-    missingOrInvalidAssets: ['BACKGROUND', 'CHARACTER', 'OBSTACLE'],
-    assets: null,
+    errorCode: null,
+    errorMessage: null,
+    missingOrInvalidAssets: missingOrInvalid,
+    assets: {
+      background: resolvedBg,
+      character: resolvedChar,
+      obstacle: resolvedObs,
+    },
   };
 }
 
@@ -904,23 +824,27 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     obstacle: null,
   });
 
-  // Preload the 3 verified image assets once per game config
+  // Preload the 3 verified image assets once per game config with automatic per-slot safe fallback
   useEffect(() => {
-    if (!resolvedAssets.valid || !resolvedAssets.assets) {
-      setAssetLoadStatus('ERROR');
-      setAssetLoadError(
-        resolvedAssets.errorMessage ||
-          'Thiếu tài nguyên hình ảnh bắt buộc cho game Adventure.'
-      );
-      setFailedAssetSlots(
-        resolvedAssets.missingOrInvalidAssets.length > 0
-          ? resolvedAssets.missingOrInvalidAssets
-          : ['BACKGROUND', 'CHARACTER', 'OBSTACLE']
-      );
-      return;
-    }
+    const fallbackAssets = {
+      background: buildDefaultFallbackSlotAsset(
+        'BACKGROUND',
+        effectiveConfig.industryId,
+        effectiveConfig.themePresetId
+      ),
+      character: buildDefaultFallbackSlotAsset(
+        'CHARACTER',
+        effectiveConfig.industryId,
+        effectiveConfig.themePresetId
+      ),
+      obstacle: buildDefaultFallbackSlotAsset(
+        'OBSTACLE',
+        effectiveConfig.industryId,
+        effectiveConfig.themePresetId
+      ),
+    };
 
-    const { background, character, obstacle } = resolvedAssets.assets;
+    const { background, character, obstacle } = resolvedAssets.assets || fallbackAssets;
     const cachedBg = processedSpriteCache.get(`bg:${background.url}`);
     const cachedChar = processedSpriteCache.get(`char:${character.url}`);
     const cachedObs = processedSpriteCache.get(`obs:${obstacle.url}`);
@@ -932,78 +856,98 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
       };
       setAssetLoadStatus('READY');
       setAssetLoadError(null);
-      setFailedAssetSlots([]);
+      setFailedAssetSlots(resolvedAssets.missingOrInvalidAssets);
       return;
     }
 
     let cancelled = false;
     setAssetLoadStatus('LOADING');
     setAssetLoadError(null);
-    setFailedAssetSlots([]);
 
-    const loadSingleImage = (
-      slotName: 'BACKGROUND' | 'CHARACTER' | 'OBSTACLE',
-      url: string
-    ): Promise<{ slotName: 'BACKGROUND' | 'CHARACTER' | 'OBSTACLE'; img: HTMLImageElement }> =>
+    const loadRawImage = (url: string): Promise<HTMLImageElement> =>
       new Promise((resolve, reject) => {
         const img = new Image();
         img.decoding = 'async';
         img.onload = () => {
           if ((img.naturalWidth || img.width) > 0 && (img.naturalHeight || img.height) > 0) {
-            resolve({ slotName, img });
+            resolve(img);
           } else {
-            reject({ slotName, url, reason: 'Ảnh có kích thước 0px' });
+            reject(new Error('Ảnh có kích thước 0px'));
           }
         };
         img.onerror = () => {
-          reject({ slotName, url, reason: 'Không thể tải URL ảnh' });
+          reject(new Error('Không thể tải URL ảnh'));
         };
         img.src = url;
       });
 
-    Promise.allSettled([
-      loadSingleImage('BACKGROUND', background.url),
-      loadSingleImage('CHARACTER', character.url),
-      loadSingleImage('OBSTACLE', obstacle.url),
-    ]).then(results => {
+    const loadSlotWithFallback = async (
+      slotName: 'BACKGROUND' | 'CHARACTER' | 'OBSTACLE',
+      primaryUrl: string,
+      fallbackUrl: string
+    ): Promise<{
+      slotName: 'BACKGROUND' | 'CHARACTER' | 'OBSTACLE';
+      img: HTMLImageElement | null;
+      usedUrl: string;
+      usedFallback: boolean;
+    }> => {
+      try {
+        const img = await loadRawImage(primaryUrl);
+        return { slotName, img, usedUrl: primaryUrl, usedFallback: false };
+      } catch {
+        if (fallbackUrl && fallbackUrl !== primaryUrl) {
+          try {
+            const fbImg = await loadRawImage(fallbackUrl);
+            return { slotName, img: fbImg, usedUrl: fallbackUrl, usedFallback: true };
+          } catch {
+            // Fall through to universal EDUCATION_GENERAL pack or procedural canvas sprite
+          }
+        }
+        const universalFallbackUrl = `/adventure-assets/packs/EDUCATION_GENERAL/${slotName.toLowerCase()}.png`;
+        if (universalFallbackUrl !== primaryUrl && universalFallbackUrl !== fallbackUrl) {
+          try {
+            const uniImg = await loadRawImage(universalFallbackUrl);
+            return { slotName, img: uniImg, usedUrl: universalFallbackUrl, usedFallback: true };
+          } catch {
+            // Fall through to procedural canvas fallback
+          }
+        }
+        return { slotName, img: null, usedUrl: universalFallbackUrl, usedFallback: true };
+      }
+    };
+
+    Promise.all([
+      loadSlotWithFallback('BACKGROUND', background.url, fallbackAssets.background.url),
+      loadSlotWithFallback('CHARACTER', character.url, fallbackAssets.character.url),
+      loadSlotWithFallback('OBSTACLE', obstacle.url, fallbackAssets.obstacle.url),
+    ]).then(([bgRes, charRes, obsRes]) => {
       if (cancelled) return;
 
-      const failed: string[] = [];
-      let bgImg: HTMLImageElement | null = null;
-      let charImg: HTMLImageElement | null = null;
-      let obsImg: HTMLImageElement | null = null;
-
-      for (const res of results) {
-        if (res.status === 'fulfilled') {
-          if (res.value.slotName === 'BACKGROUND') bgImg = res.value.img;
-          if (res.value.slotName === 'CHARACTER') charImg = res.value.img;
-          if (res.value.slotName === 'OBSTACLE') obsImg = res.value.img;
-        } else {
-          failed.push(String(res.reason?.slotName || 'UNKNOWN'));
-        }
-      }
-
-      if (failed.length > 0 || !bgImg || !charImg || !obsImg) {
-        setFailedAssetSlots(failed);
-        setAssetLoadStatus('ERROR');
-        setAssetLoadError(
-          `Không thể tải tài nguyên ảnh 2D (${failed.join(', ')}) cho ngành "${effectiveConfig.industryLabel}". Không tự động thay bằng ảnh ngành khác.`
-        );
-        return;
-      }
+      const fallbackUsedSlots = new Set<string>(resolvedAssets.missingOrInvalidAssets);
+      if (bgRes.usedFallback) fallbackUsedSlots.add('BACKGROUND');
+      if (charRes.usedFallback) fallbackUsedSlots.add('CHARACTER');
+      if (obsRes.usedFallback) fallbackUsedSlots.add('OBSTACLE');
 
       loadedSpritesRef.current = {
-        background: prepareCleanSprite(bgImg, true, `bg:${background.url}`),
-        character: prepareCleanSprite(charImg, false, `char:${character.url}`),
-        obstacle: prepareCleanSprite(obsImg, false, `obs:${obstacle.url}`),
+        background: bgRes.img
+          ? prepareCleanSprite(bgRes.img, true, `bg:${bgRes.usedUrl}`)
+          : null,
+        character: charRes.img
+          ? prepareCleanSprite(charRes.img, false, `char:${charRes.usedUrl}`)
+          : null,
+        obstacle: obsRes.img
+          ? prepareCleanSprite(obsRes.img, false, `obs:${obsRes.usedUrl}`)
+          : null,
       };
+      setFailedAssetSlots(Array.from(fallbackUsedSlots));
+      setAssetLoadError(null);
       setAssetLoadStatus('READY');
     });
 
     return () => {
       cancelled = true;
     };
-  }, [resolvedAssets, effectiveConfig.industryLabel]);
+  }, [resolvedAssets, effectiveConfig.industryId, effectiveConfig.themePresetId]);
 
   // Gameplay states
   const [isJourneyStarted, setIsJourneyStarted] = useState<boolean>(() => Boolean(sessionStarted));

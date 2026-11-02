@@ -5,6 +5,7 @@ import { evaluatePerformanceResult } from '../game/game.scoring.js';
 import {
   GameScoreboardSummary,
   PersistedPracticeSessionRecord,
+  PlayExamHistoryDetail,
 } from '../storage/persistence.repository.js';
 import { AppError } from '../utils/errors.js';
 
@@ -477,6 +478,194 @@ export class ExportService {
     return {
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       filename: `${safeSlug}_scoreboard.xlsx`,
+      body: xlsxBuffer,
+    };
+  }
+
+  /**
+   * Exports a Play/Exam History Detail record (Solo or Multiplayer, Play or Exam) in CSV, XLSX, or JSON format.
+   * Neutralizes Formula Injection in both CSV and XLSX cells and never exposes unrevealed exam answers.
+   */
+  public exportPlayExamHistoryDetail(
+    detail: PlayExamHistoryDetail,
+    format: ScoreboardExportFormat
+  ): { contentType: string; filename: string; body: string | Buffer } {
+    const safeSlug = detail.historyId.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    if (format === 'json') {
+      const { ownerUserId: _omitOwner, ...safeDetail } = detail;
+      return {
+        contentType: 'application/json; charset=utf-8',
+        filename: `${safeSlug}_history.json`,
+        body: JSON.stringify(
+          {
+            ...safeDetail,
+            exportedAt: new Date().toISOString(),
+          },
+          null,
+          2
+        ),
+      };
+    }
+
+    const headers = [
+      'Hạng',
+      'Họ và tên',
+      'Phòng ban / Đơn vị',
+      'Mã nhân viên',
+      'Tên game',
+      'Chế độ',
+      'Hình thức',
+      'Trạng thái',
+      'Số câu đúng',
+      'Số câu sai',
+      'Tổng số câu',
+      'Tỷ lệ đúng (%)',
+      'Điểm đạt được',
+      'Điểm tối đa',
+      'Kết quả Đạt/Chưa đạt',
+      'Xếp loại đánh giá',
+      'Lần làm thứ',
+      'Tổng số lượt',
+      'Thời gian làm bài (giây)',
+      'Thời điểm bắt đầu',
+      'Thời điểm hoàn thành',
+    ];
+
+    const translateStatus = (st: string): string => {
+      switch (st) {
+        case 'AUTO_SUBMITTED':
+          return 'Tự động thu bài';
+        case 'CLOSED':
+          return 'Đã đóng';
+        case 'COMPLETED':
+        default:
+          return 'Đã hoàn thành';
+      }
+    };
+
+    const modeLabel = detail.sessionMode === 'EXAM' ? 'Thi nghiêm túc' : 'Chơi';
+    const deliveryLabel =
+      detail.deliveryMode === 'MULTIPLAYER'
+        ? `Nhóm${detail.roomCode ? ` (Phòng ${detail.roomCode})` : ''}`
+        : 'Cá nhân';
+
+    const rows: unknown[][] = detail.participants.map((p, idx) => {
+      const evalRes = evaluatePerformanceResult({
+        correctAnswers: p.correctAnswers,
+        totalQuestions: p.totalQuestions,
+        totalScore: p.score,
+        maxPossibleScore: p.maxPossibleScore,
+        sessionMode: detail.sessionMode,
+        passThresholdPercent: detail.passThresholdPercent,
+      });
+
+      const passLabel =
+        detail.sessionMode === 'EXAM'
+          ? p.isPassed === null
+            ? 'N/A'
+            : p.isPassed
+              ? 'Đạt'
+              : 'Chưa đạt'
+          : 'Không áp dụng';
+
+      return [
+        p.rank ?? idx + 1,
+        p.fullName,
+        p.departmentUnit || '',
+        p.employeeCode || '',
+        detail.gameTitle,
+        modeLabel,
+        deliveryLabel,
+        translateStatus(p.status),
+        p.correctAnswers,
+        p.wrongAnswers,
+        p.totalQuestions,
+        p.accuracyPercent,
+        p.score,
+        p.maxPossibleScore,
+        passLabel,
+        evalRes.tierLabel,
+        p.attemptNumber,
+        p.usedAttempts,
+        Number((p.durationMs / 1000).toFixed(1)),
+        p.startedAt || detail.startedAt || '',
+        p.finishedAt || detail.finishedAt || '',
+      ];
+    });
+
+    if (format === 'csv') {
+      return {
+        contentType: 'text/csv; charset=utf-8',
+        filename: `${safeSlug}_history.csv`,
+        body: buildCsvDocument(headers, rows),
+      };
+    }
+
+    const workbook = XLSX.utils.book_new();
+    const sanitizedAoA: Array<Array<string | number | boolean>> = [
+      headers.map(h => sanitizeSpreadsheetText(h)),
+      ...rows.map(row => row.map(cell => sanitizeSpreadsheetText(cell))),
+    ];
+    const wsResults = XLSX.utils.aoa_to_sheet(sanitizedAoA);
+    XLSX.utils.book_append_sheet(workbook, wsResults, 'Ket Qua Phien');
+
+    const metaRows: Array<Array<string | number | boolean>> = [
+      ['Thông tin phiên', 'Giá trị'].map(h => sanitizeSpreadsheetText(h)),
+      ['Mã lịch sử', sanitizeSpreadsheetText(detail.historyId)],
+      ['Tên game', sanitizeSpreadsheetText(detail.gameTitle)],
+      ['Loại game', sanitizeSpreadsheetText(detail.gameType)],
+      ['Chế độ', sanitizeSpreadsheetText(modeLabel)],
+      ['Hình thức', sanitizeSpreadsheetText(deliveryLabel)],
+      ['Trạng thái', sanitizeSpreadsheetText(translateStatus(detail.status))],
+      ['Số người tham gia', detail.participantCount],
+      ['Điểm trung bình', detail.averageScore],
+      ['Điểm cao nhất', detail.highestScore],
+      ['Điểm tối đa', detail.maxPossibleScore],
+      ['Độ chính xác trung bình (%)', detail.averageAccuracy],
+      ['Chính sách tính điểm', sanitizeSpreadsheetText(detail.officialAttemptPolicy)],
+      ['Ngưỡng đạt (%)', detail.passThresholdPercent],
+      ['Thời gian bắt đầu', sanitizeSpreadsheetText(detail.startedAt || '')],
+      ['Thời gian kết thúc', sanitizeSpreadsheetText(detail.finishedAt || '')],
+    ];
+    const wsMeta = XLSX.utils.aoa_to_sheet(metaRows);
+    XLSX.utils.book_append_sheet(workbook, wsMeta, 'Thong Tin Phien');
+
+    if (detail.questionBreakdown && detail.questionBreakdown.length > 0) {
+      const qHeaders = [
+        'Câu số',
+        'Nội dung câu hỏi',
+        'Câu trả lời của người chơi',
+        'Kết quả',
+        'Điểm đạt được',
+        'Thời gian phản hồi (ms)',
+        'Đáp án đúng',
+        'Giải thích',
+      ];
+      const qAoA: Array<Array<string | number | boolean>> = [
+        qHeaders.map(h => sanitizeSpreadsheetText(h)),
+        ...detail.questionBreakdown.map(q =>
+          [
+            q.questionIndex,
+            q.questionText,
+            q.playerAnswer,
+            q.timedOut ? 'Hết giờ / Thu bài' : q.isCorrect ? 'Đúng' : 'Sai',
+            q.pointsEarned,
+            q.responseTimeMs,
+            q.correctAnswer !== null ? q.correctAnswer : '[Bảo mật cho đến khi công bố]',
+            q.explanation !== null ? q.explanation : '',
+          ].map(c => sanitizeSpreadsheetText(c))
+        ),
+      ];
+      const wsQuestions = XLSX.utils.aoa_to_sheet(qAoA);
+      XLSX.utils.book_append_sheet(workbook, wsQuestions, 'Chi Tiet Cau Hoi');
+    }
+
+    const xlsxBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+
+    return {
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      filename: `${safeSlug}_history.xlsx`,
       body: xlsxBuffer,
     };
   }

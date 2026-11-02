@@ -276,6 +276,23 @@ export const MIGRATIONS: MigrationDefinition[] = [
         ON game_participant_attempts(participant_id, attempt_number DESC);
     `,
   },
+  {
+    version: 5,
+    name: '005_v3_history_session_mode_and_metadata',
+    upSql: `
+      ALTER TABLE practice_sessions ADD COLUMN session_mode TEXT NOT NULL DEFAULT 'PLAY';
+      ALTER TABLE practice_sessions ADD COLUMN participant_id TEXT;
+      ALTER TABLE practice_sessions ADD COLUMN player_name TEXT NOT NULL DEFAULT '';
+      ALTER TABLE practice_sessions ADD COLUMN department_unit TEXT NOT NULL DEFAULT '';
+      ALTER TABLE practice_sessions ADD COLUMN is_passed INTEGER;
+      ALTER TABLE practice_sessions ADD COLUMN submitted_reason TEXT;
+
+      ALTER TABLE room_history ADD COLUMN session_mode TEXT NOT NULL DEFAULT 'PLAY';
+      ALTER TABLE room_history ADD COLUMN max_possible_score INTEGER NOT NULL DEFAULT 0;
+      ALTER TABLE room_history ADD COLUMN pass_threshold_percent INTEGER NOT NULL DEFAULT 50;
+      ALTER TABLE room_history ADD COLUMN submitted_reason TEXT;
+    `,
+  },
 ];
 
 let dbInstance: DatabaseSync | null = null;

@@ -335,33 +335,41 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
 
     // Do not allow client-supplied custom specification to overwrite stored game
     const customSpecToUse = storedSpec ? undefined : gameSpecification;
+    const effectiveDisplayName =
+      resolvedParticipantName ||
+      (req.user?.displayName ? req.user.displayName.trim() : null) ||
+      'Người chơi cá nhân';
     const session = gameEngine.createSession(gameId, customSpecToUse, req.user?.userId ?? null, {
       participantId: participantId ?? null,
-      displayName: resolvedParticipantName,
+      displayName: effectiveDisplayName,
       departmentUnit: resolvedDepartment,
       employeeCode: resolvedEmployeeCode,
       lockToken: effectiveLockToken,
     });
 
-    if (participantId || resolvedParticipantName) {
-      const maxPossibleScore = calculateMaxPossibleScore(
-        session.specification.questions.length,
-        session.specification.settings.scoringMode
-      );
-      const attempt = persistenceRepo.recordParticipantAttemptStart({
-        gameId: session.specification.gameId,
-        participantId: participantId ?? null,
-        sessionId: session.sessionId,
-        deliveryMode: 'SOLO',
-        sessionMode,
-        displayName: resolvedParticipantName || 'Người chơi',
-        departmentUnit: resolvedDepartment || '',
-        employeeCode: resolvedEmployeeCode || '',
-        lockToken: effectiveLockToken,
-        totalQuestions: session.specification.questions.length,
-        maxPossibleScore,
-      });
-      session.attemptId = attempt.attemptId;
+    if (storedSpec || participantId || resolvedParticipantName) {
+      try {
+        const maxPossibleScore = calculateMaxPossibleScore(
+          session.specification.questions.length,
+          session.specification.settings.scoringMode
+        );
+        const attempt = persistenceRepo.recordParticipantAttemptStart({
+          gameId: session.specification.gameId,
+          participantId: participantId ?? null,
+          sessionId: session.sessionId,
+          deliveryMode: 'SOLO',
+          sessionMode,
+          displayName: effectiveDisplayName,
+          departmentUnit: resolvedDepartment || '',
+          employeeCode: resolvedEmployeeCode || '',
+          lockToken: effectiveLockToken,
+          totalQuestions: session.specification.questions.length,
+          maxPossibleScore,
+        });
+        session.attemptId = attempt.attemptId;
+      } catch {
+        // Ignore if gameId is not persisted in SQLite (e.g. ephemeral preview spec)
+      }
     }
 
     res.status(200).json(

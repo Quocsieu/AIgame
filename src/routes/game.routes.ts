@@ -26,6 +26,7 @@ import { roomStore } from '../multiplayer/room.store.js';
 import { multiplayerWsServer } from '../multiplayer/room.websocket.js';
 import {
   cleanupOrphanedAdventureGameAssets,
+  ensurePlayableAdventureAssetsWithFallback,
   listVerifiedAdventureAssetPacks,
   provisionAdventureAssetsForGame,
   resolveAdventureAssetPack,
@@ -973,9 +974,14 @@ gameRouter.get(
           }))
         : spec.questions;
 
+      const playableSpec =
+        spec.gameType === 'ADVENTURE'
+          ? ensurePlayableAdventureAssetsWithFallback(spec).specification
+          : spec;
+
       res.status(200).json(
         createSuccessResponse({
-          ...spec,
+          ...playableSpec,
           questions: returnedQuestions,
           ownerUserId,
           isPublic,
@@ -1196,31 +1202,18 @@ async function handleUpdateGameSpecification(req: Request, res: Response, next: 
           currentAdv.assetErrorCode = null;
           currentAdv.assetUpdatedAt = currentAdv.assetUpdatedAt || nowIso;
         } else {
-          const errDetail =
-            checkResult.errors.join('; ') ||
-            existingAdv?.assetError ||
-            'Chưa có đủ 3 tài nguyên hình ảnh hợp lệ (background, character, obstacle).';
-          currentAdv.version = Math.max(currentAdv.version || 1, 2);
-          currentAdv.assets = null;
-          currentAdv.assetPackSource = null;
-          currentAdv.assetStatus = 'ASSET_GENERATION_FAILED';
-          currentAdv.assetError = errDetail.slice(0, 500);
-          currentAdv.assetErrorCode =
-            existingAdv?.assetErrorCode || checkResult.errorCode || 'ADVENTURE_ASSETS_INCOMPLETE';
-          currentAdv.assetUpdatedAt = nowIso;
-
-          // Always preserve the edited questions and draft data (isPublic = false) before rejecting completion/publish
-          const draftToPreserve = {
-            ...updatedSpec,
-            isPublic: false,
-          };
-          gameStore.save(draftToPreserve, Date.now(), ownerUserId, false);
-
-          throw new AppError(
-            'ADVENTURE_ASSETS_INCOMPLETE',
-            `Không thể hoàn tất lưu hoặc xuất bản game Adventure khi bộ 3 tài nguyên hình ảnh (background, character, obstacle) chưa hợp lệ hoặc chưa được tạo đầy đủ. Bộ câu hỏi nháp đã được giữ lại để bạn thử tạo ảnh lại. Chi tiết: ${currentAdv.assetError}`,
-            422
-          );
+          // Mandatory per-slot safe fallback: preserve any valid slots and replace only missing/corrupted slots from verified default pack
+          const fallbackSpecRes = ensurePlayableAdventureAssetsWithFallback(updatedSpec);
+          const repairedAdv = fallbackSpecRes.specification.settings?.adventureConfig;
+          if (repairedAdv && repairedAdv.assets) {
+            currentAdv.version = Math.max(currentAdv.version || 1, 2);
+            currentAdv.assets = repairedAdv.assets;
+            currentAdv.assetPackSource = repairedAdv.assetPackSource ?? repairedAdv.assets.background.source;
+            currentAdv.assetStatus = 'READY';
+            currentAdv.assetError = null;
+            currentAdv.assetErrorCode = null;
+            currentAdv.assetUpdatedAt = nowIso;
+          }
         }
       }
     }

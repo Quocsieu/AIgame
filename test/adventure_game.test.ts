@@ -263,7 +263,7 @@ async function runAdventureGameTests() {
 
   const sessionCreateRes = await request(app)
     .post('/api/games/sessions')
-    .send({ gameId: motoGame.gameId, publicPlay: true });
+    .send({ gameId: motoGame.gameId, publicPlay: true, displayName: 'Kỹ thuật viên Gara' });
   assert.equal(sessionCreateRes.status, 200, 'Khởi tạo phiên chơi đơn cho game ADVENTURE phải thành công');
   const sessionId = sessionCreateRes.body.data.sessionId;
 
@@ -505,7 +505,7 @@ async function runAdventureGameTests() {
 
   const multiSessionCreate = await request(app)
     .post('/api/games/sessions')
-    .send({ gameId: multiTypeAdvGame.gameId, publicPlay: true });
+    .send({ gameId: multiTypeAdvGame.gameId, publicPlay: true, displayName: 'Kỹ thuật viên Đa Năng' });
   assert.equal(multiSessionCreate.status, 200);
   const multiSessionId = multiSessionCreate.body.data.sessionId;
   await request(app).post(`/api/games/sessions/${multiSessionId}/start`);

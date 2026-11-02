@@ -13,8 +13,13 @@ import {
   UsersIcon,
 } from '../components/Icons.js';
 import {
+  downloadPlayExamHistoryExport,
   fetchLearningAnalytics,
+  fetchPlayExamHistoryApi,
+  fetchPlayExamHistoryDetailApi,
   fetchPracticeHistory,
+  type PlayExamHistoryDetail,
+  type PlayExamHistoryListResult,
 } from '../services/api.js';
 import type { LibraryFilterPreset } from './AnalyticsPage.js';
 import type {
@@ -82,6 +87,74 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
   const [isChartLoading, setIsChartLoading] = useState<boolean>(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // V3: Play / Exam History State
+  const [historyData, setHistoryData] = useState<PlayExamHistoryListResult | null>(null);
+  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyModeFilter, setHistoryModeFilter] = useState<'ALL' | 'PLAY' | 'EXAM'>('ALL');
+  const [historyDeliveryFilter, setHistoryDeliveryFilter] = useState<'ALL' | 'SOLO' | 'MULTIPLAYER'>('ALL');
+  const [historySearch, setHistorySearch] = useState<string>('');
+  const [historySortOrder, setHistorySortOrder] = useState<'NEWEST' | 'OLDEST'>('NEWEST');
+  const [historyPage, setHistoryPage] = useState<number>(1);
+  const historyLimit = 10;
+
+  const [selectedHistoryDetail, setSelectedHistoryDetail] = useState<PlayExamHistoryDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState<boolean>(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+  const [exportingKey, setExportingKey] = useState<string | null>(null);
+  const [exportErrorMsg, setExportErrorMsg] = useState<string | null>(null);
+
+  const loadHistoryActivities = useCallback(async () => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const res = await fetchPlayExamHistoryApi({
+        sessionMode: historyModeFilter,
+        deliveryMode: historyDeliveryFilter,
+        search: historySearch,
+        sortOrder: historySortOrder,
+        page: historyPage,
+        limit: historyLimit,
+      });
+      setHistoryData(res);
+    } catch (err: any) {
+      setHistoryError(err?.message || 'Không thể tải danh sách lịch sử Chơi / Thi.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  }, [historyModeFilter, historyDeliveryFilter, historySearch, historySortOrder, historyPage]);
+
+  useEffect(() => {
+    loadHistoryActivities();
+  }, [loadHistoryActivities, currentUser?.userId]);
+
+  const handleOpenHistoryDetail = async (historyId: string) => {
+    setDetailLoading(true);
+    setDetailError(null);
+    setSelectedHistoryDetail(null);
+    try {
+      const detail = await fetchPlayExamHistoryDetailApi(historyId);
+      setSelectedHistoryDetail(detail);
+    } catch (err: any) {
+      setDetailError(err?.message || 'Không thể tải chi tiết phiên Chơi / Thi.');
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const handleExportHistory = async (historyId: string, format: 'csv' | 'xlsx') => {
+    const key = `${historyId}:${format}`;
+    setExportingKey(key);
+    setExportErrorMsg(null);
+    try {
+      await downloadPlayExamHistoryExport(historyId, format);
+    } catch (err: any) {
+      setExportErrorMsg(err?.message || 'Không thể xuất tệp kết quả.');
+    } finally {
+      setExportingKey(null);
+    }
+  };
+
   const loadAllStatistics = useCallback(
     async (selectedRange: ActivityRange = activityRange) => {
       setIsLoading(true);
@@ -96,13 +169,14 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         setAnalytics(allTimeRes);
         setRangeAnalytics(filteredRes || allTimeRes);
         setSessions(Array.isArray(sessionsRes) ? sessionsRes : []);
+        loadHistoryActivities();
       } catch (err: any) {
         setErrorMessage(err?.message || 'Không thể tải dữ liệu thống kê hoạt động.');
       } finally {
         setIsLoading(false);
       }
     },
-    [activityRange]
+    [activityRange, loadHistoryActivities]
   );
 
   useEffect(() => {
@@ -1647,6 +1721,894 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
             </section>
           </div>
         </>
+      )}
+
+      {/* E. Lịch sử Chơi / Thi (V3 Unified Play & Exam History + Detail + CSV/Excel Export) */}
+      <section
+        data-testid="play-exam-history-section"
+        aria-label="Lịch sử Chơi và Thi"
+        style={{
+          backgroundColor: 'var(--bg-surface)',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: '12px',
+          padding: '20px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '16px',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            flexWrap: 'wrap',
+            gap: '12px',
+          }}
+        >
+          <div>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: '1.08rem',
+                fontWeight: 800,
+                color: 'var(--text-primary)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <ClockIcon size={18} />
+              <span>Lịch sử Chơi / Thi</span>
+            </h2>
+            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+              Lưu trữ đầy đủ kết quả các phiên Chơi cá nhân, Thi cá nhân, Chơi nhóm và Thi nhóm. Hỗ trợ xem lại chi tiết và xuất báo cáo Excel / CSV.
+            </p>
+          </div>
+          <div
+            style={{
+              fontSize: '0.78rem',
+              fontWeight: 700,
+              color: 'var(--text-secondary)',
+              backgroundColor: 'var(--bg-subtle)',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            Tổng cộng: <strong style={{ color: 'var(--text-primary)' }}>{historyData?.total ?? 0}</strong> phiên
+          </div>
+        </div>
+
+        {/* Bộ lọc & Tìm kiếm */}
+        <div
+          data-testid="history-filters-bar"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '10px',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px',
+            backgroundColor: 'var(--bg-subtle)',
+            borderRadius: '10px',
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center' }}>
+            {/* Filter Chế độ: Tất cả / Chơi / Thi */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginRight: '4px' }}>
+                Chế độ:
+              </span>
+              {(
+                [
+                  { key: 'ALL', label: 'Tất cả' },
+                  { key: 'PLAY', label: 'Chơi' },
+                  { key: 'EXAM', label: 'Thi' },
+                ] as const
+              ).map((opt) => {
+                const active = historyModeFilter === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    data-testid={`history-filter-mode-${opt.key.toLowerCase()}`}
+                    onClick={() => {
+                      setHistoryModeFilter(opt.key);
+                      setHistoryPage(1);
+                    }}
+                    style={{
+                      padding: '5px 10px',
+                      borderRadius: '6px',
+                      fontSize: '0.76rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: active ? '1px solid var(--primary)' : '1px solid var(--border-strong)',
+                      backgroundColor: active ? 'var(--primary)' : 'var(--bg-surface)',
+                      color: active ? 'var(--primary-ink, #060913)' : 'var(--text-primary)',
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Filter Hình thức: Tất cả / Cá nhân / Nhóm */}
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', marginLeft: '6px' }}>
+              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginRight: '4px' }}>
+                Hình thức:
+              </span>
+              {(
+                [
+                  { key: 'ALL', label: 'Tất cả' },
+                  { key: 'SOLO', label: 'Cá nhân' },
+                  { key: 'MULTIPLAYER', label: 'Nhóm' },
+                ] as const
+              ).map((opt) => {
+                const active = historyDeliveryFilter === opt.key;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    data-testid={`history-filter-delivery-${opt.key.toLowerCase()}`}
+                    onClick={() => {
+                      setHistoryDeliveryFilter(opt.key);
+                      setHistoryPage(1);
+                    }}
+                    style={{
+                      padding: '5px 10px',
+                      borderRadius: '6px',
+                      fontSize: '0.76rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: active ? '1px solid var(--primary)' : '1px solid var(--border-strong)',
+                      backgroundColor: active ? 'var(--primary)' : 'var(--bg-surface)',
+                      color: active ? 'var(--primary-ink, #060913)' : 'var(--text-primary)',
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Search & Sort */}
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', flex: '1 1 260px', justifyContent: 'flex-end' }}>
+            <input
+              type="search"
+              data-testid="history-search-input"
+              value={historySearch}
+              onChange={(e) => {
+                setHistorySearch(e.target.value);
+                setHistoryPage(1);
+              }}
+              placeholder="Tìm theo tên game hoặc mã phiên..."
+              style={{
+                padding: '6px 12px',
+                borderRadius: '7px',
+                border: '1px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                fontSize: '0.8rem',
+                minWidth: '200px',
+                flex: '1 1 180px',
+                maxWidth: '300px',
+              }}
+            />
+            <select
+              data-testid="history-sort-select"
+              aria-label="Sắp xếp lịch sử"
+              value={historySortOrder}
+              onChange={(e) => {
+                setHistorySortOrder(e.target.value as 'NEWEST' | 'OLDEST');
+                setHistoryPage(1);
+              }}
+              style={{
+                padding: '6px 10px',
+                borderRadius: '7px',
+                border: '1px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              <option value="NEWEST">Mới nhất</option>
+              <option value="OLDEST">Cũ nhất</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Thông báo lỗi xuất file nếu có */}
+        {exportErrorMsg && (
+          <div
+            data-testid="history-export-error"
+            role="alert"
+            style={{
+              padding: '10px 14px',
+              borderRadius: '8px',
+              backgroundColor: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.35)',
+              color: 'var(--accent-rose)',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: '8px',
+            }}
+          >
+            <span>{exportErrorMsg}</span>
+            <button
+              type="button"
+              onClick={() => setExportErrorMsg(null)}
+              style={{
+                background: 'transparent',
+                border: 'none',
+                color: 'var(--accent-rose)',
+                fontWeight: 800,
+                cursor: 'pointer',
+              }}
+            >
+              Đóng
+            </button>
+          </div>
+        )}
+
+        {/* Loading / Error / Empty / Data Table */}
+        {historyLoading ? (
+          <div
+            data-testid="history-loading-state"
+            style={{
+              padding: '28px',
+              textAlign: 'center',
+              color: 'var(--text-secondary)',
+              fontSize: '0.86rem',
+              fontWeight: 600,
+            }}
+          >
+            Đang tải danh sách lịch sử Chơi / Thi...
+          </div>
+        ) : historyError ? (
+          <div
+            data-testid="history-error-state"
+            style={{
+              padding: '20px',
+              borderRadius: '10px',
+              backgroundColor: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              color: 'var(--accent-rose)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '12px',
+            }}
+          >
+            <span style={{ fontSize: '0.84rem', fontWeight: 600 }}>{historyError}</span>
+            <button
+              type="button"
+              data-testid="history-retry-btn"
+              onClick={() => loadHistoryActivities()}
+              style={{
+                padding: '6px 12px',
+                borderRadius: '6px',
+                border: '1px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Thử lại
+            </button>
+          </div>
+        ) : !historyData || historyData.items.length === 0 ? (
+          <div
+            data-testid="history-empty-state"
+            style={{
+              padding: '32px 16px',
+              textAlign: 'center',
+              color: 'var(--text-muted)',
+              borderRadius: '10px',
+              border: '1px dashed var(--border-subtle)',
+              fontSize: '0.85rem',
+            }}
+          >
+            Chưa có phiên Chơi hoặc Thi nào phù hợp với bộ lọc hiện tại.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto', width: '100%' }}>
+            <table
+              data-testid="play-exam-history-table"
+              style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+                fontSize: '0.82rem',
+                minWidth: '760px',
+              }}
+            >
+              <thead>
+                <tr
+                  style={{
+                    borderBottom: '1px solid var(--border-subtle)',
+                    color: 'var(--text-secondary)',
+                    textAlign: 'left',
+                    fontSize: '0.74rem',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  <th style={{ padding: '10px 8px' }}>Tên game</th>
+                  <th style={{ padding: '10px 8px' }}>Chế độ / Hình thức</th>
+                  <th style={{ padding: '10px 8px' }}>Mã phiên</th>
+                  <th style={{ padding: '10px 8px' }}>Người tham gia</th>
+                  <th style={{ padding: '10px 8px' }}>Thời gian</th>
+                  <th style={{ padding: '10px 8px' }}>Kết quả / Điểm</th>
+                  <th style={{ padding: '10px 8px' }}>Trạng thái</th>
+                  <th style={{ padding: '10px 8px', textAlign: 'right' }}>Thao tác</th>
+                </tr>
+              </thead>
+              <tbody>
+                {historyData.items.map((item) => {
+                  const isExam = item.sessionMode === 'EXAM';
+                  const isMulti = item.deliveryMode === 'MULTIPLAYER';
+                  const isExportingCsv = exportingKey === `${item.historyId}:csv`;
+                  const isExportingXlsx = exportingKey === `${item.historyId}:xlsx`;
+                  const displayCode =
+                    item.roomCode ||
+                    (item.sessionId ? item.sessionId.slice(0, 8).toUpperCase() : item.historyId);
+                  const statusLabel =
+                    item.submittedReason === 'EXAM_CLOSED_BY_HOST' || item.status === 'AUTO_SUBMITTED'
+                      ? 'BTC kết thúc (Tự động nộp)'
+                      : 'Hoàn tất';
+                  return (
+                    <tr
+                      key={item.historyId}
+                      data-testid={`history-row-${item.historyId}`}
+                      style={{
+                        borderBottom: '1px solid var(--border-subtle)',
+                      }}
+                    >
+                      <td style={{ padding: '12px 8px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        <div>{item.gameTitle}</div>
+                        {item.playerName && !isMulti && (
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+                            Người chơi: {item.playerName}
+                            {item.departmentUnit ? ` (${item.departmentUnit})` : ''}
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 8px' }}>
+                        <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              padding: '2px 7px',
+                              borderRadius: '999px',
+                              fontSize: '0.7rem',
+                              fontWeight: 800,
+                              backgroundColor: isExam ? 'rgba(245, 158, 11, 0.16)' : 'rgba(16, 185, 129, 0.15)',
+                              color: isExam ? 'var(--accent-amber)' : 'var(--accent-emerald)',
+                            }}
+                          >
+                            {isExam ? 'Thi' : 'Chơi'}
+                          </span>
+                          <span
+                            style={{
+                              padding: '2px 7px',
+                              borderRadius: '999px',
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              backgroundColor: 'var(--bg-subtle)',
+                              color: 'var(--text-secondary)',
+                              border: '1px solid var(--border-subtle)',
+                            }}
+                          >
+                            {isMulti ? 'Nhóm' : 'Cá nhân'}
+                          </span>
+                        </div>
+                      </td>
+                      <td
+                        style={{
+                          padding: '12px 8px',
+                          fontFamily: 'monospace',
+                          fontWeight: 700,
+                          color: 'var(--primary)',
+                        }}
+                      >
+                        {displayCode}
+                      </td>
+                      <td style={{ padding: '12px 8px', fontVariantNumeric: 'tabular-nums' }}>
+                        <span style={{ fontWeight: 700 }}>{item.participantCount}</span> người
+                      </td>
+                      <td style={{ padding: '12px 8px', fontSize: '0.75rem', color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
+                        <div>
+                          BĐ:{' '}
+                          {item.startedAt
+                            ? new Date(item.startedAt).toLocaleString('vi-VN')
+                            : new Date(item.createdAt).toLocaleString('vi-VN')}
+                        </div>
+                        <div>
+                          KT:{' '}
+                          {item.finishedAt
+                            ? new Date(item.finishedAt).toLocaleString('vi-VN')
+                            : new Date(item.createdAt).toLocaleString('vi-VN')}
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 8px', fontVariantNumeric: 'tabular-nums' }}>
+                        <div style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
+                          Cao nhất: {item.highestScore.toLocaleString('vi-VN')} đ
+                        </div>
+                        <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>
+                          {isMulti
+                            ? `TB: ${item.averageScore.toLocaleString('vi-VN')} đ`
+                            : item.passedCount > 0
+                              ? 'Đạt'
+                              : item.failedCount > 0
+                                ? 'Chưa đạt'
+                                : `Độ chính xác: ${item.averageAccuracy}%`}
+                          {(item.passedCount > 0 || item.failedCount > 0) && isMulti
+                            ? ` (${item.passedCount} Đạt / ${item.failedCount} Chưa đạt)`
+                            : ''}
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 8px' }}>
+                        <span
+                          style={{
+                            padding: '3px 8px',
+                            borderRadius: '6px',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            backgroundColor: 'var(--bg-subtle)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--border-subtle)',
+                          }}
+                        >
+                          {statusLabel}
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 8px', textAlign: 'right' }}>
+                        <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                          <button
+                            type="button"
+                            data-testid={`history-view-detail-${item.historyId}`}
+                            onClick={() => handleOpenHistoryDetail(item.historyId)}
+                            style={{
+                              padding: '5px 10px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--primary)',
+                              backgroundColor: 'var(--primary-subtle)',
+                              color: 'var(--primary)',
+                              fontSize: '0.75rem',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Xem chi tiết
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`history-export-csv-${item.historyId}`}
+                            disabled={isExportingCsv}
+                            onClick={() => handleExportHistory(item.historyId, 'csv')}
+                            style={{
+                              padding: '5px 9px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border-strong)',
+                              backgroundColor: 'var(--bg-surface)',
+                              color: 'var(--text-primary)',
+                              fontSize: '0.74rem',
+                              fontWeight: 700,
+                              cursor: isExportingCsv ? 'not-allowed' : 'pointer',
+                            }}
+                          >
+                            {isExportingCsv ? 'Đang xuất...' : 'Xuất CSV'}
+                          </button>
+                          <button
+                            type="button"
+                            data-testid={`history-export-xlsx-${item.historyId}`}
+                            disabled={isExportingXlsx}
+                            onClick={() => handleExportHistory(item.historyId, 'xlsx')}
+                            style={{
+                              padding: '5px 9px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border-strong)',
+                              backgroundColor: 'var(--bg-surface)',
+                              color: 'var(--text-primary)',
+                              fontSize: '0.74rem',
+                              fontWeight: 700,
+                              cursor: isExportingXlsx ? 'not-allowed' : 'pointer',
+                            }}
+                          >
+                            {isExportingXlsx ? 'Đang xuất...' : 'Xuất Excel'}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Phân trang */}
+        {historyData && historyData.total > historyLimit && (
+          <div
+            data-testid="history-pagination"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              paddingTop: '8px',
+              fontSize: '0.78rem',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            <span>
+              Trang {historyPage} / {Math.max(1, Math.ceil(historyData.total / historyLimit))}
+            </span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                disabled={historyPage <= 1}
+                onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontWeight: 700,
+                  cursor: historyPage <= 1 ? 'not-allowed' : 'pointer',
+                  opacity: historyPage <= 1 ? 0.5 : 1,
+                }}
+              >
+                Trang trước
+              </button>
+              <button
+                type="button"
+                disabled={historyPage >= Math.ceil(historyData.total / historyLimit)}
+                onClick={() => setHistoryPage((p) => p + 1)}
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontWeight: 700,
+                  cursor: historyPage >= Math.ceil(historyData.total / historyLimit) ? 'not-allowed' : 'pointer',
+                  opacity: historyPage >= Math.ceil(historyData.total / historyLimit) ? 0.5 : 1,
+                }}
+              >
+                Trang sau
+              </button>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {/* Modal Xem chi tiết phiên Chơi / Thi */}
+      {(detailLoading || detailError || selectedHistoryDetail) && (
+        <div
+          data-testid="history-detail-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Chi tiết phiên Chơi / Thi"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: 'rgba(6, 9, 19, 0.72)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            boxSizing: 'border-box',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setSelectedHistoryDetail(null);
+              setDetailError(null);
+              setDetailLoading(false);
+            }
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-strong)',
+              borderRadius: '14px',
+              width: '100%',
+              maxWidth: '980px',
+              maxHeight: '88vh',
+              overflowY: 'auto',
+              padding: '22px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '18px',
+              boxShadow: '0 24px 48px rgba(0,0,0,0.45)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: '12px',
+                borderBottom: '1px solid var(--border-subtle)',
+                paddingBottom: '14px',
+              }}
+            >
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                  {selectedHistoryDetail
+                    ? `Chi tiết phiên: ${selectedHistoryDetail.gameTitle}`
+                    : 'Chi tiết phiên Chơi / Thi'}
+                </h3>
+                {selectedHistoryDetail && (
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                    Mã phiên:{' '}
+                    <strong>
+                      {selectedHistoryDetail.roomCode ||
+                        (selectedHistoryDetail.sessionId
+                          ? selectedHistoryDetail.sessionId.slice(0, 8).toUpperCase()
+                          : selectedHistoryDetail.historyId)}
+                    </strong>{' '}
+                    • Chế độ: <strong>{selectedHistoryDetail.sessionMode === 'EXAM' ? 'Thi' : 'Chơi'}</strong> • Hình thức:{' '}
+                    <strong>
+                      {selectedHistoryDetail.deliveryMode === 'MULTIPLAYER' ? 'Nhóm' : 'Cá nhân'}
+                    </strong>{' '}
+                    • Trạng thái:{' '}
+                    <strong>
+                      {selectedHistoryDetail.submittedReason === 'EXAM_CLOSED_BY_HOST' ||
+                      selectedHistoryDetail.status === 'AUTO_SUBMITTED'
+                        ? 'BTC kết thúc (Tự động nộp)'
+                        : 'Hoàn tất'}
+                    </strong>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                {selectedHistoryDetail && (
+                  <>
+                    <button
+                      type="button"
+                      data-testid="modal-export-csv-btn"
+                      disabled={exportingKey === `${selectedHistoryDetail.historyId}:csv`}
+                      onClick={() => handleExportHistory(selectedHistoryDetail.historyId, 'csv')}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '7px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-subtle)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {exportingKey === `${selectedHistoryDetail.historyId}:csv`
+                        ? 'Đang xuất...'
+                        : 'Xuất CSV'}
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="modal-export-xlsx-btn"
+                      disabled={exportingKey === `${selectedHistoryDetail.historyId}:xlsx`}
+                      onClick={() => handleExportHistory(selectedHistoryDetail.historyId, 'xlsx')}
+                      style={{
+                        padding: '6px 12px',
+                        borderRadius: '7px',
+                        border: '1px solid var(--primary)',
+                        backgroundColor: 'var(--primary)',
+                        color: 'var(--primary-ink, #060913)',
+                        fontSize: '0.78rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {exportingKey === `${selectedHistoryDetail.historyId}:xlsx`
+                        ? 'Đang xuất...'
+                        : 'Xuất Excel (.xlsx)'}
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  data-testid="close-history-detail-modal"
+                  onClick={() => {
+                    setSelectedHistoryDetail(null);
+                    setDetailError(null);
+                    setDetailLoading(false);
+                  }}
+                  style={{
+                    padding: '6px 12px',
+                    borderRadius: '7px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-surface)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+
+            {detailLoading ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-secondary)' }}>
+                Đang tải chi tiết phiên...
+              </div>
+            ) : detailError ? (
+              <div style={{ padding: '16px', color: 'var(--accent-rose)', fontWeight: 600 }}>{detailError}</div>
+            ) : selectedHistoryDetail ? (
+              <>
+                {/* Bảng kết quả người chơi / thí sinh */}
+                <div>
+                  <h4 style={{ margin: '0 0 10px 0', fontSize: '0.92rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                    Danh sách kết quả người tham gia ({selectedHistoryDetail.participants.length})
+                  </h4>
+                  <div style={{ overflowX: 'auto' }}>
+                    <table
+                      data-testid="modal-participants-table"
+                      style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: '640px' }}
+                    >
+                      <thead>
+                        <tr
+                          style={{
+                            borderBottom: '1px solid var(--border-subtle)',
+                            color: 'var(--text-secondary)',
+                            textAlign: 'left',
+                            fontSize: '0.73rem',
+                          }}
+                        >
+                          <th style={{ padding: '8px' }}>Hạng</th>
+                          <th style={{ padding: '8px' }}>Họ và tên</th>
+                          <th style={{ padding: '8px' }}>Đơn vị / Phòng ban</th>
+                          <th style={{ padding: '8px' }}>Điểm số</th>
+                          <th style={{ padding: '8px' }}>Số câu đúng</th>
+                          <th style={{ padding: '8px' }}>Độ chính xác</th>
+                          <th style={{ padding: '8px' }}>Thời gian</th>
+                          <th style={{ padding: '8px' }}>Trạng thái nộp</th>
+                          <th style={{ padding: '8px' }}>Kết quả</th>
+                          <th style={{ padding: '8px' }}>Số lượt</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {selectedHistoryDetail.participants.map((p, idx) => {
+                          const submissionLabel =
+                            p.submittedReason === 'EXAM_CLOSED_BY_HOST' || p.status === 'AUTO_SUBMITTED'
+                              ? 'BTC kết thúc'
+                              : p.submittedReason === 'TIMER_EXPIRED'
+                                ? 'Hết giờ'
+                                : p.status === 'COMPLETED'
+                                  ? 'Nộp thủ công'
+                                  : 'Chưa nộp';
+                          const resultLabel =
+                            p.isPassed === true
+                              ? 'Đạt'
+                              : p.isPassed === false
+                                ? 'Chưa đạt'
+                                : p.status === 'COMPLETED' || p.status === 'AUTO_SUBMITTED'
+                                  ? 'Hoàn thành'
+                                  : 'Chưa nộp';
+                          return (
+                            <tr
+                              key={`${p.rank ?? idx}-${p.fullName}`}
+                              style={{ borderBottom: '1px solid var(--border-subtle)' }}
+                            >
+                              <td style={{ padding: '8px', fontWeight: 800 }}>#{p.rank ?? idx + 1}</td>
+                              <td style={{ padding: '8px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                {p.fullName}
+                              </td>
+                              <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>
+                                {p.departmentUnit || '—'}
+                              </td>
+                              <td style={{ padding: '8px', fontWeight: 800, color: 'var(--primary)' }}>
+                                {p.score.toLocaleString('vi-VN')} đ
+                              </td>
+                              <td style={{ padding: '8px' }}>
+                                {p.correctAnswers} / {p.totalQuestions}
+                              </td>
+                              <td style={{ padding: '8px' }}>{p.accuracyPercent}%</td>
+                              <td style={{ padding: '8px' }}>{formatDuration(p.durationMs)}</td>
+                              <td style={{ padding: '8px' }}>{submissionLabel}</td>
+                              <td style={{ padding: '8px', fontWeight: 700 }}>{resultLabel}</td>
+                              <td style={{ padding: '8px' }}>
+                                {p.usedAttempts} / {p.allowedAttempts}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Chi tiết từng câu hỏi (nếu có) */}
+                {selectedHistoryDetail.questionBreakdown && selectedHistoryDetail.questionBreakdown.length > 0 && (
+                  <div>
+                    <h4 style={{ margin: '0 0 10px 0', fontSize: '0.92rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                      Chi tiết câu trả lời ({selectedHistoryDetail.questionBreakdown.length} câu)
+                      {selectedHistoryDetail.sessionMode === 'EXAM' &&
+                        !selectedHistoryDetail.answersPublished && (
+                          <span
+                            style={{
+                              marginLeft: '10px',
+                              fontSize: '0.74rem',
+                              fontWeight: 600,
+                              color: 'var(--accent-amber)',
+                            }}
+                          >
+                            (Đáp án chuẩn đang được bảo mật theo quy chế Thi)
+                          </span>
+                        )}
+                    </h4>
+                    <div style={{ overflowX: 'auto' }}>
+                      <table
+                        data-testid="modal-questions-table"
+                        style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.79rem', minWidth: '580px' }}
+                      >
+                        <thead>
+                          <tr
+                            style={{
+                              borderBottom: '1px solid var(--border-subtle)',
+                              color: 'var(--text-secondary)',
+                              textAlign: 'left',
+                              fontSize: '0.73rem',
+                            }}
+                          >
+                            <th style={{ padding: '8px' }}>Câu</th>
+                            <th style={{ padding: '8px' }}>Nội dung câu hỏi</th>
+                            <th style={{ padding: '8px' }}>Câu trả lời đã chọn</th>
+                            {selectedHistoryDetail.answersPublished && (
+                              <th style={{ padding: '8px' }}>Đáp án đúng</th>
+                            )}
+                            <th style={{ padding: '8px' }}>Kết quả</th>
+                            <th style={{ padding: '8px' }}>Điểm</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedHistoryDetail.questionBreakdown.map((q) => (
+                            <tr key={q.questionId} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                              <td style={{ padding: '8px', fontWeight: 700 }}>#{q.questionIndex}</td>
+                              <td style={{ padding: '8px', color: 'var(--text-primary)' }}>{q.questionText}</td>
+                              <td style={{ padding: '8px' }}>{q.playerAnswer || '(Bỏ trống)'}</td>
+                              {selectedHistoryDetail.answersPublished && (
+                                <td style={{ padding: '8px', color: 'var(--accent-emerald)', fontWeight: 600 }}>
+                                  {q.correctAnswer || '—'}
+                                </td>
+                              )}
+                              <td
+                                style={{
+                                  padding: '8px',
+                                  fontWeight: 700,
+                                  color: q.isCorrect ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                                }}
+                              >
+                                {q.isCorrect ? 'Đúng' : 'Sai'}
+                              </td>
+                              <td style={{ padding: '8px', fontWeight: 700 }}>{q.pointsEarned} đ</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : null}
+          </div>
+        </div>
       )}
     </div>
   );

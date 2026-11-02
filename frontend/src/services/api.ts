@@ -1602,3 +1602,207 @@ export async function fetchAdminAiLogs(): Promise<AdminAiLogRecord[]> {
   }
   return data.data.logs || [];
 }
+
+// ==========================================
+// V3 Play / Exam History & Export APIs (/api/history/activities)
+// ==========================================
+
+export interface PlayExamHistoryItem {
+  historyId: string;
+  gameId: string;
+  gameTitle: string;
+  gameType: string;
+  scoringMode: ScoringMode;
+  sessionMode: 'PLAY' | 'EXAM';
+  deliveryMode: 'SOLO' | 'MULTIPLAYER';
+  roomId: string | null;
+  roomCode: string | null;
+  sessionId: string | null;
+  playerName: string | null;
+  departmentUnit: string | null;
+  participantCount: number;
+  completedCount: number;
+  passedCount: number;
+  failedCount: number;
+  averageScore: number;
+  highestScore: number;
+  maxPossibleScore: number;
+  averageAccuracy: number;
+  durationMs: number;
+  status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'CLOSED';
+  submittedReason: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+}
+
+export interface PlayExamHistoryParticipantRow {
+  rank: number | null;
+  participantId: string | null;
+  fullName: string;
+  departmentUnit: string;
+  employeeCode: string;
+  score: number;
+  maxPossibleScore: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number;
+  durationMs: number;
+  isPassed: boolean | null;
+  attemptNumber: number;
+  usedAttempts: number;
+  allowedAttempts: number;
+  status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'IN_PROGRESS' | 'PENDING';
+  submittedReason: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+export interface PlayExamHistoryQuestionRow {
+  questionIndex: number;
+  questionId: string;
+  questionText: string;
+  playerAnswer: string;
+  isCorrect: boolean;
+  pointsEarned: number;
+  responseTimeMs: number;
+  timedOut: boolean;
+  correctAnswer: string | null;
+  explanation: string | null;
+}
+
+export interface PlayExamHistoryDetail {
+  historyId: string;
+  gameId: string;
+  gameTitle: string;
+  gameType: string;
+  scoringMode: ScoringMode;
+  sessionMode: 'PLAY' | 'EXAM';
+  deliveryMode: 'SOLO' | 'MULTIPLAYER';
+  status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'CLOSED';
+  submittedReason: string | null;
+  roomId: string | null;
+  roomCode: string | null;
+  sessionId: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  durationMs: number;
+  totalQuestions: number;
+  maxPossibleScore: number;
+  officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
+  passThresholdPercent: number;
+  answersPublished: boolean;
+  participantCount: number;
+  completedCount: number;
+  passedCount: number;
+  failedCount: number;
+  averageScore: number;
+  highestScore: number;
+  averageAccuracy: number;
+  participants: PlayExamHistoryParticipantRow[];
+  questionBreakdown: PlayExamHistoryQuestionRow[];
+}
+
+export interface PlayExamHistoryListResult {
+  items: PlayExamHistoryItem[];
+  total: number;
+  page: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  summary: {
+    totalRuns: number;
+    playRuns: number;
+    examRuns: number;
+    soloRuns: number;
+    multiplayerRuns: number;
+    totalParticipants: number;
+  };
+}
+
+export async function fetchPlayExamHistoryApi(options?: {
+  sessionMode?: 'ALL' | 'PLAY' | 'EXAM';
+  deliveryMode?: 'ALL' | 'SOLO' | 'MULTIPLAYER';
+  gameId?: string;
+  search?: string;
+  sortOrder?: 'NEWEST' | 'OLDEST';
+  page?: number;
+  limit?: number;
+}): Promise<PlayExamHistoryListResult> {
+  const query = new URLSearchParams();
+  if (options?.sessionMode && options.sessionMode !== 'ALL') {
+    query.set('sessionMode', options.sessionMode);
+  }
+  if (options?.deliveryMode && options.deliveryMode !== 'ALL') {
+    query.set('deliveryMode', options.deliveryMode);
+  }
+  if (options?.gameId) query.set('gameId', options.gameId);
+  if (options?.search && options.search.trim()) query.set('search', options.search.trim());
+  if (options?.sortOrder) query.set('sortOrder', options.sortOrder);
+  if (options?.page) query.set('page', String(options.page));
+  if (options?.limit) query.set('limit', String(options.limit));
+  const qs = query.toString();
+
+  const res = await fetch(`${API_BASE_URL}/history/activities${qs ? `?${qs}` : ''}`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải lịch sử Chơi / Thi.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function fetchPlayExamHistoryDetailApi(
+  historyId: string
+): Promise<PlayExamHistoryDetail> {
+  const res = await fetch(
+    `${API_BASE_URL}/history/activities/${encodeURIComponent(historyId)}`,
+    {
+      headers: buildAuthHeaders(),
+    }
+  );
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải chi tiết phiên Chơi / Thi.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function downloadPlayExamHistoryExport(
+  historyId: string,
+  format: 'csv' | 'xlsx' | 'json'
+): Promise<void> {
+  const res = await fetch(
+    `${API_BASE_URL}/history/activities/${encodeURIComponent(historyId)}/export?format=${format}`,
+    {
+      headers: buildAuthHeaders(),
+    }
+  );
+  if (!res.ok) {
+    let message = 'Lỗi khi xuất tệp kết quả.';
+    try {
+      const errJson = await res.json();
+      message = errJson.error?.message || message;
+    } catch {
+      // ignore
+    }
+    throw new Error(message);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const safeId = historyId.replace(/[^a-zA-Z0-9_-]/g, '_');
+  a.download = `${safeId}_history.${format}`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
