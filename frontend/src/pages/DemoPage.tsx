@@ -448,11 +448,12 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     presetId: effectiveBootSpec?.settings?.audioConfig?.presetId || 'ENERGETIC_ARENA',
     customAudioUrl: effectiveBootSpec?.settings?.audioConfig?.customAudioUrl,
     customAudioName: effectiveBootSpec?.settings?.audioConfig?.customAudioName,
-    volume: effectiveBootSpec?.settings?.audioConfig?.volume ?? 0.5,
+    volume: effectiveBootSpec?.settings?.audioConfig?.volume ?? 0.7,
     countdownSoundEnabled: effectiveBootSpec?.settings?.audioConfig?.countdownSoundEnabled ?? true,
     countdownTriggerSeconds: effectiveBootSpec?.settings?.audioConfig?.countdownTriggerSeconds ?? 5,
   }));
   const [isAudioPreviewPlaying, setIsAudioPreviewPlaying] = useState<boolean>(false);
+  const [isAudioMuted, setIsAudioMuted] = useState<boolean>(() => soundManager.isMuted());
   const [isUploadingAudio, setIsUploadingAudio] = useState<boolean>(false);
 
   // V2 BTC Roster & Scoreboard Manager State
@@ -641,20 +642,87 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     }
   }, [initialSpec]);
 
-  // Dừng phát nhạc nghe thử khi thoát khỏi trang Tạo Game
+  // Đồng bộ trạng thái âm thanh và dừng phát nhạc nghe thử khi thoát khỏi trang Tạo Game
   useEffect(() => {
+    const unsubscribe = soundManager.subscribe(() => {
+      setIsAudioPreviewPlaying(soundManager.getIsPreviewing());
+      setIsAudioMuted(soundManager.isMuted());
+    });
     return () => {
+      unsubscribe();
       soundManager.stopPreview();
     };
   }, []);
 
+  const startAudioPreviewWithFeedback = (cfg: GameAudioConfig) => {
+    if (cfg.presetId === 'NONE') {
+      soundManager.stopPreview();
+      setIsAudioPreviewPlaying(false);
+      return;
+    }
+    if (cfg.presetId === 'CUSTOM' && !cfg.customAudioUrl) {
+      soundManager.stopPreview();
+      setIsAudioPreviewPlaying(false);
+      toast.warning(
+        'Vui lòng tải lên tệp âm thanh (.mp3, .wav, .ogg) trước khi nghe thử nhạc tùy chỉnh.',
+        'Chưa có tệp nhạc'
+      );
+      return;
+    }
+    const started = soundManager.playPreview(cfg, {
+      onStateChange: (playing) => {
+        setIsAudioPreviewPlaying(playing);
+      },
+      onError: (msg) => {
+        setIsAudioPreviewPlaying(false);
+        toast.error(msg, 'Không thể phát âm thanh');
+      },
+    });
+    setIsAudioPreviewPlaying(started);
+    setIsAudioMuted(soundManager.isMuted());
+  };
+
   const handleToggleAudioPreview = () => {
-    if (isAudioPreviewPlaying) {
+    if (isAudioPreviewPlaying || soundManager.getIsPreviewing()) {
       soundManager.stopPreview();
       setIsAudioPreviewPlaying(false);
     } else {
-      soundManager.playPreview(audioConfig);
-      setIsAudioPreviewPlaying(true);
+      startAudioPreviewWithFeedback(audioConfig);
+    }
+  };
+
+  const handleToggleCreatorAudioMute = () => {
+    const nextMuted = soundManager.toggleMute();
+    setIsAudioMuted(nextMuted);
+  };
+
+  const handleCreatorAudioVolumeChange = (volPercent: number) => {
+    const clampedPercent = Math.max(0, Math.min(100, Math.round(volPercent)));
+    const normalizedVol = Number((clampedPercent / 100).toFixed(2));
+    soundManager.setVolume(clampedPercent);
+    if (isAudioMuted && clampedPercent > 0) {
+      soundManager.setMuted(false);
+      setIsAudioMuted(false);
+    }
+    const nextCfg: GameAudioConfig = {
+      ...audioConfig,
+      volume: normalizedVol,
+    };
+    setAudioConfig(nextCfg);
+    if (generatedSpec) {
+      setGeneratedSpec((prev) =>
+        prev
+          ? {
+              ...prev,
+              settings: {
+                ...prev.settings,
+                audioConfig: nextCfg,
+              },
+            }
+          : prev
+      );
+      setSavedForLater(false);
+      setSaveStatus('dirty');
     }
   };
 
@@ -673,6 +741,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         customAudioName: uploaded.fileName,
       };
       setAudioConfig(nextCfg);
+      if (isAudioPreviewPlaying || soundManager.getIsPreviewing()) {
+        startAudioPreviewWithFeedback(nextCfg);
+      }
       if (generatedSpec) {
         setGeneratedSpec((prev) =>
           prev
@@ -1958,6 +2029,8 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           : {}),
       },
     };
+    soundManager.stopPreview();
+    setIsAudioPreviewPlaying(false);
     setPlaytestSpec(snapshot);
     setIsPlaytestOpen(true);
   };
@@ -3956,9 +4029,13 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                           presetId: nextPreset,
                         };
                         setAudioConfig(nextCfg);
-                        if (isAudioPreviewPlaying) {
-                          soundManager.stopPreview();
-                          setIsAudioPreviewPlaying(false);
+                        if (isAudioPreviewPlaying || soundManager.getIsPreviewing()) {
+                          if (nextPreset === 'NONE' || (nextPreset === 'CUSTOM' && !nextCfg.customAudioUrl)) {
+                            soundManager.stopPreview();
+                            setIsAudioPreviewPlaying(false);
+                          } else {
+                            startAudioPreviewWithFeedback(nextCfg);
+                          }
                         }
                         if (generatedSpec) {
                           setGeneratedSpec((prev) =>
@@ -3987,19 +4064,17 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     >
                       {AUDIO_PRESET_CATALOG.map((preset) => (
                         <option key={preset.presetId} value={preset.presetId}>
-                          {preset.label}
+                          {preset.presetId === 'CUSTOM' && audioConfig.customAudioName
+                            ? `Nhạc tải lên: ${audioConfig.customAudioName}`
+                            : preset.label}
                         </option>
                       ))}
-                      {audioConfig.customAudioUrl && (
-                        <option value="CUSTOM">
-                          Nhạc tải lên: {audioConfig.customAudioName || 'Custom Audio'}
-                        </option>
-                      )}
                     </select>
 
                     <button
                       type="button"
                       data-testid="audio-preview-btn"
+                      aria-pressed={isAudioPreviewPlaying}
                       onClick={handleToggleAudioPreview}
                       disabled={audioConfig.presetId === 'NONE'}
                       style={{
@@ -4017,6 +4092,60 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     >
                       {isAudioPreviewPlaying ? '⏹ Dừng nghe' : '🔊 Nghe thử'}
                     </button>
+
+                    <div
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.35rem',
+                        padding: '0.28rem 0.55rem',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-input)',
+                      }}
+                    >
+                      <button
+                        type="button"
+                        data-testid="creator-audio-mute-btn"
+                        onClick={handleToggleCreatorAudioMute}
+                        title={isAudioMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
+                        style={{
+                          border: 'none',
+                          background: 'transparent',
+                          color: isAudioMuted ? 'var(--text-muted)' : 'var(--primary)',
+                          fontSize: '0.78rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                          padding: 0,
+                        }}
+                      >
+                        {isAudioMuted ? '🔇' : '🔊'}
+                      </button>
+                      <input
+                        type="range"
+                        data-testid="creator-audio-volume-slider"
+                        min={0}
+                        max={100}
+                        step={5}
+                        value={
+                          isAudioMuted
+                            ? 0
+                            : Math.round(
+                                (audioConfig.volume <= 1
+                                  ? audioConfig.volume * 100
+                                  : audioConfig.volume) || 70
+                              )
+                        }
+                        onChange={(e) => handleCreatorAudioVolumeChange(Number(e.target.value))}
+                        aria-label="Âm lượng nhạc nền"
+                        style={{
+                          width: '60px',
+                          height: '5px',
+                          accentColor: 'var(--primary)',
+                          cursor: 'pointer',
+                        }}
+                      />
+                    </div>
 
                     <label
                       style={{

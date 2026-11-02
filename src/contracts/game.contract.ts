@@ -569,8 +569,19 @@ export const GameAudioConfigSchema = z.object({
   presetId: AudioPresetIdEnum.default('ENERGETIC_ARENA').optional(),
   customAudioUrl: z.string().nullable().optional(),
   customAudioName: z.string().nullable().optional(),
-  volume: z.number().min(0).max(1).default(0.6).optional(),
+  customAudioFileName: z.string().nullable().optional(),
+  customAudioMimeType: z.string().nullable().optional(),
+  customAudioSizeBytes: z.number().nullable().optional(),
+  volume: z
+    .number()
+    .min(0)
+    .max(100)
+    .transform((v) => (v > 1 ? Number((v / 100).toFixed(4)) : v))
+    .default(0.7)
+    .optional(),
+  countdownSoundEnabled: z.boolean().default(true).optional(),
   countdownTriggerSeconds: z.number().int().min(0).max(60).default(5).optional(),
+  sfxEnabled: z.boolean().default(true).optional(),
 });
 export type GameAudioConfig = z.infer<typeof GameAudioConfigSchema>;
 

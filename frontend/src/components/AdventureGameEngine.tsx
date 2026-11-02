@@ -3,6 +3,7 @@ import {
   buildDefaultAdventureConfig,
   syncAdventureStagesWithQuestions,
 } from '../config/adventureThemes.js';
+import { soundManager } from '../services/audio.js';
 import type {
   AdventureAssetMetadata,
   AdventureConfig,
@@ -1231,6 +1232,11 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
         const fullQ = activeQuestion as Partial<GameQuestion>;
         const isCorrect = evaluateRunnerPreviewAnswer(activeQuestion, trimmed);
+        if (isCorrect) {
+          soundManager.playCorrect();
+        } else {
+          soundManager.playWrong();
+        }
         const pts = isCorrect ? 100 : 0;
         setPreviewScore(prev => prev + pts);
         if (isCorrect) {

@@ -389,6 +389,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const playtestQuestionStartedAtRef = useRef<number>(Date.now());
   const playtestStartedAtRef = useRef<number>(Date.now());
   const playtestMaxStreakRef = useRef<number>(0);
+  const adventureCheckpointOpenRef = useRef<boolean>(false);
 
   const clearAutoAdvanceTimer = () => {
     if (autoAdvanceTimerRef.current !== null) {
@@ -400,16 +401,17 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const handleToggleAudioMute = () => {
     const nextMuted = soundManager.toggleMute();
     setAudioMuted(nextMuted);
-    if (!nextMuted) {
+    if (!nextMuted && !finalResult) {
       const spec = loadedSpec || initialSpec;
       soundManager.startSessionAudio(spec?.settings?.audioConfig);
     }
   };
 
-  const handleAudioVolumeChange = (vol: number) => {
-    soundManager.setVolume(vol);
-    setAudioVolume(vol);
-    if (audioMuted && vol > 0) {
+  const handleAudioVolumeChange = (volPercent: number) => {
+    const clamped = Math.max(0, Math.min(100, Math.round(volPercent)));
+    soundManager.setVolume(clamped);
+    setAudioVolume(clamped);
+    if (audioMuted && clamped > 0) {
       soundManager.setMuted(false);
       setAudioMuted(false);
     }
@@ -435,6 +437,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
   const startCountdown = (durationSec: number) => {
     stopTimer();
+    soundManager.resetCountdownTracker();
     const safeSec = Math.max(0, Math.ceil(durationSec));
     setTimeLeft(safeSec);
     if (safeSec <= 0) {
@@ -459,6 +462,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   useEffect(() => {
     if (!currentQuestion || questionFeedback || isQuestionTimedOut || inlineEditOpen) return;
     const spec = loadedSpec || initialSpec;
+    if (spec?.gameType === 'ADVENTURE' && !adventureCheckpointOpenRef.current) return;
     soundManager.checkCountdownTick(timeLeft, spec?.settings?.audioConfig);
   }, [timeLeft, currentQuestion?.id, questionFeedback, isQuestionTimedOut, inlineEditOpen, loadedSpec, initialSpec]);
 
@@ -695,6 +699,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
   const handleAdventureCheckpointModalChange = React.useCallback(
     (isOpen: boolean) => {
+      adventureCheckpointOpenRef.current = isOpen;
       const spec = loadedSpec || initialSpec;
       if (spec?.gameType !== 'ADVENTURE') return;
       if (isOpen) {
@@ -725,6 +730,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         }
       } else {
         stopTimer();
+        soundManager.resetCountdownTracker();
       }
     },
     [loadedSpec, initialSpec, questionFeedback, currentQuestion?.timePerQuestion, playtestMode, sessionId]
@@ -2346,8 +2352,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               min={0}
               max={100}
               step={5}
-              value={audioMuted ? 0 : Math.round(audioVolume * 100)}
-              onChange={(e) => handleAudioVolumeChange(Number(e.target.value) / 100)}
+              value={
+                audioMuted
+                  ? 0
+                  : Math.round(
+                      audioVolume > 0 && audioVolume <= 1 ? audioVolume * 100 : audioVolume
+                    )
+              }
+              onChange={(e) => handleAudioVolumeChange(Number(e.target.value))}
               aria-label="Âm lượng"
               style={{
                 width: '64px',

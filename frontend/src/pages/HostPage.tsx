@@ -96,6 +96,7 @@ export const HostPage: React.FC<HostPageProps> = ({
 
   const socketRef = useRef<GameSocketClient | null>(null);
   const timerIntervalRef = useRef<any>(null);
+  const hasPlayedFinishSfxRef = useRef<boolean>(false);
 
   const stopTimer = () => {
     if (timerIntervalRef.current) {
@@ -106,6 +107,7 @@ export const HostPage: React.FC<HostPageProps> = ({
 
   const startTimer = (durationSec: number) => {
     stopTimer();
+    soundManager.resetCountdownTracker();
     setTimeRemaining(durationSec);
     timerIntervalRef.current = setInterval(() => {
       setTimeRemaining((prev) => {
@@ -117,6 +119,11 @@ export const HostPage: React.FC<HostPageProps> = ({
       });
     }, 1000);
   };
+
+  useEffect(() => {
+    if (viewState !== 'question' || timeRemaining <= 0) return;
+    soundManager.checkCountdownTick(timeRemaining);
+  }, [viewState, timeRemaining]);
 
   const connectToSocket = (code: string, token: string) => {
     if (socketRef.current) {
@@ -223,6 +230,10 @@ export const HostPage: React.FC<HostPageProps> = ({
     });
 
     client.on('question.started', (msg: any) => {
+      hasPlayedFinishSfxRef.current = false;
+      if (!soundManager.getIsPlaying()) {
+        soundManager.startBackgroundMusic();
+      }
       setCurrentQuestion(msg.question);
       setAnswerCount(typeof msg.answeredCount === 'number' ? msg.answeredCount : 0);
       setViewState('question');
@@ -263,7 +274,10 @@ export const HostPage: React.FC<HostPageProps> = ({
     client.on('game.finished', (msg: any) => {
       stopTimer();
       soundManager.stopBackgroundMusic();
-      soundManager.playSfx('finish');
+      if (!hasPlayedFinishSfxRef.current) {
+        hasPlayedFinishSfxRef.current = true;
+        soundManager.playSfx('finish');
+      }
       setFinishData({
         winner: msg.winner,
         leaderboard: msg.leaderboard || [],

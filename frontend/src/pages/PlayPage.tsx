@@ -126,6 +126,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
     if (isLeaving) return;
     setIsLeaving(true);
     stopTimer();
+    soundManager.stopAll();
     const tokenKey = `token_${roomCode}`;
     const savedToken = sessionStorage.getItem(tokenKey);
     if (socketRef.current && savedToken) {
@@ -151,6 +152,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
   const socketRef = useRef<GameSocketClient | null>(null);
   const timerIntervalRef = useRef<any>(null);
+  const lastRevealedQuestionIdRef = useRef<string | null>(null);
+  const hasPlayedFinishSfxRef = useRef<boolean>(false);
 
   const stopTimer = () => {
     if (timerIntervalRef.current) {
@@ -161,6 +164,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
   const startTimer = (durationSec: number) => {
     stopTimer();
+    soundManager.resetCountdownTracker();
     setTimeRemaining(durationSec);
     setTotalQuestionTime(durationSec);
 
@@ -174,6 +178,11 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       });
     }, 1000);
   };
+
+  useEffect(() => {
+    if (screen !== 'question' || isAnswerSubmitted || timeRemaining <= 0) return;
+    soundManager.checkCountdownTick(timeRemaining);
+  }, [screen, isAnswerSubmitted, timeRemaining]);
 
   const submitAnswer = (ans: string) => {
     if (!socketRef.current || isAnswerSubmitted || isSubmittingAnswer || !currentQuestion) return;
@@ -251,6 +260,12 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       if (typeof msg.answersPublished === 'boolean') {
         setAnswersPublished(msg.answersPublished);
       }
+      if (msg.audioConfig) {
+        soundManager.configure(msg.audioConfig);
+        if (msg.state === 'QUESTION_ACTIVE') {
+          soundManager.startBackgroundMusic(msg.audioConfig);
+        }
+      }
       if (msg.playerToken) {
         sessionStorage.setItem(tokenKey, msg.playerToken);
       }
@@ -274,11 +289,16 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
     });
 
     client.on('game.started', () => {
+      soundManager.startBackgroundMusic();
       setScreen('question');
       toast.info('Trò chơi đã bắt đầu! Chúc bạn thi đấu đạt kết quả cao nhất!', 'Bắt đầu');
     });
 
     client.on('question.started', (msg: any) => {
+      hasPlayedFinishSfxRef.current = false;
+      if (!soundManager.getIsPlaying()) {
+        soundManager.startBackgroundMusic();
+      }
       setCurrentQuestion(msg.question);
       setSelectedAnswer(null);
       setTextInputAnswer('');
@@ -298,13 +318,19 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       setIsSubmittingAnswer(false);
       setIsAnswerSubmitted(true);
       setAnswerError(null);
+      soundManager.playSfx('recorded');
       toast.info('Đã ghi nhận câu trả lời của bạn.', 'Đã nộp bài');
     });
 
     client.on('question.timeUp', () => {
       stopTimer();
       setIsSubmittingAnswer(false);
-      setIsAnswerSubmitted(true);
+      setIsAnswerSubmitted((prevSubmitted) => {
+        if (!prevSubmitted) {
+          soundManager.playSfx('timeout');
+        }
+        return true;
+      });
       toast.info('Hết thời gian trả lời!', 'Hết giờ');
     });
 
@@ -324,8 +350,10 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
       const isExamRedacted =
         (msg.sessionMode === 'EXAM' || sessionMode === 'EXAM') && !msg.answersPublished;
+      const revealKey = String(msg.questionId ?? msg.questionIndex ?? 'revealed');
 
-      if (msg.personalResult && !isExamRedacted) {
+      if (msg.personalResult && !isExamRedacted && lastRevealedQuestionIdRef.current !== revealKey) {
+        lastRevealedQuestionIdRef.current = revealKey;
         if (msg.personalResult.isCorrect) {
           soundManager.playSfx('correct');
           toast.success(`Chính xác! Bạn nhận được +${msg.personalResult.pointsEarned} điểm!`, 'Chính xác');
@@ -348,6 +376,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
     client.on('game.finished', (msg: any) => {
       stopTimer();
+      soundManager.stopBackgroundMusic();
       setIsSubmittingAnswer(false);
       if (msg.sessionMode === 'EXAM' || msg.sessionMode === 'PLAY') {
         setSessionMode(msg.sessionMode);
@@ -364,7 +393,10 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           setFinalRank(me.rank);
         }
       }
-      soundManager.playSfx('finish');
+      if (!hasPlayedFinishSfxRef.current) {
+        hasPlayedFinishSfxRef.current = true;
+        soundManager.playSfx('finish');
+      }
       setScreen('finish');
       toast.success('Trò chơi đã kết thúc! Xem kết quả chung cuộc của bạn bên dưới.', 'Kết thúc');
     });
@@ -399,6 +431,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
     return () => {
       stopTimer();
+      soundManager.stopAll();
       client.close();
     };
   }, [roomCode, displayName]);
