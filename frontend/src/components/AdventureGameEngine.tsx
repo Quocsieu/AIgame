@@ -1178,12 +1178,18 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
   const handleStartJourney = useCallback(async () => {
     if (assetLoadStatus !== 'READY') return;
+    soundManager.startSessionAudio({
+      ...(game.settings?.audioConfig || {}),
+      sessionMode: game.settings?.sessionMode || 'PLAY',
+      answersPublished: Boolean(game.settings?.answersPublished),
+    });
+    soundManager.playStart();
     if (mode === 'LIVE_SESSION' && effectiveOnStartSession) {
       await effectiveOnStartSession();
     }
     setIsJourneyStarted(true);
     setIsPaused(false);
-  }, [assetLoadStatus, mode, effectiveOnStartSession]);
+  }, [assetLoadStatus, mode, effectiveOnStartSession, game.settings]);
 
   const handleJumpAction = useCallback(() => {
     const canControl =
@@ -1196,6 +1202,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
     const jumped = triggerRunnerJump(physicsRef.current, canControl);
     if (jumped) {
+      soundManager.playAdventureJump();
       setJumpStateSnapshot(physicsRef.current.jumpState);
       setIsGroundedSnapshot(physicsRef.current.isGrounded);
     }
@@ -1321,6 +1328,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   const handleExitGame = useCallback(() => {
     setIsPaused(true);
     setCheckpointModalOpen(false);
+    soundManager.stopAll();
     onExit();
   }, [onExit]);
 
@@ -1416,11 +1424,17 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         playerAnchorScreenX,
       });
 
+      if (stepEvents.collidedObstacleIds.length > 0) {
+        soundManager.playAdventureHit();
+      }
       if (stepEvents.reachedCheckpointIndex !== null) {
+        soundManager.playAdventureCheckpoint();
         setActiveStageIndex(stepEvents.reachedCheckpointIndex);
         setCheckpointModalOpen(true);
       }
       if (stepEvents.reachedFinish && mode === 'CREATOR_PREVIEW' && !previewFinished) {
+        soundManager.stopAll();
+        soundManager.playVictory();
         setPreviewFinished(true);
       }
 

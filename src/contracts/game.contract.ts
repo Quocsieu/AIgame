@@ -556,6 +556,7 @@ export type OfficialAttemptPolicy = z.infer<typeof OfficialAttemptPolicyEnum>;
 
 export const AudioPresetIdEnum = z.enum([
   'NONE',
+  'UNIFIED_DEFAULT',
   'ENERGETIC_ARENA',
   'EXAM_FOCUS',
   'ADVENTURE_QUEST',
@@ -568,6 +569,7 @@ export const AudioPresetIdEnum = z.enum([
 export type AudioPresetId = z.infer<typeof AudioPresetIdEnum>;
 
 export const SoundPackIdEnum = z.enum([
+  'UNIFIED_DEFAULT',
   'ARCADE_FUN',
   'CLASSROOM_QUIZ',
   'ADVENTURE_QUEST',
@@ -645,6 +647,49 @@ export const GameAudioConfigSchema = z.object({
   sfxEnabled: z.boolean().default(true).optional(),
 });
 export type GameAudioConfig = z.infer<typeof GameAudioConfigSchema>;
+
+export function normalizeBackendAudioConfig(
+  raw?: Partial<GameAudioConfig> | null
+): GameAudioConfig {
+  if (!raw || typeof raw !== 'object') {
+    return {
+      enabled: true,
+      bgmEnabled: true,
+      presetId: 'ENERGETIC_ARENA',
+      soundPackId: 'ARCADE_FUN',
+      volume: 0.7,
+      countdownSoundEnabled: true,
+      countdownTriggerSeconds: 5,
+      sfxEnabled: true,
+    };
+  }
+  const isEnabled =
+    typeof raw.enabled === 'boolean'
+      ? raw.enabled
+      : !(raw.presetId === 'NONE' && raw.bgmEnabled === false && raw.sfxEnabled === false);
+
+  if (!isEnabled) {
+    return {
+      ...raw,
+      enabled: false,
+      bgmEnabled: false,
+      sfxEnabled: false,
+      countdownSoundEnabled: false,
+      volume: typeof raw.volume === 'number' ? (raw.volume > 1 ? raw.volume / 100 : raw.volume) : 0.7,
+    };
+  }
+  return {
+    ...raw,
+    enabled: true,
+    bgmEnabled: raw.bgmEnabled !== undefined ? Boolean(raw.bgmEnabled) : true,
+    sfxEnabled: raw.sfxEnabled !== undefined ? Boolean(raw.sfxEnabled) : true,
+    countdownSoundEnabled:
+      raw.countdownSoundEnabled !== undefined ? Boolean(raw.countdownSoundEnabled) : true,
+    presetId: raw.presetId && raw.presetId !== 'NONE' ? raw.presetId : 'ENERGETIC_ARENA',
+    soundPackId: raw.soundPackId && raw.soundPackId !== 'NONE' ? raw.soundPackId : 'ARCADE_FUN',
+    volume: typeof raw.volume === 'number' ? (raw.volume > 1 ? raw.volume / 100 : raw.volume) : 0.7,
+  };
+}
 
 export const GameSettingsSchema = z.object({
   questionCount: z.number().int().min(1).max(100).default(5),

@@ -353,6 +353,42 @@ async function runV3ComprehensiveAcceptanceTests() {
   }
   assert.equal(verifiedWavFilesCount, 28, 'Phải xác minh đủ 28 tệp WAV thật (4 packs x 7 cues)');
 
+  // Xác minh 16 tệp WAV của Bộ Âm Thanh Trò Chơi Mặc Định Hợp Nhất (/audio/default/*.wav)
+  const expectedDefaultWavFiles = [
+    'correct_applause.wav',
+    'correct_wow.wav',
+    'correct_cheer.wav',
+    'wrong_tete.wav',
+    'wrong_buzzer.wav',
+    'countdown.wav',
+    'timeout.wav',
+    'start.wav',
+    'finish.wav',
+    'top3.wav',
+    'recorded.wav',
+    'adventure_jump.wav',
+    'adventure_hit.wav',
+    'adventure_checkpoint.wav',
+    'bgm_default.wav',
+    'bgm_exam.wav',
+  ] as const;
+
+  const defaultManifestPath = path.join(projectRoot, 'public', 'audio', 'default', 'manifest.json');
+  const frontendDefaultManifestPath = path.join(projectRoot, 'frontend', 'public', 'audio', 'default', 'manifest.json');
+  assert.ok(fs.existsSync(defaultManifestPath), 'public/audio/default/manifest.json phải tồn tại');
+  assert.ok(fs.existsSync(frontendDefaultManifestPath), 'frontend/public/audio/default/manifest.json phải tồn tại');
+
+  for (const fileName of expectedDefaultWavFiles) {
+    const pubFile = path.join(projectRoot, 'public', 'audio', 'default', fileName);
+    const feFile = path.join(projectRoot, 'frontend', 'public', 'audio', 'default', fileName);
+    assert.ok(fs.existsSync(pubFile), `File WAV mặc định phải tồn tại: ${pubFile}`);
+    assert.ok(fs.existsSync(feFile), `File WAV mặc định frontend phải tồn tại: ${feFile}`);
+    const buf = fs.readFileSync(pubFile);
+    assert.ok(buf.length > 4000, `File WAV mặc định ${fileName} phải > 4KB (nhận: ${buf.length}B)`);
+    assert.equal(buf.subarray(0, 4).toString('ascii'), 'RIFF');
+    assert.equal(buf.subarray(8, 12).toString('ascii'), 'WAVE');
+  }
+
   // Kiểm thử contract schema với các trường V3 mới
   const parsedV3AudioCfg = GameAudioConfigSchema.parse({
     enabled: true,
@@ -1032,69 +1068,56 @@ async function runV3ComprehensiveAcceptanceTests() {
 
       const soundPackUiCheck = await page.eval(`(async () => {
         const legacyPresetSelect = document.querySelector('[data-testid="audio-preset-select"]');
-        const soundPackSections = document.querySelectorAll('[data-testid="v3-sound-pack-section"]');
-        const packSelect = document.querySelector('[data-testid="sound-pack-select"]');
-        const sfxPanel = document.querySelector('[data-testid="sfx-cue-preview-panel"]');
-        const previewBtn = document.querySelector('[data-testid="audio-preview-btn"]');
-        const stopPreviewBtn = document.querySelector('[data-testid="audio-stop-preview-btn"]');
+        const legacySoundPackSections = document.querySelectorAll('[data-testid="v3-sound-pack-section"]');
+        const legacyPackSelect = document.querySelector('[data-testid="sound-pack-select"]');
+        const legacySfxPanel = document.querySelector('[data-testid="sfx-cue-preview-panel"]');
+        const legacyPreviewBtn = document.querySelector('[data-testid="audio-preview-btn"]');
         const sessionSelect = document.querySelector('[data-testid="session-mode-select"]');
         const rosterSection = document.querySelector('[data-testid="creator-roster-section"]');
-        const soundSection = document.querySelector('[data-testid="v3-sound-pack-section"]');
+        const audioSections = document.querySelectorAll('[data-testid="creator-game-audio-section"]');
+        const audioSection = document.querySelector('[data-testid="creator-game-audio-section"]');
+        const audioCheckbox = document.querySelector('[data-testid="creator-game-audio-enabled"]');
+        const audioDesc = document.querySelector('[data-testid="creator-game-audio-description"]');
         const submitBtn = document.querySelector('[data-testid="create-game-submit-btn"]');
         const sm = window.__aiGameSoundManager;
-        if (!packSelect || !sfxPanel || !sm || !previewBtn || !stopPreviewBtn || !sessionSelect || !rosterSection || !soundSection || !submitBtn) {
+        if (!sm || !sessionSelect || !rosterSection || !audioSection || !audioCheckbox || !submitBtn) {
           return { ok: false };
         }
 
         // Kiểm tra thứ tự vị trí từ trên xuống dưới trong cột phải:
-        // 5. Chế độ Vận hành -> 6. Danh sách người tham gia -> 7. Bộ âm thanh chủ đề -> Nút Tạo Game Bằng AI
+        // 5. Chế độ Vận hành -> 6. Danh sách người tham gia -> 7. Âm thanh trò chơi -> Nút Tạo Game Bằng AI
         const sessionTop = sessionSelect.getBoundingClientRect().top;
         const rosterTop = rosterSection.getBoundingClientRect().top;
-        const soundTop = soundSection.getBoundingClientRect().top;
+        const soundTop = audioSection.getBoundingClientRect().top;
         const submitTop = submitBtn.getBoundingClientRect().top;
         const isOrderCorrect = sessionTop < rosterTop && rosterTop < soundTop && soundTop < submitTop;
 
-        const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
-        setter.call(packSelect, 'CORPORATE_TRAINING');
-        packSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        const initialChecked = audioCheckbox.checked;
+        audioCheckbox.click();
         await new Promise((r) => setTimeout(r, 60));
-        const packAfterCorporate = packSelect.value;
+        const afterUncheck = audioCheckbox.checked;
+        const enabledAfterUncheck = sm.getDiagnostics().enabled;
 
-        setter.call(packSelect, 'ARCADE_FUN');
-        packSelect.dispatchEvent(new Event('change', { bubbles: true }));
+        audioCheckbox.click();
         await new Promise((r) => setTimeout(r, 60));
-
-        // Bấm Nghe thử bộ âm thanh rồi bấm nút Dừng riêng biệt
-        previewBtn.click();
-        await new Promise((r) => setTimeout(r, 80));
-        const isPlayingAfterPreview = sm.getDiagnostics().isPreviewing;
-        stopPreviewBtn.click();
-        await new Promise((r) => setTimeout(r, 60));
-        const isPlayingAfterStop = sm.getDiagnostics().isPreviewing;
-
-        const btnCorrect = document.querySelector('[data-testid="preview-sfx-cue-correct"]');
-        const btnTop3 = document.querySelector('[data-testid="preview-sfx-cue-top3"]');
-        if (btnCorrect) btnCorrect.click();
-        await new Promise((r) => setTimeout(r, 120));
-        const afterCorrect = sm.getDiagnostics();
-
-        if (btnTop3) btnTop3.click();
-        await new Promise((r) => setTimeout(r, 120));
-        const afterTop3 = sm.getDiagnostics();
+        const afterRecheck = audioCheckbox.checked;
+        const enabledAfterRecheck = sm.getDiagnostics().enabled;
 
         return {
           ok: true,
           hasLegacyPresetSelect: Boolean(legacyPresetSelect),
-          soundPackSectionsCount: soundPackSections.length,
+          hasLegacySoundPackSection: legacySoundPackSections.length > 0,
+          hasLegacyPackSelect: Boolean(legacyPackSelect),
+          hasLegacySfxPanel: Boolean(legacySfxPanel),
+          hasLegacyPreviewBtn: Boolean(legacyPreviewBtn),
+          audioSectionsCount: audioSections.length,
           isOrderCorrect,
-          packValue: packSelect.value,
-          packAfterCorporate,
-          isPlayingAfterPreview,
-          isPlayingAfterStop,
-          cueButtonsCount: document.querySelectorAll('[data-testid^="preview-sfx-cue-"]').length,
-          overrideInputsCount: document.querySelectorAll('[data-testid^="upload-sfx-override-"]').length,
-          afterCorrectSfx: afterCorrect.lastSfxPlayed,
-          afterTop3Sfx: afterTop3.lastSfxPlayed,
+          initialChecked,
+          afterUncheck,
+          enabledAfterUncheck,
+          afterRecheck,
+          enabledAfterRecheck,
+          descText: audioDesc ? audioDesc.textContent.trim() : '',
           horizontalOverflowPx: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
         };
       })()`);
@@ -1102,31 +1125,32 @@ async function runV3ComprehensiveAcceptanceTests() {
       assert.equal(
         soundPackUiCheck.ok,
         true,
-        'Bảng điều khiển Bộ âm thanh chủ đề V3 và Danh sách người tham gia phải hiển thị trên Trang Tạo Game'
+        'Khu vực 7. Âm thanh trò chơi (1 checkbox duy nhất) và Danh sách người tham gia phải hiển thị trên Trang Tạo Game'
       );
+      assert.equal(soundPackUiCheck.hasLegacyPresetSelect, false, 'Đã xóa select V2 cũ');
+      assert.equal(soundPackUiCheck.hasLegacySoundPackSection, false, 'Đã xóa v3-sound-pack-section phức tạp');
+      assert.equal(soundPackUiCheck.hasLegacyPackSelect, false, 'Đã xóa dropdown chọn bộ âm thanh');
+      assert.equal(soundPackUiCheck.hasLegacySfxPanel, false, 'Đã xóa bảng nút nghe thử từng SFX');
+      assert.equal(soundPackUiCheck.hasLegacyPreviewBtn, false, 'Đã xóa nút Nghe thử bộ âm thanh trên trang Tạo Game');
       assert.equal(
-        soundPackUiCheck.hasLegacyPresetSelect,
-        false,
-        'Không còn cụm giao diện âm thanh V2 bị trùng phía trên (audio-preset-select đã xóa)'
-      );
-      assert.equal(
-        soundPackUiCheck.soundPackSectionsCount,
+        soundPackUiCheck.audioSectionsCount,
         1,
-        'Chỉ có duy nhất 1 khu vực Bộ âm thanh chủ đề (SFX + BGM)'
+        'Chỉ có duy nhất 1 khu vực 7. Âm thanh trò chơi (creator-game-audio-section)'
       );
       assert.equal(
         soundPackUiCheck.isOrderCorrect,
         true,
-        'Thứ tự cột phải bắt buộc: Chế độ Vận hành -> Danh sách người tham gia -> Bộ âm thanh chủ đề -> Nút Tạo Game Bằng AI'
+        'Thứ tự cột phải bắt buộc: Chế độ Vận hành -> Danh sách người tham gia -> Âm thanh trò chơi -> Nút Tạo Game Bằng AI'
       );
-      assert.equal(soundPackUiCheck.packAfterCorporate, 'CORPORATE_TRAINING');
-      assert.equal(soundPackUiCheck.packValue, 'ARCADE_FUN');
-      assert.equal(soundPackUiCheck.isPlayingAfterPreview, true, 'Nút Nghe thử bộ âm thanh phải phát được');
-      assert.equal(soundPackUiCheck.isPlayingAfterStop, false, 'Nút Dừng phải dừng phát nghe thử ngay lập tức');
-      assert.equal(soundPackUiCheck.cueButtonsCount, 7, 'Phải có đủ 7 nút nghe thử từng hiệu ứng âm thanh');
-      assert.equal(soundPackUiCheck.overrideInputsCount, 7, 'Phải có đủ 7 nút tải lên ghi đè từng hiệu ứng âm thanh');
-      assert.equal(soundPackUiCheck.afterCorrectSfx, 'correct');
-      assert.equal(soundPackUiCheck.afterTop3Sfx, 'top3');
+      assert.equal(soundPackUiCheck.initialChecked, true, 'Checkbox Sử dụng bộ âm thanh trò chơi mặc định bật');
+      assert.equal(soundPackUiCheck.afterUncheck, false);
+      assert.equal(soundPackUiCheck.enabledAfterUncheck, false);
+      assert.equal(soundPackUiCheck.afterRecheck, true);
+      assert.equal(soundPackUiCheck.enabledAfterRecheck, true);
+      assert.equal(
+        soundPackUiCheck.descText,
+        'Khi bật, hệ thống tự động phát nhạc nền và hiệu ứng âm thanh phù hợp với từng tình huống trong trò chơi.'
+      );
       assert.equal(soundPackUiCheck.horizontalOverflowPx, 0, 'Desktop 1440x900 không được tràn ngang');
 
       // 1B. Kiểm thử chi tiết Phần Danh sách người tham gia (Creator Roster) trên cột phải Trang Tạo Game + API Parse XLSX/CSV
@@ -1193,11 +1217,14 @@ async function runV3ComprehensiveAcceptanceTests() {
         await new Promise((r) => setTimeout(r, 60));
         const rowsAfterTabSwitch = document.querySelectorAll('[data-testid^="creator-roster-row-"]').length;
 
-        // Đổi sound pack -> không làm mất roster
-        const packSelect = document.querySelector('[data-testid="sound-pack-select"]');
-        selectSetter.call(packSelect, 'ADVENTURE_QUEST');
-        packSelect.dispatchEvent(new Event('change', { bubbles: true }));
-        await new Promise((r) => setTimeout(r, 60));
+        // Bật/tắt checkbox âm thanh trò chơi -> không làm mất roster
+        const audioCheckbox = document.querySelector('[data-testid="creator-game-audio-enabled"]');
+        if (audioCheckbox) {
+          audioCheckbox.click();
+          await new Promise((r) => setTimeout(r, 40));
+          audioCheckbox.click();
+          await new Promise((r) => setTimeout(r, 40));
+        }
         const rowsAfterSoundPackSwitch = document.querySelectorAll('[data-testid^="creator-roster-row-"]').length;
 
         return {

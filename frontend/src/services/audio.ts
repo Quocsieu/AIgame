@@ -5,6 +5,57 @@ import type {
   SoundPackId,
 } from '../types/index.js';
 
+export const UNIFIED_DEFAULT_AUDIO_ASSETS = {
+  packId: 'UNIFIED_DEFAULT' as const,
+  folder: '/audio/default',
+  correctVariants: [
+    {
+      key: 'correct_applause',
+      url: '/audio/default/correct_applause.wav',
+      label: 'Tiếng vỗ tay chúc mừng',
+    },
+    {
+      key: 'correct_wow',
+      url: '/audio/default/correct_wow.wav',
+      label: 'Tiếng "Wow!" hào hứng',
+    },
+    {
+      key: 'correct_cheer',
+      url: '/audio/default/correct_cheer.wav',
+      label: 'Tiếng reo hò "Bravo!" & vỗ tay',
+    },
+  ],
+  wrongVariants: [
+    {
+      key: 'wrong_tete',
+      url: '/audio/default/wrong_tete.wav',
+      label: 'Tiếng kèn "tè tè" hai nốt trầm',
+    },
+    {
+      key: 'wrong_buzzer',
+      url: '/audio/default/wrong_buzzer.wav',
+      label: 'Tiếng còi Buzzer game-show',
+    },
+  ],
+  cues: {
+    correct: '/audio/default/correct_applause.wav',
+    wrong: '/audio/default/wrong_tete.wav',
+    countdown: '/audio/default/countdown.wav',
+    timeout: '/audio/default/timeout.wav',
+    start: '/audio/default/start.wav',
+    finish: '/audio/default/finish.wav',
+    top3: '/audio/default/top3.wav',
+    recorded: '/audio/default/recorded.wav',
+    adventure_jump: '/audio/default/adventure_jump.wav',
+    adventure_hit: '/audio/default/adventure_hit.wav',
+    adventure_checkpoint: '/audio/default/adventure_checkpoint.wav',
+  },
+  bgm: {
+    default: '/audio/default/bgm_default.wav',
+    exam: '/audio/default/bgm_exam.wav',
+  },
+} as const;
+
 export const DEFAULT_AUDIO_CONFIG: GameAudioConfig = {
   enabled: true,
   bgmEnabled: true,
@@ -21,6 +72,61 @@ export const DEFAULT_AUDIO_CONFIG: GameAudioConfig = {
   countdownTriggerSeconds: 5,
   sfxEnabled: true,
 };
+
+/**
+ * Normalizes any new or legacy GameAudioConfig into a consistent structure while
+ * strictly preserving `enabled: false` on legacy games that had audio turned off.
+ */
+export function normalizeGameAudioConfig(
+  raw?: Partial<GameAudioConfig> | null
+): GameAudioConfig {
+  if (!raw || typeof raw !== 'object') {
+    return { ...DEFAULT_AUDIO_CONFIG };
+  }
+
+  let isEnabled: boolean;
+  if (typeof raw.enabled === 'boolean') {
+    isEnabled = raw.enabled;
+  } else {
+    const legacyExplicitlyDisabled =
+      raw.presetId === 'NONE' && raw.bgmEnabled === false && raw.sfxEnabled === false;
+    isEnabled = !legacyExplicitlyDisabled;
+  }
+
+  const volPercent =
+    raw.volume !== undefined ? normalizeVolumeToPercent(raw.volume, 70) : 70;
+
+  if (!isEnabled) {
+    return {
+      ...DEFAULT_AUDIO_CONFIG,
+      ...raw,
+      enabled: false,
+      bgmEnabled: false,
+      sfxEnabled: false,
+      countdownSoundEnabled: false,
+      volume: Number((volPercent / 100).toFixed(2)),
+    };
+  }
+
+  return {
+    ...DEFAULT_AUDIO_CONFIG,
+    ...raw,
+    enabled: true,
+    bgmEnabled: raw.bgmEnabled !== undefined ? Boolean(raw.bgmEnabled) : true,
+    sfxEnabled: raw.sfxEnabled !== undefined ? Boolean(raw.sfxEnabled) : true,
+    countdownSoundEnabled:
+      raw.countdownSoundEnabled !== undefined ? Boolean(raw.countdownSoundEnabled) : true,
+    presetId:
+      raw.presetId && raw.presetId !== 'NONE'
+        ? raw.presetId
+        : DEFAULT_AUDIO_CONFIG.presetId,
+    soundPackId:
+      raw.soundPackId && raw.soundPackId !== 'NONE'
+        ? raw.soundPackId
+        : DEFAULT_AUDIO_CONFIG.soundPackId,
+    volume: Number((volPercent / 100).toFixed(2)),
+  };
+}
 
 export interface SoundPackDefinition {
   id: SoundPackId;
@@ -259,6 +365,7 @@ export interface AudioDiagnosticsSnapshot {
   muted: boolean;
   volume: number;
   volumeNormalized: number;
+  enabled: boolean;
   activePresetId: AudioPresetId;
   activeSoundPackId: SoundPackId;
   oscillatorsStartedCount: number;
@@ -266,9 +373,17 @@ export interface AudioDiagnosticsSnapshot {
   lastGainValue: number;
   lastToneFrequency: number;
   lastSfxPlayed: string | null;
+  lastSfxVariantKey: string | null;
   lastSfxAssetUrl: string | null;
+  correctVariantHistory: string[];
+  wrongVariantHistory: string[];
+  bgmAssetUrl: string | null;
+  bgmAudioPlaying: boolean;
+  bgmStartCount: number;
   customAudioPlaying: boolean;
   customAudioSrc: string | null;
+  sessionMode: 'PLAY' | 'EXAM';
+  answersPublished: boolean;
   lastError: string | null;
 }
 
@@ -442,6 +557,8 @@ const PACK_SYNTH_PATTERNS: Record<string, Record<SfxCueType, PackCueNote[]>> = {
 class GameAudioManager {
   private ctx: AudioContext | null = null;
   private bgmLoopInterval: number | null = null;
+  private defaultBgmAudioEl: HTMLAudioElement | null = null;
+  private activeBgmUrl: string | null = null;
   private customAudioEl: HTMLAudioElement | null = null;
   private activeSfxAudioElements: Map<string, HTMLAudioElement> = new Map();
   private duckTimeoutId: number | null = null;
@@ -458,12 +575,22 @@ class GameAudioManager {
   private listeners: Set<() => void> = new Set();
   private unlockListenerAttached: boolean = false;
 
+  // Unified Default Audio Variant Cursors & Exam Secrecy Context
+  private correctVariantCursor: number = 0;
+  private wrongVariantCursor: number = 0;
+  private correctVariantHistory: string[] = [];
+  private wrongVariantHistory: string[] = [];
+  private sessionMode: 'PLAY' | 'EXAM' = 'PLAY';
+  private answersPublished: boolean = false;
+  private bgmStartCount: number = 0;
+
   // Diagnostic telemetry counters for automated & E2E verification
   private oscillatorsStartedCount: number = 0;
   private activeOscillatorCount: number = 0;
   private lastGainValue: number = 0;
   private lastToneFrequency: number = 0;
   private lastSfxPlayed: string | null = null;
+  private lastSfxVariantKey: string | null = null;
   private lastSfxAssetUrl: string | null = null;
   private lastError: string | null = null;
 
@@ -494,8 +621,13 @@ class GameAudioManager {
       if (this.ctx && this.ctx.state === 'suspended') {
         this.ctx.resume().catch(() => {});
       }
-      if (this.isPlayingBgm && !this.muted && this.customAudioEl && this.customAudioEl.paused) {
-        this.customAudioEl.play().catch(() => {});
+      if (this.isPlayingBgm && !this.muted) {
+        if (this.defaultBgmAudioEl && this.defaultBgmAudioEl.paused) {
+          this.defaultBgmAudioEl.play().catch(() => {});
+        }
+        if (this.customAudioEl && this.customAudioEl.paused) {
+          this.customAudioEl.play().catch(() => {});
+        }
       }
     };
     window.addEventListener('pointerdown', unlockHandler, { passive: true });
@@ -539,6 +671,34 @@ class GameAudioManager {
     return this.ctx;
   }
 
+  public setSessionContext(context: {
+    sessionMode?: 'PLAY' | 'EXAM' | string | null;
+    answersPublished?: boolean;
+  }): void {
+    if (context.sessionMode === 'EXAM' || context.sessionMode === 'PLAY') {
+      this.sessionMode = context.sessionMode;
+    }
+    if (typeof context.answersPublished === 'boolean') {
+      this.answersPublished = context.answersPublished;
+    }
+    this.notifyListeners();
+  }
+
+  public getSessionContext(): { sessionMode: 'PLAY' | 'EXAM'; answersPublished: boolean } {
+    return {
+      sessionMode: this.sessionMode,
+      answersPublished: this.answersPublished,
+    };
+  }
+
+  public resetVariantHistory(): void {
+    this.correctVariantCursor = 0;
+    this.wrongVariantCursor = 0;
+    this.correctVariantHistory = [];
+    this.wrongVariantHistory = [];
+    this.lastSfxVariantKey = null;
+  }
+
   public getMuted(): boolean {
     return this.muted;
   }
@@ -579,6 +739,7 @@ class GameAudioManager {
       muted: this.muted,
       volume: this.volume,
       volumeNormalized: this.getVolumeNormalized(),
+      enabled: Boolean(this.currentConfig.enabled),
       activePresetId: this.currentConfig.presetId,
       activeSoundPackId: activePack.packId,
       oscillatorsStartedCount: this.oscillatorsStartedCount,
@@ -586,32 +747,77 @@ class GameAudioManager {
       lastGainValue: Number(this.lastGainValue.toFixed(4)),
       lastToneFrequency: Number(this.lastToneFrequency.toFixed(2)),
       lastSfxPlayed: this.lastSfxPlayed,
+      lastSfxVariantKey: this.lastSfxVariantKey,
       lastSfxAssetUrl: this.lastSfxAssetUrl,
+      correctVariantHistory: [...this.correctVariantHistory],
+      wrongVariantHistory: [...this.wrongVariantHistory],
+      bgmAssetUrl: this.activeBgmUrl,
+      bgmAudioPlaying: Boolean(
+        (this.defaultBgmAudioEl && !this.defaultBgmAudioEl.paused) ||
+          (this.customAudioEl && !this.customAudioEl.paused) ||
+          this.isPlayingBgm
+      ),
+      bgmStartCount: this.bgmStartCount,
       customAudioPlaying: Boolean(this.customAudioEl && !this.customAudioEl.paused),
       customAudioSrc: this.customAudioEl ? this.customAudioEl.src : null,
+      sessionMode: this.sessionMode,
+      answersPublished: this.answersPublished,
       lastError: this.lastError,
     };
   }
 
-  public configure(partialConfig?: Partial<GameAudioConfig>): void {
+  public configure(
+    partialConfig?: Partial<GameAudioConfig> & {
+      sessionMode?: 'PLAY' | 'EXAM' | string | null;
+      answersPublished?: boolean;
+    }
+  ): void {
+    if (partialConfig?.sessionMode === 'EXAM' || partialConfig?.sessionMode === 'PLAY') {
+      this.sessionMode = partialConfig.sessionMode;
+    }
+    if (typeof partialConfig?.answersPublished === 'boolean') {
+      this.answersPublished = partialConfig.answersPublished;
+    }
+
     const nextVolPercent =
       partialConfig?.volume !== undefined
         ? normalizeVolumeToPercent(partialConfig.volume, this.volume)
         : this.volume;
     this.volume = nextVolPercent;
-    const merged: GameAudioConfig = {
+
+    const rawMerged = {
       ...DEFAULT_AUDIO_CONFIG,
       ...this.currentConfig,
       ...(partialConfig || {}),
       volume: Number((nextVolPercent / 100).toFixed(2)),
     };
-    if (partialConfig?.soundPackId && !partialConfig?.presetId) {
-      merged.presetId = mapSoundPackToPresetId(partialConfig.soundPackId);
-    } else if (partialConfig?.presetId && !partialConfig?.soundPackId) {
-      merged.soundPackId = resolveSoundPackDefinition(partialConfig.presetId).packId;
+
+    if (partialConfig?.enabled === false) {
+      rawMerged.enabled = false;
+      rawMerged.bgmEnabled = false;
+      rawMerged.sfxEnabled = false;
+      rawMerged.countdownSoundEnabled = false;
+    } else if (partialConfig?.enabled === true) {
+      rawMerged.enabled = true;
+      if (partialConfig.bgmEnabled === undefined) rawMerged.bgmEnabled = true;
+      if (partialConfig.sfxEnabled === undefined) rawMerged.sfxEnabled = true;
+      if (partialConfig.countdownSoundEnabled === undefined)
+        rawMerged.countdownSoundEnabled = true;
     }
-    this.currentConfig = merged;
-    this.notifyListeners();
+
+    if (partialConfig?.soundPackId && !partialConfig?.presetId) {
+      rawMerged.presetId = mapSoundPackToPresetId(partialConfig.soundPackId);
+    } else if (partialConfig?.presetId && !partialConfig?.soundPackId) {
+      rawMerged.soundPackId = resolveSoundPackDefinition(partialConfig.presetId).packId;
+    }
+
+    this.currentConfig = rawMerged;
+
+    if (!this.currentConfig.enabled) {
+      this.stopAll();
+    } else {
+      this.notifyListeners();
+    }
   }
 
   public startBackgroundMusic(partialConfig?: Partial<GameAudioConfig>): void {
@@ -627,7 +833,18 @@ class GameAudioManager {
   }
 
   public playSfx(
-    type: 'correct' | 'wrong' | 'timeout' | 'recorded' | 'finish' | 'start' | 'top3' | 'countdown'
+    type:
+      | 'correct'
+      | 'wrong'
+      | 'timeout'
+      | 'recorded'
+      | 'finish'
+      | 'start'
+      | 'top3'
+      | 'countdown'
+      | 'adventure_jump'
+      | 'adventure_hit'
+      | 'adventure_checkpoint'
   ): void {
     switch (type) {
       case 'correct':
@@ -654,6 +871,15 @@ class GameAudioManager {
       case 'countdown':
         this.playCueFromActivePack('countdown');
         break;
+      case 'adventure_jump':
+        this.playAdventureJump();
+        break;
+      case 'adventure_hit':
+        this.playAdventureHit();
+        break;
+      case 'adventure_checkpoint':
+        this.playAdventureCheckpoint();
+        break;
     }
   }
 
@@ -662,6 +888,9 @@ class GameAudioManager {
     try {
       localStorage.setItem(STORAGE_MUTED_KEY, String(this.muted));
     } catch {}
+    if (this.defaultBgmAudioEl) {
+      this.defaultBgmAudioEl.muted = this.muted;
+    }
     if (this.customAudioEl) {
       this.customAudioEl.muted = this.muted;
     }
@@ -694,8 +923,14 @@ class GameAudioManager {
     try {
       localStorage.setItem(STORAGE_VOLUME_KEY, String(clamped));
     } catch {}
+    const duckFactor = this.isBgmDucked ? 0.32 : 1.0;
+    if (this.defaultBgmAudioEl) {
+      this.defaultBgmAudioEl.volume = Math.max(
+        0,
+        Math.min(1, (clamped / 100) * 0.26 * duckFactor)
+      );
+    }
     if (this.customAudioEl) {
-      const duckFactor = this.isBgmDucked ? 0.28 : 1.0;
       this.customAudioEl.volume = Math.max(0, Math.min(1, (clamped / 100) * duckFactor));
     }
     this.notifyListeners();
@@ -704,6 +939,9 @@ class GameAudioManager {
   private duckBgmTemporarily(durationMs: number = 650): void {
     if (!this.isPlayingBgm) return;
     this.isBgmDucked = true;
+    if (this.defaultBgmAudioEl) {
+      this.defaultBgmAudioEl.volume = Math.max(0, Math.min(1, (this.volume / 100) * 0.08));
+    }
     if (this.customAudioEl) {
       this.customAudioEl.volume = Math.max(0, Math.min(1, (this.volume / 100) * 0.28));
     }
@@ -714,6 +952,9 @@ class GameAudioManager {
       this.duckTimeoutId = window.setTimeout(() => {
         this.isBgmDucked = false;
         this.duckTimeoutId = null;
+        if (this.defaultBgmAudioEl) {
+          this.defaultBgmAudioEl.volume = Math.max(0, Math.min(1, (this.volume / 100) * 0.26));
+        }
         if (this.customAudioEl) {
           this.customAudioEl.volume = Math.max(0, Math.min(1, this.volume / 100));
         }
@@ -780,7 +1021,7 @@ class GameAudioManager {
       return;
     }
     try {
-      // Stop any previous instance of the same cue so identical SFX never overlap
+      // Stop any previous instance of the same cue category so identical SFX never overlap
       const existing = this.activeSfxAudioElements.get(cueKey);
       if (existing) {
         try {
@@ -790,7 +1031,7 @@ class GameAudioManager {
       }
 
       const audio = new Audio(assetUrl);
-      audio.volume = Math.max(0, Math.min(1, this.volume / 100));
+      audio.volume = Math.max(0, Math.min(1, (this.volume / 100) * 0.85));
       audio.muted = this.muted;
       this.activeSfxAudioElements.set(cueKey, audio);
       this.lastSfxAssetUrl = assetUrl;
@@ -819,8 +1060,11 @@ class GameAudioManager {
     if (customOverride && typeof customUrl === 'string' && customUrl.trim()) {
       return customUrl.trim();
     }
-    const pack = resolveSoundPackDefinition(cfg.soundPackId || cfg.presetId);
-    return pack.cues[cue] || SOUND_PACK_CATALOG[0].cues[cue];
+    return UNIFIED_DEFAULT_AUDIO_ASSETS.cues[cue] || SOUND_PACK_CATALOG[0].cues[cue];
+  }
+
+  private isExamSecrecyActive(): boolean {
+    return this.sessionMode === 'EXAM' && !this.answersPublished;
   }
 
   private playCueFromActivePack(
@@ -833,18 +1077,58 @@ class GameAudioManager {
       if (this.muted || !cfg.enabled || cfg.sfxEnabled === false || this.volume <= 0) {
         return false;
       }
-      // Deduplicate rapid identical SFX triggers within 90ms (e.g. WS reconnect duplicate packets)
-      const nowMs = Date.now();
-      const prevAt = this.lastCuePlayedAtMap.get(cue) || 0;
-      if (nowMs - prevAt < 90) {
-        return false;
+      // Enforce Exam Mode Audio Secrecy automatically at the engine boundary
+      if (this.isExamSecrecyActive()) {
+        if (cue === 'correct' || cue === 'wrong') {
+          this.playAnswerRecorded();
+          return true;
+        }
+        if (cue === 'top3') {
+          return this.playCueFromActivePack('finish', configOverride, false);
+        }
       }
-      this.lastCuePlayedAtMap.set(cue, nowMs);
     }
 
-    const pack = resolveSoundPackDefinition(cfg.soundPackId || cfg.presetId);
-    const assetUrl = this.resolveCueAssetUrl(cue, cfg);
+    const customOverride = cfg.customSfxOverrides?.[cue] as any;
+    const customUrl =
+      customOverride && typeof (customOverride?.url || customOverride?.audioUrl) === 'string'
+        ? String(customOverride.url || customOverride.audioUrl).trim()
+        : '';
+
+    let assetUrl = customUrl;
+    let variantKey: string = cue;
+
+    if (!assetUrl) {
+      if (cue === 'correct') {
+        const variants = UNIFIED_DEFAULT_AUDIO_ASSETS.correctVariants;
+        const idx = this.correctVariantCursor % variants.length;
+        this.correctVariantCursor = (this.correctVariantCursor + 1) % variants.length;
+        const chosen = variants[idx];
+        assetUrl = chosen.url;
+        variantKey = chosen.key;
+        this.correctVariantHistory.push(chosen.key);
+        if (this.correctVariantHistory.length > 50) {
+          this.correctVariantHistory.shift();
+        }
+      } else if (cue === 'wrong') {
+        const variants = UNIFIED_DEFAULT_AUDIO_ASSETS.wrongVariants;
+        const idx = this.wrongVariantCursor % variants.length;
+        this.wrongVariantCursor = (this.wrongVariantCursor + 1) % variants.length;
+        const chosen = variants[idx];
+        assetUrl = chosen.url;
+        variantKey = chosen.key;
+        this.wrongVariantHistory.push(chosen.key);
+        if (this.wrongVariantHistory.length > 50) {
+          this.wrongVariantHistory.shift();
+        }
+      } else {
+        assetUrl = UNIFIED_DEFAULT_AUDIO_ASSETS.cues[cue] || this.resolveCueAssetUrl(cue, cfg);
+        variantKey = cue;
+      }
+    }
+
     this.lastSfxPlayed = cue;
+    this.lastSfxVariantKey = variantKey;
     this.lastSfxAssetUrl = assetUrl;
 
     // Duck BGM briefly so the SFX stands out clearly
@@ -855,8 +1139,22 @@ class GameAudioManager {
     this.playWavAssetFile(assetUrl, cue);
 
     // Also trigger multi-harmonic Web Audio notes for zero-latency response & telemetry
-    const packNotes =
+    const pack = resolveSoundPackDefinition(cfg.soundPackId || cfg.presetId);
+    let packNotes =
       PACK_SYNTH_PATTERNS[pack.packId]?.[cue] || PACK_SYNTH_PATTERNS.ARCADE_FUN[cue];
+
+    if (variantKey === 'wrong_tete') {
+      packNotes = [
+        { freq: 233.08, dur: 0.2, wave: 'sawtooth', gain: 0.25, delay: 0 },
+        { freq: 164.81, dur: 0.3, wave: 'sawtooth', gain: 0.26, delay: 0.22 },
+      ];
+    } else if (variantKey === 'wrong_buzzer') {
+      packNotes = [
+        { freq: 146.83, dur: 0.32, wave: 'sawtooth', gain: 0.26, delay: 0 },
+        { freq: 155.56, dur: 0.32, wave: 'square', gain: 0.2, delay: 0.04 },
+      ];
+    }
+
     let startedAny = false;
     for (const n of packNotes) {
       const ok = this.playTone(n.freq, n.dur, n.wave, n.gain, n.delay, false);
@@ -866,8 +1164,7 @@ class GameAudioManager {
   }
 
   /**
-   * Previews a single SFX cue (correct, wrong, timeout, countdown, start, finish, top3)
-   * when BTC clicks the individual cue preview button in the Sound Pack configurator.
+   * Previews a single SFX cue (correct, wrong, timeout, countdown, start, finish, top3).
    */
   public previewSfxCue(
     cue: SfxCueType,
@@ -901,19 +1198,37 @@ class GameAudioManager {
     return ok;
   }
 
+  private resolveTargetBgmUrl(config: GameAudioConfig): string {
+    if (config.customAudioUrl && config.customAudioUrl.trim()) {
+      return config.customAudioUrl.trim();
+    }
+    if (this.sessionMode === 'EXAM' || config.presetId === 'EXAM_FOCUS') {
+      return UNIFIED_DEFAULT_AUDIO_ASSETS.bgm.exam;
+    }
+    return UNIFIED_DEFAULT_AUDIO_ASSETS.bgm.default;
+  }
+
   /**
    * Starts or updates background music for a game session or preview.
-   * Ensures any previous loop or HTMLAudioElement is stopped first so tracks never overlap.
+   * If BGM is already playing for the same session mode & track, it continues seamlessly
+   * without restarting from 0s across question transitions.
    */
   public startSessionAudio(
-    partialConfig?: Partial<GameAudioConfig>,
+    partialConfig?: Partial<GameAudioConfig> & {
+      sessionMode?: 'PLAY' | 'EXAM' | string | null;
+      answersPublished?: boolean;
+    },
     isPreview: boolean = false,
     callbacks?: AudioPreviewCallbacks
   ): boolean {
-    this.stopAll();
-    this.lastError = null;
-    this.previewCallbacks = isPreview ? callbacks || null : null;
+    if (partialConfig?.sessionMode === 'EXAM' || partialConfig?.sessionMode === 'PLAY') {
+      this.sessionMode = partialConfig.sessionMode;
+    }
+    if (typeof partialConfig?.answersPublished === 'boolean') {
+      this.answersPublished = partialConfig.answersPublished;
+    }
 
+    const normalized = normalizeGameAudioConfig(partialConfig || this.currentConfig);
     const resolvedVolPercent =
       partialConfig?.volume !== undefined
         ? normalizeVolumeToPercent(partialConfig.volume, this.volume || 70)
@@ -923,40 +1238,54 @@ class GameAudioManager {
     this.volume = resolvedVolPercent;
 
     const merged: GameAudioConfig = {
-      ...DEFAULT_AUDIO_CONFIG,
-      ...(partialConfig || {}),
+      ...normalized,
       volume: Number((resolvedVolPercent / 100).toFixed(2)),
     };
-    if (partialConfig?.soundPackId && !partialConfig?.presetId) {
-      merged.presetId = mapSoundPackToPresetId(partialConfig.soundPackId);
-    } else if (partialConfig?.presetId && !partialConfig?.soundPackId) {
-      merged.soundPackId = resolveSoundPackDefinition(partialConfig.presetId).packId;
-    }
-    this.currentConfig = merged;
 
     const bgmAllowed =
-      this.currentConfig.enabled &&
-      this.currentConfig.bgmEnabled !== false &&
-      this.currentConfig.presetId !== 'NONE';
+      merged.enabled && merged.bgmEnabled !== false && merged.presetId !== 'NONE';
 
     if (!bgmAllowed) {
-      this.isPlayingBgm = false;
-      this.isPreviewing = false;
+      this.currentConfig = merged;
+      this.stopAll();
       this.previewCallbacks?.onStateChange?.(false);
       this.notifyListeners();
       return false;
     }
 
-    if (this.currentConfig.presetId === 'CUSTOM' && !this.currentConfig.customAudioUrl) {
+    if (merged.presetId === 'CUSTOM' && !merged.customAudioUrl) {
+      this.currentConfig = merged;
       this.lastError =
         'Chưa có tệp nhạc tải lên. Vui lòng tải lên tệp .mp3, .wav hoặc .ogg trước khi nghe thử.';
-      this.isPlayingBgm = false;
-      this.isPreviewing = false;
+      this.stopAll();
+      this.previewCallbacks = isPreview ? callbacks || null : null;
       this.previewCallbacks?.onStateChange?.(false);
       this.previewCallbacks?.onError?.(this.lastError);
       this.notifyListeners();
       return false;
     }
+
+    const targetBgmUrl = this.resolveTargetBgmUrl(merged);
+
+    // Seamless continuation: if BGM is already playing the exact same track in gameplay mode,
+    // update config & volume without tearing down or resetting currentTime to 0
+    if (
+      this.isPlayingBgm &&
+      !isPreview &&
+      !this.isPreviewing &&
+      this.activeBgmUrl === targetBgmUrl &&
+      !this.muted
+    ) {
+      this.currentConfig = merged;
+      this.ensureContext();
+      this.notifyListeners();
+      return true;
+    }
+
+    this.stopAll();
+    this.lastError = null;
+    this.previewCallbacks = isPreview ? callbacks || null : null;
+    this.currentConfig = merged;
 
     // Ensure AudioContext is created/resumed synchronously inside the user click gesture
     this.ensureContext();
@@ -1021,6 +1350,8 @@ class GameAudioManager {
         audio.volume = Math.max(0, Math.min(1, this.volume / 100));
         audio.muted = this.muted;
         this.customAudioEl = audio;
+        this.activeBgmUrl = config.customAudioUrl;
+        this.bgmStartCount++;
 
         audio.onerror = () => {
           if (this.customAudioEl !== audio) return;
@@ -1066,6 +1397,29 @@ class GameAudioManager {
       return;
     }
 
+    // Play the Unified Default Looping BGM WAV asset (/audio/default/bgm_default.wav or bgm_exam.wav)
+    const targetBgmUrl = this.resolveTargetBgmUrl(config);
+    this.activeBgmUrl = targetBgmUrl;
+    this.bgmStartCount++;
+
+    if (typeof window !== 'undefined' && typeof Audio !== 'undefined') {
+      try {
+        const bgmEl = new Audio(targetBgmUrl);
+        bgmEl.loop = true;
+        bgmEl.volume = Math.max(0, Math.min(1, (this.volume / 100) * 0.26));
+        bgmEl.muted = this.muted;
+        this.defaultBgmAudioEl = bgmEl;
+        const p = bgmEl.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch(() => {
+            // Web Audio harmonic pulse below ensures fallback even if HTMLAudioElement is deferred
+          });
+        }
+      } catch {
+        // Ignore HTMLAudioElement construction errors in non-DOM environments
+      }
+    }
+
     this.stepIndex = 0;
     const notesByPreset: Record<
       string,
@@ -1075,47 +1429,49 @@ class GameAudioManager {
         notes: [261.63, 329.63, 392.0, 523.25, 392.0, 329.63, 293.66, 349.23],
         tempoMs: 420,
         wave: 'triangle',
-        gain: 0.18,
+        gain: 0.14,
       },
       ARCADE_FUN: {
         notes: [261.63, 329.63, 392.0, 523.25, 392.0, 329.63, 293.66, 349.23],
         tempoMs: 420,
         wave: 'triangle',
-        gain: 0.18,
+        gain: 0.14,
       },
       EXAM_FOCUS: {
         notes: [220.0, 277.18, 329.63, 277.18, 196.0, 246.94, 293.66, 246.94],
         tempoMs: 880,
         wave: 'sine',
-        gain: 0.14,
+        gain: 0.1,
       },
       CLASSROOM_QUIZ: {
         notes: [220.0, 277.18, 329.63, 277.18, 196.0, 246.94, 293.66, 246.94],
         tempoMs: 880,
         wave: 'sine',
-        gain: 0.14,
+        gain: 0.1,
       },
       ADVENTURE_QUEST: {
         notes: [293.66, 369.99, 440.0, 587.33, 493.88, 440.0, 369.99, 329.63],
         tempoMs: 380,
         wave: 'triangle',
-        gain: 0.18,
+        gain: 0.14,
       },
       CORPORATE_CALM: {
         notes: [261.63, 329.63, 392.0, 493.88, 440.0, 392.0, 329.63, 293.66],
         tempoMs: 680,
         wave: 'sine',
-        gain: 0.15,
+        gain: 0.12,
       },
       CORPORATE_TRAINING: {
         notes: [261.63, 329.63, 392.0, 493.88, 440.0, 392.0, 329.63, 293.66],
         tempoMs: 680,
         wave: 'sine',
-        gain: 0.15,
+        gain: 0.12,
       },
     };
 
-    const preset = notesByPreset[config.presetId] || notesByPreset.ENERGETIC_ARENA;
+    const presetKey =
+      this.sessionMode === 'EXAM' ? 'EXAM_FOCUS' : config.presetId || 'ENERGETIC_ARENA';
+    const preset = notesByPreset[presetKey] || notesByPreset.ENERGETIC_ARENA;
     const playStep = () => {
       if (!this.isPlayingBgm || this.muted || !this.currentConfig.enabled) return;
       const note = preset.notes[this.stepIndex % preset.notes.length];
@@ -1134,6 +1490,17 @@ class GameAudioManager {
       window.clearInterval(this.bgmLoopInterval);
       this.bgmLoopInterval = null;
     }
+    if (this.defaultBgmAudioEl) {
+      const el = this.defaultBgmAudioEl;
+      this.defaultBgmAudioEl = null;
+      try {
+        el.onerror = null;
+        el.pause();
+        el.currentTime = 0;
+        el.removeAttribute('src');
+        el.load();
+      } catch {}
+    }
     if (this.customAudioEl) {
       const el = this.customAudioEl;
       this.customAudioEl = null;
@@ -1145,6 +1512,7 @@ class GameAudioManager {
         el.load();
       } catch {}
     }
+    this.activeBgmUrl = null;
   }
 
   /**
@@ -1188,7 +1556,9 @@ class GameAudioManager {
     if (sec > 0 && sec <= triggerSec && this.lastCountdownSecondPlayed !== sec) {
       this.lastCountdownSecondPlayed = sec;
       this.lastSfxPlayed = `countdown:${sec}`;
-      const assetUrl = this.resolveCueAssetUrl('countdown', cfg);
+      this.lastSfxVariantKey = 'countdown';
+      const assetUrl = UNIFIED_DEFAULT_AUDIO_ASSETS.cues.countdown;
+      this.lastSfxAssetUrl = assetUrl;
       this.playWavAssetFile(assetUrl, 'countdown');
       const pitch = sec <= 2 ? 880 : 660;
       this.playTone(pitch, 0.12, 'sine', 0.24, 0, false);
@@ -1214,8 +1584,12 @@ class GameAudioManager {
   public playAnswerRecorded(): void {
     if (this.currentConfig.sfxEnabled === false || this.muted || !this.currentConfig.enabled) return;
     this.lastSfxPlayed = 'recorded';
+    this.lastSfxVariantKey = 'recorded';
+    const assetUrl = UNIFIED_DEFAULT_AUDIO_ASSETS.cues.recorded;
+    this.lastSfxAssetUrl = assetUrl;
     this.duckBgmTemporarily(320);
-    this.playTone(440.0, 0.11, 'sine', 0.24, 0, false);
+    this.playWavAssetFile(assetUrl, 'recorded');
+    this.playTone(440.0, 0.11, 'sine', 0.22, 0, false);
   }
 
   public playVictory(): void {
@@ -1223,7 +1597,45 @@ class GameAudioManager {
   }
 
   public playTop3Celebration(): void {
+    if (this.isExamSecrecyActive()) {
+      this.playVictory();
+      return;
+    }
     this.playCueFromActivePack('top3');
+  }
+
+  public playAdventureJump(): void {
+    if (this.currentConfig.sfxEnabled === false || this.muted || !this.currentConfig.enabled) return;
+    this.lastSfxPlayed = 'adventure_jump';
+    this.lastSfxVariantKey = 'adventure_jump';
+    const assetUrl = UNIFIED_DEFAULT_AUDIO_ASSETS.cues.adventure_jump;
+    this.lastSfxAssetUrl = assetUrl;
+    this.playWavAssetFile(assetUrl, 'adventure_jump');
+    this.playTone(523.25, 0.1, 'sine', 0.2, 0, false);
+    this.playTone(783.99, 0.12, 'sine', 0.22, 0.05, false);
+  }
+
+  public playAdventureHit(): void {
+    if (this.currentConfig.sfxEnabled === false || this.muted || !this.currentConfig.enabled) return;
+    this.lastSfxPlayed = 'adventure_hit';
+    this.lastSfxVariantKey = 'adventure_hit';
+    const assetUrl = UNIFIED_DEFAULT_AUDIO_ASSETS.cues.adventure_hit;
+    this.lastSfxAssetUrl = assetUrl;
+    this.duckBgmTemporarily(350);
+    this.playWavAssetFile(assetUrl, 'adventure_hit');
+    this.playTone(196.0, 0.18, 'sawtooth', 0.22, 0, false);
+  }
+
+  public playAdventureCheckpoint(): void {
+    if (this.currentConfig.sfxEnabled === false || this.muted || !this.currentConfig.enabled) return;
+    this.lastSfxPlayed = 'adventure_checkpoint';
+    this.lastSfxVariantKey = 'adventure_checkpoint';
+    const assetUrl = UNIFIED_DEFAULT_AUDIO_ASSETS.cues.adventure_checkpoint;
+    this.lastSfxAssetUrl = assetUrl;
+    this.duckBgmTemporarily(420);
+    this.playWavAssetFile(assetUrl, 'adventure_checkpoint');
+    this.playTone(587.33, 0.12, 'triangle', 0.24, 0, false);
+    this.playTone(880.0, 0.18, 'triangle', 0.26, 0.09, false);
   }
 }
 

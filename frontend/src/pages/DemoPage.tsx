@@ -70,6 +70,7 @@ import {
   SOUND_PACK_CATALOG,
   SFX_CUE_CATALOG,
   mapSoundPackToPresetId,
+  normalizeGameAudioConfig,
   resolveSoundPackDefinition,
   soundManager,
 } from '../services/audio.js';
@@ -455,48 +456,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
     () => effectiveBootSpec?.settings?.rosterMode || 'FREE_TEXT'
   );
   const normalizeCreatorAudioConfig = (raw?: Partial<GameAudioConfig> | null): GameAudioConfig => {
-    const resolvedPack = resolveSoundPackDefinition(raw || undefined);
-    const enabled = raw?.enabled ?? true;
-    const soundPackId: SoundPackId =
-      !enabled || raw?.soundPackId === 'NONE' || raw?.presetId === 'NONE'
-        ? 'NONE'
-        : raw?.soundPackId ||
-          (raw?.presetId === 'CUSTOM' ? 'CUSTOM' : resolvedPack.packId || 'ARCADE_FUN');
-    const presetId =
-      raw?.presetId ||
-      (soundPackId === 'NONE'
-        ? 'NONE'
-        : soundPackId === 'CUSTOM'
-        ? 'CUSTOM'
-        : mapSoundPackToPresetId(soundPackId));
-    const normalizedOverrides: GameAudioConfig['customSfxOverrides'] = {};
-    if (raw?.customSfxOverrides && typeof raw.customSfxOverrides === 'object') {
-      for (const [cueKey, val] of Object.entries(raw.customSfxOverrides)) {
-        const entry = val as any;
-        const resolvedUrl = entry?.url || entry?.audioUrl;
-        if (resolvedUrl) {
-          normalizedOverrides[cueKey as SfxCueType] = {
-            url: resolvedUrl,
-            audioUrl: resolvedUrl,
-            fileName: entry?.fileName,
-            mimeType: entry?.mimeType,
-          };
-        }
-      }
-    }
-    return {
-      enabled: soundPackId !== 'NONE' && (raw?.enabled ?? true),
-      bgmEnabled: raw?.bgmEnabled ?? true,
-      presetId,
-      soundPackId,
-      customAudioUrl: raw?.customAudioUrl,
-      customAudioName: raw?.customAudioName,
-      customSfxOverrides: normalizedOverrides,
-      volume: raw?.volume ?? 0.7,
-      sfxEnabled: raw?.sfxEnabled ?? true,
-      countdownSoundEnabled: raw?.countdownSoundEnabled ?? true,
-      countdownTriggerSeconds: raw?.countdownTriggerSeconds ?? 5,
-    };
+    return normalizeGameAudioConfig(raw);
   };
 
   const [audioConfig, setAudioConfig] = useState<GameAudioConfig>(() =>
@@ -5326,9 +5286,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   )}
                 </div>
 
-                {/* 7. Khu vực âm thanh V3 hợp nhất duy nhất: Bộ âm thanh chủ đề (SFX + BGM) */}
+                {/* 7. Âm thanh trò chơi (Một checkbox duy nhất) */}
                 <div
-                  data-testid="v3-sound-pack-section"
+                  data-testid="creator-game-audio-section"
                   style={{
                     padding: '0.65rem 0.75rem',
                     borderRadius: '8px',
@@ -5336,43 +5296,49 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     border: '1px solid var(--border-subtle)',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '0.5rem',
+                    gap: '0.35rem',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.5rem', flexWrap: 'wrap' }}>
-                    <label style={{ fontSize: '0.76rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                      7. Bộ âm thanh chủ đề (SFX + BGM)
-                    </label>
-                    <select
-                      data-testid="sound-pack-select"
-                      value={
-                        !audioConfig.enabled || audioConfig.soundPackId === 'NONE' || audioConfig.presetId === 'NONE'
-                          ? 'NONE'
-                          : audioConfig.soundPackId ||
-                            resolveSoundPackDefinition(audioConfig).packId
-                      }
+                  <div
+                    style={{
+                      fontSize: '0.78rem',
+                      fontWeight: 800,
+                      color: 'var(--text-primary)',
+                    }}
+                  >
+                    7. Âm thanh trò chơi
+                  </div>
+
+                  <label
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                      cursor: 'pointer',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      color: 'var(--text-primary)',
+                      userSelect: 'none',
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      data-testid="creator-game-audio-enabled"
+                      checked={audioConfig.enabled !== false}
                       onChange={(e) => {
-                        const nextPackId = e.target.value as SoundPackId;
-                        const mappedPreset =
-                          nextPackId === 'NONE'
-                            ? 'NONE'
-                            : audioConfig.customAudioUrl && nextPackId === 'CUSTOM'
-                            ? 'CUSTOM'
-                            : mapSoundPackToPresetId(nextPackId);
-                        const nextCfg: GameAudioConfig = {
+                        const isChecked = e.target.checked;
+                        const nextCfg: GameAudioConfig = normalizeGameAudioConfig({
                           ...audioConfig,
-                          enabled: nextPackId !== 'NONE',
-                          soundPackId: nextPackId,
-                          presetId: mappedPreset,
-                        };
+                          enabled: isChecked,
+                          bgmEnabled: isChecked,
+                          sfxEnabled: isChecked,
+                          countdownSoundEnabled: isChecked,
+                        });
                         setAudioConfig(nextCfg);
-                        if (isAudioPreviewPlaying || soundManager.getIsPreviewing()) {
-                          if (nextPackId === 'NONE') {
-                            soundManager.stopPreview();
-                            setIsAudioPreviewPlaying(false);
-                          } else {
-                            startAudioPreviewWithFeedback(nextCfg);
-                          }
+                        soundManager.configure(nextCfg);
+                        if (!isChecked) {
+                          soundManager.stopAll();
+                          setIsAudioPreviewPlaying(false);
                         }
                         if (generatedSpec) {
                           setGeneratedSpec((prev) =>
@@ -5388,303 +5354,24 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         }
                       }}
                       style={{
-                        flex: '1 1 200px',
-                        backgroundColor: 'var(--bg-input)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: '6px',
-                        padding: '0.38rem 0.55rem',
-                        color: 'var(--text-primary)',
-                        fontSize: '0.76rem',
-                        fontWeight: 700,
-                        boxSizing: 'border-box',
+                        width: '16px',
+                        height: '16px',
+                        accentColor: 'var(--primary)',
+                        cursor: 'pointer',
                       }}
-                    >
-                      {SOUND_PACK_CATALOG.map((pack) => (
-                        <option key={pack.packId} value={pack.packId}>
-                          {pack.label} — {pack.description}
-                        </option>
-                      ))}
-                      {(audioConfig.customAudioName || audioConfig.soundPackId === 'CUSTOM') && (
-                        <option value="CUSTOM">
-                          Nhạc nền riêng: {audioConfig.customAudioName || 'Tùy chỉnh'}
-                        </option>
-                      )}
-                      <option value="NONE">Tắt âm thanh</option>
-                    </select>
-                  </div>
+                    />
+                    <span>Sử dụng bộ âm thanh trò chơi</span>
+                  </label>
 
-                  {/* Hàng điều khiển: Nghe thử bộ âm thanh / Dừng / Mute + Thanh âm lượng / Upload nhạc nền riêng */}
-                  <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      data-testid="audio-preview-btn"
-                      aria-pressed={isAudioPreviewPlaying}
-                      onClick={handleToggleAudioPreview}
-                      disabled={audioConfig.soundPackId === 'NONE' || audioConfig.presetId === 'NONE' || !audioConfig.enabled}
-                      style={{
-                        padding: '0.38rem 0.65rem',
-                        borderRadius: '6px',
-                        border: '1px solid var(--border-strong)',
-                        backgroundColor: isAudioPreviewPlaying
-                          ? 'rgba(16, 185, 129, 0.16)'
-                          : 'var(--bg-input)',
-                        color: isAudioPreviewPlaying ? 'var(--accent-emerald)' : 'var(--text-primary)',
-                        fontSize: '0.74rem',
-                        fontWeight: 800,
-                        cursor:
-                          audioConfig.soundPackId === 'NONE' || audioConfig.presetId === 'NONE' || !audioConfig.enabled
-                            ? 'not-allowed'
-                            : 'pointer',
-                      }}
-                    >
-                      {isAudioPreviewPlaying ? '🔊 Đang phát nghe thử' : '🔊 Nghe thử bộ âm thanh'}
-                    </button>
-
-                    <button
-                      type="button"
-                      data-testid="audio-stop-preview-btn"
-                      onClick={handleStopAudioPreview}
-                      disabled={!isAudioPreviewPlaying}
-                      style={{
-                        padding: '0.38rem 0.6rem',
-                        borderRadius: '6px',
-                        border: '1px solid var(--border-strong)',
-                        backgroundColor: isAudioPreviewPlaying
-                          ? 'rgba(239, 68, 68, 0.14)'
-                          : 'var(--bg-input)',
-                        color: isAudioPreviewPlaying ? 'var(--accent-rose)' : 'var(--text-muted)',
-                        fontSize: '0.74rem',
-                        fontWeight: 800,
-                        cursor: isAudioPreviewPlaying ? 'pointer' : 'not-allowed',
-                      }}
-                    >
-                      ⏹ Dừng
-                    </button>
-
-                    <div
-                      style={{
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.35rem',
-                        padding: '0.26rem 0.55rem',
-                        borderRadius: '6px',
-                        border: '1px solid var(--border-strong)',
-                        backgroundColor: 'var(--bg-input)',
-                      }}
-                    >
-                      <button
-                        type="button"
-                        data-testid="creator-audio-mute-btn"
-                        onClick={handleToggleCreatorAudioMute}
-                        title={isAudioMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
-                        style={{
-                          border: 'none',
-                          background: 'transparent',
-                          color: isAudioMuted ? 'var(--text-muted)' : 'var(--primary)',
-                          fontSize: '0.78rem',
-                          fontWeight: 800,
-                          cursor: 'pointer',
-                          padding: 0,
-                        }}
-                      >
-                        {isAudioMuted ? '🔇' : '🔊'}
-                      </button>
-                      <input
-                        type="range"
-                        data-testid="creator-audio-volume-slider"
-                        min={0}
-                        max={100}
-                        step={5}
-                        value={
-                          isAudioMuted
-                            ? 0
-                            : Math.round(
-                                (audioConfig.volume <= 1
-                                  ? audioConfig.volume * 100
-                                  : audioConfig.volume) || 70
-                              )
-                        }
-                        onChange={(e) => handleCreatorAudioVolumeChange(Number(e.target.value))}
-                        aria-label="Âm lượng bộ âm thanh"
-                        style={{
-                          width: '64px',
-                          height: '5px',
-                          accentColor: 'var(--primary)',
-                          cursor: 'pointer',
-                        }}
-                      />
-                    </div>
-
-                    <label
-                      style={{
-                        padding: '0.38rem 0.65rem',
-                        borderRadius: '6px',
-                        border: '1px solid var(--border-strong)',
-                        backgroundColor: 'var(--bg-input)',
-                        color: 'var(--accent-sky)',
-                        fontSize: '0.73rem',
-                        fontWeight: 800,
-                        cursor: isUploadingAudio ? 'not-allowed' : 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '0.25rem',
-                      }}
-                      title="Tải nhạc nền riêng .mp3, .wav, .ogg (tối đa 10MB)"
-                    >
-                      <UploadIcon size={12} />
-                      <span>
-                        {isUploadingAudio
-                          ? 'Đang tải...'
-                          : audioConfig.customAudioName
-                          ? `Nhạc nền: ${audioConfig.customAudioName}`
-                          : 'Upload nhạc nền riêng (.mp3/.wav)'}
-                      </span>
-                      <input
-                        type="file"
-                        data-testid="custom-audio-upload-input"
-                        accept=".mp3,.wav,.ogg,audio/mpeg,audio/wav,audio/ogg"
-                        onChange={handleCustomAudioUpload}
-                        disabled={isUploadingAudio}
-                        style={{ display: 'none' }}
-                      />
-                    </label>
-                  </div>
-
-                  {/* Toggles: BGM / SFX / Countdown */}
-                  <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', flexWrap: 'wrap', fontSize: '0.74rem' }}>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', fontWeight: 700 }}>
-                      <input
-                        type="checkbox"
-                        data-testid="audio-bgm-toggle"
-                        checked={audioConfig.bgmEnabled !== false}
-                        onChange={(e) => {
-                          const nextCfg: GameAudioConfig = {
-                            ...audioConfig,
-                            bgmEnabled: e.target.checked,
-                          };
-                          setAudioConfig(nextCfg);
-                          if (generatedSpec) {
-                            setGeneratedSpec((prev) =>
-                              prev ? { ...prev, settings: { ...prev.settings, audioConfig: nextCfg } } : prev
-                            );
-                            setSavedForLater(false);
-                            setSaveStatus('dirty');
-                          }
-                        }}
-                      />
-                      <span>Nhạc nền (BGM)</span>
-                    </label>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', fontWeight: 700 }}>
-                      <input
-                        type="checkbox"
-                        data-testid="audio-sfx-toggle"
-                        checked={audioConfig.sfxEnabled !== false}
-                        onChange={(e) => {
-                          const nextCfg: GameAudioConfig = {
-                            ...audioConfig,
-                            sfxEnabled: e.target.checked,
-                          };
-                          setAudioConfig(nextCfg);
-                          if (generatedSpec) {
-                            setGeneratedSpec((prev) =>
-                              prev ? { ...prev, settings: { ...prev.settings, audioConfig: nextCfg } } : prev
-                            );
-                            setSavedForLater(false);
-                            setSaveStatus('dirty');
-                          }
-                        }}
-                      />
-                      <span>Hiệu ứng SFX</span>
-                    </label>
-                    <label style={{ display: 'inline-flex', alignItems: 'center', gap: '0.3rem', cursor: 'pointer', fontWeight: 700 }}>
-                      <input
-                        type="checkbox"
-                        data-testid="audio-countdown-toggle"
-                        checked={audioConfig.countdownSoundEnabled !== false}
-                        onChange={(e) => {
-                          const nextCfg: GameAudioConfig = {
-                            ...audioConfig,
-                            countdownSoundEnabled: e.target.checked,
-                          };
-                          setAudioConfig(nextCfg);
-                          if (generatedSpec) {
-                            setGeneratedSpec((prev) =>
-                              prev ? { ...prev, settings: { ...prev.settings, audioConfig: nextCfg } } : prev
-                            );
-                            setSavedForLater(false);
-                            setSaveStatus('dirty');
-                          }
-                        }}
-                      />
-                      <span>Đếm ngược cuối câu</span>
-                    </label>
-                  </div>
-
-                  {/* Nghe thử từng hiệu ứng riêng lẻ & Tải hiệu ứng tùy chỉnh */}
-                  <div data-testid="sfx-cue-preview-panel">
-                    <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.3rem' }}>
-                      Nghe thử từng hiệu ứng âm thanh (hoặc bấm ⬆ để thay bằng file riêng):
-                    </div>
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.35rem' }}>
-                      {SFX_CUE_CATALOG.map((item) => {
-                        const overrideEntry = audioConfig.customSfxOverrides?.[item.cue];
-                        const hasCustom = Boolean(overrideEntry?.url || overrideEntry?.audioUrl);
-                        return (
-                          <div
-                            key={item.cue}
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              borderRadius: '6px',
-                              border: hasCustom
-                                ? '1px solid var(--accent-emerald)'
-                                : '1px solid var(--border-subtle)',
-                              backgroundColor: 'var(--bg-input)',
-                              overflow: 'hidden',
-                            }}
-                          >
-                            <button
-                              type="button"
-                              data-testid={`preview-sfx-cue-${item.cue}`}
-                              onClick={() => soundManager.previewSfxCue(item.cue, audioConfig)}
-                              title={`Nghe thử hiệu ứng: ${item.label}`}
-                              style={{
-                                border: 'none',
-                                background: 'transparent',
-                                color: 'var(--text-primary)',
-                                fontSize: '0.72rem',
-                                fontWeight: 700,
-                                padding: '0.28rem 0.5rem',
-                                cursor: 'pointer',
-                              }}
-                            >
-                              🔊 {item.label}
-                            </button>
-                            <label
-                              title={`Tải file .mp3/.wav/.ogg riêng cho hiệu ứng ${item.label}`}
-                              style={{
-                                borderLeft: '1px solid var(--border-subtle)',
-                                padding: '0.28rem 0.4rem',
-                                fontSize: '0.68rem',
-                                color: hasCustom ? 'var(--accent-emerald)' : 'var(--accent-sky)',
-                                fontWeight: 800,
-                                cursor: uploadingSfxCue === item.cue ? 'wait' : 'pointer',
-                              }}
-                            >
-                              {hasCustom ? '✓' : '⬆'}
-                              <input
-                                type="file"
-                                data-testid={`upload-sfx-override-${item.cue}`}
-                                accept=".mp3,.wav,.ogg,audio/mpeg,audio/wav,audio/ogg"
-                                onChange={(e) => handleCustomSfxOverrideUpload(item.cue, e)}
-                                disabled={uploadingSfxCue === item.cue}
-                                style={{ display: 'none' }}
-                              />
-                            </label>
-                          </div>
-                        );
-                      })}
-                    </div>
+                  <div
+                    data-testid="creator-game-audio-description"
+                    style={{
+                      fontSize: '0.72rem',
+                      color: 'var(--text-secondary)',
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    Khi bật, hệ thống tự động phát nhạc nền và hiệu ứng âm thanh phù hợp với từng tình huống trong trò chơi.
                   </div>
                 </div>
               </div>

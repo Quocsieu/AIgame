@@ -17,6 +17,8 @@ import { persistenceRepo } from '../src/storage/persistence.repository.js';
 import { initDatabase } from '../src/storage/sqlite.db.js';
 import {
   DEFAULT_AUDIO_CONFIG,
+  UNIFIED_DEFAULT_AUDIO_ASSETS,
+  normalizeGameAudioConfig,
   normalizeVolumeToPercent,
   soundManager,
 } from '../frontend/src/services/audio.js';
@@ -410,22 +412,142 @@ async function runAudioSystemVerification() {
       soundManager.checkCountdownTick(2); // Giây 2 -> kêu âm cao 880Hz
       assert.equal(soundManager.getDiagnostics().lastToneFrequency, 880, '2 giây cuối phải phát tần số cảnh báo 880Hz');
 
-      // Test phân biệt rõ 5 loại SFX (correct, wrong, timeout, recorded, finish)
-      soundManager.playSfx('correct');
-      assert.equal(soundManager.getDiagnostics().lastSfxPlayed, 'correct');
-      soundManager.playSfx('wrong');
-      assert.equal(soundManager.getDiagnostics().lastSfxPlayed, 'wrong');
+      // Test phân biệt rõ các loại SFX + Xoay vòng biến thể Correct (3 biến thể) & Wrong (2 biến thể)
+      soundManager.setSessionContext({ sessionMode: 'PLAY', answersPublished: false });
+      soundManager.resetVariantHistory();
+
+      const correctVariantsSeen: string[] = [];
+      for (let i = 0; i < 6; i++) {
+        soundManager.playCorrect();
+        const d = soundManager.getDiagnostics();
+        assert.equal(d.lastSfxPlayed, 'correct');
+        assert.ok(d.lastSfxVariantKey, 'Phải ghi nhận lastSfxVariantKey cho correct');
+        correctVariantsSeen.push(d.lastSfxVariantKey!);
+        if (i > 0) {
+          assert.notEqual(
+            correctVariantsSeen[i],
+            correctVariantsSeen[i - 1],
+            'Hai lần trả lời đúng liên tiếp không được lặp lại cùng một biến thể âm thanh'
+          );
+        }
+      }
+      assert.deepEqual(
+        correctVariantsSeen,
+        [
+          'correct_applause',
+          'correct_wow',
+          'correct_cheer',
+          'correct_applause',
+          'correct_wow',
+          'correct_cheer',
+        ],
+        'Phải xoay vòng đủ 3 biến thể trả lời đúng (vỗ tay -> wow -> reo hò)'
+      );
+
+      const wrongVariantsSeen: string[] = [];
+      for (let i = 0; i < 4; i++) {
+        soundManager.playWrong();
+        const d = soundManager.getDiagnostics();
+        assert.equal(d.lastSfxPlayed, 'wrong');
+        assert.ok(d.lastSfxVariantKey, 'Phải ghi nhận lastSfxVariantKey cho wrong');
+        wrongVariantsSeen.push(d.lastSfxVariantKey!);
+        if (i > 0) {
+          assert.notEqual(
+            wrongVariantsSeen[i],
+            wrongVariantsSeen[i - 1],
+            'Hai lần trả lời sai liên tiếp không được lặp lại cùng một biến thể âm thanh'
+          );
+        }
+      }
+      assert.deepEqual(
+        wrongVariantsSeen,
+        ['wrong_tete', 'wrong_buzzer', 'wrong_tete', 'wrong_buzzer'],
+        'Phải xoay vòng đủ 2 biến thể trả lời sai (tè tè -> buzzer)'
+      );
+
       soundManager.playSfx('timeout');
       assert.equal(soundManager.getDiagnostics().lastSfxPlayed, 'timeout');
+      assert.equal(soundManager.getDiagnostics().lastSfxAssetUrl, '/audio/default/timeout.wav');
+
       soundManager.playSfx('recorded');
       assert.equal(soundManager.getDiagnostics().lastSfxPlayed, 'recorded');
+      assert.equal(soundManager.getDiagnostics().lastSfxAssetUrl, '/audio/default/recorded.wav');
+
+      soundManager.playSfx('start');
+      assert.equal(soundManager.getDiagnostics().lastSfxPlayed, 'start');
+      assert.equal(soundManager.getDiagnostics().lastSfxAssetUrl, '/audio/default/start.wav');
+
       soundManager.playSfx('finish');
       assert.equal(soundManager.getDiagnostics().lastSfxPlayed, 'finish');
+      assert.equal(soundManager.getDiagnostics().lastSfxAssetUrl, '/audio/default/finish.wav');
+
+      soundManager.playSfx('top3');
+      assert.equal(soundManager.getDiagnostics().lastSfxPlayed, 'top3');
+      assert.equal(soundManager.getDiagnostics().lastSfxAssetUrl, '/audio/default/top3.wav');
+
+      // Test Adventure 2D cues (jump, hit, checkpoint)
+      soundManager.playAdventureJump();
+      assert.equal(soundManager.getDiagnostics().lastSfxPlayed, 'adventure_jump');
+      soundManager.playAdventureHit();
+      assert.equal(soundManager.getDiagnostics().lastSfxPlayed, 'adventure_hit');
+      soundManager.playAdventureCheckpoint();
+      assert.equal(soundManager.getDiagnostics().lastSfxPlayed, 'adventure_checkpoint');
+
+      // Test Exam Mode Secrecy tự động chặn lộ đáp án ở tầng Engine
+      soundManager.setSessionContext({ sessionMode: 'EXAM', answersPublished: false });
+      soundManager.playCorrect();
+      assert.equal(
+        soundManager.getDiagnostics().lastSfxPlayed,
+        'recorded',
+        'Trong chế độ EXAM chưa công bố đáp án, playCorrect() phải tự động chuyển sang phát recorded'
+      );
+      soundManager.playWrong();
+      assert.equal(
+        soundManager.getDiagnostics().lastSfxPlayed,
+        'recorded',
+        'Trong chế độ EXAM chưa công bố đáp án, playWrong() phải tự động chuyển sang phát recorded'
+      );
+      soundManager.playTop3Celebration();
+      assert.equal(
+        soundManager.getDiagnostics().lastSfxPlayed,
+        'finish',
+        'Trong chế độ EXAM chưa công bố đáp án, playTop3Celebration() phải tự động chuyển sang phát finish'
+      );
+      soundManager.setSessionContext({ sessionMode: 'PLAY', answersPublished: false });
+
+      // Test Seamless BGM Continuation qua các câu hỏi (không khởi động lại từ đầu)
+      soundManager.stopAll();
+      soundManager.startSessionAudio({ enabled: true, bgmEnabled: true, sessionMode: 'PLAY' });
+      const bgmStartCountQ1 = soundManager.getDiagnostics().bgmStartCount;
+      assert.equal(soundManager.getDiagnostics().bgmAssetUrl, '/audio/default/bgm_default.wav');
+      soundManager.startSessionAudio({ enabled: true, bgmEnabled: true, sessionMode: 'PLAY' });
+      const bgmStartCountQ2 = soundManager.getDiagnostics().bgmStartCount;
+      assert.equal(
+        bgmStartCountQ2,
+        bgmStartCountQ1,
+        'Chuyển từ câu hỏi 1 sang câu hỏi 2 không được khởi động lại nhạc nền BGM'
+      );
+
+      // Test Tương thích ngược (Backward Compatibility) với normalizeGameAudioConfig
+      const normNew = normalizeGameAudioConfig(undefined);
+      assert.equal(normNew.enabled, true, 'Game mới mặc định phải bật âm thanh');
+      const normDisabledOld = normalizeGameAudioConfig({
+        enabled: false,
+        presetId: 'CORPORATE_CALM',
+        soundPackId: 'CORPORATE_TRAINING',
+      });
+      assert.equal(
+        normDisabledOld.enabled,
+        false,
+        'Game cũ đã lưu enabled=false tuyệt đối không được tự bật lại âm thanh'
+      );
+      assert.equal(normDisabledOld.bgmEnabled, false);
+      assert.equal(normDisabledOld.sfxEnabled, false);
 
       soundManager.stopAll();
       assert.equal(soundManager.getIsPlaying(), false);
       assert.equal(soundManager.getIsPreviewing(), false);
-      console.log('✓ [D1] Toàn bộ 11 hạng mục Unit Test cho GameAudioManager đều PASS!');
+      console.log('✓ [D1] Toàn bộ hạng mục Unit Test cho Unified GameAudioManager V3 đều PASS!');
     } finally {
       soundManager.stopAll();
       (globalThis as any).window = origWindow;
@@ -643,131 +765,97 @@ async function runAudioSystemVerification() {
       await page.goto(`${baseUrl}/?tab=demo`);
       await sleep(700);
 
-      // 1. Click "Nghe thử" lần đầu trên Desktop 1440x900
-      const firstClickResult = await page.eval(`(async () => {
-        const btn = document.querySelector('[data-testid="audio-preview-btn"]');
-        const beforeText = btn ? btn.textContent.trim() : '';
-        if (btn) btn.click();
-        await new Promise((r) => setTimeout(r, 80));
-        const afterText = btn ? btn.textContent.trim() : '';
-        const sm = window.__aiGameSoundManager;
+      // 1. Kiểm tra Giao diện Âm thanh tối giản trên Trang Tạo Game (Desktop 1440x900):
+      //    - Chỉ có 1 checkbox duy nhất [data-testid="creator-game-audio-enabled"] trong [data-testid="creator-game-audio-section"]
+      //    - Toàn bộ control phức tạp cũ (dropdown, preview, stop, mute, volume slider, upload, 3 sub-checkboxes, 7 nút preview SFX) đã được gỡ bỏ hoàn toàn
+      const creatorUiAudit = await page.eval(`(async () => {
+        const rosterSec = document.querySelector('[data-testid="creator-roster-section"]');
+        const audioSec = document.querySelector('[data-testid="creator-game-audio-section"]');
+        const audioCheckbox = document.querySelector('[data-testid="creator-game-audio-enabled"]');
+        const audioDesc = document.querySelector('[data-testid="creator-game-audio-description"]');
+        const submitBtn = document.querySelector('[data-testid="create-game-submit-btn"]');
+
+        const removedLegacyControls = {
+          v3SoundPackSection: Boolean(document.querySelector('[data-testid="v3-sound-pack-section"]')),
+          soundPackSelect: Boolean(document.querySelector('[data-testid="sound-pack-select"]')),
+          audioPreviewBtn: Boolean(document.querySelector('[data-testid="audio-preview-btn"]')),
+          audioStopBtn: Boolean(document.querySelector('[data-testid="audio-stop-preview-btn"]')),
+          creatorMuteBtn: Boolean(document.querySelector('[data-testid="creator-audio-mute-btn"]')),
+          creatorVolSlider: Boolean(document.querySelector('[data-testid="creator-audio-volume-slider"]')),
+          customUploadInput: Boolean(document.querySelector('[data-testid="custom-audio-upload-input"]')),
+          bgmToggle: Boolean(document.querySelector('[data-testid="audio-bgm-toggle"]')),
+          sfxToggle: Boolean(document.querySelector('[data-testid="audio-sfx-toggle"]')),
+          countdownToggle: Boolean(document.querySelector('[data-testid="audio-countdown-toggle"]')),
+          sfxPreviewPanel: Boolean(document.querySelector('[data-testid="sfx-cue-preview-panel"]')),
+        };
+
+        const rRoster = rosterSec ? rosterSec.getBoundingClientRect() : null;
+        const rAudio = audioSec ? audioSec.getBoundingClientRect() : null;
+        const rSubmit = submitBtn ? submitBtn.getBoundingClientRect() : null;
+        const isOrderValid = Boolean(
+          rRoster && rAudio && rSubmit && rRoster.top < rAudio.top && rAudio.top < rSubmit.top
+        );
+
+        const initialChecked = audioCheckbox ? audioCheckbox.checked : false;
+
+        // Tắt checkbox -> kiểm tra trạng thái tắt âm thanh
+        audioCheckbox.click();
+        await new Promise((r) => setTimeout(r, 60));
+        const afterUncheck = audioCheckbox.checked;
+        const diagAfterUncheck = window.__aiGameSoundManager.getDiagnostics();
+
+        // Bật lại checkbox -> kiểm tra trạng thái bật âm thanh
+        audioCheckbox.click();
+        await new Promise((r) => setTimeout(r, 60));
+        const afterRecheck = audioCheckbox.checked;
+        const diagAfterRecheck = window.__aiGameSoundManager.getDiagnostics();
+
         return {
-          beforeText,
-          afterText,
-          ariaPressed: btn ? btn.getAttribute('aria-pressed') : null,
-          diag: sm ? sm.getDiagnostics() : null,
+          hasAudioSec: Boolean(audioSec),
+          hasAudioCheckbox: Boolean(audioCheckbox),
+          descText: audioDesc ? audioDesc.textContent.trim() : '',
+          removedLegacyControls,
+          isOrderValid,
+          initialChecked,
+          afterUncheck,
+          diagAfterUncheck,
+          afterRecheck,
+          diagAfterRecheck,
         };
       })()`);
 
-      assert.equal(firstClickResult.beforeText, '🔊 Nghe thử bộ âm thanh', 'Trạng thái ban đầu của nút phải là 🔊 Nghe thử bộ âm thanh');
-      assert.equal(firstClickResult.afterText, '🔊 Đang phát nghe thử', 'Sau khi click lần đầu phải đổi sang 🔊 Đang phát nghe thử');
-      assert.equal(firstClickResult.ariaPressed, 'true');
-      assert.ok(firstClickResult.diag, 'window.__aiGameSoundManager phải tồn tại');
-      assert.equal(firstClickResult.diag.isPreviewing, true, 'isPreviewing phải bằng true');
-      assert.equal(firstClickResult.diag.isPlayingBgm, true, 'isPlayingBgm phải bằng true');
-      assert.ok(
-        firstClickResult.diag.oscillatorsStartedCount >= 1,
-        `Phải tạo và phát ít nhất 1 OscillatorNode khi bấm Nghe thử (nhận: ${firstClickResult.diag.oscillatorsStartedCount})`
+      assert.equal(creatorUiAudit.hasAudioSec, true, 'Phải có khu vực 7. Âm thanh trò chơi (creator-game-audio-section)');
+      assert.equal(creatorUiAudit.hasAudioCheckbox, true, 'Phải có checkbox Sử dụng bộ âm thanh trò chơi (creator-game-audio-enabled)');
+      assert.equal(
+        creatorUiAudit.descText,
+        'Khi bật, hệ thống tự động phát nhạc nền và hiệu ứng âm thanh phù hợp với từng tình huống trong trò chơi.',
+        'Mô tả dưới checkbox phải khớp chính xác đặc tả'
       );
-      assert.ok(
-        firstClickResult.diag.lastGainValue > 0.05,
-        `Gain phát thực tế phải > 0.05 (trước khi sửa là 0.0006 bị chặn), nhận: ${firstClickResult.diag.lastGainValue}`
-      );
-      console.log(
-        `✓ [D3.1] Click "Nghe thử bộ âm thanh" lần đầu thành công: AudioContext=${firstClickResult.diag.contextState}, oscillatorsStarted=${firstClickResult.diag.oscillatorsStartedCount}, gain=${firstClickResult.diag.lastGainValue}, freq=${firstClickResult.diag.lastToneFrequency}Hz`
-      );
+      assert.equal(creatorUiAudit.isOrderValid, true, 'Mục 7. Âm thanh trò chơi phải nằm dưới Danh sách người tham gia và trên nút Tạo Game Bằng AI');
+      for (const [ctrlName, exists] of Object.entries(creatorUiAudit.removedLegacyControls)) {
+        assert.equal(exists, false, `Control phức tạp cũ (${ctrlName}) phải được gỡ bỏ hoàn toàn khỏi Trang Tạo Game`);
+      }
+      assert.equal(creatorUiAudit.initialChecked, true, 'Checkbox Sử dụng bộ âm thanh trò chơi mặc định phải Bật (true)');
+      assert.equal(creatorUiAudit.afterUncheck, false, 'Click lần 1 phải tắt checkbox');
+      assert.equal(creatorUiAudit.diagAfterUncheck.enabled, false, 'Khi tắt checkbox, soundManager.enabled phải bằng false');
+      assert.equal(creatorUiAudit.diagAfterUncheck.isPlayingBgm, false, 'Khi tắt checkbox, không có nhạc nền nào được chạy');
+      assert.equal(creatorUiAudit.afterRecheck, true, 'Click lần 2 phải bật lại checkbox');
+      assert.equal(creatorUiAudit.diagAfterRecheck.enabled, true, 'Khi bật lại checkbox, soundManager.enabled phải bằng true');
+      console.log('✓ [D3.1] Giao diện 1 checkbox duy nhất "7. Âm thanh trò chơi" trên Trang Tạo Game hoạt động chính xác 100%');
 
-      // 2. Đổi sang từng bộ âm thanh chủ đề (sound pack) khi đang Nghe thử -> tự động chuyển sang pack mới, không chồng âm thanh, và không còn select V2 trùng lặp
-      const presetSwitchResult = await page.eval(`(async () => {
-        const legacyPresetSelect = document.querySelector('[data-testid="audio-preset-select"]');
-        const select = document.querySelector('[data-testid="sound-pack-select"]');
-        const sm = window.__aiGameSoundManager;
-        const nativeSelectSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
-        const switchPack = async (val) => {
-          nativeSelectSetter.call(select, val);
-          select.dispatchEvent(new Event('change', { bubbles: true }));
-          await new Promise((r) => setTimeout(r, 60));
-          return sm.getDiagnostics();
-        };
-        const examDiag = await switchPack('CLASSROOM_QUIZ');
-        const advDiag = await switchPack('ADVENTURE_QUEST');
-        const corpDiag = await switchPack('CORPORATE_TRAINING');
-        return { hasLegacyPresetSelect: Boolean(legacyPresetSelect), examDiag, advDiag, corpDiag };
-      })()`);
-
-      assert.equal(presetSwitchResult.hasLegacyPresetSelect, false, 'Cụm select V2 trùng lặp (audio-preset-select) phải bị xóa hoàn toàn khỏi DOM');
-      assert.equal(presetSwitchResult.examDiag.activePresetId, 'EXAM_FOCUS');
-      assert.equal(presetSwitchResult.examDiag.lastToneFrequency, 220, 'CLASSROOM_QUIZ (EXAM_FOCUS) phải phát 220Hz');
-      assert.equal(presetSwitchResult.advDiag.activePresetId, 'ADVENTURE_QUEST');
-      assert.equal(presetSwitchResult.advDiag.lastToneFrequency, 293.66, 'ADVENTURE_QUEST phải phát 293.66Hz');
-      assert.equal(presetSwitchResult.corpDiag.activePresetId, 'CORPORATE_CALM');
-      assert.equal(presetSwitchResult.corpDiag.lastToneFrequency, 261.63, 'CORPORATE_TRAINING (CORPORATE_CALM) phải phát 261.63Hz');
-      console.log('✓ [D3.2] Đổi Bộ âm thanh chủ đề trực tiếp khi đang Nghe thử hoạt động chính xác cho mọi sound pack');
-
-      // 3. Click liên tiếp 5 lần vào nút Nghe thử / Dừng -> không bị chồng âm thanh hoặc lệch state
-      const rapidClicksResult = await page.eval(`(async () => {
-        const btn = document.querySelector('[data-testid="audio-preview-btn"]');
-        const sm = window.__aiGameSoundManager;
-        for (let i = 0; i < 5; i++) {
-          btn.click();
-          await new Promise((r) => setTimeout(r, 30));
-        }
-        await new Promise((r) => setTimeout(r, 50));
-        return {
-          btnText: btn.textContent.trim(),
-          diag: sm.getDiagnostics(),
-        };
-      })()`);
-      // Đang phát (true) -> 5 lần click (lẻ) -> phải dừng (false)
-      assert.equal(rapidClicksResult.diag.isPreviewing, false, 'Sau số lần click lẻ từ trạng thái đang phát, preview phải dừng hoàn toàn');
-      assert.equal(rapidClicksResult.btnText, '🔊 Nghe thử bộ âm thanh');
-
-      // Bấm lại để bật preview và kiểm tra Mute/Unmute + Volume slider ngay trên Trang Tạo Game
-      const creatorMuteVolResult = await page.eval(`(async () => {
-        const previewBtn = document.querySelector('[data-testid="audio-preview-btn"]');
-        const muteBtn = document.querySelector('[data-testid="creator-audio-mute-btn"]');
-        const volSlider = document.querySelector('[data-testid="creator-audio-volume-slider"]');
-        const sm = window.__aiGameSoundManager;
-
-        previewBtn.click(); // Bật lại preview
-        await new Promise((r) => setTimeout(r, 40));
-        muteBtn.click(); // Mute
-        await new Promise((r) => setTimeout(r, 40));
-        const mutedState = sm.getDiagnostics().muted;
-        muteBtn.click(); // Unmute
-        await new Promise((r) => setTimeout(r, 40));
-        const unmutedState = sm.getDiagnostics().muted;
-
-        // Đổi volume slider sang 85%
-        const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
-        nativeInputValueSetter.call(volSlider, '85');
-        volSlider.dispatchEvent(new Event('change', { bubbles: true }));
-        await new Promise((r) => setTimeout(r, 40));
-        const volAfterSlider = sm.getDiagnostics().volume;
-
-        return { mutedState, unmutedState, volAfterSlider };
-      })()`);
-      assert.equal(creatorMuteVolResult.mutedState, true, 'Nút Mute trên Trang Tạo Game phải tắt tiếng');
-      assert.equal(creatorMuteVolResult.unmutedState, false, 'Bấm lại nút Mute phải bật tiếng trở lại');
-      assert.equal(creatorMuteVolResult.volAfterSlider, 85, 'Thanh trượt âm lượng phải cập nhật volume = 85%');
-      console.log('✓ [D3.3] Click liên tiếp, Mute/Unmute và Volume slider trên Trang Tạo Game hoạt động chính xác');
-
-      // 4. Chuyển từ Trang Tạo Game (đang phát Nghe thử) sang Playtest -> Preview phải tự dừng và BGM Playtest chạy
+      // 4. Chuyển từ Trang Tạo Game sang Playtest -> Nhạc nền mặc định tự động phát và dừng sạch khi thoát
       await page.eval(`document.querySelector('[data-testid="playtest-game-btn"]').click()`);
       await sleep(500);
       const playtestAudioCheck = await page.eval(`(() => {
         const sm = window.__aiGameSoundManager;
-        const previewBtn = document.querySelector('[data-testid="audio-preview-btn"]');
         return {
           diag: sm.getDiagnostics(),
-          creatorPreviewBtnText: previewBtn ? previewBtn.textContent.trim() : '',
           hasPlaytestOverlay: Boolean(document.querySelector('[data-testid="playtest-overlay"]')),
         };
       })()`);
       assert.equal(playtestAudioCheck.hasPlaytestOverlay, true);
-      assert.equal(playtestAudioCheck.diag.isPreviewing, false, 'Khi mở Playtest, chế độ isPreviewing phải tắt');
-      assert.equal(playtestAudioCheck.diag.isPlayingBgm, true, 'Nhạc nền phiên Playtest phải đang chạy');
-      assert.equal(playtestAudioCheck.creatorPreviewBtnText, '🔊 Nghe thử bộ âm thanh', 'Nút Nghe thử bên dưới phải về trạng thái 🔊 Nghe thử bộ âm thanh');
+      assert.equal(playtestAudioCheck.diag.isPlayingBgm, true, 'Nhạc nền phiên Playtest phải tự động chạy khi bắt đầu');
+      assert.equal(playtestAudioCheck.diag.lastSfxPlayed, 'start', 'Khi vào Playtest phải phát hiệu ứng start');
 
       // Mở trình sửa câu hỏi trực tiếp trong Playtest -> kiểm tra timer tạm dừng -> lưu & đóng lại -> thoát Playtest
       await page.eval(`document.querySelector('[data-testid="playtest-inline-edit-btn"]').click()`);
@@ -832,20 +920,31 @@ async function runAudioSystemVerification() {
       const mobilePage = await browser.newPage({ width: 390, height: 844 });
       await mobilePage.goto(`${baseUrl}/?tab=demo`);
       await sleep(700);
-      const mobileCheck = await mobilePage.eval(`(() => {
-        const btn = document.querySelector('[data-testid="audio-preview-btn"]');
-        if (btn) btn.click();
+      const mobileCheck = await mobilePage.eval(`(async () => {
+        const cb = document.querySelector('[data-testid="creator-game-audio-enabled"]');
+        const sec = document.querySelector('[data-testid="creator-game-audio-section"]');
         const sm = window.__aiGameSoundManager;
-        const diag = sm ? sm.getDiagnostics() : null;
-        if (btn) btn.click(); // Dừng lại
+        const initialChecked = cb ? cb.checked : false;
+        if (cb) cb.click();
+        await new Promise((r) => setTimeout(r, 40));
+        const afterUncheck = cb ? cb.checked : true;
+        if (cb) cb.click();
+        await new Promise((r) => setTimeout(r, 40));
+        const afterRecheck = cb ? cb.checked : false;
         return {
+          hasSection: Boolean(sec),
+          initialChecked,
+          afterUncheck,
+          afterRecheck,
           overflowPx: Math.max(0, document.documentElement.scrollWidth - window.innerWidth),
-          diag,
+          diag: sm ? sm.getDiagnostics() : null,
         };
       })()`);
       assert.equal(mobileCheck.overflowPx, 0, 'Giao diện Mobile 390x844 không được tràn ngang');
-      assert.equal(mobileCheck.diag.isPreviewing, true, 'Nút Nghe thử trên Mobile 390x844 phải hoạt động bình thường');
-      assert.ok(mobileCheck.diag.oscillatorsStartedCount >= 1);
+      assert.equal(mobileCheck.hasSection, true, 'Khu vực 7. Âm thanh trò chơi phải hiển thị trên Mobile 390x844');
+      assert.equal(mobileCheck.initialChecked, true);
+      assert.equal(mobileCheck.afterUncheck, false);
+      assert.equal(mobileCheck.afterRecheck, true);
       assert.equal(page.consoleErrors.length, 0, `Không được có lỗi Console trên Desktop: ${page.consoleErrors.join('; ')}`);
       assert.equal(page.pageErrors.length, 0, `Không được có lỗi Runtime/Promise trên Desktop: ${page.pageErrors.join('; ')}`);
       assert.equal(mobilePage.consoleErrors.length, 0, `Không được có lỗi Console trên Mobile: ${mobilePage.consoleErrors.join('; ')}`);

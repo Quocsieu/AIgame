@@ -164,10 +164,19 @@ export const HostPage: React.FC<HostPageProps> = ({
         setPassThresholdPercent(msg.passThresholdPercent);
       }
       if (msg.audioConfig) {
-        soundManager.configure(msg.audioConfig);
+        soundManager.configure({
+          ...msg.audioConfig,
+          sessionMode: msg.sessionMode,
+          answersPublished: msg.answersPublished,
+        });
         if (msg.state === 'QUESTION_ACTIVE') {
           soundManager.startBackgroundMusic();
         }
+      } else {
+        soundManager.setSessionContext({
+          sessionMode: msg.sessionMode,
+          answersPublished: msg.answersPublished,
+        });
       }
       if (Array.isArray(msg.players)) {
         setPlayers(msg.players.map((p: any) => ({ id: p.id, displayName: p.displayName })));
@@ -189,6 +198,7 @@ export const HostPage: React.FC<HostPageProps> = ({
 
     client.on('answers.published', () => {
       setAnswersPublished(true);
+      soundManager.setSessionContext({ answersPublished: true });
       toast.success('Đã công bố đáp án chính thức cho toàn bộ thí sinh!', 'Đã công bố đáp án');
     });
 

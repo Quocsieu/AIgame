@@ -509,12 +509,17 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         return;
       }
       setLoadedSpec(spec);
-      soundManager.startSessionAudio(spec.settings?.audioConfig);
+      soundManager.startSessionAudio({
+        ...(spec.settings?.audioConfig || {}),
+        sessionMode: spec.settings?.sessionMode || 'PLAY',
+        answersPublished: Boolean(spec.settings?.answersPublished),
+      });
       if (spec.gameType === 'ADVENTURE' && !isExplicitStart) {
         setSessionId(null);
         setIsLoading(false);
         return;
       }
+      soundManager.playStart();
       playtestQuestionIndexRef.current = 0;
       playtestStartedAtRef.current = Date.now();
       playtestQuestionStartedAtRef.current = Date.now();
@@ -591,7 +596,11 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           setPlayerStreak(summary.currentStreak || 0);
           setPlayerCorrectCount((summary as any).correctCount || 0);
           setPlayerWrongCount((summary as any).wrongCount || 0);
-          soundManager.startSessionAudio(resolvedSpec?.settings?.audioConfig);
+          soundManager.startSessionAudio({
+            ...(resolvedSpec?.settings?.audioConfig || {}),
+            sessionMode: resolvedSpec?.settings?.sessionMode || 'PLAY',
+            answersPublished: Boolean(resolvedSpec?.settings?.answersPublished),
+          });
           if (summary.state === 'QUESTION_ANSWERED') {
             const adv = await advancePracticeSession(savedSessionId);
             if (adv.finished && adv.result) {
@@ -712,7 +721,11 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       if (sessionKey) {
         sessionStorage.setItem(sessionKey, activeSessionId);
       }
-      soundManager.startSessionAudio(resolvedSpec?.settings?.audioConfig);
+      soundManager.startSessionAudio({
+        ...(resolvedSpec?.settings?.audioConfig || {}),
+        sessionMode: resolvedSpec?.settings?.sessionMode || 'PLAY',
+        answersPublished: Boolean(resolvedSpec?.settings?.answersPublished),
+      });
       soundManager.playStart();
       const startRes = await startPracticeSession(activeSessionId);
       setCurrentQuestion(startRes.question);
@@ -960,8 +973,15 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         };
 
         answeredQuestionIdsRef.current.add(currentQuestion.id);
-        if (isCorrect) soundManager.playCorrect();
-        else soundManager.playWrong();
+        const isExamUnpublished =
+          spec.settings?.sessionMode === 'EXAM' && !spec.settings?.answersPublished;
+        if (isExamUnpublished) {
+          soundManager.playAnswerRecorded();
+        } else if (isCorrect) {
+          soundManager.playCorrect();
+        } else {
+          soundManager.playWrong();
+        }
         setQuestionFeedback(localRes);
         setIsQuestionTimedOut(false);
         setPlayerScore(nextScore);

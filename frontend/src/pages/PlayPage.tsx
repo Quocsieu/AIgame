@@ -261,11 +261,24 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       if (typeof msg.answersPublished === 'boolean') {
         setAnswersPublished(msg.answersPublished);
       }
+      soundManager.setSessionContext({
+        sessionMode: msg.sessionMode,
+        answersPublished: msg.answersPublished,
+      });
       if (msg.audioConfig) {
-        soundManager.configure(msg.audioConfig);
+        soundManager.configure({
+          ...msg.audioConfig,
+          sessionMode: msg.sessionMode,
+          answersPublished: msg.answersPublished,
+        });
         if (msg.state === 'QUESTION_ACTIVE') {
           soundManager.startBackgroundMusic(msg.audioConfig);
         }
+      } else {
+        soundManager.setSessionContext({
+          sessionMode: msg.sessionMode,
+          answersPublished: msg.answersPublished,
+        });
       }
       if (msg.playerToken) {
         sessionStorage.setItem(tokenKey, msg.playerToken);
@@ -353,6 +366,10 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       if (typeof msg.answersPublished === 'boolean') {
         setAnswersPublished(msg.answersPublished);
       }
+      soundManager.setSessionContext({
+        sessionMode: msg.sessionMode,
+        answersPublished: msg.answersPublished,
+      });
       setCorrectAnswer(msg.correctAnswer || '');
       setExplanation(msg.explanation);
       setLeaderboard(msg.leaderboard || []);
@@ -394,6 +411,10 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       if (typeof msg.answersPublished === 'boolean') {
         setAnswersPublished(msg.answersPublished);
       }
+      soundManager.setSessionContext({
+        sessionMode: msg.sessionMode,
+        answersPublished: msg.answersPublished,
+      });
       setLeaderboard(msg.leaderboard || []);
       const myId = playerIdRef.current;
       let myRank: number | null = null;

@@ -163,6 +163,7 @@ export type RosterMode = 'FREE_TEXT' | 'PRECONFIGURED' | 'HYBRID';
 export type OfficialAttemptPolicy = 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
 export type AudioPresetId =
   | 'NONE'
+  | 'UNIFIED_DEFAULT'
   | 'ENERGETIC_ARENA'
   | 'EXAM_FOCUS'
   | 'ADVENTURE_QUEST'
@@ -173,6 +174,7 @@ export type AudioPresetId =
   | 'CUSTOM';
 
 export type SoundPackId =
+  | 'UNIFIED_DEFAULT'
   | 'ARCADE_FUN'
   | 'CLASSROOM_QUIZ'
   | 'ADVENTURE_QUEST'
