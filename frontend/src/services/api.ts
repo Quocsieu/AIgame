@@ -8,6 +8,7 @@ import type {
   AuthenticatedUser,
   CreateRoomResponse,
   Difficulty,
+  ExamAnswerRevealPolicy,
   GameActiveStatus,
   GameAudioConfig,
   GameQuestion,
@@ -295,6 +296,7 @@ export async function generateGame(params: {
   difficulty?: Difficulty;
   scoringMode?: ScoringMode;
   sessionMode?: SessionMode;
+  examAnswerRevealPolicy?: ExamAnswerRevealPolicy;
   timerMode?: TimerMode;
   totalExamDurationSeconds?: number;
   passThresholdPercent?: number;
@@ -596,6 +598,7 @@ export async function saveEditedQuestions(
           timePerQuestion?: number;
           scoringMode?: ScoringMode;
           sessionMode?: SessionMode;
+          examAnswerRevealPolicy?: ExamAnswerRevealPolicy;
           timerMode?: TimerMode;
           totalExamDurationSeconds?: number;
           autoAdvanceDelayMs?: number;

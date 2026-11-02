@@ -513,7 +513,7 @@ export class MultiplayerWebSocketServer {
     } else if (room.state === 'QUESTION_REVEAL') {
       const activeQ = room.gameSpecification.questions[room.currentQuestionIndex];
       const rawPersonal = player.questionResults.get(activeQ.id);
-      const hideAnswers = room.getSessionMode() === 'EXAM' && !room.answersPublished;
+      const hideAnswers = !room.canRevealQuestionAnswersToPlayers();
       const showLb =
         room.getSessionMode() !== 'EXAM' ||
         room.showExamLeaderboardToPlayers ||
@@ -541,14 +541,16 @@ export class MultiplayerWebSocketServer {
           : undefined,
         autoAdvanceMs: room.getAutoAdvanceDelayMs(),
         sessionMode: room.getSessionMode(),
+        examAnswerRevealPolicy: room.getExamAnswerRevealPolicy(),
         answersPublished: room.answersPublished,
-      });
+      } as any);
     } else if (room.state === 'FINISHED') {
       const leaderboard = room.getLeaderboard();
       const showLb =
         room.getSessionMode() !== 'EXAM' ||
         room.showExamLeaderboardToPlayers ||
         room.answersPublished;
+      const canRevealFinished = room.canRevealFinishedAnswersToPlayers();
       this.send(ws, {
         type: 'game.finished',
         leaderboard: showLb ? leaderboard : [],
@@ -556,10 +558,22 @@ export class MultiplayerWebSocketServer {
         totalQuestions: room.gameSpecification.questions.length,
         maxPossibleScore: room.getMaxPossibleScore(),
         sessionMode: room.getSessionMode(),
-        answersPublished: room.answersPublished,
+        examAnswerRevealPolicy: room.getExamAnswerRevealPolicy(),
+        answersPublished: room.answersPublished || canRevealFinished,
         passThresholdPercent: room.getPassThresholdPercent(),
         personalEvaluation: room.evaluatePlayerPerformance(player),
-      });
+        ...(canRevealFinished
+          ? {
+              questions: room.gameSpecification.questions.map((q, idx) => ({
+                id: q.id,
+                questionIndex: idx,
+                question: q.question,
+                correctAnswer: q.correctAnswer,
+                explanation: q.explanation,
+              })),
+            }
+          : {}),
+      } as any);
     }
   }
 
@@ -707,10 +721,21 @@ export class MultiplayerWebSocketServer {
       room.getSessionMode() !== 'EXAM' ||
       room.showExamLeaderboardToPlayers ||
       room.answersPublished;
+    const canRevealFinished = room.canRevealFinishedAnswersToPlayers();
     const maxPossibleScore = room.getMaxPossibleScore();
     const sessionMode = room.getSessionMode();
+    const examAnswerRevealPolicy = room.getExamAnswerRevealPolicy();
     const passThresholdPercent = room.getPassThresholdPercent();
     const totalQuestions = room.gameSpecification.questions.length;
+    const revealedQuestionsPayload = canRevealFinished
+      ? room.gameSpecification.questions.map((q, idx) => ({
+          id: q.id,
+          questionIndex: idx,
+          question: q.question,
+          correctAnswer: q.correctAnswer,
+          explanation: q.explanation,
+        }))
+      : undefined;
 
     for (const ws of socketSet) {
       if (ws.readyState !== WebSocket.OPEN) continue;
@@ -732,10 +757,12 @@ export class MultiplayerWebSocketServer {
         totalQuestions,
         maxPossibleScore,
         sessionMode,
-        answersPublished: room.answersPublished,
+        examAnswerRevealPolicy,
+        answersPublished: room.answersPublished || canRevealFinished,
         passThresholdPercent,
         personalEvaluation,
-      });
+        ...(revealedQuestionsPayload ? { questions: revealedQuestionsPayload } : {}),
+      } as any);
     }
   }
 
@@ -819,7 +846,7 @@ export class MultiplayerWebSocketServer {
 
     const revealData = room.revealQuestion();
     const autoAdvanceMs = room.getAutoAdvanceDelayMs();
-    const hideAnswersFromPlayers = room.getSessionMode() === 'EXAM' && !room.answersPublished;
+    const hideAnswersFromPlayers = !room.canRevealQuestionAnswersToPlayers();
     const showLbToPlayers =
       room.getSessionMode() !== 'EXAM' ||
       room.showExamLeaderboardToPlayers ||
@@ -869,8 +896,9 @@ export class MultiplayerWebSocketServer {
           personalResult,
           autoAdvanceMs,
           sessionMode: room.getSessionMode(),
-          answersPublished: room.answersPublished,
-        });
+          examAnswerRevealPolicy: room.getExamAnswerRevealPolicy(),
+          answersPublished: room.answersPublished || !hideAnswersFromPlayers,
+        } as any);
       }
     }
 

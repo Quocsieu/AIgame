@@ -90,6 +90,7 @@ import {
   type QuestionType,
   type ScoringMode,
   type SessionMode,
+  type ExamAnswerRevealPolicy,
   type RosterMode,
   type OfficialAttemptPolicy,
   type GameAudioConfig,
@@ -444,6 +445,14 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [sessionMode, setSessionMode] = useState<SessionMode>(
     () => effectiveBootSpec?.settings?.sessionMode || 'PLAY'
   );
+  const [examAnswerRevealPolicy, setExamAnswerRevealPolicy] = useState<ExamAnswerRevealPolicy>(
+    () =>
+      effectiveBootSpec?.settings?.examAnswerRevealPolicy === 'IMMEDIATE' ||
+      effectiveBootSpec?.settings?.examAnswerRevealPolicy === 'AFTER_SUBMIT' ||
+      effectiveBootSpec?.settings?.examAnswerRevealPolicy === 'AFTER_PUBLISH'
+        ? effectiveBootSpec.settings.examAnswerRevealPolicy
+        : 'AFTER_PUBLISH'
+  );
   const [passThresholdPercent, setPassThresholdPercent] = useState<number>(
     () => effectiveBootSpec?.settings?.passThresholdPercent ?? 50
   );
@@ -721,6 +730,15 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       setQuestionCount(initialSpec.questions.length);
       if (initialSpec.settings?.sessionMode) {
         setSessionMode(initialSpec.settings.sessionMode);
+      }
+      if (
+        initialSpec.settings?.examAnswerRevealPolicy === 'IMMEDIATE' ||
+        initialSpec.settings?.examAnswerRevealPolicy === 'AFTER_SUBMIT' ||
+        initialSpec.settings?.examAnswerRevealPolicy === 'AFTER_PUBLISH'
+      ) {
+        setExamAnswerRevealPolicy(initialSpec.settings.examAnswerRevealPolicy);
+      } else {
+        setExamAnswerRevealPolicy('AFTER_PUBLISH');
       }
       if (typeof initialSpec.settings?.passThresholdPercent === 'number') {
         setPassThresholdPercent(initialSpec.settings.passThresholdPercent);
@@ -1664,6 +1682,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         questionCount,
         timePerQuestion,
         sessionMode,
+        examAnswerRevealPolicy: sessionMode === 'EXAM' ? examAnswerRevealPolicy : undefined,
         passThresholdPercent,
         officialAttemptPolicy,
         rosterMode: effectiveRosterModeForGen,
@@ -1703,6 +1722,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         settings: {
           ...rawSpec.settings,
           sessionMode,
+          ...(sessionMode === 'EXAM' ? { examAnswerRevealPolicy } : {}),
           passThresholdPercent,
           officialAttemptPolicy,
           rosterMode: effectiveRosterModeForGen,
@@ -2052,6 +2072,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
             scoringMode,
             timePerQuestion,
             sessionMode,
+            ...(sessionMode === 'EXAM' ? { examAnswerRevealPolicy } : {}),
             passThresholdPercent,
             officialAttemptPolicy,
             rosterMode: effectiveRosterModeForRoom,
@@ -2476,6 +2497,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
           ...(syncedAdvCfg ? { adventureConfig: syncedAdvCfg } : {}),
           scoringMode,
           sessionMode,
+          ...(sessionMode === 'EXAM' ? { examAnswerRevealPolicy } : {}),
           passThresholdPercent,
           officialAttemptPolicy,
           rosterMode: effectiveRosterModeForSave,
@@ -2591,6 +2613,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         scoringMode,
         timePerQuestion,
         sessionMode,
+        examAnswerRevealPolicy: sessionMode === 'EXAM' ? examAnswerRevealPolicy : undefined,
         passThresholdPercent,
         officialAttemptPolicy,
         rosterMode,
@@ -4479,6 +4502,12 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                                 settings: {
                                   ...prev.settings,
                                   sessionMode: nextMode,
+                                  ...(nextMode === 'EXAM'
+                                    ? {
+                                        examAnswerRevealPolicy:
+                                          prev.settings?.examAnswerRevealPolicy || examAnswerRevealPolicy,
+                                      }
+                                    : {}),
                                   officialAttemptPolicy: nextPolicy,
                                   rosterMode: nextRosterMode,
                                 },
@@ -4502,7 +4531,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     }}
                   >
                     <option value="PLAY">Chơi / Luyện tập (Hiện đáp án ngay, tính điểm cao nhất)</option>
-                    <option value="EXAM">Thi nghiêm túc (Ẩn đáp án cho đến khi kết thúc, tính lượt hợp lệ cuối)</option>
+                    <option value="EXAM">Thi nghiêm túc (Tuỳ chọn hiển thị đáp án, tính lượt hợp lệ cuối)</option>
                   </select>
 
                   {sessionMode === 'EXAM' && (
@@ -4518,6 +4547,59 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                         border: '1px solid rgba(245, 158, 11, 0.3)',
                       }}
                     >
+                      <div style={{ gridColumn: '1 / -1' }}>
+                        <label
+                          htmlFor="exam-answer-reveal-policy-select"
+                          style={{
+                            display: 'block',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            color: 'var(--text-secondary)',
+                            marginBottom: '0.15rem',
+                          }}
+                        >
+                          Chế độ hiển thị đáp án (Chế độ Thi):
+                        </label>
+                        <select
+                          id="exam-answer-reveal-policy-select"
+                          data-testid="exam-answer-reveal-policy-select"
+                          value={examAnswerRevealPolicy}
+                          onChange={(e) => {
+                            const nextReveal = e.target.value as ExamAnswerRevealPolicy;
+                            setExamAnswerRevealPolicy(nextReveal);
+                            if (generatedSpec) {
+                              setGeneratedSpec((prev) =>
+                                prev
+                                  ? {
+                                      ...prev,
+                                      settings: {
+                                        ...prev.settings,
+                                        examAnswerRevealPolicy: nextReveal,
+                                      },
+                                    }
+                                  : prev
+                              );
+                              setSavedForLater(false);
+                              setSaveStatus('dirty');
+                            }
+                          }}
+                          style={{
+                            width: '100%',
+                            backgroundColor: 'var(--bg-input)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '6px',
+                            padding: '0.35rem 0.45rem',
+                            color: 'var(--text-primary)',
+                            fontSize: '0.76rem',
+                            fontWeight: 600,
+                            boxSizing: 'border-box',
+                          }}
+                        >
+                          <option value="IMMEDIATE">Hiển thị đáp án sau mỗi câu</option>
+                          <option value="AFTER_SUBMIT">Hiển thị đáp án sau khi nộp bài</option>
+                          <option value="AFTER_PUBLISH">Chỉ hiển thị khi người tạo công bố</option>
+                        </select>
+                      </div>
                       <div>
                         <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.15rem' }}>
                           Ngưỡng Đạt (%):

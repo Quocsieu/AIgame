@@ -42,12 +42,14 @@ import {
 } from '../services/api.js';
 import type {
   AuthenticatedUser,
+  ExamAnswerRevealPolicy,
   GameQuestion,
   GameSpecification,
   GameType,
   PersistedGameSummary,
   QuestionType,
   ScoringMode,
+  SessionMode,
 } from '../types/index.js';
 
 export type DiscoverTabKey = 'ALL' | 'PUBLISHED' | 'DRAFT' | 'MINE';
@@ -847,6 +849,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const [editDescription, setEditDescription] = useState('');
   const [editTimePerQuestion, setEditTimePerQuestion] = useState<number>(15);
   const [editScoringMode, setEditScoringMode] = useState<ScoringMode>('SPEED_BONUS');
+  const [editSessionMode, setEditSessionMode] = useState<SessionMode>('PLAY');
+  const [editExamAnswerRevealPolicy, setEditExamAnswerRevealPolicy] =
+    useState<ExamAnswerRevealPolicy>('AFTER_PUBLISH');
   const [editIsPublic, setEditIsPublic] = useState<boolean>(true);
   const [editQuestions, setEditQuestions] = useState<GameQuestion[]>([]);
   const [isSavingEdits, setIsSavingEdits] = useState(false);
@@ -1175,6 +1180,14 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     setEditDescription(spec.description);
     setEditTimePerQuestion(spec.settings.timePerQuestion || 15);
     setEditScoringMode(spec.settings.scoringMode || 'SPEED_BONUS');
+    setEditSessionMode(spec.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY');
+    setEditExamAnswerRevealPolicy(
+      spec.settings?.examAnswerRevealPolicy === 'IMMEDIATE' ||
+        spec.settings?.examAnswerRevealPolicy === 'AFTER_SUBMIT' ||
+        spec.settings?.examAnswerRevealPolicy === 'AFTER_PUBLISH'
+        ? spec.settings.examAnswerRevealPolicy
+        : 'AFTER_PUBLISH'
+    );
     setEditIsPublic(spec.isPublic ?? false);
     setEditQuestions(
       spec.questions.map((q) => ({
@@ -1197,7 +1210,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const handleViewOrEditGame = async (gameId: string, startInEditMode: boolean = false) => {
     setIsDetailLoading(true);
     try {
-      const spec = await fetchGameById(gameId, { mode: 'manage' });
+      const spec = await fetchGameById(gameId, { mode: isLibraryMode ? 'manage' : 'public' });
       setActiveGameSpec(spec);
       syncEditorFromSpec(spec);
       setIsEditMode(isLibraryMode && startInEditMode && canManageGame(spec));
@@ -1529,11 +1542,30 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         settings: {
           timePerQuestion: editTimePerQuestion,
           scoringMode: editScoringMode,
+          sessionMode: editSessionMode,
+          ...(editSessionMode === 'EXAM'
+            ? { examAnswerRevealPolicy: editExamAnswerRevealPolicy }
+            : {}),
         },
         isPublic: editIsPublic,
       });
       setActiveGameSpec(updated);
       syncEditorFromSpec(updated);
+      setSavedGames((prev) =>
+        prev.map((item) =>
+          item.gameId === updated.gameId
+            ? {
+                ...item,
+                title: updated.title,
+                description: updated.description,
+                sessionMode: updated.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY',
+                isPublic: Boolean(updated.isPublic),
+                questionCount: updated.questions.length,
+                timePerQuestion: updated.settings?.timePerQuestion || editTimePerQuestion,
+              }
+            : item
+        )
+      );
       setIsEditMode(false);
       toast.success('Đã lưu cập nhật bộ câu hỏi thành công.', 'Đã lưu');
       await loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter, discoverTab);
@@ -2037,6 +2069,79 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           <option value="DRAFT">Bản nháp (Ẩn khỏi người chơi)</option>
                         </select>
                       </div>
+
+                      <div>
+                        <label
+                          htmlFor="edit-spec-session-mode"
+                          style={{
+                            display: 'block',
+                            fontSize: '0.78rem',
+                            fontWeight: 600,
+                            color: 'var(--text-secondary)',
+                            marginBottom: '6px',
+                          }}
+                        >
+                          Chế độ vận hành (CHƠI / THI)
+                        </label>
+                        <select
+                          id="edit-spec-session-mode"
+                          data-testid="library-edit-session-mode-select"
+                          value={editSessionMode}
+                          onChange={(e) => setEditSessionMode(e.target.value as SessionMode)}
+                          style={{
+                            width: '100%',
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            border: '1px solid var(--border-strong)',
+                            backgroundColor: 'var(--bg-input)',
+                            color: editSessionMode === 'EXAM' ? 'var(--accent-rose)' : 'var(--accent-emerald)',
+                            fontWeight: 800,
+                            height: '40px',
+                          }}
+                        >
+                          <option value="PLAY">CHƠI (Luyện tập — hiện đáp án ngay)</option>
+                          <option value="EXAM">THI (Thi nghiêm túc — quản lý hiển thị đáp án)</option>
+                        </select>
+                      </div>
+
+                      {editSessionMode === 'EXAM' && (
+                        <div style={{ gridColumn: '1 / -1' }}>
+                          <label
+                            htmlFor="edit-spec-exam-reveal-policy"
+                            style={{
+                              display: 'block',
+                              fontSize: '0.78rem',
+                              fontWeight: 700,
+                              color: 'var(--accent-amber)',
+                              marginBottom: '6px',
+                            }}
+                          >
+                            Chế độ hiển thị đáp án (Chế độ Thi):
+                          </label>
+                          <select
+                            id="edit-spec-exam-reveal-policy"
+                            data-testid="library-edit-exam-reveal-policy-select"
+                            value={editExamAnswerRevealPolicy}
+                            onChange={(e) =>
+                              setEditExamAnswerRevealPolicy(e.target.value as ExamAnswerRevealPolicy)
+                            }
+                            style={{
+                              width: '100%',
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              border: '1px solid rgba(245, 158, 11, 0.45)',
+                              backgroundColor: 'var(--bg-input)',
+                              color: 'var(--text-primary)',
+                              fontWeight: 700,
+                              height: '40px',
+                            }}
+                          >
+                            <option value="IMMEDIATE">Hiển thị đáp án sau mỗi câu</option>
+                            <option value="AFTER_SUBMIT">Hiển thị đáp án sau khi nộp bài</option>
+                            <option value="AFTER_PUBLISH">Chỉ hiển thị khi người tạo công bố</option>
+                          </select>
+                        </div>
+                      )}
                     </div>
                   </div>
                 ) : (
@@ -2054,6 +2159,54 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       >
                         {formatGameTypeName(activeGameSpec.gameType)}
                       </span>
+                      <span
+                        data-testid="detail-game-mode-badge"
+                        data-mode={activeGameSpec.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY'}
+                        style={{
+                          backgroundColor:
+                            activeGameSpec.settings?.sessionMode === 'EXAM'
+                              ? 'rgba(239, 68, 68, 0.16)'
+                              : 'rgba(16, 185, 129, 0.16)',
+                          color:
+                            activeGameSpec.settings?.sessionMode === 'EXAM'
+                              ? 'var(--accent-rose)'
+                              : 'var(--accent-emerald)',
+                          border: `1px solid ${
+                            activeGameSpec.settings?.sessionMode === 'EXAM'
+                              ? 'rgba(239, 68, 68, 0.4)'
+                              : 'rgba(16, 185, 129, 0.4)'
+                          }`,
+                          padding: '3px 10px',
+                          borderRadius: '6px',
+                          fontSize: '0.75rem',
+                          fontWeight: 900,
+                          letterSpacing: '0.03em',
+                        }}
+                      >
+                        {activeGameSpec.settings?.sessionMode === 'EXAM' ? 'THI' : 'CHƠI'}
+                      </span>
+                      {isLibraryMode &&
+                        canManageGame(activeGameSpec) &&
+                        activeGameSpec.settings?.sessionMode === 'EXAM' && (
+                          <span
+                            data-testid="detail-exam-reveal-policy-badge"
+                            style={{
+                              backgroundColor: 'rgba(245, 158, 11, 0.14)',
+                              color: 'var(--accent-amber)',
+                              border: '1px solid rgba(245, 158, 11, 0.35)',
+                              padding: '3px 10px',
+                              borderRadius: '6px',
+                              fontSize: '0.73rem',
+                              fontWeight: 700,
+                            }}
+                          >
+                            {activeGameSpec.settings?.examAnswerRevealPolicy === 'IMMEDIATE'
+                              ? 'Đáp án: Sau mỗi câu'
+                              : activeGameSpec.settings?.examAnswerRevealPolicy === 'AFTER_SUBMIT'
+                                ? 'Đáp án: Sau khi nộp bài'
+                                : 'Đáp án: Khi công bố'}
+                          </span>
+                        )}
                       <span
                         style={{
                           backgroundColor: activeGameSpec.isPublic
@@ -2250,6 +2403,39 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         >
                           <PencilIcon size={14} />
                           <span>Sửa</span>
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="detail-duplicate-game-btn"
+                          onClick={() =>
+                            handleDuplicateGame({
+                              gameId: activeGameSpec.gameId,
+                              title: activeGameSpec.title,
+                            })
+                          }
+                          disabled={duplicatingGameId === activeGameSpec.gameId}
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '8px',
+                            padding: '0 12px',
+                            height: '38px',
+                            fontWeight: 700,
+                            fontSize: '0.82rem',
+                            cursor: duplicatingGameId === activeGameSpec.gameId ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                          title="Nhân bản bộ câu hỏi này sang bản nháp mới"
+                        >
+                          {duplicatingGameId === activeGameSpec.gameId ? (
+                            <SpinnerIcon size={14} />
+                          ) : (
+                            <CopyIcon size={14} />
+                          )}
+                          <span>Sao chép</span>
                         </button>
                         <button
                           type="button"
@@ -2961,51 +3147,81 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       >
                         {q.question}
                       </div>
-                      {q.choices && q.choices.length > 0 && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
-                          {q.choices.map((ch, cIdx) => {
-                            const isCorrect = ch === q.correctAnswer;
-                            return (
-                              <span
-                                key={cIdx}
+                      {(() => {
+                        const isDetailAnswerRedacted =
+                          activeGameSpec.settings?.sessionMode === 'EXAM' &&
+                          !activeGameSpec.settings?.answersPublished &&
+                          (!isLibraryMode || !canManageGame(activeGameSpec) || !q.correctAnswer);
+                        return (
+                          <>
+                            {q.choices && q.choices.length > 0 && (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '8px' }}>
+                                {q.choices.map((ch, cIdx) => {
+                                  const isCorrect =
+                                    !isDetailAnswerRedacted && Boolean(q.correctAnswer) && ch === q.correctAnswer;
+                                  return (
+                                    <span
+                                      key={cIdx}
+                                      style={{
+                                        fontSize: '0.8rem',
+                                        padding: '4px 10px',
+                                        borderRadius: '6px',
+                                        border: isCorrect
+                                          ? '1px solid var(--accent-emerald)'
+                                          : '1px solid var(--border-subtle)',
+                                        backgroundColor: isCorrect
+                                          ? 'rgba(16, 185, 129, 0.14)'
+                                          : 'var(--bg-surface)',
+                                        color: isCorrect ? 'var(--accent-emerald)' : 'var(--text-secondary)',
+                                        fontWeight: isCorrect ? 700 : 500,
+                                      }}
+                                    >
+                                      {ch}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                            )}
+                            {isDetailAnswerRedacted ? (
+                              <div
+                                data-testid={`detail-answer-redacted-${idx}`}
                                 style={{
-                                  fontSize: '0.8rem',
-                                  padding: '4px 10px',
-                                  borderRadius: '6px',
-                                  border: isCorrect
-                                    ? '1px solid var(--accent-emerald)'
-                                    : '1px solid var(--border-subtle)',
-                                  backgroundColor: isCorrect
-                                    ? 'rgba(16, 185, 129, 0.14)'
-                                    : 'var(--bg-surface)',
-                                  color: isCorrect ? 'var(--accent-emerald)' : 'var(--text-secondary)',
-                                  fontWeight: isCorrect ? 700 : 500,
+                                  fontSize: '0.82rem',
+                                  color: 'var(--accent-amber)',
+                                  fontWeight: 700,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
                                 }}
                               >
-                                {ch}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      )}
-                      <div
-                        style={{
-                          fontSize: '0.82rem',
-                          color: 'var(--accent-emerald)',
-                          fontWeight: 700,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                        }}
-                      >
-                        <CheckIcon size={14} />
-                        <span>Đáp án đúng: {q.correctAnswer}</span>
-                      </div>
-                      {q.explanation && (
-                        <div style={{ fontSize: '0.81rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                          Giải thích: {q.explanation}
-                        </div>
-                      )}
+                                <LockIcon size={14} />
+                                <span>Đáp án được bảo mật (Chế độ Thi)</span>
+                              </div>
+                            ) : (
+                              <>
+                                <div
+                                  style={{
+                                    fontSize: '0.82rem',
+                                    color: 'var(--accent-emerald)',
+                                    fontWeight: 700,
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                  }}
+                                >
+                                  <CheckIcon size={14} />
+                                  <span>Đáp án đúng: {q.correctAnswer}</span>
+                                </div>
+                                {q.explanation && (
+                                  <div style={{ fontSize: '0.81rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                    Giải thích: {q.explanation}
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </>
+                        );
+                      })()}
                       {q.sourceReference && (
                         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
                           Nguồn: {q.sourceReference.sourceLocation}
@@ -4018,6 +4234,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     {displayedGames.map((item) => (
                       <article
                         key={`discover-${item.gameId}`}
+                        data-testid={`discover-game-card-${item.gameId}`}
                         style={{
                           backgroundColor: 'var(--bg-input)',
                           border: '1px solid var(--border-subtle)',
@@ -4054,6 +4271,31 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             }}
                           >
                             {formatGameTypeName(item.gameType)}
+                          </span>
+                          <span
+                            data-testid={`discover-mode-badge-${item.gameId}`}
+                            data-mode={item.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY'}
+                            style={{
+                              position: 'absolute',
+                              top: '8px',
+                              right: '8px',
+                              fontSize: '0.68rem',
+                              fontWeight: 900,
+                              letterSpacing: '0.03em',
+                              color: '#ffffff',
+                              backgroundColor:
+                                item.sessionMode === 'EXAM'
+                                  ? 'rgba(220, 38, 38, 0.92)'
+                                  : 'rgba(16, 185, 129, 0.92)',
+                              border: `1px solid ${
+                                item.sessionMode === 'EXAM' ? '#f87171' : '#34d399'
+                              }`,
+                              padding: '2px 8px',
+                              borderRadius: '4px',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {item.sessionMode === 'EXAM' ? 'THI' : 'CHƠI'}
                           </span>
                           <span
                             style={{
@@ -4137,13 +4379,14 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                               display: 'flex',
                               alignItems: 'center',
                               justifyContent: 'space-between',
-                              gap: '8px',
+                              gap: '6px',
                               paddingTop: '8px',
                               borderTop: '1px solid var(--border-subtle)',
                             }}
                           >
                             <button
                               type="button"
+                              data-testid={`discover-card-open-btn-${item.gameId}`}
                               onClick={() => handleOpenModeModal(item.gameId)}
                               style={{
                                 flex: 1,
@@ -4151,15 +4394,15 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                                 color: 'var(--primary-ink, #060913)',
                                 border: '1px solid var(--primary)',
                                 borderRadius: '6px',
-                                padding: '0 10px',
+                                padding: '0 8px',
                                 height: '32px',
-                                fontSize: '0.78rem',
+                                fontSize: '0.76rem',
                                 fontWeight: 800,
                                 cursor: 'pointer',
                                 display: 'inline-flex',
                                 alignItems: 'center',
                                 justifyContent: 'center',
-                                gap: '5px',
+                                gap: '4px',
                               }}
                             >
                               <GamepadIcon size={13} />
@@ -4167,6 +4410,41 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             </button>
                             <button
                               type="button"
+                              data-testid={`discover-card-duplicate-btn-${item.gameId}`}
+                              disabled={duplicatingGameId === item.gameId}
+                              onClick={() =>
+                                handleDuplicateGame({
+                                  gameId: item.gameId,
+                                  title: item.title,
+                                })
+                              }
+                              style={{
+                                backgroundColor: 'var(--bg-surface)',
+                                color: 'var(--accent-sky)',
+                                border: '1px solid var(--border-strong)',
+                                borderRadius: '6px',
+                                padding: '0 8px',
+                                height: '32px',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                cursor: duplicatingGameId === item.gameId ? 'not-allowed' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px',
+                                flexShrink: 0,
+                              }}
+                              title="Sao chép game về Thư viện của bạn"
+                            >
+                              {duplicatingGameId === item.gameId ? (
+                                <SpinnerIcon size={12} />
+                              ) : (
+                                <CopyIcon size={12} />
+                              )}
+                              <span>Sao chép</span>
+                            </button>
+                            <button
+                              type="button"
+                              data-testid={`discover-card-detail-btn-${item.gameId}`}
                               onClick={() => handleViewOrEditGame(item.gameId, false)}
                               style={{
                                 backgroundColor: 'var(--bg-surface)',
@@ -4420,7 +4698,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     }}
                   >
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      {/* Hàng nhận diện: Loại game & Trạng thái */}
+                      {/* Hàng nhận diện: Loại game, Chế độ (CHƠI / THI) & Trạng thái */}
                       <div
                         style={{
                           display: 'flex',
@@ -4430,20 +4708,49 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           flexWrap: 'wrap',
                         }}
                       >
-                        <span
-                          style={{
-                            backgroundColor: 'var(--bg-input)',
-                            color: 'var(--accent-sky)',
-                            border: '1px solid var(--border-subtle)',
-                            padding: '2px 8px',
-                            borderRadius: '5px',
-                            fontWeight: 700,
-                            fontSize: '0.73rem',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {formatGameTypeName(g.gameType)}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              backgroundColor: 'var(--bg-input)',
+                              color: 'var(--accent-sky)',
+                              border: '1px solid var(--border-subtle)',
+                              padding: '2px 8px',
+                              borderRadius: '5px',
+                              fontWeight: 700,
+                              fontSize: '0.73rem',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {formatGameTypeName(g.gameType)}
+                          </span>
+                          <span
+                            data-testid={`library-mode-badge-${g.gameId}`}
+                            data-mode={g.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY'}
+                            style={{
+                              backgroundColor:
+                                g.sessionMode === 'EXAM'
+                                  ? 'rgba(239, 68, 68, 0.16)'
+                                  : 'rgba(16, 185, 129, 0.16)',
+                              color:
+                                g.sessionMode === 'EXAM'
+                                  ? 'var(--accent-rose)'
+                                  : 'var(--accent-emerald)',
+                              border: `1px solid ${
+                                g.sessionMode === 'EXAM'
+                                  ? 'rgba(239, 68, 68, 0.4)'
+                                  : 'rgba(16, 185, 129, 0.4)'
+                              }`,
+                              padding: '2px 8px',
+                              borderRadius: '5px',
+                              fontWeight: 900,
+                              fontSize: '0.7rem',
+                              letterSpacing: '0.03em',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {g.sessionMode === 'EXAM' ? 'THI' : 'CHƠI'}
+                          </span>
+                        </div>
 
                         <span
                           style={{
@@ -4698,6 +5005,33 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         }}
                       >
                         {formatGameTypeName(g.gameType)}
+                      </span>
+                      <span
+                        data-testid={`library-row-mode-badge-${g.gameId}`}
+                        data-mode={g.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY'}
+                        style={{
+                          backgroundColor:
+                            g.sessionMode === 'EXAM'
+                              ? 'rgba(239, 68, 68, 0.16)'
+                              : 'rgba(16, 185, 129, 0.16)',
+                          color:
+                            g.sessionMode === 'EXAM'
+                              ? 'var(--accent-rose)'
+                              : 'var(--accent-emerald)',
+                          border: `1px solid ${
+                            g.sessionMode === 'EXAM'
+                              ? 'rgba(239, 68, 68, 0.4)'
+                              : 'rgba(16, 185, 129, 0.4)'
+                          }`,
+                          padding: '2px 8px',
+                          borderRadius: '5px',
+                          fontWeight: 900,
+                          fontSize: '0.7rem',
+                          letterSpacing: '0.03em',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {g.sessionMode === 'EXAM' ? 'THI' : 'CHƠI'}
                       </span>
                       <div
                         style={{

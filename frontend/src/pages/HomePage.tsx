@@ -1012,19 +1012,38 @@ export const HomePage: React.FC<HomePageProps> = ({
                   >
                     <div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', marginBottom: '6px' }}>
-                        <span
-                          style={{
-                            fontSize: '0.7rem',
-                            fontWeight: 700,
-                            color: 'var(--accent-sky)',
-                            backgroundColor: 'var(--accent-sky-subtle)',
-                            padding: '2px 7px',
-                            borderRadius: '4px',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {formatGameTypeName(item.gameType)}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span
+                            style={{
+                              fontSize: '0.7rem',
+                              fontWeight: 700,
+                              color: 'var(--accent-sky)',
+                              backgroundColor: 'var(--accent-sky-subtle)',
+                              padding: '2px 7px',
+                              borderRadius: '4px',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {formatGameTypeName(item.gameType)}
+                          </span>
+                          <span
+                            data-testid={`home-recent-mode-badge-${item.gameId}`}
+                            style={{
+                              fontSize: '0.68rem',
+                              fontWeight: 900,
+                              color: item.sessionMode === 'EXAM' ? 'var(--accent-rose)' : 'var(--accent-emerald)',
+                              backgroundColor:
+                                item.sessionMode === 'EXAM'
+                                  ? 'rgba(239, 68, 68, 0.16)'
+                                  : 'rgba(16, 185, 129, 0.16)',
+                              padding: '2px 7px',
+                              borderRadius: '4px',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {item.sessionMode === 'EXAM' ? 'THI' : 'CHƠI'}
+                          </span>
+                        </div>
                         <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
                           {item.questionCount} câu
                         </span>
@@ -1733,6 +1752,28 @@ export const HomePage: React.FC<HomePageProps> = ({
                     >
                       <CheckIcon size={10} />
                       <span>Sẵn sàng chơi</span>
+                    </span>
+                    <span
+                      data-testid={`home-discover-mode-badge-${item.gameId}`}
+                      style={{
+                        position: 'absolute',
+                        top: '8px',
+                        right: '8px',
+                        fontSize: '0.68rem',
+                        fontWeight: 900,
+                        color: '#ffffff',
+                        backgroundColor:
+                          item.sessionMode === 'EXAM'
+                            ? 'rgba(220, 38, 38, 0.92)'
+                            : 'rgba(16, 185, 129, 0.92)',
+                        border: `1px solid ${
+                          item.sessionMode === 'EXAM' ? '#f87171' : '#34d399'
+                        }`,
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                      }}
+                    >
+                      {item.sessionMode === 'EXAM' ? 'THI' : 'CHƠI'}
                     </span>
                     <span
                       style={{

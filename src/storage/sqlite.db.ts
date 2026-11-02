@@ -310,6 +310,15 @@ export const MIGRATIONS: MigrationDefinition[] = [
       CREATE INDEX IF NOT EXISTS idx_ai_usage_logs_game_id ON ai_usage_logs(game_id, created_at DESC);
     `,
   },
+  {
+    version: 8,
+    name: '008_v3_exam_answer_reveal_policy',
+    upSql: `
+      ALTER TABLE practice_sessions ADD COLUMN exam_answer_reveal_policy TEXT;
+      ALTER TABLE game_participant_attempts ADD COLUMN exam_answer_reveal_policy TEXT;
+      ALTER TABLE room_history ADD COLUMN exam_answer_reveal_policy TEXT;
+    `,
+  },
 ];
 
 let dbInstance: DatabaseSync | null = null;

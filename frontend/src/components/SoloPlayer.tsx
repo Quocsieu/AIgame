@@ -154,6 +154,35 @@ function buildPlaytestClientQuestion(
   };
 }
 
+function doesChoiceMatchTarget(
+  choiceText: string,
+  targetAnswer: string | undefined,
+  choiceIdx: number,
+  questionType?: string
+): boolean {
+  if (!targetAnswer) return false;
+  const normChoice = normalizePlaytestToken(choiceText);
+  const strippedChoice = stripPlaytestOptionPrefix(choiceText);
+  const normTarget = normalizePlaytestToken(targetAnswer);
+  const strippedTarget = stripPlaytestOptionPrefix(targetAnswer);
+  if (normChoice && (normChoice === normTarget || (strippedChoice && strippedChoice === strippedTarget))) {
+    return true;
+  }
+  const upperTarget = targetAnswer.trim().toUpperCase();
+  const letterIdx = ['A', 'B', 'C', 'D'].indexOf(upperTarget);
+  if (letterIdx >= 0 && letterIdx === choiceIdx) {
+    return true;
+  }
+  if (questionType === 'QUICK_BUTTON' || questionType === 'TRUE_FALSE') {
+    const choicePol = normalizePlaytestTrueFalsePolarity(choiceText);
+    const targetPol = normalizePlaytestTrueFalsePolarity(targetAnswer);
+    if (choicePol && targetPol && choicePol === targetPol) {
+      return true;
+    }
+  }
+  return false;
+}
+
 function evaluatePlaytestAnswer(
   q: GameSpecification['questions'][number],
   fallbackType: string,
@@ -411,6 +440,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const playtestQuestionStartedAtRef = useRef<number>(Date.now());
   const playtestStartedAtRef = useRef<number>(Date.now());
   const playtestMaxStreakRef = useRef<number>(0);
+  const playtestQuestionResultsRef = useRef<PracticeQuestionResult[]>([]);
   const adventureCheckpointOpenRef = useRef<boolean>(false);
 
   const clearAutoAdvanceTimer = () => {
@@ -531,6 +561,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       playtestStartedAtRef.current = Date.now();
       playtestQuestionStartedAtRef.current = Date.now();
       playtestMaxStreakRef.current = 0;
+      playtestQuestionResultsRef.current = [];
       setSessionId('playtest-local-session');
       const firstQ = buildPlaytestClientQuestion(spec, 0);
       setCurrentQuestion(firstQ);
@@ -809,6 +840,30 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     };
   }, [playtestMode, sessionId, finalResult, loadedSpec, initialSpec, gameId]);
 
+  // Poll result on Finish Screen in EXAM AFTER_PUBLISH mode so answers appear automatically once published by BTC
+  useEffect(() => {
+    if (playtestMode || !sessionId || !finalResult) return;
+    const spec = loadedSpec || initialSpec;
+    if ((finalResult.sessionMode || spec?.settings?.sessionMode) !== 'EXAM') return;
+    if (finalResult.canRevealAnswers || finalResult.answersPublished) return;
+
+    const interval = window.setInterval(async () => {
+      try {
+        const latest = await fetchPracticeResult(sessionId);
+        if (latest.canRevealAnswers || latest.answersPublished) {
+          window.clearInterval(interval);
+          setFinalResult(latest);
+        }
+      } catch {
+        // Ignore transient network errors
+      }
+    }, 2500);
+
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [playtestMode, sessionId, finalResult, loadedSpec, initialSpec]);
+
   const handleAdventureCheckpointModalChange = React.useCallback(
     (isOpen: boolean) => {
       adventureCheckpointOpenRef.current = isOpen;
@@ -875,12 +930,11 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         responseTimeMs: (currentQuestion.timePerQuestion || spec.settings?.timePerQuestion || 20) * 1000,
         answeredAt: new Date().toISOString(),
         correctAnswer: displayCorrectAnswer,
-        explanation:
-          rawQ.explanation ||
-          'Đã hết thời gian trả lời cho câu hỏi này (+0 điểm).',
+        explanation: rawQ.explanation || undefined,
         sourceReference: rawQ.sourceReference,
       };
       answeredQuestionIdsRef.current.add(currentQuestion.id);
+      playtestQuestionResultsRef.current.push(timeoutRes);
       soundManager.playTimeout();
       setQuestionFeedback(timeoutRes);
       setIsQuestionTimedOut(false);
@@ -990,11 +1044,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         };
 
         answeredQuestionIdsRef.current.add(currentQuestion.id);
-        const isExamUnpublished =
-          spec.settings?.sessionMode === 'EXAM' && !spec.settings?.answersPublished;
-        if (isExamUnpublished) {
-          soundManager.playAnswerRecorded();
-        } else if (isCorrect) {
+        playtestQuestionResultsRef.current.push(localRes);
+        if (isCorrect) {
           soundManager.playCorrect();
         } else {
           soundManager.playWrong();
@@ -1022,7 +1073,10 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       answeredQuestionIdsRef.current.add(currentQuestion.id);
       const spec = loadedSpec || initialSpec;
       const isExamUnpublished =
-        spec?.settings?.sessionMode === 'EXAM' && !spec?.settings?.answersPublished;
+        Boolean((res as any).examAnswerRecorded) ||
+        (spec?.settings?.sessionMode === 'EXAM' &&
+          !spec?.settings?.answersPublished &&
+          spec?.settings?.examAnswerRevealPolicy !== 'IMMEDIATE');
       if (isExamUnpublished) {
         soundManager.playAnswerRecorded();
       } else if (res.isCorrect) {
@@ -1032,10 +1086,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       }
       setQuestionFeedback(res);
       setIsQuestionTimedOut(false);
-      setPlayerScore((prev) => prev + res.pointsEarned);
-      setPlayerStreak((prev) => (res.isCorrect ? prev + 1 : 0));
-      setPlayerCorrectCount((prev) => prev + (res.isCorrect ? 1 : 0));
-      setPlayerWrongCount((prev) => prev + (res.isCorrect ? 0 : 1));
+      setPlayerScore((prev) => prev + (typeof res.pointsEarned === 'number' ? res.pointsEarned : 0));
+      if (typeof res.isCorrect === 'boolean') {
+        setPlayerStreak((prev) => (res.isCorrect ? prev + 1 : 0));
+        setPlayerCorrectCount((prev) => prev + (res.isCorrect ? 1 : 0));
+        setPlayerWrongCount((prev) => prev + (res.isCorrect ? 0 : 1));
+      }
     } catch (err: any) {
       if (err.code === 'EXAM_CLOSED' || err.message?.includes('Đợt thi đã kết thúc')) {
         stopTimer();
@@ -1129,7 +1185,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             performanceEvaluation: perfEval,
             durationMs: durationSeconds * 1000,
             finishedAt: new Date().toISOString(),
-            questionResults: [],
+            questionResults: [...playtestQuestionResultsRef.current],
           };
           soundManager.stopAll();
           soundManager.playVictory();
@@ -1330,9 +1386,28 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   };
 
   const activeGameSpec = loadedSpec || initialSpec;
-  const isExamMode = activeGameSpec?.settings?.sessionMode === 'EXAM';
+  const isExamMode =
+    finalResult?.sessionMode === 'EXAM' || activeGameSpec?.settings?.sessionMode === 'EXAM';
+  const effectiveExamRevealPolicy =
+    finalResult?.examAnswerRevealPolicy === 'IMMEDIATE' ||
+    finalResult?.examAnswerRevealPolicy === 'AFTER_SUBMIT' ||
+    finalResult?.examAnswerRevealPolicy === 'AFTER_PUBLISH'
+      ? finalResult.examAnswerRevealPolicy
+      : activeGameSpec?.settings?.examAnswerRevealPolicy === 'IMMEDIATE' ||
+          activeGameSpec?.settings?.examAnswerRevealPolicy === 'AFTER_SUBMIT' ||
+          activeGameSpec?.settings?.examAnswerRevealPolicy === 'AFTER_PUBLISH'
+        ? activeGameSpec.settings.examAnswerRevealPolicy
+        : 'AFTER_PUBLISH';
   const isExamUnpublished =
-    isExamMode && !activeGameSpec?.settings?.answersPublished && !playtestMode;
+    isExamMode &&
+    !activeGameSpec?.settings?.answersPublished &&
+    !playtestMode &&
+    effectiveExamRevealPolicy !== 'IMMEDIATE' &&
+    Boolean(
+      (questionFeedback as any)?.examAnswerRecorded ||
+        (questionFeedback as any)?.examRedacted ||
+        !questionFeedback?.correctAnswer
+    );
 
   const inlineEditModalNode = inlineEditOpen ? (
     <div
@@ -2692,6 +2767,181 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           </div>
         </div>
 
+        {/* Per-Question Answer & Explanation Review */}
+        {(() => {
+          const canShowResultAnswers =
+            !isExamMode ||
+            playtestMode ||
+            Boolean(finalResult.canRevealAnswers) ||
+            Boolean(finalResult.answersPublished) ||
+            effectiveExamRevealPolicy === 'IMMEDIATE' ||
+            effectiveExamRevealPolicy === 'AFTER_SUBMIT';
+          const qResults = Array.isArray(finalResult.questionResults)
+            ? finalResult.questionResults
+            : [];
+
+          if (canShowResultAnswers && qResults.length > 0) {
+            return (
+              <div
+                data-testid="solo-result-question-review"
+                style={{
+                  textAlign: 'left',
+                  marginBottom: '1.75rem',
+                  padding: '1.15rem',
+                  borderRadius: '16px',
+                  backgroundColor: 'var(--bg-input)',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '0.92rem',
+                    fontWeight: 900,
+                    color: 'var(--text-primary)',
+                    marginBottom: '0.85rem',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.5rem',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <span>Chi tiết đáp án từng câu ({qResults.length} câu)</span>
+                  <span style={{ fontSize: '0.76rem', color: 'var(--accent-emerald)', fontWeight: 800 }}>
+                    Đã hiển thị đáp án
+                  </span>
+                </div>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.75rem',
+                    maxHeight: '360px',
+                    overflowY: 'auto',
+                  }}
+                >
+                  {qResults.map((qr, idx) => {
+                    const specQ =
+                      activeGameSpec?.questions?.find((item) => item.id === qr.questionId) ||
+                      activeGameSpec?.questions?.[idx];
+                    const isRight = Boolean(qr.isCorrect);
+                    const isTimedOutItem = Boolean(qr.timedOut);
+                    return (
+                      <div
+                        key={qr.questionId || idx}
+                        data-testid={`solo-result-review-item-${idx}`}
+                        style={{
+                          padding: '0.85rem 1rem',
+                          borderRadius: '12px',
+                          backgroundColor: 'var(--bg-surface)',
+                          border: `1.5px solid ${
+                            isRight ? 'rgba(16, 185, 129, 0.45)' : 'rgba(239, 68, 68, 0.45)'
+                          }`,
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            gap: '0.5rem',
+                            marginBottom: '0.35rem',
+                          }}
+                        >
+                          <span style={{ fontSize: '0.82rem', fontWeight: 900, color: 'var(--text-secondary)' }}>
+                            Câu #{idx + 1}
+                          </span>
+                          <span
+                            data-testid={`solo-result-review-status-${idx}`}
+                            style={{
+                              padding: '0.18rem 0.55rem',
+                              borderRadius: '999px',
+                              fontSize: '0.72rem',
+                              fontWeight: 900,
+                              backgroundColor: isRight
+                                ? 'rgba(16, 185, 129, 0.16)'
+                                : 'rgba(239, 68, 68, 0.16)',
+                              color: isRight ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                            }}
+                          >
+                            {isRight
+                              ? `✓ Trả lời đúng (+${qr.pointsEarned ?? 0}đ)`
+                              : isTimedOutItem
+                                ? '⏰ Hết thời gian (+0đ)'
+                                : '✕ Trả lời sai (+0đ)'}
+                          </span>
+                        </div>
+                        {specQ?.question && (
+                          <div
+                            style={{
+                              fontSize: '0.9rem',
+                              fontWeight: 800,
+                              color: 'var(--text-primary)',
+                              marginBottom: '0.4rem',
+                            }}
+                          >
+                            {specQ.question}
+                          </div>
+                        )}
+                        <div style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                          <div>
+                            Câu trả lời của bạn:{' '}
+                            <strong style={{ color: isRight ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
+                              {isTimedOutItem || !qr.answer ? 'Chưa trả lời (Hết thời gian)' : qr.answer}
+                            </strong>
+                          </div>
+                          {qr.correctAnswer && (
+                            <div style={{ marginTop: '0.2rem' }}>
+                              Đáp án chính xác:{' '}
+                              <strong style={{ color: 'var(--accent-emerald)' }}>{qr.correctAnswer}</strong>
+                            </div>
+                          )}
+                          {typeof qr.explanation === 'string' && qr.explanation.trim().length > 0 && (
+                            <div
+                              data-testid={`solo-result-review-explanation-${idx}`}
+                              style={{
+                                marginTop: '0.35rem',
+                                paddingTop: '0.35rem',
+                                borderTop: '1px dashed var(--border-subtle)',
+                                color: 'var(--text-secondary)',
+                              }}
+                            >
+                              Giải thích: {qr.explanation.trim()}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          }
+
+          if (isExamMode && !canShowResultAnswers) {
+            return (
+              <div
+                data-testid="solo-result-answers-pending-publish"
+                style={{
+                  marginBottom: '1.75rem',
+                  padding: '1rem 1.25rem',
+                  borderRadius: '14px',
+                  backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                  border: '1.5px solid rgba(56, 189, 248, 0.4)',
+                  color: 'var(--text-secondary)',
+                  fontSize: '0.86rem',
+                  fontWeight: 700,
+                  lineHeight: 1.5,
+                }}
+              >
+                🔒 Chế độ Thi bảo mật đáp án: Chi tiết đúng/sai từng câu, đáp án chính xác và lời giải thích sẽ được hiển thị sau khi người tạo chính thức công bố đáp án.
+              </div>
+            );
+          }
+
+          return null;
+        })()}
+
         {/* Buttons */}
         <div style={{ display: 'flex', gap: '0.85rem', justifyContent: 'center', flexWrap: 'wrap' }}>
           {(!isExamMode || playtestMode) && activeGameSpec?.settings?.allowReplay !== false && (
@@ -3019,13 +3269,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             ) : (
               <>
                 <div
+                  data-testid="solo-feedback-status-banner"
                   style={{
                     fontSize: '1.4rem',
                     fontWeight: 900,
                     color: questionFeedback.isCorrect
                       ? 'var(--accent-emerald)'
                       : 'var(--accent-rose)',
-                    marginBottom: '0.5rem',
+                    marginBottom: '0.65rem',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -3035,7 +3286,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                   {questionFeedback.isCorrect ? (
                     <>
                       <CheckIcon size={26} />
-                      <span>Chính Xác! +{questionFeedback.pointsEarned} điểm</span>
+                      <span>Chính Xác! Trả lời đúng (+{questionFeedback.pointsEarned} điểm)</span>
                     </>
                   ) : questionFeedback.timedOut ? (
                     <>
@@ -3045,30 +3296,175 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                   ) : (
                     <>
                       <XMarkIcon size={26} />
-                      <span>Chưa Đúng!</span>
+                      <span>Chưa Đúng! Trả lời sai (+0 điểm)</span>
                     </>
                   )}
                 </div>
 
+                {/* Highlighted choices for choice-based questions (Green for correct, Red for selected wrong) */}
+                {(currentQuestion.type === 'MULTIPLE_CHOICE' ||
+                  currentQuestion.type === 'QUIZ' ||
+                  currentQuestion.type === 'QUICK_BUTTON' ||
+                  currentQuestion.type === 'TRUE_FALSE') &&
+                  (() => {
+                    const effectiveChoices =
+                      Array.isArray(currentQuestion.choices) && currentQuestion.choices.length > 0
+                        ? currentQuestion.choices
+                        : currentQuestion.type === 'QUICK_BUTTON' || currentQuestion.type === 'TRUE_FALSE'
+                          ? ['Đúng', 'Sai']
+                          : [];
+                    if (effectiveChoices.length === 0) return null;
+                    const submittedText = questionFeedback.answer || selectedChoice || '';
+                    return (
+                      <div
+                        data-testid="solo-feedback-choices-grid"
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns:
+                            currentQuestion.type === 'QUICK_BUTTON' || currentQuestion.type === 'TRUE_FALSE'
+                              ? '1fr 1fr'
+                              : 'repeat(auto-fit, minmax(230px, 1fr))',
+                          gap: '0.75rem',
+                          margin: '0.85rem auto 1rem auto',
+                          maxWidth: '680px',
+                          textAlign: 'left',
+                        }}
+                      >
+                        {effectiveChoices.map((opt, idx) => {
+                          const isCorrectOption = doesChoiceMatchTarget(
+                            opt,
+                            questionFeedback.correctAnswer,
+                            idx,
+                            currentQuestion.type
+                          );
+                          const isSelectedWrongOption =
+                            !questionFeedback.isCorrect &&
+                            !questionFeedback.timedOut &&
+                            Boolean(submittedText) &&
+                            doesChoiceMatchTarget(opt, submittedText, idx, currentQuestion.type);
+
+                          return (
+                            <div
+                              key={idx}
+                              data-testid={
+                                isCorrectOption
+                                  ? `solo-choice-feedback-correct-${idx}`
+                                  : isSelectedWrongOption
+                                    ? `solo-choice-feedback-wrong-${idx}`
+                                    : `solo-choice-feedback-neutral-${idx}`
+                              }
+                              data-feedback-state={
+                                isCorrectOption
+                                  ? 'correct'
+                                  : isSelectedWrongOption
+                                    ? 'wrong'
+                                    : 'neutral'
+                              }
+                              style={{
+                                padding: '0.8rem 1rem',
+                                borderRadius: '14px',
+                                backgroundColor: isCorrectOption
+                                  ? '#16a34a'
+                                  : isSelectedWrongOption
+                                    ? '#dc2626'
+                                    : 'var(--bg-input)',
+                                border: isCorrectOption
+                                  ? '3px solid #4ade80'
+                                  : isSelectedWrongOption
+                                    ? '3px solid #f87171'
+                                    : '1.5px solid var(--border-subtle)',
+                                color: isCorrectOption || isSelectedWrongOption ? '#ffffff' : 'var(--text-secondary)',
+                                fontWeight: 800,
+                                fontSize: '0.94rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: '0.6rem',
+                                opacity: isCorrectOption || isSelectedWrongOption ? 1 : 0.65,
+                              }}
+                            >
+                              <span style={{ wordBreak: 'break-word', lineHeight: 1.35 }}>{opt}</span>
+                              {isCorrectOption && (
+                                <span
+                                  style={{
+                                    flexShrink: 0,
+                                    fontSize: '0.75rem',
+                                    fontWeight: 900,
+                                    padding: '0.18rem 0.5rem',
+                                    borderRadius: '999px',
+                                    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+                                  }}
+                                >
+                                  ✓ Đúng
+                                </span>
+                              )}
+                              {isSelectedWrongOption && (
+                                <span
+                                  style={{
+                                    flexShrink: 0,
+                                    fontSize: '0.75rem',
+                                    fontWeight: 900,
+                                    padding: '0.18rem 0.5rem',
+                                    borderRadius: '999px',
+                                    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+                                  }}
+                                >
+                                  ✕ Bạn chọn
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+
+                {!questionFeedback.isCorrect &&
+                  !questionFeedback.timedOut &&
+                  (questionFeedback.answer || selectedChoice || textAnswerInput) && (
+                    <p
+                      data-testid="solo-feedback-user-answer"
+                      style={{
+                        margin: '0 0 0.4rem 0',
+                        fontSize: '0.92rem',
+                        fontWeight: 800,
+                        color: 'var(--accent-rose)',
+                      }}
+                    >
+                      Câu trả lời của bạn:{' '}
+                      <strong>{questionFeedback.answer || selectedChoice || textAnswerInput}</strong>
+                    </p>
+                  )}
+
                 {questionFeedback.correctAnswer && (
-                  <p style={{ margin: '0 0 0.5rem 0', fontSize: '0.95rem', fontWeight: 700 }}>
+                  <p
+                    data-testid="solo-feedback-correct-answer"
+                    style={{
+                      margin: '0 0 0.5rem 0',
+                      fontSize: '0.98rem',
+                      fontWeight: 800,
+                      color: 'var(--accent-emerald)',
+                    }}
+                  >
                     Đáp án chính xác: <strong>{questionFeedback.correctAnswer}</strong>
                   </p>
                 )}
 
-                {questionFeedback.explanation && (
-                  <p
-                    style={{
-                      margin: '0.5rem auto 0 auto',
-                      fontSize: '0.88rem',
-                      color: 'var(--text-secondary)',
-                      lineHeight: 1.5,
-                      maxWidth: '600px',
-                    }}
-                  >
-                    {questionFeedback.explanation}
-                  </p>
-                )}
+                {typeof questionFeedback.explanation === 'string' &&
+                  questionFeedback.explanation.trim().length > 0 && (
+                    <p
+                      data-testid="solo-feedback-explanation"
+                      style={{
+                        margin: '0.5rem auto 0 auto',
+                        fontSize: '0.88rem',
+                        color: 'var(--text-secondary)',
+                        lineHeight: 1.5,
+                        maxWidth: '600px',
+                      }}
+                    >
+                      <strong>Giải thích:</strong> {questionFeedback.explanation.trim()}
+                    </p>
+                  )}
               </>
             )}
 
@@ -3193,6 +3589,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                     <button
                       key={idx}
                       type="button"
+                      data-testid={`solo-choice-btn-${idx}`}
                       disabled={isSubmitting}
                       onClick={() => {
                         setSelectedChoice(opt);

@@ -3,9 +3,11 @@ import { LIMITS } from '../config/limits.js';
 import { AdventureConfig } from '../contracts/adventure.contract.js';
 import { CanonicalDocument } from '../contracts/canonical.contract.js';
 import {
+  ExamAnswerRevealPolicy,
   GameQuestion,
   GameSpecification,
   GameType,
+  resolveEffectiveExamRevealPolicy,
   ScoringMode,
 } from '../contracts/game.contract.js';
 import { GameResult } from '../game/game.types.js';
@@ -37,6 +39,7 @@ export interface PersistedGameSummary {
   title: string;
   description: string;
   gameType: GameType;
+  sessionMode?: 'PLAY' | 'EXAM';
   questionCount: number;
   timePerQuestion: number;
   scoringMode: ScoringMode;
@@ -55,6 +58,7 @@ export interface PersistedPracticeSessionRecord {
   gameType: GameType;
   scoringMode: ScoringMode;
   sessionMode?: 'PLAY' | 'EXAM';
+  examAnswerRevealPolicy?: ExamAnswerRevealPolicy | null;
   participantId?: string | null;
   playerName?: string;
   departmentUnit?: string;
@@ -87,6 +91,7 @@ export interface PersistedRoomHistoryRecord {
   gameType: GameType;
   scoringMode: ScoringMode;
   sessionMode?: 'PLAY' | 'EXAM';
+  examAnswerRevealPolicy?: ExamAnswerRevealPolicy | null;
   maxPossibleScore?: number;
   passThresholdPercent?: number;
   submittedReason?: string | null;
@@ -445,6 +450,13 @@ export class PersistenceRepository {
       isPublic: false,
       coverImageUrl: existing.coverImageUrl ?? null,
       title: safeTitle,
+      settings: {
+        ...existing.settings,
+        answersPublished: false,
+        answersPublishedAt: null,
+        examStatus: 'OPEN',
+        examClosedAt: null,
+      },
       questions: existing.questions.map((q, idx) => ({
         ...q,
         id: `q_${idx + 1}_${crypto.randomUUID().slice(0, 8)}`,
@@ -664,6 +676,7 @@ export class PersistenceRepository {
         title: String(row.title),
         description: String(row.description),
         gameType: row.game_type as GameType,
+        sessionMode: settings.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY',
         questionCount: Number(settings.questionCount || 0),
         timePerQuestion: Number(settings.timePerQuestion || 20),
         scoringMode: (settings.scoringMode || 'STANDARD') as ScoringMode,
@@ -750,6 +763,7 @@ export class PersistenceRepository {
     gameType: GameType;
     scoringMode: ScoringMode;
     sessionMode?: 'PLAY' | 'EXAM';
+    examAnswerRevealPolicy?: ExamAnswerRevealPolicy | null;
     participantId?: string | null;
     playerName?: string;
     departmentUnit?: string;
@@ -774,12 +788,13 @@ export class PersistenceRepository {
 
     const existing = db
       .prepare(
-        'SELECT owner_user_id, session_mode, participant_id, player_name, department_unit, is_passed, submitted_reason, created_at FROM practice_sessions WHERE session_id = ?'
+        'SELECT owner_user_id, session_mode, exam_answer_reveal_policy, participant_id, player_name, department_unit, is_passed, submitted_reason, created_at FROM practice_sessions WHERE session_id = ?'
       )
       .get(record.sessionId) as
       | {
           owner_user_id: string | null;
           session_mode: string | null;
+          exam_answer_reveal_policy: string | null;
           participant_id: string | null;
           player_name: string | null;
           department_unit: string | null;
@@ -796,8 +811,19 @@ export class PersistenceRepository {
           ? existing.owner_user_id
           : null;
     const resolvedSessionMode =
+      (existing?.session_mode === 'EXAM' || existing?.session_mode === 'PLAY'
+        ? existing.session_mode
+        : undefined) ||
       record.sessionMode ||
-      (existing?.session_mode === 'EXAM' ? 'EXAM' : 'PLAY');
+      'PLAY';
+    const resolvedExamRevealPolicy =
+      existing?.exam_answer_reveal_policy
+        ? resolveEffectiveExamRevealPolicy(existing.exam_answer_reveal_policy)
+        : record.examAnswerRevealPolicy
+          ? resolveEffectiveExamRevealPolicy(record.examAnswerRevealPolicy)
+          : resolvedSessionMode === 'EXAM'
+            ? 'AFTER_PUBLISH'
+            : null;
     const resolvedParticipantId =
       record.participantId !== undefined
         ? record.participantId
@@ -827,13 +853,14 @@ export class PersistenceRepository {
     db.prepare(
       `INSERT INTO practice_sessions (
         session_id, game_id, owner_user_id, game_title, game_type, scoring_mode,
-        session_mode, participant_id, player_name, department_unit, is_passed, submitted_reason,
+        session_mode, exam_answer_reveal_policy, participant_id, player_name, department_unit, is_passed, submitted_reason,
         state, total_questions, answered_questions, correct_answers, wrong_answers,
         total_score, max_possible_score, max_streak, duration_ms, results_json,
         started_at, finished_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(session_id) DO UPDATE SET
-        session_mode = excluded.session_mode,
+        session_mode = COALESCE(practice_sessions.session_mode, excluded.session_mode),
+        exam_answer_reveal_policy = COALESCE(practice_sessions.exam_answer_reveal_policy, excluded.exam_answer_reveal_policy),
         participant_id = COALESCE(excluded.participant_id, practice_sessions.participant_id),
         player_name = CASE WHEN excluded.player_name != '' THEN excluded.player_name ELSE practice_sessions.player_name END,
         department_unit = CASE WHEN excluded.department_unit != '' THEN excluded.department_unit ELSE practice_sessions.department_unit END,
@@ -859,6 +886,7 @@ export class PersistenceRepository {
       record.gameType,
       record.scoringMode,
       resolvedSessionMode,
+      resolvedExamRevealPolicy,
       resolvedParticipantId,
       resolvedPlayerName,
       resolvedDept,
@@ -911,7 +939,15 @@ export class PersistenceRepository {
       metaCache?.set(mapped.gameId, meta);
     }
     const isExam = mapped.sessionMode === 'EXAM' || meta.sessionMode === 'EXAM';
-    const canRevealAnswers = !isExam || meta.answersPublished;
+    const effectivePolicy = mapped.examAnswerRevealPolicy
+      ? resolveEffectiveExamRevealPolicy(mapped.examAnswerRevealPolicy)
+      : meta.examAnswerRevealPolicy;
+    const isFinished = mapped.state === 'FINISHED';
+    const canRevealAnswers =
+      !isExam ||
+      meta.answersPublished ||
+      effectivePolicy === 'IMMEDIATE' ||
+      (effectivePolicy === 'AFTER_SUBMIT' && isFinished);
     if (canRevealAnswers) {
       return mapped;
     }
@@ -1015,6 +1051,11 @@ export class PersistenceRepository {
       gameType: row.game_type as GameType,
       scoringMode: (row.scoring_mode || 'STANDARD') as ScoringMode,
       sessionMode: row.session_mode === 'EXAM' ? 'EXAM' : 'PLAY',
+      examAnswerRevealPolicy: row.exam_answer_reveal_policy
+        ? resolveEffectiveExamRevealPolicy(String(row.exam_answer_reveal_policy))
+        : row.session_mode === 'EXAM'
+          ? 'AFTER_PUBLISH'
+          : null,
       participantId: row.participant_id ? String(row.participant_id) : null,
       playerName: row.player_name ? String(row.player_name) : '',
       departmentUnit: row.department_unit ? String(row.department_unit) : '',
@@ -2963,6 +3004,7 @@ export class PersistenceRepository {
   private resolveGameSettingsMeta(gameId: string): {
     ownerUserId: string | null;
     sessionMode: 'PLAY' | 'EXAM';
+    examAnswerRevealPolicy: ExamAnswerRevealPolicy;
     officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
     passThresholdPercent: number;
     answersPublished: boolean;
@@ -3010,6 +3052,9 @@ export class PersistenceRepository {
     });
 
     const sessionMode: 'PLAY' | 'EXAM' = settings.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+    const examAnswerRevealPolicy = resolveEffectiveExamRevealPolicy(
+      settings.examAnswerRevealPolicy
+    );
     const officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE' =
       settings.officialAttemptPolicy === 'LATEST_ATTEMPT' ||
       settings.officialAttemptPolicy === 'HIGHEST_SCORE'
@@ -3040,6 +3085,7 @@ export class PersistenceRepository {
     return {
       ownerUserId: row?.owner_user_id ? String(row.owner_user_id) : null,
       sessionMode,
+      examAnswerRevealPolicy,
       officialAttemptPolicy,
       passThresholdPercent,
       answersPublished: Boolean(settings.answersPublished),
@@ -3751,7 +3797,14 @@ export class PersistenceRepository {
     };
 
     // Build questionBreakdown safely: never expose unrevealed EXAM correctAnswer/explanation/isCorrect/pointsEarned
-    const canRevealAnswers = sessionMode === 'PLAY' || meta.answersPublished;
+    const effectiveRevealPolicy = mapped.examAnswerRevealPolicy
+      ? resolveEffectiveExamRevealPolicy(mapped.examAnswerRevealPolicy)
+      : meta.examAnswerRevealPolicy;
+    const canRevealAnswers =
+      sessionMode === 'PLAY' ||
+      meta.answersPublished ||
+      effectiveRevealPolicy === 'IMMEDIATE' ||
+      effectiveRevealPolicy === 'AFTER_SUBMIT';
     const rawResults = Array.isArray(mapped.questionResults) ? mapped.questionResults : [];
     const questionBreakdown: PlayExamHistoryQuestionRow[] = rawResults.map((qr, idx) => {
       const qMeta = meta.questionMap.get(String(qr.questionId));

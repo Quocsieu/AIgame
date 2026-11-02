@@ -1,5 +1,9 @@
 import crypto from 'node:crypto';
 import { NextFunction, Request, Response, Router } from 'express';
+import {
+  ExamAnswerRevealPolicy,
+  resolveEffectiveExamRevealPolicy,
+} from '../contracts/game.contract.js';
 import { gameEngine } from '../game/game.engine.js';
 import { calculateMaxPossibleScore, evaluatePerformanceResult } from '../game/game.scoring.js';
 import { gameStore } from '../game/game.store.js';
@@ -16,13 +20,24 @@ import { AppError, createSuccessResponse } from '../utils/errors.js';
 
 export const sessionRouter = Router();
 
-function resolveGameExamState(gameId: string, fallbackSpec?: any, currentUser?: any): {
+function resolveGameExamState(
+  gameId: string,
+  fallbackSpec?: any,
+  currentUser?: any,
+  options?: {
+    sessionState?: string;
+    persistedSessionMode?: 'PLAY' | 'EXAM' | null;
+    persistedExamRevealPolicy?: ExamAnswerRevealPolicy | null;
+  }
+): {
   sessionMode: 'PLAY' | 'EXAM';
+  examAnswerRevealPolicy: ExamAnswerRevealPolicy;
   examStatus: 'OPEN' | 'CLOSING' | 'CLOSED';
   examOpenAt: string | null;
   examCloseAt: string | null;
   examClosedAt: string | null;
   answersPublished: boolean;
+  canRevealQuestionAnswers: boolean;
   canRevealAnswers: boolean;
   autoAdvanceMs: number;
   passThresholdPercent: number;
@@ -30,8 +45,27 @@ function resolveGameExamState(gameId: string, fallbackSpec?: any, currentUser?: 
   const liveSpec = gameStore.get(gameId) || fallbackSpec;
   const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
   const ownerUserId = liveSpec?.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+
+  // Prefer the session's snapshotted sessionMode and examAnswerRevealPolicy so editing the game later
+  // does not retroactively alter historical sessions or leak unrevealed exam answers.
+  const snapshottedMode =
+    options?.persistedSessionMode ||
+    (fallbackSpec?.settings?.sessionMode === 'EXAM' || fallbackSpec?.settings?.sessionMode === 'PLAY'
+      ? fallbackSpec.settings.sessionMode
+      : undefined);
   const sessionMode: 'PLAY' | 'EXAM' =
-    liveSpec?.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+    snapshottedMode === 'EXAM' || snapshottedMode === 'PLAY'
+      ? snapshottedMode
+      : liveSpec?.settings?.sessionMode === 'EXAM'
+        ? 'EXAM'
+        : 'PLAY';
+
+  const snapshottedPolicy =
+    options?.persistedExamRevealPolicy || fallbackSpec?.settings?.examAnswerRevealPolicy;
+  const examAnswerRevealPolicy = resolveEffectiveExamRevealPolicy(
+    snapshottedPolicy ?? liveSpec?.settings?.examAnswerRevealPolicy
+  );
+
   const rawExamStatus = liveSpec?.settings?.examStatus;
   const examStatus: 'OPEN' | 'CLOSING' | 'CLOSED' =
     rawExamStatus === 'CLOSED' || rawExamStatus === 'CLOSING' ? rawExamStatus : 'OPEN';
@@ -47,16 +81,26 @@ function resolveGameExamState(gameId: string, fallbackSpec?: any, currentUser?: 
     typeof liveSpec?.settings?.examClosedAt === 'string' && liveSpec.settings.examClosedAt.trim()
       ? liveSpec.settings.examClosedAt.trim()
       : null;
-  const answersPublished = Boolean(liveSpec?.settings?.answersPublished);
+  const answersPublished = Boolean(
+    liveSpec?.settings?.answersPublished || fallbackSpec?.settings?.answersPublished
+  );
   const isOwnerOrAdmin =
     Boolean(currentUser?.role === 'ADMIN') ||
     Boolean(currentUser?.userId && ownerUserId && currentUser.userId === ownerUserId);
 
-  const canRevealAnswers = sessionMode === 'PLAY' || answersPublished;
+  const isSessionFinished = options?.sessionState === 'FINISHED';
+  const canRevealQuestionAnswers =
+    sessionMode === 'PLAY' ||
+    answersPublished ||
+    examAnswerRevealPolicy === 'IMMEDIATE';
+  const canRevealAnswers =
+    canRevealQuestionAnswers ||
+    (examAnswerRevealPolicy === 'AFTER_SUBMIT' && isSessionFinished);
+
   const autoAdvanceMs =
     typeof liveSpec?.settings?.autoAdvanceDelayMs === 'number'
       ? liveSpec.settings.autoAdvanceDelayMs
-      : sessionMode === 'EXAM'
+      : sessionMode === 'EXAM' && !canRevealQuestionAnswers
         ? 1500
         : 3500;
   const passThresholdPercent =
@@ -66,11 +110,13 @@ function resolveGameExamState(gameId: string, fallbackSpec?: any, currentUser?: 
 
   return {
     sessionMode,
+    examAnswerRevealPolicy,
     examStatus,
     examOpenAt,
     examCloseAt,
     examClosedAt,
     answersPublished,
+    canRevealQuestionAnswers,
     canRevealAnswers,
     autoAdvanceMs,
     passThresholdPercent,
@@ -82,6 +128,7 @@ function sanitizeGameResultForClient(
   result: GameResult,
   examState: {
     sessionMode: 'PLAY' | 'EXAM';
+    examAnswerRevealPolicy?: ExamAnswerRevealPolicy;
     examStatus?: 'OPEN' | 'CLOSING' | 'CLOSED';
     answersPublished: boolean;
     canRevealAnswers: boolean;
@@ -103,6 +150,7 @@ function sanitizeGameResultForClient(
     return {
       ...result,
       sessionMode: examState.sessionMode,
+      examAnswerRevealPolicy: examState.examAnswerRevealPolicy || 'AFTER_PUBLISH',
       examStatus: examState.examStatus || 'OPEN',
       answersPublished: examState.answersPublished,
       canRevealAnswers: true,
@@ -113,6 +161,7 @@ function sanitizeGameResultForClient(
   return {
     ...result,
     sessionMode: examState.sessionMode,
+    examAnswerRevealPolicy: examState.examAnswerRevealPolicy || 'AFTER_PUBLISH',
     examStatus: examState.examStatus || 'OPEN',
     answersPublished: examState.answersPublished,
     canRevealAnswers: false,
@@ -672,16 +721,18 @@ sessionRouter.post('/:sessionId/timeout', (req: Request, res: Response, next: Ne
     const examState = resolveGameExamState(
       session.specification.gameId,
       session.specification,
-      req.user
+      req.user,
+      { sessionState: session.state }
     );
 
-    if (!examState.canRevealAnswers) {
+    if (!examState.canRevealQuestionAnswers) {
       res.status(200).json(
         createSuccessResponse({
           questionId: timeoutResult.questionId,
           timedOut: true,
           examAnswerRecorded: true,
           sessionMode: 'EXAM',
+          examAnswerRevealPolicy: examState.examAnswerRevealPolicy,
           autoAdvanceMs: examState.autoAdvanceMs,
           nextQuestionAvailable: timeoutResult.nextQuestionAvailable,
         })
@@ -693,6 +744,7 @@ sessionRouter.post('/:sessionId/timeout', (req: Request, res: Response, next: Ne
       createSuccessResponse({
         ...timeoutResult,
         sessionMode: examState.sessionMode,
+        examAnswerRevealPolicy: examState.examAnswerRevealPolicy,
         autoAdvanceMs: examState.autoAdvanceMs,
       })
     );
@@ -704,7 +756,8 @@ sessionRouter.post('/:sessionId/timeout', (req: Request, res: Response, next: Ne
 /**
  * POST /api/games/sessions/:sessionId/answer
  * Submits player answer, performs server-side validation and scoring.
- * In EXAM mode (before answersPublished), strictly omits correctAnswer, explanation, isCorrect, and pointsEarned.
+ * In EXAM mode (when examAnswerRevealPolicy is AFTER_SUBMIT or AFTER_PUBLISH and answers are not yet published),
+ * strictly omits correctAnswer, explanation, isCorrect, and pointsEarned during question turns.
  */
 sessionRouter.post('/:sessionId/answer', (req: Request, res: Response, next: NextFunction) => {
   try {
@@ -733,7 +786,8 @@ sessionRouter.post('/:sessionId/answer', (req: Request, res: Response, next: Nex
     const examState = resolveGameExamState(
       session.specification.gameId,
       session.specification,
-      req.user
+      req.user,
+      { sessionState: session.state }
     );
 
     if (
@@ -750,13 +804,14 @@ sessionRouter.post('/:sessionId/answer', (req: Request, res: Response, next: Nex
 
     if (timedOut || answer === '__TIMEOUT__') {
       const timeoutResult = gameEngine.recordTimeout(sessionId, questionId);
-      if (!examState.canRevealAnswers) {
+      if (!examState.canRevealQuestionAnswers) {
         res.status(200).json(
           createSuccessResponse({
             questionId: timeoutResult.questionId,
             timedOut: true,
             examAnswerRecorded: true,
             sessionMode: 'EXAM',
+            examAnswerRevealPolicy: examState.examAnswerRevealPolicy,
             autoAdvanceMs: examState.autoAdvanceMs,
             nextQuestionAvailable: timeoutResult.nextQuestionAvailable,
           })
@@ -767,6 +822,7 @@ sessionRouter.post('/:sessionId/answer', (req: Request, res: Response, next: Nex
         createSuccessResponse({
           ...timeoutResult,
           sessionMode: examState.sessionMode,
+          examAnswerRevealPolicy: examState.examAnswerRevealPolicy,
           autoAdvanceMs: examState.autoAdvanceMs,
         })
       );
@@ -775,12 +831,13 @@ sessionRouter.post('/:sessionId/answer', (req: Request, res: Response, next: Nex
 
     const answerResult = gameEngine.submitAnswer(sessionId, questionId, answer, clientTimestamp);
 
-    if (!examState.canRevealAnswers) {
+    if (!examState.canRevealQuestionAnswers) {
       res.status(200).json(
         createSuccessResponse({
           questionId: answerResult.questionId,
           examAnswerRecorded: true,
           sessionMode: 'EXAM',
+          examAnswerRevealPolicy: examState.examAnswerRevealPolicy,
           autoAdvanceMs: examState.autoAdvanceMs,
           nextQuestionAvailable: answerResult.nextQuestionAvailable,
         })
@@ -792,6 +849,7 @@ sessionRouter.post('/:sessionId/answer', (req: Request, res: Response, next: Nex
       createSuccessResponse({
         ...answerResult,
         sessionMode: examState.sessionMode,
+        examAnswerRevealPolicy: examState.examAnswerRevealPolicy,
         autoAdvanceMs: examState.autoAdvanceMs,
       })
     );
@@ -825,7 +883,8 @@ sessionRouter.post('/:sessionId/next', (req: Request, res: Response, next: NextF
       const examState = resolveGameExamState(
         session.specification.gameId,
         session.specification,
-        req.user
+        req.user,
+        { sessionState: 'FINISHED' }
       );
       advanceResult.result = sanitizeGameResultForClient(advanceResult.result, examState);
     }
@@ -925,7 +984,8 @@ sessionRouter.get('/:sessionId/result', (req: Request, res: Response, next: Next
       const examState = resolveGameExamState(
         activeSession.specification.gameId,
         activeSession.specification,
-        req.user
+        req.user,
+        { sessionState: activeSession.state }
       );
       const sanitized = sanitizeGameResultForClient(rawResult, examState);
       res.status(200).json(createSuccessResponse(sanitized));
@@ -956,7 +1016,11 @@ sessionRouter.get('/:sessionId/result', (req: Request, res: Response, next: Next
       throw new AppError('GAME_NOT_FINISHED', 'Game session is not finished yet.', 400);
     }
 
-    const examState = resolveGameExamState(persisted.gameId, undefined, req.user);
+    const examState = resolveGameExamState(persisted.gameId, undefined, req.user, {
+      sessionState: persisted.state,
+      persistedSessionMode: persisted.sessionMode,
+      persistedExamRevealPolicy: persisted.examAnswerRevealPolicy,
+    });
     const evaluation = evaluatePerformanceResult({
       correctAnswers: persisted.correctAnswers,
       totalQuestions: persisted.totalQuestions,
@@ -987,6 +1051,7 @@ sessionRouter.get('/:sessionId/result', (req: Request, res: Response, next: Next
         title: persisted.gameTitle,
         gameType: persisted.gameType,
         sessionMode: examState.sessionMode,
+        examAnswerRevealPolicy: examState.examAnswerRevealPolicy,
         answersPublished: examState.answersPublished,
         canRevealAnswers: examState.canRevealAnswers,
         state: 'FINISHED',
@@ -1060,7 +1125,11 @@ sessionRouter.get('/:sessionId/export', (req: Request, res: Response, next: Next
       'read'
     );
 
-    const examState = resolveGameExamState(persisted.gameId, undefined, req.user);
+    const examState = resolveGameExamState(persisted.gameId, undefined, req.user, {
+      sessionState: persisted.state,
+      persistedSessionMode: persisted.sessionMode,
+      persistedExamRevealPolicy: persisted.examAnswerRevealPolicy,
+    });
     if (!examState.canRevealAnswers) {
       throw new AppError(
         'EXAM_ANSWERS_LOCKED',

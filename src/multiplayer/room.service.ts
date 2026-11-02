@@ -1,7 +1,9 @@
 import crypto from 'node:crypto';
 import {
+  ExamAnswerRevealPolicy,
   GameSpecification,
   GameSpecificationSchema,
+  resolveEffectiveExamRevealPolicy,
   shufflePuzzleChoicesForClient,
 } from '../contracts/game.contract.js';
 import {
@@ -75,6 +77,27 @@ export class MultiplayerRoom {
 
   public getSessionMode(): 'PLAY' | 'EXAM' {
     return this.gameSpecification.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+  }
+
+  public getExamAnswerRevealPolicy(): ExamAnswerRevealPolicy {
+    return resolveEffectiveExamRevealPolicy(
+      this.gameSpecification.settings?.examAnswerRevealPolicy
+    );
+  }
+
+  public canRevealQuestionAnswersToPlayers(): boolean {
+    if (this.getSessionMode() !== 'EXAM') return true;
+    return this.answersPublished || this.getExamAnswerRevealPolicy() === 'IMMEDIATE';
+  }
+
+  public canRevealFinishedAnswersToPlayers(): boolean {
+    if (this.getSessionMode() !== 'EXAM') return true;
+    const policy = this.getExamAnswerRevealPolicy();
+    return (
+      this.answersPublished ||
+      policy === 'IMMEDIATE' ||
+      policy === 'AFTER_SUBMIT'
+    );
   }
 
   public getRosterMode(): 'FREE_TEXT' | 'PRECONFIGURED' | 'HYBRID' {

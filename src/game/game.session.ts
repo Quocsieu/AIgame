@@ -1,6 +1,8 @@
 import {
+  ExamAnswerRevealPolicy,
   GameQuestion,
   GameSpecification,
+  resolveEffectiveExamRevealPolicy,
   shufflePuzzleChoicesForClient,
 } from '../contracts/game.contract.js';
 import { persistenceRepo } from '../storage/persistence.repository.js';
@@ -63,6 +65,12 @@ export class GameSession {
 
   public getSessionMode(): 'PLAY' | 'EXAM' {
     return this.specification.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+  }
+
+  public getExamAnswerRevealPolicy(): ExamAnswerRevealPolicy {
+    return resolveEffectiveExamRevealPolicy(
+      this.specification.settings?.examAnswerRevealPolicy
+    );
   }
 
   public getQuestionTimeLimitSeconds(questionIndex: number = this.currentQuestionIndex): number {
@@ -581,6 +589,8 @@ export class GameSession {
       0
     );
     const sessionMode = this.getSessionMode();
+    const examAnswerRevealPolicy =
+      sessionMode === 'EXAM' ? this.getExamAnswerRevealPolicy() : null;
     const passThresholdPercent = this.specification.settings?.passThresholdPercent ?? 50;
     const accuracyPercent =
       result.totalQuestions > 0
@@ -602,6 +612,7 @@ export class GameSession {
       gameType: this.specification.gameType,
       scoringMode: this.specification.settings.scoringMode,
       sessionMode,
+      examAnswerRevealPolicy,
       participantId: this.participantId,
       playerName: resolvedPlayerName,
       departmentUnit: this.departmentUnit || '',

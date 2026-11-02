@@ -544,6 +544,26 @@ export type MixedQuestionDistribution = z.infer<typeof MixedQuestionDistribution
 export const SessionModeEnum = z.enum(['PLAY', 'EXAM']);
 export type SessionMode = z.infer<typeof SessionModeEnum>;
 
+export const ExamAnswerRevealPolicyEnum = z.enum([
+  'IMMEDIATE',
+  'AFTER_SUBMIT',
+  'AFTER_PUBLISH',
+]);
+export type ExamAnswerRevealPolicy = z.infer<typeof ExamAnswerRevealPolicyEnum>;
+
+export function resolveEffectiveExamRevealPolicy(
+  rawPolicy?: string | null
+): ExamAnswerRevealPolicy {
+  if (
+    rawPolicy === 'IMMEDIATE' ||
+    rawPolicy === 'AFTER_SUBMIT' ||
+    rawPolicy === 'AFTER_PUBLISH'
+  ) {
+    return rawPolicy;
+  }
+  return 'AFTER_PUBLISH';
+}
+
 export const TimerModeEnum = z.enum(['PER_QUESTION', 'TOTAL_EXAM', 'UNLIMITED']);
 export type TimerMode = z.infer<typeof TimerModeEnum>;
 
@@ -697,6 +717,7 @@ export const GameSettingsSchema = z.object({
   adventureConfig: AdventureConfigSchema.optional(),
   mixedDistribution: MixedQuestionDistributionSchema.optional(),
   sessionMode: SessionModeEnum.optional(),
+  examAnswerRevealPolicy: ExamAnswerRevealPolicyEnum.optional(),
   timerMode: TimerModeEnum.optional(),
   totalExamDurationSeconds: z.number().int().min(10).max(14400).nullable().optional(),
   autoAdvanceDelayMs: z.number().int().min(500).max(15000).optional(),
@@ -761,6 +782,7 @@ export const GenerateGameRequestSchema = z.object({
   adventureConfig: GenerateAdventureConfigInputSchema.optional(),
   isPublic: z.boolean().optional(),
   sessionMode: SessionModeEnum.optional(),
+  examAnswerRevealPolicy: ExamAnswerRevealPolicyEnum.optional(),
   timerMode: TimerModeEnum.optional(),
   totalExamDurationSeconds: z.number().int().min(10).max(14400).nullable().optional(),
   autoAdvanceDelayMs: z.number().int().min(500).max(15000).optional(),
@@ -806,6 +828,7 @@ export const UpdateGameQuestionsRequestSchema = z.object({
       scoringMode: ScoringModeEnum.optional(),
       mixedDistribution: MixedQuestionDistributionSchema.optional(),
       sessionMode: SessionModeEnum.optional(),
+      examAnswerRevealPolicy: ExamAnswerRevealPolicyEnum.optional(),
       timerMode: TimerModeEnum.optional(),
       totalExamDurationSeconds: z.number().int().min(10).max(14400).nullable().optional(),
       autoAdvanceDelayMs: z.number().int().min(500).max(15000).optional(),
@@ -824,6 +847,8 @@ export const UpdateGameQuestionsRequestSchema = z.object({
     })
     .optional(),
   isPublic: z.boolean().optional(),
+  sessionMode: SessionModeEnum.optional(),
+  examAnswerRevealPolicy: ExamAnswerRevealPolicyEnum.optional(),
   coverImageUrl: z.string().nullable().optional(),
   generateCover: z.boolean().optional(),
   participants: z.array(ParticipantDraftItemSchema).max(2000).optional(),

@@ -1197,9 +1197,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           isCorrect,
           pointsEarned: pts,
           correctAnswer: fullQ.correctAnswer || '',
-          explanation:
-            fullQ.explanation ||
-            'Đã đối chiếu đáp án tại trạm kiểm tra theo nội dung nguồn.',
+          explanation: fullQ.explanation || '',
         });
       } catch (err) {
         submittedStageIndicesRef.current.delete(activeStageIndex);
@@ -2871,10 +2869,39 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   >
                     {activeQuestion.choices.map((choice, cIdx) => {
                       const isSelected = selectedChoice === choice;
-                      const isCorrectChoice =
-                        activeFeedback && choice === activeFeedback.correctAnswer;
-                      const isWrongSelected =
-                        activeFeedback && isSelected && !activeFeedback.isCorrect;
+                      const isExamQuestionRedacted =
+                        game.settings?.sessionMode === 'EXAM' &&
+                        !game.settings?.answersPublished &&
+                        !isPlaytest &&
+                        game.settings?.examAnswerRevealPolicy !== 'IMMEDIATE' &&
+                        Boolean(
+                          (activeFeedback as any)?.examAnswerRecorded ||
+                            (activeFeedback as any)?.examRedacted ||
+                            !activeFeedback?.correctAnswer
+                        );
+                      const normChoice = choice
+                        .replace(/^[A-Da-d1-4][\.\)\:\-]\s*/, '')
+                        .trim()
+                        .toLowerCase();
+                      const normCorrect = (activeFeedback?.correctAnswer || '')
+                        .replace(/^[A-Da-d1-4][\.\)\:\-]\s*/, '')
+                        .trim()
+                        .toLowerCase();
+                      const isCorrectChoice = Boolean(
+                        activeFeedback &&
+                          !isExamQuestionRedacted &&
+                          activeFeedback.correctAnswer &&
+                          (choice.trim().toLowerCase() ===
+                            activeFeedback.correctAnswer.trim().toLowerCase() ||
+                            (normChoice && normChoice === normCorrect))
+                      );
+                      const isWrongSelected = Boolean(
+                        activeFeedback &&
+                          !isExamQuestionRedacted &&
+                          isSelected &&
+                          !activeFeedback.isCorrect &&
+                          !(activeFeedback as any)?.timedOut
+                      );
 
                       let bg = uiTheme.choiceBg;
                       let border = uiTheme.choiceBorder;
@@ -2898,6 +2925,15 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                           key={`${cIdx}_${choice}`}
                           type="button"
                           data-testid={`checkpoint-choice-${cIdx}`}
+                          data-feedback-state={
+                            isCorrectChoice
+                              ? 'correct'
+                              : isWrongSelected
+                                ? 'wrong'
+                                : isSelected
+                                  ? 'selected'
+                                  : 'neutral'
+                          }
                           disabled={Boolean(activeFeedback) || submittingAnswer}
                           onClick={() => {
                             setSelectedChoice(choice);
@@ -2939,10 +2975,39 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   >
                     {activeQuestion.choices.map((choice, cIdx) => {
                       const isSelected = selectedChoice === choice;
-                      const isCorrectChoice =
-                        activeFeedback && choice === activeFeedback.correctAnswer;
-                      const isWrongSelected =
-                        activeFeedback && isSelected && !activeFeedback.isCorrect;
+                      const isExamQuestionRedacted =
+                        game.settings?.sessionMode === 'EXAM' &&
+                        !game.settings?.answersPublished &&
+                        !isPlaytest &&
+                        game.settings?.examAnswerRevealPolicy !== 'IMMEDIATE' &&
+                        Boolean(
+                          (activeFeedback as any)?.examAnswerRecorded ||
+                            (activeFeedback as any)?.examRedacted ||
+                            !activeFeedback?.correctAnswer
+                        );
+                      const normChoice = choice
+                        .replace(/^[A-Da-d1-4][\.\)\:\-]\s*/, '')
+                        .trim()
+                        .toLowerCase();
+                      const normCorrect = (activeFeedback?.correctAnswer || '')
+                        .replace(/^[A-Da-d1-4][\.\)\:\-]\s*/, '')
+                        .trim()
+                        .toLowerCase();
+                      const isCorrectChoice = Boolean(
+                        activeFeedback &&
+                          !isExamQuestionRedacted &&
+                          activeFeedback.correctAnswer &&
+                          (choice.trim().toLowerCase() ===
+                            activeFeedback.correctAnswer.trim().toLowerCase() ||
+                            (normChoice && normChoice === normCorrect))
+                      );
+                      const isWrongSelected = Boolean(
+                        activeFeedback &&
+                          !isExamQuestionRedacted &&
+                          isSelected &&
+                          !activeFeedback.isCorrect &&
+                          !(activeFeedback as any)?.timedOut
+                      );
 
                       let bg = uiTheme.choiceBg;
                       let border = uiTheme.choiceBorder;
@@ -2966,6 +3031,15 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                           key={`${cIdx}_${choice}`}
                           type="button"
                           data-testid={`checkpoint-choice-${cIdx}`}
+                          data-feedback-state={
+                            isCorrectChoice
+                              ? 'correct'
+                              : isWrongSelected
+                                ? 'wrong'
+                                : isSelected
+                                  ? 'selected'
+                                  : 'neutral'
+                          }
                           disabled={Boolean(activeFeedback) || submittingAnswer}
                           onClick={() => {
                             setSelectedChoice(choice);
@@ -3072,7 +3146,13 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 const isExamUnpublished =
                   game.settings?.sessionMode === 'EXAM' &&
                   !game.settings?.answersPublished &&
-                  !isPlaytest;
+                  !isPlaytest &&
+                  game.settings?.examAnswerRevealPolicy !== 'IMMEDIATE' &&
+                  Boolean(
+                    (activeFeedback as any)?.examAnswerRecorded ||
+                      (activeFeedback as any)?.examRedacted ||
+                      !activeFeedback?.correctAnswer
+                  );
                 const isTimedOutFeedback =
                   (activeFeedback as PracticeQuestionResult).timedOut === true;
                 return (
@@ -3118,21 +3198,26 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                           ? `[HẾT THỜI GIAN TRẢ LỜI] Đã ghi nhận tự động — Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
                           : `[ĐÃ GHI NHẬN CÂU TRẢ LỜI] Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
                         : activeFeedback.isCorrect
-                          ? `[CHÍNH XÁC +${activeFeedback.pointsEarned}Đ] Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
-                          : `[CHƯA ĐÚNG]${activeFeedback.correctAnswer ? ` Đáp án chuẩn: ${activeFeedback.correctAnswer}` : ''}`}
+                          ? `[CHÍNH XÁC · TRẢ LỜI ĐÚNG +${activeFeedback.pointsEarned}Đ] Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
+                          : isTimedOutFeedback
+                            ? `[HẾT THỜI GIAN TRẢ LỜI · +0Đ]${activeFeedback.correctAnswer ? ` Đáp án chuẩn: ${activeFeedback.correctAnswer}` : ''}`
+                            : `[CHƯA ĐÚNG · TRẢ LỜI SAI +0Đ]${activeFeedback.correctAnswer ? ` Đáp án chuẩn: ${activeFeedback.correctAnswer}` : ''}`}
                     </div>
-                    {!isExamUnpublished && activeFeedback.explanation && (
-                      <div
-                        style={{
-                          marginTop: '4px',
-                          fontSize: '12px',
-                          color: uiTheme.textSecondary,
-                          lineHeight: 1.4,
-                        }}
-                      >
-                        {activeFeedback.explanation}
-                      </div>
-                    )}
+                    {!isExamUnpublished &&
+                      typeof activeFeedback.explanation === 'string' &&
+                      activeFeedback.explanation.trim().length > 0 && (
+                        <div
+                          data-testid="checkpoint-feedback-explanation"
+                          style={{
+                            marginTop: '4px',
+                            fontSize: '12px',
+                            color: uiTheme.textSecondary,
+                            lineHeight: 1.4,
+                          }}
+                        >
+                          {activeFeedback.explanation.trim()}
+                        </div>
+                      )}
                   </div>
                   <button
                     type="button"
@@ -3317,6 +3402,107 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   </div>
                 </div>
               </div>
+
+              {mode === 'LIVE_SESSION' &&
+                (() => {
+                  const resObj = effectiveFinalResult as PracticeFinalResult | null;
+                  const isExam =
+                    resObj?.sessionMode === 'EXAM' || game.settings?.sessionMode === 'EXAM';
+                  const policy =
+                    resObj?.examAnswerRevealPolicy ||
+                    game.settings?.examAnswerRevealPolicy ||
+                    'AFTER_PUBLISH';
+                  const canShowResultAnswers =
+                    !isExam ||
+                    isPlaytest ||
+                    Boolean(resObj?.canRevealAnswers) ||
+                    Boolean(resObj?.answersPublished) ||
+                    policy === 'IMMEDIATE' ||
+                    policy === 'AFTER_SUBMIT';
+                  const qResults = Array.isArray(resObj?.questionResults)
+                    ? resObj!.questionResults!
+                    : [];
+
+                  if (canShowResultAnswers && qResults.length > 0) {
+                    return (
+                      <div
+                        data-testid="solo-result-question-review"
+                        style={{
+                          marginBottom: '18px',
+                          padding: '12px',
+                          borderRadius: '10px',
+                          backgroundColor: uiTheme.subCardBg,
+                          border: `1px solid ${uiTheme.subCardBorder}`,
+                          maxHeight: '220px',
+                          overflowY: 'auto',
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: '12.5px',
+                            fontWeight: 800,
+                            color: uiTheme.textPrimary,
+                            marginBottom: '8px',
+                          }}
+                        >
+                          Chi tiết đáp án từng trạm ({qResults.length} câu)
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          {qResults.map((qr, idx) => (
+                            <div
+                              key={qr.questionId || idx}
+                              data-testid={`solo-result-review-item-${idx}`}
+                              style={{
+                                padding: '8px 10px',
+                                borderRadius: '8px',
+                                backgroundColor: uiTheme.cardBg,
+                                border: `1px solid ${
+                                  qr.isCorrect ? uiTheme.choiceCorrectBorder : uiTheme.choiceWrongBorder
+                                }`,
+                                fontSize: '12px',
+                              }}
+                            >
+                              <div style={{ fontWeight: 800, color: qr.isCorrect ? uiTheme.choiceCorrectText : uiTheme.choiceWrongText }}>
+                                Trạm #{idx + 1}: {qr.isCorrect ? `✓ Đúng (+${qr.pointsEarned}đ)` : qr.timedOut ? '⏰ Hết giờ (+0đ)' : '✕ Sai (+0đ)'}
+                              </div>
+                              {qr.correctAnswer && (
+                                <div style={{ color: uiTheme.textSecondary, marginTop: '2px' }}>
+                                  Đáp án đúng: <strong style={{ color: uiTheme.choiceCorrectText }}>{qr.correctAnswer}</strong>
+                                </div>
+                              )}
+                              {typeof qr.explanation === 'string' && qr.explanation.trim().length > 0 && (
+                                <div style={{ color: uiTheme.textMuted, marginTop: '2px' }}>
+                                  Giải thích: {qr.explanation.trim()}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  if (isExam && !canShowResultAnswers) {
+                    return (
+                      <div
+                        data-testid="solo-result-answers-pending-publish"
+                        style={{
+                          marginBottom: '18px',
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          backgroundColor: uiTheme.feedbackExamBg,
+                          border: `1px solid ${uiTheme.feedbackExamBorder}`,
+                          color: uiTheme.feedbackExamText,
+                          fontSize: '12px',
+                          fontWeight: 700,
+                        }}
+                      >
+                        🔒 Đáp án chi tiết từng trạm sẽ hiển thị sau khi người tạo chính thức công bố đáp án.
+                      </div>
+                    );
+                  }
+                  return null;
+                })()}
 
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
                 <button

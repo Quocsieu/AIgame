@@ -835,6 +835,11 @@ gameRouter.post(
         settings: {
           ...rawGameSpecification.settings,
           ...(requestData.sessionMode ? { sessionMode: requestData.sessionMode } : {}),
+          ...(requestData.examAnswerRevealPolicy
+            ? { examAnswerRevealPolicy: requestData.examAnswerRevealPolicy }
+            : requestData.sessionMode === 'EXAM' && !rawGameSpecification.settings?.examAnswerRevealPolicy
+              ? { examAnswerRevealPolicy: 'AFTER_PUBLISH' as const }
+              : {}),
           ...(requestData.timerMode ? { timerMode: requestData.timerMode } : {}),
           ...(requestData.totalExamDurationSeconds
             ? { totalExamDurationSeconds: requestData.totalExamDurationSeconds }
@@ -1076,13 +1081,25 @@ async function handleUpdateGameSpecification(req: Request, res: Response, next: 
       title,
       description,
       questions,
-      settings,
+      settings: rawSettings,
+      sessionMode: topLevelSessionMode,
+      examAnswerRevealPolicy: topLevelExamAnswerRevealPolicy,
       isPublic,
       coverImageUrl,
       generateCover,
       participants,
       requireRoster,
     } = parseResult.data;
+    const settings = {
+      ...rawSettings,
+      ...(topLevelSessionMode !== undefined && rawSettings?.sessionMode === undefined
+        ? { sessionMode: topLevelSessionMode }
+        : {}),
+      ...(topLevelExamAnswerRevealPolicy !== undefined &&
+      rawSettings?.examAnswerRevealPolicy === undefined
+        ? { examAnswerRevealPolicy: topLevelExamAnswerRevealPolicy }
+        : {}),
+    };
 
     const effectiveSessionMode = settings?.sessionMode ?? existing.settings?.sessionMode ?? 'PLAY';
     if (effectiveSessionMode === 'EXAM' && requireRoster === true) {
@@ -1143,6 +1160,12 @@ async function handleUpdateGameSpecification(req: Request, res: Response, next: 
         ...(settings?.timePerQuestion !== undefined ? { timePerQuestion: settings.timePerQuestion } : {}),
         ...(settings?.scoringMode !== undefined ? { scoringMode: settings.scoringMode } : {}),
         ...(settings?.sessionMode !== undefined ? { sessionMode: settings.sessionMode } : {}),
+        ...(settings?.examAnswerRevealPolicy !== undefined
+          ? { examAnswerRevealPolicy: settings.examAnswerRevealPolicy }
+          : (settings?.sessionMode ?? existing.settings?.sessionMode) === 'EXAM' &&
+              !existing.settings?.examAnswerRevealPolicy
+            ? { examAnswerRevealPolicy: 'AFTER_PUBLISH' as const }
+            : {}),
         ...(settings?.timerMode !== undefined ? { timerMode: settings.timerMode } : {}),
         ...(settings?.totalExamDurationSeconds !== undefined
           ? { totalExamDurationSeconds: settings.totalExamDurationSeconds }
@@ -1532,6 +1555,19 @@ gameRouter.post(
         mode: 'read',
         isPublic,
       });
+
+      const isManager = hasCreatorOrHostManagementAccess(req, gameId, ownerUserId);
+      if (
+        spec.settings?.sessionMode === 'EXAM' &&
+        !spec.settings?.answersPublished &&
+        !isManager
+      ) {
+        throw new AppError(
+          'EXAM_ANSWERS_LOCKED',
+          'Không thể sao chép bộ đề thi đang bảo mật đáp án khi người tạo chưa công bố đáp án.',
+          403
+        );
+      }
 
       const customTitle =
         typeof req.body?.title === 'string' && req.body.title.trim().length > 0

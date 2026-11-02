@@ -416,6 +416,9 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
         answersPublished: msg.answersPublished,
       });
       setLeaderboard(msg.leaderboard || []);
+      if (Array.isArray(msg.questions) && msg.questions.length > 0) {
+        setPublishedAnswersList(msg.questions);
+      }
       const myId = playerIdRef.current;
       let myRank: number | null = null;
       if (msg.leaderboard && myId) {

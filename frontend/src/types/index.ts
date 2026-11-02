@@ -158,6 +158,7 @@ export interface AdventureConfig {
 export type Difficulty = 'EASY' | 'MEDIUM' | 'HARD';
 export type ScoringMode = 'STANDARD' | 'SPEED_BONUS' | 'STREAK';
 export type SessionMode = 'PLAY' | 'EXAM';
+export type ExamAnswerRevealPolicy = 'IMMEDIATE' | 'AFTER_SUBMIT' | 'AFTER_PUBLISH';
 export type TimerMode = 'PER_QUESTION' | 'TOTAL_EXAM' | 'UNLIMITED';
 export type RosterMode = 'FREE_TEXT' | 'PRECONFIGURED' | 'HYBRID';
 export type OfficialAttemptPolicy = 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
@@ -565,6 +566,7 @@ export interface GameSpecification {
     timePerQuestion: number;
     scoringMode: ScoringMode;
     sessionMode?: SessionMode;
+    examAnswerRevealPolicy?: ExamAnswerRevealPolicy;
     timerMode?: TimerMode;
     totalExamDurationSeconds?: number;
     autoAdvanceDelayMs?: number;
@@ -706,7 +708,9 @@ export interface PracticeFinalResult {
   title: string;
   gameType: GameType;
   sessionMode?: SessionMode;
+  examAnswerRevealPolicy?: ExamAnswerRevealPolicy;
   answersPublished?: boolean;
+  canRevealAnswers?: boolean;
   passThresholdPercent?: number;
   isPassed?: boolean | null;
   accuracyPercent?: number;
@@ -915,6 +919,7 @@ export interface PersistedGameSummary {
   title: string;
   description: string;
   gameType: GameType;
+  sessionMode?: SessionMode;
   questionCount: number;
   timePerQuestion: number;
   scoringMode: ScoringMode;
