@@ -1017,8 +1017,10 @@ gameRouter.post(
       }
 
       // 3 & 4 & 5. Build bounded AI input, generate, validate structured output
+      const generationId = `gen_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const rawGameSpecification = await aiQuestionService.generateGame(documents, requestData, {
         userId: req.user?.userId ?? null,
+        generationId,
       });
 
       let gameSpecification: GameSpecification = {
@@ -1049,6 +1051,7 @@ gameRouter.post(
       if (gameSpecification.gameType === 'ADVENTURE') {
         const assetProvision = await provisionAdventureAssetsForGame(gameSpecification, {
           userId: req.user?.userId ?? null,
+          generationId,
         });
         gameSpecification = assetProvision.specification;
         adventureAssetsReady = assetProvision.verified;

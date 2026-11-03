@@ -319,6 +319,34 @@ export const MIGRATIONS: MigrationDefinition[] = [
       ALTER TABLE room_history ADD COLUMN exam_answer_reveal_policy TEXT;
     `,
   },
+  {
+    version: 9,
+    name: '009_v3_ai_cost_tracking',
+    upSql: `
+      ALTER TABLE ai_usage_logs ADD COLUMN request_id TEXT;
+      ALTER TABLE ai_usage_logs ADD COLUMN generation_id TEXT;
+      ALTER TABLE ai_usage_logs ADD COLUMN game_title_snapshot TEXT;
+      ALTER TABLE ai_usage_logs ADD COLUMN task_type TEXT;
+      ALTER TABLE ai_usage_logs ADD COLUMN source_type TEXT;
+      ALTER TABLE ai_usage_logs ADD COLUMN cached_tokens INTEGER;
+      ALTER TABLE ai_usage_logs ADD COLUMN thinking_tokens INTEGER;
+      ALTER TABLE ai_usage_logs ADD COLUMN billing_mode TEXT;
+      ALTER TABLE ai_usage_logs ADD COLUMN pricing_version TEXT;
+      ALTER TABLE ai_usage_logs ADD COLUMN pricing_status TEXT;
+      ALTER TABLE ai_usage_logs ADD COLUMN cost_usd REAL;
+      ALTER TABLE ai_usage_logs ADD COLUMN cost_vnd REAL;
+      ALTER TABLE ai_usage_logs ADD COLUMN paid_equivalent_cost_usd REAL;
+      ALTER TABLE ai_usage_logs ADD COLUMN paid_equivalent_cost_vnd REAL;
+      ALTER TABLE ai_usage_logs ADD COLUMN exchange_rate_usd_vnd REAL;
+      ALTER TABLE ai_usage_logs ADD COLUMN input_price_per_1m_usd REAL;
+      ALTER TABLE ai_usage_logs ADD COLUMN output_price_per_1m_usd REAL;
+      ALTER TABLE ai_usage_logs ADD COLUMN cached_price_per_1m_usd REAL;
+      ALTER TABLE ai_usage_logs ADD COLUMN image_price_usd REAL;
+      ALTER TABLE ai_usage_logs ADD COLUMN data_note TEXT;
+      CREATE INDEX IF NOT EXISTS idx_ai_usage_logs_generation_id ON ai_usage_logs(generation_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_ai_usage_logs_model ON ai_usage_logs(model, created_at DESC);
+    `,
+  },
 ];
 
 let dbInstance: DatabaseSync | null = null;

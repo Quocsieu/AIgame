@@ -95,6 +95,7 @@ export interface AdventureGameAssetVerificationResult {
 export interface ProvisionAdventureAssetsOptions {
   baseDir?: string;
   userId?: string | null;
+  generationId?: string | null;
   forceRegenerate?: boolean;
   imageProvider?: ImageModelProvider;
 }
@@ -989,16 +990,21 @@ export async function generateRuntimeAdventureAssetsForGame(
         });
         const usage = payload.usageMetadata ?? provider.getLastUsageMetadata?.() ?? null;
         aiObservabilityService.recordAiCall({
+          generationId: options.generationId ?? null,
           userId: options.userId ?? spec.ownerUserId ?? null,
           gameId: spec.gameId,
+          gameTitleSnapshot: spec.title,
           assetSlot: item.type,
           provider: usage?.provider || 'gemini',
           model: usage?.model || 'gemini-2.5-flash-image',
           operation: 'GENERATE_ADVENTURE_SPRITE',
+          taskType: 'ADVENTURE_SPRITE_GENERATION',
           status: 'SUCCESS',
           latencyMs: Date.now() - startedAt,
           inputTokens: usage?.inputTokens ?? null,
           outputTokens: usage?.outputTokens ?? null,
+          cachedTokens: usage?.cachedTokens ?? null,
+          thinkingTokens: usage?.thinkingTokens ?? null,
           totalTokens: usage?.totalTokens ?? null,
           usageIsEstimated: !usage?.usageReportedByProvider,
           requestedQuestions: 0,
@@ -1014,17 +1020,22 @@ export async function generateRuntimeAdventureAssetsForGame(
         const usage = provider.getLastUsageMetadata?.() ?? null;
         const errCode = apiErr instanceof AppError ? apiErr.code : 'AI_PROVIDER_ERROR';
         aiObservabilityService.recordAiCall({
+          generationId: options.generationId ?? null,
           userId: options.userId ?? spec.ownerUserId ?? null,
           gameId: spec.gameId,
+          gameTitleSnapshot: spec.title,
           assetSlot: item.type,
           provider: usage?.provider || 'gemini',
           model: usage?.model || 'gemini-2.5-flash-image',
           operation: 'GENERATE_ADVENTURE_SPRITE',
+          taskType: 'ADVENTURE_SPRITE_GENERATION',
           status: 'FAILED',
           errorCode: errCode,
           latencyMs: Date.now() - startedAt,
           inputTokens: usage?.inputTokens ?? null,
           outputTokens: usage?.outputTokens ?? null,
+          cachedTokens: usage?.cachedTokens ?? null,
+          thinkingTokens: usage?.thinkingTokens ?? null,
           totalTokens: usage?.totalTokens ?? null,
           usageIsEstimated: true,
           requestedQuestions: 0,

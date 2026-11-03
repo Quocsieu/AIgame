@@ -193,6 +193,88 @@ export function requireAdminMiddleware(
 }
 
 /**
+ * Returns true if the server is running on a public Production environment.
+ * Demo Mode is strictly forbidden when this returns true, even if ADMIN_COST_DEMO_MODE=true.
+ */
+export function isPublicProductionEnvironment(): boolean {
+  const nodeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
+  if (nodeEnv === 'production') {
+    return true;
+  }
+  if (
+    process.env.RENDER ||
+    process.env.RENDER_SERVICE_ID ||
+    process.env.VERCEL ||
+    String(process.env.VERCEL_ENV || '').trim().toLowerCase() === 'production' ||
+    String(process.env.RAILWAY_ENVIRONMENT || '').trim().toLowerCase() === 'production' ||
+    process.env.FLY_APP_NAME
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Returns true when Local/Development Demo Mode for Admin AI Cost Analytics is enabled.
+ * - Strictly blocked on public Production environments.
+ * - Never trusts any client-supplied HTTP header.
+ * - Enabled in local/development unless ADMIN_COST_DEMO_MODE is explicitly set to 'false' / '0' / 'off'.
+ */
+export function isAdminCostDemoModeEnabled(): boolean {
+  if (isPublicProductionEnvironment()) {
+    return false;
+  }
+  const rawFlag = String(process.env.ADMIN_COST_DEMO_MODE ?? 'true')
+    .trim()
+    .toLowerCase();
+  if (rawFlag === 'false' || rawFlag === '0' || rawFlag === 'off' || rawFlag === 'no') {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Separated permission middleware for Admin AI Cost Analytics & Excel Export.
+ * - In Local Demo Mode (ADMIN_COST_DEMO_MODE=true & non-production), permits read-only GET/HEAD access
+ *   to AI cost analytics and Excel export without requiring an Admin session token.
+ * - Never trusts fake client headers (e.g., X-Admin-Demo, X-Admin).
+ * - Always rejects Guest/Player tokens (X-Guest-Token, X-Player-Token).
+ * - When Demo Mode is disabled or in Production, enforces full requireAdminMiddleware RBAC.
+ */
+export function requireAdminCostAnalyticsMiddleware(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): void {
+  try {
+    if (req.headers['x-player-token'] || req.headers['x-guest-token'] || req.isGuest) {
+      throw new AppError(
+        'ACCESS_DENIED',
+        'Khách hoặc người chơi không được phép truy cập báo cáo chi phí AI.',
+        403
+      );
+    }
+
+    if (req.user && req.user.role === 'ADMIN') {
+      next();
+      return;
+    }
+
+    if (
+      isAdminCostDemoModeEnabled() &&
+      (req.method === 'GET' || req.method === 'HEAD')
+    ) {
+      next();
+      return;
+    }
+
+    requireAdminMiddleware(req, res, next);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
  * Strictly rejects callers with X-Player-Token, X-Guest-Token, or synthetic guest accounts.
  * Ensures only authenticated organizers (USER/ADMIN) or unauthenticated callers in test/demo mode
  * can access game management and creation features.

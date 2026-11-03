@@ -8,6 +8,7 @@ import {
   MoonIcon,
   PlusIcon,
   SearchIcon,
+  ShieldIcon,
   SparklesIcon,
   SpinnerIcon,
   SunIcon,
@@ -23,7 +24,11 @@ import { PlayPage } from './pages/PlayPage.js';
 import { ReportsPage } from './pages/ReportsPage.js';
 import { SoloPlayer } from './components/SoloPlayer.js';
 import { SoloPresentationPage } from './pages/SoloPresentationPage.js';
-import { fetchCurrentUser, fetchGameById } from './services/api.js';
+import {
+  fetchCurrentUser,
+  fetchGameById,
+  isClientAdminDemoModeEnabled,
+} from './services/api.js';
 import type { AuthenticatedUser, GameSpecification, GameType } from './types/index.js';
 
 type Tab =
@@ -348,12 +353,18 @@ export const AppContent: React.FC = () => {
     }
   };
 
-  // Navigation bên trái chuẩn hóa theo mô hình Kahoot: Trang Chủ, Khám phá, Thư viện, Thống kê, Nhập mã PIN
+  // Navigation bên trái chuẩn hóa theo mô hình Kahoot: Trang Chủ, Khám phá, Thư viện, Thống kê, Admin (Local/Demo hoặc Admin), Nhập mã PIN
+  const showAdminInSidebar =
+    currentUser?.role === 'ADMIN' || isClientAdminDemoModeEnabled();
+
   const navItems = [
     { id: 'home' as Tab, label: 'Trang Chủ', icon: <HomeIcon size={17} /> },
     { id: 'analytics' as Tab, label: 'Khám phá', icon: <SearchIcon size={17} /> },
     { id: 'library' as Tab, label: 'Thư viện', icon: <BookOpenIcon size={17} /> },
     { id: 'reports' as Tab, label: 'Thống kê', icon: <BarChartIcon size={17} /> },
+    ...(showAdminInSidebar
+      ? [{ id: 'admin' as Tab, label: 'Admin', icon: <ShieldIcon size={17} /> }]
+      : []),
     { id: 'join' as Tab, label: 'Nhập mã PIN', icon: <UsersIcon size={17} /> },
   ];
 

@@ -1861,6 +1861,274 @@ export async function downloadAdminAiLogsExport(
   URL.revokeObjectURL(url);
 }
 
+export interface AdminAiCostReportFilters {
+  preset?: 'TODAY' | 'LAST_7_DAYS' | 'LAST_30_DAYS' | 'THIS_MONTH' | 'ALL' | 'CUSTOM';
+  from?: string;
+  to?: string;
+  model?: string;
+  gameType?: string;
+  taskType?: string;
+}
+
+export interface AdminAiCostApiLogItem {
+  requestId: string;
+  logId: string;
+  generationId: string | null;
+  gameId: string | null;
+  gameTitle: string | null;
+  gameType: string | null;
+  userId: string | null;
+  createdAt: string;
+  provider: string;
+  model: string;
+  operation: string;
+  taskType: string;
+  sourceType: string | null;
+  assetSlot: string | null;
+  status: string;
+  errorCode: string | null;
+  latencyMs: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cachedTokens: number | null;
+  thinkingTokens: number | null;
+  totalTokens: number | null;
+  billingMode: 'FREE' | 'PAID' | 'UNKNOWN';
+  pricingVersion: string;
+  pricingStatus: string;
+  inputPricePer1MUsd: number | null;
+  outputPricePer1MUsd: number | null;
+  cachedPricePer1MUsd: number | null;
+  imagePriceUsd: number | null;
+  exchangeRateUsdVnd: number;
+  actualCostUsd: number | null;
+  actualCostVnd: number | null;
+  paidEquivalentCostUsd: number | null;
+  paidEquivalentCostVnd: number | null;
+  dataNote: string | null;
+}
+
+export interface AdminAiCostGameItem {
+  generationKey: string;
+  generationId: string | null;
+  gameId: string | null;
+  gameTitle: string;
+  gameType: string;
+  createdAt: string;
+  modelsUsed: string[];
+  requestCount: number;
+  successCount: number;
+  failedCount: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cachedTokens: number | null;
+  thinkingTokens: number | null;
+  totalTokens: number | null;
+  actualCostUsd: number | null;
+  actualCostVnd: number | null;
+  paidEquivalentCostUsd: number | null;
+  paidEquivalentCostVnd: number | null;
+  status: 'SUCCESS' | 'PARTIAL_FAILURE' | 'FAILED' | 'USAGE_UNAVAILABLE' | 'PRICE_UNAVAILABLE';
+  hasUnknownUsage: boolean;
+  hasPriceUnavailable: boolean;
+  isSavedInLibrary: boolean;
+  requests: AdminAiCostApiLogItem[];
+}
+
+export interface AdminAiCostModelBreakdownItem {
+  provider: string;
+  model: string;
+  requestCount: number;
+  successCount: number;
+  failedCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  thinkingTokens: number;
+  totalTokens: number;
+  actualCostUsd: number;
+  actualCostVnd: number;
+  paidEquivalentCostUsd: number;
+  paidEquivalentCostVnd: number;
+  shareOfPaidCostPercent: number;
+  pricingStatus: string;
+}
+
+export interface AdminAiCostScalingProjectionItem {
+  scaleGenerations: number;
+  label: string;
+  basisEligibleGenerations: number;
+  avgTokensPerGeneration: number | null;
+  projectedTotalTokens: number | null;
+  avgActualCostPerGameUsd: number | null;
+  avgActualCostPerGameVnd: number | null;
+  projectedActualCostUsd: number | null;
+  projectedActualCostVnd: number | null;
+  avgPaidEquivalentCostPerGameUsd: number | null;
+  avgPaidEquivalentCostPerGameVnd: number | null;
+  projectedPaidEquivalentCostUsd: number | null;
+  projectedPaidEquivalentCostVnd: number | null;
+  formulaNote: string;
+}
+
+export interface AdminAiCostReport {
+  demoMode?: boolean;
+  generatedAt: string;
+  filtersApplied: {
+    preset: string;
+    from: string | null;
+    to: string | null;
+    model: string | null;
+    gameType: string | null;
+    taskType: string | null;
+  };
+  billingModeConfigured: 'FREE' | 'PAID' | 'UNKNOWN';
+  exchangeRate: {
+    usdToVndRate: number;
+    effectiveDate: string;
+    source: string;
+  };
+  persistenceStatus: {
+    databasePath: string;
+    isEphemeralWarning: boolean;
+    warningMessage: string | null;
+  };
+  summary: {
+    totalGameGenerations: number;
+    eligibleGenerationsForAverage: number;
+    totalAiRequests: number;
+    successfulRequests: number;
+    failedRequests: number;
+    requestsWithReportedTokens: number;
+    requestsWithUnknownUsage: number;
+    requestsWithPriceUnavailable: number;
+    requestsWithUnknownBilling: number;
+    inputTokens: number;
+    outputTokens: number;
+    cachedTokens: number;
+    thinkingTokens: number;
+    totalTokens: number;
+    actualCostUsd: number;
+    actualCostVnd: number;
+    paidEquivalentCostUsd: number;
+    paidEquivalentCostVnd: number;
+    avgTokensPerGame: number | null;
+    avgActualCostPerGameUsd: number | null;
+    avgActualCostPerGameVnd: number | null;
+    avgPaidEquivalentCostPerGameUsd: number | null;
+    avgPaidEquivalentCostPerGameVnd: number | null;
+    highestCostModel: string | null;
+  };
+  scalingProjections: AdminAiCostScalingProjectionItem[];
+  byModel: AdminAiCostModelBreakdownItem[];
+  byGame: AdminAiCostGameItem[];
+  apiLogs: AdminAiCostApiLogItem[];
+  pricingCatalog: Array<{
+    provider: string;
+    model: string;
+    displayName: string;
+    inputPricePer1MUsd: number;
+    outputPricePer1MUsd: number;
+    cachedInputPricePer1MUsd: number;
+    imagePriceUsd: number | null;
+    unitDescription: string;
+    pricingVersion: string;
+    effectiveFrom: string;
+    sourceUrl: string;
+    notes?: string;
+  }>;
+}
+
+export function isClientAdminDemoModeEnabled(): boolean {
+  const explicitEnv = String(import.meta.env.VITE_ADMIN_COST_DEMO_MODE || '')
+    .trim()
+    .toLowerCase();
+  if (explicitEnv === 'false' || explicitEnv === '0' || explicitEnv === 'off' || explicitEnv === 'no') {
+    return false;
+  }
+  if (typeof window !== 'undefined') {
+    if ((window as any).__DISABLE_ADMIN_DEMO_MODE__ === true) {
+      return false;
+    }
+    const host = (window.location.hostname || '').toLowerCase();
+    const isLocalHost =
+      host === 'localhost' ||
+      host === '127.0.0.1' ||
+      host === '[::1]' ||
+      host.endsWith('.local');
+    if (isLocalHost) {
+      return true;
+    }
+  }
+  if (import.meta.env.PROD) {
+    return false;
+  }
+  return Boolean(import.meta.env.DEV || explicitEnv === 'true');
+}
+
+export async function fetchAdminAiCostReport(
+  filters?: AdminAiCostReportFilters
+): Promise<AdminAiCostReport> {
+  const query = new URLSearchParams();
+  if (filters?.preset && filters.preset !== 'ALL') query.set('preset', filters.preset);
+  if (filters?.from) query.set('from', filters.from);
+  if (filters?.to) query.set('to', filters.to);
+  if (filters?.model && filters.model !== 'ALL') query.set('model', filters.model);
+  if (filters?.gameType && filters.gameType !== 'ALL') query.set('gameType', filters.gameType);
+  if (filters?.taskType && filters.taskType !== 'ALL') query.set('taskType', filters.taskType);
+  const qs = query.toString();
+
+  const res = await fetch(`${API_BASE_URL}/admin/ai-costs${qs ? `?${qs}` : ''}`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải báo cáo chi phí AI.');
+    (err as any).code = data.error?.code;
+    (err as any).status = res.status;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function downloadAdminAiCostReportExcel(
+  filters?: AdminAiCostReportFilters
+): Promise<void> {
+  const query = new URLSearchParams();
+  if (filters?.preset && filters.preset !== 'ALL') query.set('preset', filters.preset);
+  if (filters?.from) query.set('from', filters.from);
+  if (filters?.to) query.set('to', filters.to);
+  if (filters?.model && filters.model !== 'ALL') query.set('model', filters.model);
+  if (filters?.gameType && filters.gameType !== 'ALL') query.set('gameType', filters.gameType);
+  if (filters?.taskType && filters.taskType !== 'ALL') query.set('taskType', filters.taskType);
+  const qs = query.toString();
+
+  const res = await fetch(`${API_BASE_URL}/admin/ai-costs/export${qs ? `?${qs}` : ''}`, {
+    headers: buildAuthHeaders(),
+  });
+  if (!res.ok) {
+    let message = 'Không thể xuất báo cáo Excel chi phí AI.';
+    try {
+      const errJson = await res.json();
+      message = errJson.error?.message || message;
+    } catch {
+      // ignore
+    }
+    throw new Error(message);
+  }
+
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  const dateStamp = new Date().toISOString().slice(0, 10);
+  a.download = `AI_Game_Cost_Report_${dateStamp}.xlsx`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 // ==========================================
 // V3 Play / Exam History & Export APIs (/api/history/activities)
 // ==========================================

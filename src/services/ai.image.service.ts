@@ -41,6 +41,7 @@ export function sanitizeAiErrorMessage(rawMessage: string, extraSecret?: string)
 
 export interface GenerateGameCoverOptions {
   userId?: string | null;
+  generationId?: string | null;
   forceRegenerate?: boolean;
   throwOnError?: boolean;
   coversDir?: string;
@@ -303,11 +304,17 @@ export class GeminiImageModelProvider implements ImageModelProvider {
           typeof usageMeta.promptTokenCount === 'number' ? usageMeta.promptTokenCount : null;
         const candidatesTokenCount =
           typeof usageMeta.candidatesTokenCount === 'number' ? usageMeta.candidatesTokenCount : null;
+        const cachedContentTokenCount =
+          typeof usageMeta.cachedContentTokenCount === 'number'
+            ? usageMeta.cachedContentTokenCount
+            : null;
+        const thoughtsTokenCount =
+          typeof usageMeta.thoughtsTokenCount === 'number' ? usageMeta.thoughtsTokenCount : null;
         const totalTokenCount =
           typeof usageMeta.totalTokenCount === 'number'
             ? usageMeta.totalTokenCount
             : promptTokenCount !== null && candidatesTokenCount !== null
-              ? promptTokenCount + candidatesTokenCount
+              ? promptTokenCount + candidatesTokenCount + (thoughtsTokenCount || 0)
               : null;
 
         this.lastUsageMetadata = {
@@ -315,6 +322,8 @@ export class GeminiImageModelProvider implements ImageModelProvider {
           model: modelName,
           inputTokens: promptTokenCount,
           outputTokens: candidatesTokenCount,
+          cachedTokens: cachedContentTokenCount,
+          thinkingTokens: thoughtsTokenCount,
           totalTokens: totalTokenCount,
           usageReportedByProvider:
             promptTokenCount !== null || candidatesTokenCount !== null || totalTokenCount !== null,
@@ -565,16 +574,21 @@ export class AiImageService {
           : null);
 
       aiObservabilityService.recordAiCall({
+        generationId: options.generationId ?? null,
         userId: options.userId ?? spec.ownerUserId ?? null,
         gameId: spec.gameId,
+        gameTitleSnapshot: spec.title,
         assetSlot: 'COVER',
         provider: usage?.provider || 'gemini',
         model: usage?.model || process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image',
         operation: 'GENERATE_COVER_IMAGE',
+        taskType: 'COVER_IMAGE_GENERATION',
         status: 'SUCCESS',
         latencyMs: Date.now() - startTime,
         inputTokens: usage?.inputTokens ?? null,
         outputTokens: usage?.outputTokens ?? null,
+        cachedTokens: usage?.cachedTokens ?? null,
+        thinkingTokens: usage?.thinkingTokens ?? null,
         totalTokens: usage?.totalTokens ?? null,
         usageIsEstimated: !usage?.usageReportedByProvider,
         requestedQuestions: 0,
@@ -602,17 +616,22 @@ export class AiImageService {
           : null;
 
       aiObservabilityService.recordAiCall({
+        generationId: options.generationId ?? null,
         userId: options.userId ?? spec.ownerUserId ?? null,
         gameId: spec.gameId,
+        gameTitleSnapshot: spec.title,
         assetSlot: 'COVER',
         provider: usage?.provider || 'gemini',
         model: usage?.model || process.env.GEMINI_IMAGE_MODEL || 'gemini-2.5-flash-image',
         operation: 'GENERATE_COVER_IMAGE',
+        taskType: 'COVER_IMAGE_GENERATION',
         status: 'FAILED',
         errorCode: err instanceof AppError ? err.code : 'AI_IMAGE_ERROR',
         latencyMs: Date.now() - startTime,
         inputTokens: usage?.inputTokens ?? null,
         outputTokens: usage?.outputTokens ?? null,
+        cachedTokens: usage?.cachedTokens ?? null,
+        thinkingTokens: usage?.thinkingTokens ?? null,
         totalTokens: usage?.totalTokens ?? null,
         usageIsEstimated: true,
         requestedQuestions: 0,

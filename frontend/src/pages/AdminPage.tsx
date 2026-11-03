@@ -20,13 +20,18 @@ import {
 import { useToast } from '../components/ToastContext.js';
 import {
   deleteAdminGame,
+  downloadAdminAiCostReportExcel,
   downloadAdminAiLogsExport,
+  fetchAdminAiCostReport,
   fetchAdminAiLogs,
   fetchAdminGames,
   fetchAdminOverview,
   fetchAdminRooms,
   fetchAdminUsers,
+  isClientAdminDemoModeEnabled,
   updateAdminGameStatus,
+  type AdminAiCostReport,
+  type AdminAiCostReportFilters,
 } from '../services/api.js';
 import type {
   AdminAiLogRecord,
@@ -42,16 +47,17 @@ interface AdminPageProps {
   onNavigateHome: () => void;
 }
 
-type AdminTab = 'overview' | 'users' | 'games' | 'ops';
+type AdminTab = 'overview' | 'users' | 'games' | 'costs' | 'ops';
 
 export const AdminPage: React.FC<AdminPageProps> = ({
   currentUser,
   onNavigateHome,
 }) => {
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<AdminTab>('overview');
+  const [activeTab, setActiveTab] = useState<AdminTab>('costs');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [demoAccessDeniedByServer, setDemoAccessDeniedByServer] = useState(false);
 
   // Overview stats
   const [overview, setOverview] = useState<AdminOverviewStats | null>(null);
@@ -77,7 +83,21 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [aiFilterOperation, setAiFilterOperation] = useState('ALL');
   const [isExportingAiLogs, setIsExportingAiLogs] = useState(false);
 
+  // AI Token & Cost Tracking state
+  const [costReport, setCostReport] = useState<AdminAiCostReport | null>(null);
+  const [costPreset, setCostPreset] = useState<'TODAY' | 'LAST_7_DAYS' | 'LAST_30_DAYS' | 'THIS_MONTH' | 'ALL' | 'CUSTOM'>('THIS_MONTH');
+  const [costFrom, setCostFrom] = useState('');
+  const [costTo, setCostTo] = useState('');
+  const [costModel] = useState('ALL');
+  const [costGameType] = useState('ALL');
+  const [costTaskType] = useState('ALL');
+  const [visibleGameCount, setVisibleGameCount] = useState(10);
+  const [isExportingCostExcel, setIsExportingCostExcel] = useState(false);
+
   const isUserAdmin = currentUser?.role === 'ADMIN';
+  const isDemoCostAccess =
+    !isUserAdmin && isClientAdminDemoModeEnabled() && !demoAccessDeniedByServer;
+  const canAccessAdminPanel = isUserAdmin || isDemoCostAccess;
 
   // Handle ESC key for modal
   useEffect(() => {
@@ -91,18 +111,22 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   }, [deleteConfirmGame, processingGameId]);
 
   useEffect(() => {
-    if (!currentUser || !isUserAdmin) return;
+    if (!canAccessAdminPanel) return;
 
-    if (activeTab === 'overview') {
-      loadOverview();
-    } else if (activeTab === 'users') {
-      loadUsers();
-    } else if (activeTab === 'games') {
-      loadGames();
-    } else if (activeTab === 'ops') {
-      loadOps();
+    if (activeTab === 'costs') {
+      loadCostReport();
+    } else if (isUserAdmin) {
+      if (activeTab === 'overview') {
+        loadOverview();
+      } else if (activeTab === 'users') {
+        loadUsers();
+      } else if (activeTab === 'games') {
+        loadGames();
+      } else if (activeTab === 'ops') {
+        loadOps();
+      }
     }
-  }, [activeTab, currentUser, isUserAdmin]);
+  }, [activeTab, currentUser, isUserAdmin, canAccessAdminPanel]);
 
   const loadOverview = async () => {
     setIsLoading(true);
@@ -200,6 +224,223 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
   };
 
+  const loadCostReport = async (override?: AdminAiCostReportFilters) => {
+    setIsLoading(true);
+    setErrorMessage(null);
+    try {
+      const activePreset = override?.preset ?? costPreset;
+      const activeFrom = (override?.from ?? costFrom).trim() || undefined;
+      const activeTo = (override?.to ?? costTo).trim() || undefined;
+      const activeModel = override?.model ?? costModel;
+      const activeGameType = override?.gameType ?? costGameType;
+      const activeTaskType = override?.taskType ?? costTaskType;
+
+      const data = await fetchAdminAiCostReport({
+        preset: activePreset,
+        from: activeFrom,
+        to: activeTo,
+        model: activeModel,
+        gameType: activeGameType,
+        taskType: activeTaskType,
+      });
+      setCostReport(data);
+      setDemoAccessDeniedByServer(false);
+    } catch (err: any) {
+      if (
+        !isUserAdmin &&
+        (err?.status === 401 ||
+          err?.status === 403 ||
+          err?.code === 'UNAUTHORIZED' ||
+          err?.code === 'ACCESS_DENIED')
+      ) {
+        setDemoAccessDeniedByServer(true);
+      }
+      setErrorMessage(err.message || 'Không thể tải thống kê chi phí AI.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleExportCostExcel = async () => {
+    setIsExportingCostExcel(true);
+    try {
+      await downloadAdminAiCostReportExcel({
+        preset: costPreset,
+        from: costFrom.trim() || undefined,
+        to: costTo.trim() || undefined,
+        model: costModel,
+        gameType: costGameType,
+        taskType: costTaskType,
+      });
+      toast.success(
+        'Đã xuất báo cáo chi phí AI (.xlsx) gồm 4 sheet thành công.',
+        'Xuất báo cáo Excel'
+      );
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể xuất báo cáo Excel chi phí AI.', 'Lỗi xuất Excel');
+    } finally {
+      setIsExportingCostExcel(false);
+    }
+  };
+
+  const formatVndCurrency = (amount: number | null | undefined): string => {
+    if (amount === null || amount === undefined || !Number.isFinite(amount)) {
+      return 'Chưa xác định';
+    }
+    return `${new Intl.NumberFormat('vi-VN').format(Math.round(amount))} ₫`;
+  };
+
+  const formatCompactTokens = (tokens: number | null | undefined): string => {
+    if (tokens === null || tokens === undefined || !Number.isFinite(tokens)) {
+      return 'Chưa xác định';
+    }
+    if (tokens < 1_000) {
+      return new Intl.NumberFormat('vi-VN').format(tokens);
+    }
+    if (tokens < 1_000_000) {
+      return `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 }).format(tokens / 1_000)}K`;
+    }
+    return `${new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 }).format(tokens / 1_000_000)}M`;
+  };
+
+  const formatExactTokens = (tokens: number | null | undefined, hasUnknownUsage?: boolean): string => {
+    if (hasUnknownUsage || tokens === null || tokens === undefined || !Number.isFinite(tokens)) {
+      return 'Chưa xác định';
+    }
+    return new Intl.NumberFormat('vi-VN').format(Math.round(tokens));
+  };
+
+  const computeLibraryGameCostColumns = (
+    g: AdminAiCostReport['byGame'][number],
+    defaultExchangeRate: number
+  ): {
+    tokenInputText: string;
+    tokenOutputText: string;
+    costInputText: string;
+    costOutputText: string;
+    costTotalText: string;
+    isCostValid: boolean;
+    totalTooltip: string | undefined;
+  } => {
+    const hasIncompleteData =
+      g.hasUnknownUsage ||
+      g.hasPriceUnavailable ||
+      g.status === 'USAGE_UNAVAILABLE' ||
+      g.status === 'PRICE_UNAVAILABLE';
+
+    const tokenInputText = formatExactTokens(g.inputTokens, g.hasUnknownUsage);
+    const tokenOutputText = formatExactTokens(g.outputTokens, g.hasUnknownUsage);
+
+    let hasAnyTokenReq = false;
+    let missingPriceOrUsage = hasIncompleteData;
+    let sumInputCostVndExact = 0;
+    let sumOutputCostVndExact = 0;
+    let hasAdditionalAiCost = false;
+
+    for (const r of g.requests || []) {
+      if (r.pricingStatus === 'PRICE_UNAVAILABLE' || r.pricingStatus === 'USAGE_UNAVAILABLE') {
+        missingPriceOrUsage = true;
+      }
+      const rate =
+        r.exchangeRateUsdVnd && Number.isFinite(r.exchangeRateUsdVnd) && r.exchangeRateUsdVnd > 0
+          ? r.exchangeRateUsdVnd
+          : defaultExchangeRate;
+
+      if (r.inputTokens !== null && r.outputTokens !== null) {
+        hasAnyTokenReq = true;
+        if (
+          r.inputPricePer1MUsd === null ||
+          r.inputPricePer1MUsd === undefined ||
+          r.outputPricePer1MUsd === null ||
+          r.outputPricePer1MUsd === undefined
+        ) {
+          missingPriceOrUsage = true;
+        } else {
+          const rawIn = Math.max(0, Math.round(r.inputTokens));
+          const rawOut = Math.max(0, Math.round(r.outputTokens));
+          const rawCached =
+            r.cachedTokens !== null && r.cachedTokens !== undefined && Number.isFinite(r.cachedTokens)
+              ? Math.max(0, Math.round(r.cachedTokens))
+              : 0;
+          const effectiveCached = Math.min(rawIn, rawCached);
+          const nonCachedInput = Math.max(0, rawIn - effectiveCached);
+          const cachedPricePer1M =
+            r.cachedPricePer1MUsd !== null && r.cachedPricePer1MUsd !== undefined
+              ? r.cachedPricePer1MUsd
+              : r.inputPricePer1MUsd * 0.25;
+
+          const reqInUsd =
+            (nonCachedInput / 1_000_000) * r.inputPricePer1MUsd +
+            (effectiveCached / 1_000_000) * cachedPricePer1M;
+          const reqOutUsd = (rawOut / 1_000_000) * r.outputPricePer1MUsd;
+
+          sumInputCostVndExact += reqInUsd * rate;
+          sumOutputCostVndExact += reqOutUsd * rate;
+
+          const rawThinking =
+            r.thinkingTokens !== null && r.thinkingTokens !== undefined && Number.isFinite(r.thinkingTokens)
+              ? Math.max(0, Math.round(r.thinkingTokens))
+              : 0;
+          if (rawThinking > 0) {
+            hasAdditionalAiCost = true;
+          }
+          if (
+            (r.taskType === 'COVER_IMAGE_GENERATION' ||
+              r.taskType === 'ADVENTURE_SPRITE_GENERATION' ||
+              String(r.model || '').toLowerCase().includes('image')) &&
+            r.status === 'SUCCESS' &&
+            rawOut === 0 &&
+            r.imagePriceUsd &&
+            r.imagePriceUsd > 0
+          ) {
+            hasAdditionalAiCost = true;
+          }
+        }
+      } else if (
+        r.pricingStatus === 'OK' &&
+        r.paidEquivalentCostVnd !== null &&
+        r.paidEquivalentCostVnd > 0
+      ) {
+        hasAdditionalAiCost = true;
+      }
+    }
+
+    const inputCostVnd =
+      !missingPriceOrUsage && hasAnyTokenReq ? Math.round(sumInputCostVndExact) : null;
+    const outputCostVnd =
+      !missingPriceOrUsage && hasAnyTokenReq ? Math.round(sumOutputCostVndExact) : null;
+    const totalCostVnd =
+      !missingPriceOrUsage &&
+      g.paidEquivalentCostVnd !== null &&
+      g.paidEquivalentCostVnd !== undefined &&
+      Number.isFinite(g.paidEquivalentCostVnd)
+        ? Math.round(g.paidEquivalentCostVnd)
+        : null;
+
+    const isCostValid = totalCostVnd !== null;
+    let totalTooltip: string | undefined;
+    if (
+      totalCostVnd !== null &&
+      (hasAdditionalAiCost ||
+        (inputCostVnd !== null &&
+          outputCostVnd !== null &&
+          totalCostVnd !== inputCostVnd + outputCostVnd))
+    ) {
+      totalTooltip =
+        'Tổng chi phí AI quy đổi của game (đã bao gồm Tiền Input, Tiền Output và chi phí tạo ảnh / tác vụ AI bổ sung)';
+    }
+
+    return {
+      tokenInputText,
+      tokenOutputText,
+      costInputText: formatVndCurrency(inputCostVnd),
+      costOutputText: formatVndCurrency(outputCostVnd),
+      costTotalText: formatVndCurrency(totalCostVnd),
+      isCostValid,
+      totalTooltip,
+    };
+  };
+
   const handleToggleStatus = async (game: PersistedGameSummary) => {
     setProcessingGameId(game.gameId);
     try {
@@ -231,8 +472,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
   };
 
-  // 1. Trường hợp chưa đăng nhập / chưa có phiên Admin
-  if (!currentUser) {
+  // 1. Trường hợp chưa đăng nhập / chưa có phiên Admin và không ở chế độ Demo Local
+  if (!currentUser && !canAccessAdminPanel) {
     return (
       <div
         style={{
@@ -321,8 +562,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     );
   }
 
-  // 2. Trường hợp đã đăng nhập nhưng không có vai trò ADMIN
-  if (!isUserAdmin) {
+  // 2. Trường hợp đã đăng nhập nhưng không có vai trò ADMIN và không ở chế độ Demo Local
+  if (!isUserAdmin && !canAccessAdminPanel) {
     return (
       <div
         style={{
@@ -355,7 +596,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           Truy Cập Bị Từ Chối (403 ACCESS_DENIED)
         </h2>
         <p style={{ margin: '0 0 1.5rem 0', color: 'var(--text-secondary)', fontSize: '0.92rem', lineHeight: 1.5 }}>
-          Tài khoản hiện tại <strong>{currentUser.email}</strong> có vai trò <strong>{currentUser.role}</strong>. Bạn không có quyền truy cập khu vực Quản trị Admin.
+          Tài khoản hiện tại <strong>{currentUser?.email}</strong> có vai trò <strong>{currentUser?.role}</strong>. Bạn không có quyền truy cập khu vực Quản trị Admin.
         </p>
         <button
           type="button"
@@ -382,9 +623,33 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     );
   }
 
-  // 3. Trường hợp là ADMIN hợp lệ
+  const visibleAdminTabs = isUserAdmin
+    ? [
+        { id: 'costs', label: 'Chi phí sử dụng AI', icon: <TargetIcon size={15} /> },
+        { id: 'overview', label: 'Tổng Quan', icon: <BarChartIcon size={15} /> },
+        { id: 'users', label: 'Người Dùng', icon: <UsersIcon size={15} /> },
+        { id: 'games', label: 'Kiểm Duyệt Game', icon: <GamepadIcon size={15} /> },
+        { id: 'ops', label: 'Vận Hành & AI', icon: <CpuIcon size={15} /> },
+      ]
+    : [{ id: 'costs', label: 'Chi phí sử dụng AI', icon: <TargetIcon size={15} /> }];
+
+  // 3. Trường hợp là ADMIN hợp lệ hoặc Chế độ Demo Local (Chi phí sử dụng AI)
   return (
-    <div style={{ maxWidth: '1100px', margin: '0 auto', padding: '1rem 0' }}>
+    <div
+      className="admin-page-container"
+      data-testid="admin-page-container"
+      style={{ width: '100%', maxWidth: 'none', margin: 0, boxSizing: 'border-box' }}
+    >
+      <style>{`
+        .admin-page-container {
+          padding: 1.25rem 28px;
+        }
+        @media (max-width: 767px) {
+          .admin-page-container {
+            padding: 1rem 16px;
+          }
+        }
+      `}</style>
       {/* Header Admin */}
       <div
         style={{
@@ -407,14 +672,32 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               display: 'flex',
               alignItems: 'center',
               gap: '0.6rem',
+              flexWrap: 'wrap',
               color: 'var(--text-primary)',
             }}
           >
             <ShieldIcon size={24} style={{ color: 'var(--primary)' }} />
             <span>Quản Trị Hệ Thống (Admin Panel)</span>
+            {isDemoCostAccess && (
+              <span
+                style={{
+                  fontSize: '0.75rem',
+                  fontWeight: 800,
+                  padding: '0.2rem 0.65rem',
+                  borderRadius: '999px',
+                  backgroundColor: 'rgba(18, 184, 134, 0.16)',
+                  border: '1px solid var(--accent-emerald)',
+                  color: 'var(--accent-emerald)',
+                }}
+              >
+                Chế độ Demo Local
+              </span>
+            )}
           </h1>
           <p style={{ margin: 0, color: 'var(--text-secondary)', fontSize: '0.88rem' }}>
-            Quản lý người dùng, kiểm duyệt bộ câu hỏi và theo dõi hạ tầng thời gian thực.
+            {isUserAdmin
+              ? 'Quản lý người dùng, kiểm duyệt bộ câu hỏi, theo dõi chi phí sử dụng AI và hạ tầng thời gian thực.'
+              : 'Theo dõi token, chi phí sử dụng AI theo từng game, dự phóng ngân sách 100 / 1.000 / 10.000 lượt và xuất báo cáo Excel 4 sheet.'}
           </p>
         </div>
 
@@ -431,12 +714,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             flexWrap: 'wrap',
           }}
         >
-          {[
-            { id: 'overview', label: 'Tổng Quan', icon: <BarChartIcon size={15} /> },
-            { id: 'users', label: 'Người Dùng', icon: <UsersIcon size={15} /> },
-            { id: 'games', label: 'Kiểm Duyệt Game', icon: <GamepadIcon size={15} /> },
-            { id: 'ops', label: 'Vận Hành & AI', icon: <CpuIcon size={15} /> },
-          ].map((tab) => {
+          {visibleAdminTabs.map((tab) => {
             const isCurrent = activeTab === tab.id;
             return (
               <button
@@ -851,6 +1129,670 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           </div>
         </div>
       )}
+
+      {/* TAB CHI PHÍ SỬ DỤNG AI (REDESIGNED EXECUTIVE DASHBOARD V2) */}
+      {!isLoading && activeTab === 'costs' && costReport && (() => {
+        // Chỉ hiển thị những game đã lưu và hiện còn trong Thư viện (liên kết theo gameId ổn định)
+        const libraryGames = [...costReport.byGame]
+          .filter(
+            (g) =>
+              g.isSavedInLibrary === true &&
+              typeof g.gameId === 'string' &&
+              g.gameId.trim().length > 0 &&
+              g.generationKey === `game:${g.gameId.trim()}`
+          )
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+        const visibleGames = libraryGames.slice(0, visibleGameCount);
+        const hasMoreGames = libraryGames.length > visibleGameCount;
+
+        const isAllCostUnknown =
+          costReport.summary.totalAiRequests > 0 &&
+          costReport.summary.eligibleGenerationsForAverage === 0 &&
+          (costReport.summary.requestsWithUnknownUsage > 0 ||
+            costReport.summary.requestsWithPriceUnavailable > 0) &&
+          costReport.summary.paidEquivalentCostVnd === 0;
+
+        const totalPaidVndDisplay = isAllCostUnknown
+          ? 'Chưa xác định'
+          : formatVndCurrency(costReport.summary.paidEquivalentCostVnd);
+
+        const avgCostPerGameVndDisplay =
+          costReport.summary.avgPaidEquivalentCostPerGameVnd !== null
+            ? formatVndCurrency(costReport.summary.avgPaidEquivalentCostPerGameVnd)
+            : 'Chưa xác định';
+
+        const isAllTokensUnknown =
+          costReport.summary.totalAiRequests > 0 &&
+          costReport.summary.requestsWithReportedTokens === 0;
+
+        const compactTokensDisplay = isAllTokensUnknown
+          ? 'Chưa xác định'
+          : formatCompactTokens(costReport.summary.totalTokens);
+
+        const exactTokensTooltip = isAllTokensUnknown
+          ? 'Chưa xác định số token từ API'
+          : `${new Intl.NumberFormat('vi-VN').format(costReport.summary.totalTokens)} token`;
+
+        return (
+          <div
+            className="admin-ai-cost-panel"
+            data-testid="admin-ai-cost-panel"
+            style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', width: '100%' }}
+          >
+            <style>{`
+              .admin-ai-cost-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 1rem;
+              }
+              .admin-ai-cost-controls {
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 0.65rem;
+              }
+              .admin-ai-cost-kpi-grid {
+                display: grid;
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 0.9rem;
+              }
+              @media (max-width: 1023px) {
+                .admin-ai-cost-kpi-grid {
+                  grid-template-columns: repeat(2, minmax(0, 1fr));
+                }
+              }
+              @media (max-width: 480px) {
+                .admin-ai-cost-kpi-grid {
+                  grid-template-columns: repeat(2, minmax(0, 1fr));
+                  gap: 0.65rem;
+                }
+                .admin-ai-cost-controls {
+                  width: 100%;
+                  justify-content: space-between;
+                }
+              }
+            `}</style>
+
+            {costReport.persistenceStatus.isEphemeralWarning &&
+              costReport.persistenceStatus.warningMessage && (
+                <div
+                  style={{
+                    padding: '0.85rem 1.1rem',
+                    borderRadius: '10px',
+                    backgroundColor: 'rgba(245, 158, 11, 0.12)',
+                    border: '1px solid rgba(245, 158, 11, 0.35)',
+                    color: 'var(--accent-amber)',
+                    fontSize: '0.84rem',
+                    fontWeight: 700,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.6rem',
+                  }}
+                >
+                  <AlertTriangleIcon size={18} />
+                  <span>{costReport.persistenceStatus.warningMessage}</span>
+                </div>
+              )}
+
+            {/* 1. HEADER & BỘ LỌC THỜI GIAN TỐI GIẢN */}
+            <div
+              className="admin-ai-cost-header"
+              style={{
+                backgroundColor: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '12px',
+                padding: '1.15rem 1.35rem',
+              }}
+            >
+              <div>
+                <h2
+                  data-testid="ai-cost-header-title"
+                  style={{
+                    margin: '0 0 0.2rem 0',
+                    fontSize: '1.25rem',
+                    fontWeight: 900,
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  Chi phí sử dụng AI
+                </h2>
+                <p
+                  data-testid="ai-cost-header-subtitle"
+                  style={{
+                    margin: 0,
+                    fontSize: '0.85rem',
+                    color: 'var(--text-secondary)',
+                  }}
+                >
+                  Theo dõi chi phí tạo game
+                </p>
+              </div>
+
+              <div className="admin-ai-cost-controls">
+                {/* Bộ lọc thời gian: chỉ 3 lựa chọn (7 ngày, Tháng này, Tất cả) */}
+                <div
+                  role="group"
+                  aria-label="Bộ lọc thời gian chi phí AI"
+                  data-testid="ai-cost-time-filter-group"
+                  style={{
+                    display: 'inline-flex',
+                    backgroundColor: 'var(--bg-input)',
+                    padding: '0.25rem',
+                    borderRadius: '10px',
+                    border: '1px solid var(--border-subtle)',
+                    gap: '0.2rem',
+                  }}
+                >
+                  {[
+                    { id: 'LAST_7_DAYS', label: '7 ngày' },
+                    { id: 'THIS_MONTH', label: 'Tháng này' },
+                    { id: 'ALL', label: 'Tất cả' },
+                  ].map((p) => {
+                    const active = costPreset === p.id;
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        aria-pressed={active}
+                        data-testid={`cost-preset-${p.id.toLowerCase()}`}
+                        onClick={() => {
+                          setCostPreset(p.id as any);
+                          setCostFrom('');
+                          setCostTo('');
+                          setVisibleGameCount(10);
+                          loadCostReport({
+                            preset: p.id as any,
+                            from: '',
+                            to: '',
+                            model: 'ALL',
+                            gameType: 'ALL',
+                            taskType: 'ALL',
+                          });
+                        }}
+                        style={{
+                          minHeight: '36px',
+                          padding: '0.35rem 0.75rem',
+                          borderRadius: '8px',
+                          border: active ? '1px solid var(--primary)' : '1px solid transparent',
+                          backgroundColor: active ? 'rgba(56, 189, 248, 0.16)' : 'transparent',
+                          color: active ? 'var(--primary)' : 'var(--text-secondary)',
+                          fontSize: '0.82rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {p.label}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Nút Xuất Excel duy nhất */}
+                <button
+                  type="button"
+                  disabled={isExportingCostExcel}
+                  onClick={handleExportCostExcel}
+                  data-testid="admin-export-ai-cost-excel-btn"
+                  style={{
+                    minHeight: '40px',
+                    padding: '0.5rem 1rem',
+                    borderRadius: '10px',
+                    border: 'none',
+                    backgroundColor: 'var(--primary)',
+                    color: 'var(--primary-ink)',
+                    fontWeight: 800,
+                    fontSize: '0.85rem',
+                    cursor: isExportingCostExcel ? 'not-allowed' : 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    boxShadow: 'var(--btn-shadow)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {isExportingCostExcel ? <SpinnerIcon size={16} /> : <FileTextIcon size={16} />}
+                  <span>{isExportingCostExcel ? 'Đang xuất...' : 'Xuất Excel'}</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 2. 4 THẺ KPI CHÍNH */}
+            <div className="admin-ai-cost-kpi-grid" data-testid="ai-cost-kpi-grid">
+              {/* KPI 1 — Game đã tạo */}
+              <div
+                data-testid="kpi-games-created"
+                style={{
+                  backgroundColor: 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '12px',
+                  padding: '1.1rem 1.15rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  minWidth: 0,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    color: 'var(--text-secondary)',
+                    marginBottom: '0.4rem',
+                  }}
+                >
+                  Game đã tạo
+                </div>
+                <div
+                  data-testid="kpi-games-created-value"
+                  style={{
+                    fontSize: '1.55rem',
+                    fontWeight: 900,
+                    color: 'var(--text-primary)',
+                    lineHeight: 1.2,
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {new Intl.NumberFormat('vi-VN').format(costReport.summary.totalGameGenerations)}
+                </div>
+              </div>
+
+              {/* KPI 2 — Tổng chi phí AI quy đổi (Nổi bật nhất) */}
+              <div
+                data-testid="kpi-total-paid-cost-vnd"
+                style={{
+                  backgroundColor: 'var(--bg-surface)',
+                  border: '1px solid rgba(16, 185, 129, 0.45)',
+                  borderRadius: '12px',
+                  padding: '1.1rem 1.15rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  minWidth: 0,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '0.8rem',
+                    fontWeight: 800,
+                    color: 'var(--text-primary)',
+                    marginBottom: '0.4rem',
+                  }}
+                >
+                  Tổng chi phí AI quy đổi
+                </div>
+                <div
+                  data-testid="kpi-total-paid-cost-vnd-value"
+                  style={{
+                    fontSize: '1.6rem',
+                    fontWeight: 900,
+                    color: 'var(--accent-emerald)',
+                    lineHeight: 1.2,
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {totalPaidVndDisplay}
+                </div>
+                <div
+                  style={{
+                    fontSize: '0.74rem',
+                    color: 'var(--text-muted)',
+                    marginTop: '0.3rem',
+                    fontWeight: 600,
+                  }}
+                >
+                  Ước tính theo giá trả phí
+                </div>
+              </div>
+
+              {/* KPI 3 — Trung bình / game */}
+              <div
+                data-testid="kpi-avg-cost-per-game-vnd"
+                style={{
+                  backgroundColor: 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '12px',
+                  padding: '1.1rem 1.15rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  minWidth: 0,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    color: 'var(--text-secondary)',
+                    marginBottom: '0.4rem',
+                  }}
+                >
+                  Trung bình / game
+                </div>
+                <div
+                  data-testid="kpi-avg-cost-per-game-vnd-value"
+                  style={{
+                    fontSize: '1.55rem',
+                    fontWeight: 900,
+                    color: 'var(--accent-amber)',
+                    lineHeight: 1.2,
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {avgCostPerGameVndDisplay}
+                </div>
+              </div>
+
+              {/* KPI 4 — Token đã dùng */}
+              <div
+                data-testid="kpi-total-tokens"
+                title={exactTokensTooltip}
+                style={{
+                  backgroundColor: 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '12px',
+                  padding: '1.1rem 1.15rem',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between',
+                  minWidth: 0,
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: '0.8rem',
+                    fontWeight: 700,
+                    color: 'var(--text-secondary)',
+                    marginBottom: '0.4rem',
+                  }}
+                >
+                  Token đã dùng
+                </div>
+                <div
+                  data-testid="kpi-total-tokens-value"
+                  style={{
+                    fontSize: '1.55rem',
+                    fontWeight: 900,
+                    color: 'var(--accent-sky)',
+                    lineHeight: 1.2,
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {compactTokensDisplay}
+                </div>
+              </div>
+            </div>
+
+            {/* 3. BẢNG CHI PHÍ CÁC GAME TRONG THƯ VIỆN (6 CỘT) */}
+            <div
+              style={{
+                backgroundColor: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '12px',
+                padding: '1.25rem 1.35rem',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  flexWrap: 'wrap',
+                  gap: '0.5rem',
+                  marginBottom: '1rem',
+                }}
+              >
+                <div>
+                  <h3
+                    data-testid="ai-cost-per-game-heading"
+                    style={{
+                      margin: '0 0 0.25rem 0',
+                      fontSize: '1.05rem',
+                      fontWeight: 800,
+                      color: 'var(--text-primary)',
+                    }}
+                  >
+                    Chi phí các game trong Thư viện
+                  </h3>
+                  <p
+                    data-testid="ai-cost-per-game-description"
+                    style={{
+                      margin: 0,
+                      fontSize: '0.83rem',
+                      color: 'var(--text-secondary)',
+                    }}
+                  >
+                    Chi tiết token và chi phí AI của từng game đã lưu.
+                  </p>
+                </div>
+                <div
+                  data-testid="ai-cost-kpi-library-note"
+                  style={{
+                    fontSize: '0.77rem',
+                    color: 'var(--text-muted)',
+                    fontWeight: 600,
+                    padding: '0.3rem 0.65rem',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  Lưu ý: 4 chỉ số tổng quan phía trên tính toàn bộ lượt tạo AI trong kỳ; bảng dưới chỉ hiển thị game đang lưu trong Thư viện ({libraryGames.length} game).
+                </div>
+              </div>
+
+              <div style={{ overflowX: 'auto' }}>
+                <table
+                  className="admin-ai-cost-game-table"
+                  data-testid="ai-cost-per-game-table"
+                  style={{
+                    width: '100%',
+                    minWidth: '700px',
+                    borderCollapse: 'collapse',
+                    textAlign: 'left',
+                    fontSize: '0.88rem',
+                  }}
+                >
+                  <thead>
+                    <tr
+                      style={{
+                        borderBottom: '1px solid var(--border-subtle)',
+                        color: 'var(--text-secondary)',
+                        fontSize: '0.8rem',
+                      }}
+                    >
+                      <th style={{ padding: '0.7rem 0.6rem', fontWeight: 700, textAlign: 'left' }}>
+                        Tên game
+                      </th>
+                      <th style={{ padding: '0.7rem 0.6rem', fontWeight: 700, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        Token Input
+                      </th>
+                      <th style={{ padding: '0.7rem 0.6rem', fontWeight: 700, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        Token Output
+                      </th>
+                      <th style={{ padding: '0.7rem 0.6rem', fontWeight: 700, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        Tiền Input
+                      </th>
+                      <th style={{ padding: '0.7rem 0.6rem', fontWeight: 700, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        Tiền Output
+                      </th>
+                      <th style={{ padding: '0.7rem 0.6rem', fontWeight: 800, textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--text-primary)' }}>
+                        Tổng cộng
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visibleGames.length === 0 ? (
+                      <tr>
+                        <td
+                          colSpan={6}
+                          data-testid="ai-cost-per-game-empty"
+                          style={{
+                            padding: '2rem 0.75rem',
+                            textAlign: 'center',
+                            color: 'var(--text-muted)',
+                            fontSize: '0.88rem',
+                          }}
+                        >
+                          Chưa có game nào trong Thư viện có dữ liệu chi phí AI ở khoảng thời gian này.
+                        </td>
+                      </tr>
+                    ) : (
+                      visibleGames.map((g) => {
+                        const cols = computeLibraryGameCostColumns(
+                          g,
+                          costReport.exchangeRate.usdToVndRate
+                        );
+                        const rowKey = g.gameId ? g.gameId : g.generationKey;
+
+                        return (
+                          <tr
+                            key={rowKey}
+                            data-testid="ai-cost-game-row"
+                            data-game-id={g.gameId || ''}
+                            style={{ borderBottom: '1px solid var(--border-subtle)' }}
+                          >
+                            {/* Cột 1: Tên game */}
+                            <td
+                              data-testid="ai-cost-cell-game-title"
+                              style={{
+                                padding: '0.8rem 0.6rem',
+                                fontWeight: 700,
+                                color: 'var(--text-primary)',
+                                textAlign: 'left',
+                                wordBreak: 'break-word',
+                              }}
+                            >
+                              {g.gameTitle}
+                            </td>
+
+                            {/* Cột 2: Token Input */}
+                            <td
+                              data-testid="ai-cost-cell-input-tokens"
+                              style={{
+                                padding: '0.8rem 0.6rem',
+                                textAlign: 'right',
+                                fontWeight: 600,
+                                color:
+                                  cols.tokenInputText === 'Chưa xác định'
+                                    ? 'var(--text-muted)'
+                                    : 'var(--text-primary)',
+                                whiteSpace: 'nowrap',
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {cols.tokenInputText}
+                            </td>
+
+                            {/* Cột 3: Token Output */}
+                            <td
+                              data-testid="ai-cost-cell-output-tokens"
+                              style={{
+                                padding: '0.8rem 0.6rem',
+                                textAlign: 'right',
+                                fontWeight: 600,
+                                color:
+                                  cols.tokenOutputText === 'Chưa xác định'
+                                    ? 'var(--text-muted)'
+                                    : 'var(--text-primary)',
+                                whiteSpace: 'nowrap',
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {cols.tokenOutputText}
+                            </td>
+
+                            {/* Cột 4: Tiền Input */}
+                            <td
+                              data-testid="ai-cost-cell-input-cost"
+                              style={{
+                                padding: '0.8rem 0.6rem',
+                                textAlign: 'right',
+                                fontWeight: 600,
+                                color:
+                                  cols.costInputText === 'Chưa xác định'
+                                    ? 'var(--text-muted)'
+                                    : 'var(--text-secondary)',
+                                whiteSpace: 'nowrap',
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {cols.costInputText}
+                            </td>
+
+                            {/* Cột 5: Tiền Output */}
+                            <td
+                              data-testid="ai-cost-cell-output-cost"
+                              style={{
+                                padding: '0.8rem 0.6rem',
+                                textAlign: 'right',
+                                fontWeight: 600,
+                                color:
+                                  cols.costOutputText === 'Chưa xác định'
+                                    ? 'var(--text-muted)'
+                                    : 'var(--text-secondary)',
+                                whiteSpace: 'nowrap',
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {cols.costOutputText}
+                            </td>
+
+                            {/* Cột 6: Tổng cộng (Nổi bật nhất) */}
+                            <td
+                              data-testid="ai-cost-cell-total-cost"
+                              title={cols.totalTooltip}
+                              style={{
+                                padding: '0.8rem 0.6rem',
+                                textAlign: 'right',
+                                fontWeight: 900,
+                                fontSize: '0.92rem',
+                                color: cols.isCostValid
+                                  ? 'var(--accent-emerald)'
+                                  : 'var(--text-muted)',
+                                whiteSpace: 'nowrap',
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {cols.costTotalText}
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {hasMoreGames && (
+                <div style={{ marginTop: '0.9rem', textAlign: 'center' }}>
+                  <button
+                    type="button"
+                    data-testid="ai-cost-load-more-games"
+                    onClick={() => setVisibleGameCount((prev) => prev + 10)}
+                    style={{
+                      minHeight: '38px',
+                      padding: '0.45rem 1.15rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-subtle)',
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Xem thêm ({libraryGames.length - visibleGameCount} game)
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* TAB 4: VẬN HÀNH & AI LOGS */}
       {!isLoading && activeTab === 'ops' && (

@@ -1,8 +1,19 @@
 import crypto from 'node:crypto';
+import {
+  AI_MODEL_PRICING_CATALOG,
+  AiBillingMode,
+  AiExchangeRateConfig,
+  AiModelPricingRule,
+  AiPricingStatus,
+  AiTaskType,
+  calculateAiCallCost,
+  getConfiguredBillingMode,
+  getExchangeRateConfig,
+} from '../config/ai-pricing.config.js';
 import { LIMITS } from '../config/limits.js';
 import { CanonicalDocument } from '../contracts/canonical.contract.js';
 import { CreatableGameType, Difficulty, GameType } from '../contracts/game.contract.js';
-import { getDatabase } from '../storage/sqlite.db.js';
+import { getDatabase, resolveDefaultDatabasePath } from '../storage/sqlite.db.js';
 import { AiQuestionService } from './ai.question.service.js';
 
 export interface AiProviderUsageMetadata {
@@ -10,24 +21,34 @@ export interface AiProviderUsageMetadata {
   model: string;
   inputTokens: number | null;
   outputTokens: number | null;
+  cachedTokens?: number | null;
+  thinkingTokens?: number | null;
   totalTokens: number | null;
   usageReportedByProvider: boolean;
 }
 
 export interface RecordAiCallInput {
+  requestId?: string | null;
+  generationId?: string | null;
   userId?: string | null;
   gameId?: string | null;
+  gameTitleSnapshot?: string | null;
   assetSlot?: string | null;
   provider: string;
   model: string;
   operation: string;
+  taskType?: AiTaskType | string | null;
+  sourceType?: 'URL' | 'FILE' | 'TOPIC' | 'MIXED' | string | null;
   status: 'SUCCESS' | 'FAILED';
   errorCode?: string | null;
   latencyMs: number;
   inputTokens?: number | null;
   outputTokens?: number | null;
+  cachedTokens?: number | null;
+  thinkingTokens?: number | null;
   totalTokens?: number | null;
   usageIsEstimated?: boolean;
+  billingMode?: AiBillingMode | string | null;
   requestedQuestions?: number;
   generatedQuestions?: number;
   validQuestions?: number;
@@ -120,13 +141,177 @@ export interface BenchmarkCaseResult {
   error?: string;
 }
 
+export interface AdminAiCostReportFilters {
+  from?: string;
+  to?: string;
+  preset?: 'TODAY' | 'LAST_7_DAYS' | 'LAST_30_DAYS' | 'THIS_MONTH' | 'ALL' | 'CUSTOM';
+  model?: string;
+  gameType?: string;
+  taskType?: string;
+}
+
+export interface AdminAiCostApiLogItem {
+  requestId: string;
+  logId: string;
+  generationId: string | null;
+  gameId: string | null;
+  gameTitle: string | null;
+  gameType: string | null;
+  userId: string | null;
+  createdAt: string;
+  provider: string;
+  model: string;
+  operation: string;
+  taskType: string;
+  sourceType: string | null;
+  assetSlot: string | null;
+  status: string;
+  errorCode: string | null;
+  latencyMs: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cachedTokens: number | null;
+  thinkingTokens: number | null;
+  totalTokens: number | null;
+  billingMode: AiBillingMode;
+  pricingVersion: string;
+  pricingStatus: AiPricingStatus;
+  inputPricePer1MUsd: number | null;
+  outputPricePer1MUsd: number | null;
+  cachedPricePer1MUsd: number | null;
+  imagePriceUsd: number | null;
+  exchangeRateUsdVnd: number;
+  actualCostUsd: number | null;
+  actualCostVnd: number | null;
+  paidEquivalentCostUsd: number | null;
+  paidEquivalentCostVnd: number | null;
+  dataNote: string | null;
+}
+
+export interface AdminAiCostGameItem {
+  generationKey: string;
+  generationId: string | null;
+  gameId: string | null;
+  gameTitle: string;
+  gameType: string;
+  createdAt: string;
+  modelsUsed: string[];
+  requestCount: number;
+  successCount: number;
+  failedCount: number;
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cachedTokens: number | null;
+  thinkingTokens: number | null;
+  totalTokens: number | null;
+  actualCostUsd: number | null;
+  actualCostVnd: number | null;
+  paidEquivalentCostUsd: number | null;
+  paidEquivalentCostVnd: number | null;
+  status: 'SUCCESS' | 'PARTIAL_FAILURE' | 'FAILED' | 'USAGE_UNAVAILABLE' | 'PRICE_UNAVAILABLE';
+  hasUnknownUsage: boolean;
+  hasPriceUnavailable: boolean;
+  isSavedInLibrary: boolean;
+  requests: AdminAiCostApiLogItem[];
+}
+
+export interface AdminAiCostModelBreakdownItem {
+  provider: string;
+  model: string;
+  requestCount: number;
+  successCount: number;
+  failedCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedTokens: number;
+  thinkingTokens: number;
+  totalTokens: number;
+  actualCostUsd: number;
+  actualCostVnd: number;
+  paidEquivalentCostUsd: number;
+  paidEquivalentCostVnd: number;
+  shareOfPaidCostPercent: number;
+  pricingStatus: string;
+}
+
+export interface AdminAiCostScalingProjectionItem {
+  scaleGenerations: number;
+  label: string;
+  basisEligibleGenerations: number;
+  avgTokensPerGeneration: number | null;
+  projectedTotalTokens: number | null;
+  avgActualCostPerGameUsd: number | null;
+  avgActualCostPerGameVnd: number | null;
+  projectedActualCostUsd: number | null;
+  projectedActualCostVnd: number | null;
+  avgPaidEquivalentCostPerGameUsd: number | null;
+  avgPaidEquivalentCostPerGameVnd: number | null;
+  projectedPaidEquivalentCostUsd: number | null;
+  projectedPaidEquivalentCostVnd: number | null;
+  formulaNote: string;
+}
+
+export interface AdminAiCostReport {
+  generatedAt: string;
+  filtersApplied: {
+    preset: string;
+    from: string | null;
+    to: string | null;
+    model: string | null;
+    gameType: string | null;
+    taskType: string | null;
+  };
+  billingModeConfigured: AiBillingMode;
+  exchangeRate: AiExchangeRateConfig;
+  persistenceStatus: {
+    databasePath: string;
+    isEphemeralWarning: boolean;
+    warningMessage: string | null;
+  };
+  summary: {
+    totalGameGenerations: number;
+    eligibleGenerationsForAverage: number;
+    totalAiRequests: number;
+    successfulRequests: number;
+    failedRequests: number;
+    requestsWithReportedTokens: number;
+    requestsWithUnknownUsage: number;
+    requestsWithPriceUnavailable: number;
+    requestsWithUnknownBilling: number;
+    inputTokens: number;
+    outputTokens: number;
+    cachedTokens: number;
+    thinkingTokens: number;
+    totalTokens: number;
+    actualCostUsd: number;
+    actualCostVnd: number;
+    paidEquivalentCostUsd: number;
+    paidEquivalentCostVnd: number;
+    avgTokensPerGame: number | null;
+    avgActualCostPerGameUsd: number | null;
+    avgActualCostPerGameVnd: number | null;
+    avgPaidEquivalentCostPerGameUsd: number | null;
+    avgPaidEquivalentCostPerGameVnd: number | null;
+    highestCostModel: string | null;
+  };
+  scalingProjections: AdminAiCostScalingProjectionItem[];
+  byModel: AdminAiCostModelBreakdownItem[];
+  byGame: AdminAiCostGameItem[];
+  apiLogs: AdminAiCostApiLogItem[];
+  pricingCatalog: AiModelPricingRule[];
+}
+
 export class AiObservabilityService {
   /**
    * Computes estimated cost ONLY when actual token counts are reported AND pricing is configured.
    */
   public computeEstimatedCostUsd(
     inputTokens: number | null | undefined,
-    outputTokens: number | null | undefined
+    outputTokens: number | null | undefined,
+    model?: string,
+    provider = 'gemini',
+    cachedTokens?: number | null,
+    thinkingTokens?: number | null
   ): number | null {
     if (
       inputTokens === null ||
@@ -140,72 +325,210 @@ export class AiObservabilityService {
     const inRate = LIMITS.GEMINI_INPUT_COST_PER_1M_USD;
     const outRate = LIMITS.GEMINI_OUTPUT_COST_PER_1M_USD;
     if (inRate === null || outRate === null || !Number.isFinite(inRate) || !Number.isFinite(outRate)) {
-      return null;
+      if (!model) {
+        return null;
+      }
+    } else if (!model || model === 'gemini-2.5-flash') {
+      const cost = (inputTokens / 1_000_000) * inRate + (outputTokens / 1_000_000) * outRate;
+      return Math.round(cost * 1_000_000) / 1_000_000;
     }
 
-    const cost = (inputTokens / 1_000_000) * inRate + (outputTokens / 1_000_000) * outRate;
-    return Math.round(cost * 1_000_000) / 1_000_000;
+    const calc = calculateAiCallCost({
+      provider,
+      model: model || 'gemini-2.5-flash',
+      status: 'SUCCESS',
+      inputTokens,
+      outputTokens,
+      cachedTokens: cachedTokens ?? null,
+      thinkingTokens: thinkingTokens ?? null,
+    });
+    return calc.paidEquivalentCostUsd !== null
+      ? Math.round(calc.paidEquivalentCostUsd * 1_000_000) / 1_000_000
+      : null;
+  }
+
+  /**
+   * Infers standard task_type from operation/assetSlot when not explicitly provided.
+   */
+  public inferTaskType(operation: string, assetSlot?: string | null, gameType?: string | null): AiTaskType {
+    const op = String(operation || '').toUpperCase();
+    const slot = String(assetSlot || '').toLowerCase();
+    if (op.includes('SUPPLEMENTAL') || op.includes('RETRY')) {
+      return 'QUESTION_SUPPLEMENTAL_RETRY';
+    }
+    if (op.includes('IMAGE') || slot) {
+      if (slot === 'cover' || op.includes('COVER')) {
+        return 'COVER_IMAGE_GENERATION';
+      }
+      return 'ADVENTURE_SPRITE_GENERATION';
+    }
+    if (op.includes('CONTENT') || op.includes('ANALY')) {
+      return 'CONTENT_ANALYSIS';
+    }
+    if (String(gameType || '').toUpperCase() === 'ADVENTURE' && op.includes('ADVENTURE')) {
+      return 'ADVENTURE_DESIGN';
+    }
+    if (op.includes('GENERATE')) {
+      return 'QUESTION_GENERATION';
+    }
+    return 'OTHER';
   }
 
   /**
    * Records an AI generation call in SQLite without logging raw prompts, source files, or secrets.
+   * Wrapped in defensive error handling so logging failure never breaks game generation.
    */
   public recordAiCall(input: RecordAiCallInput): string {
-    const db = getDatabase();
-    const logId = `ailog_${crypto.randomUUID()}`;
-    const nowIso = new Date().toISOString();
+    const logId = input.requestId && String(input.requestId).trim()
+      ? String(input.requestId).trim()
+      : `ailog_${crypto.randomUUID()}`;
+    try {
+      const db = getDatabase();
+      const nowIso = new Date().toISOString();
 
-    const hasInput = typeof input.inputTokens === 'number' && Number.isFinite(input.inputTokens);
-    const hasOutput = typeof input.outputTokens === 'number' && Number.isFinite(input.outputTokens);
+      const hasInput = typeof input.inputTokens === 'number' && Number.isFinite(input.inputTokens);
+      const hasOutput = typeof input.outputTokens === 'number' && Number.isFinite(input.outputTokens);
+      const hasCached = typeof input.cachedTokens === 'number' && Number.isFinite(input.cachedTokens);
+      const hasThinking = typeof input.thinkingTokens === 'number' && Number.isFinite(input.thinkingTokens);
 
-    const inputTokens = hasInput ? Math.max(0, Math.floor(input.inputTokens!)) : null;
-    const outputTokens = hasOutput ? Math.max(0, Math.floor(input.outputTokens!)) : null;
-    const totalTokens =
-      typeof input.totalTokens === 'number' && Number.isFinite(input.totalTokens)
-        ? Math.max(0, Math.floor(input.totalTokens))
-        : inputTokens !== null && outputTokens !== null
-          ? inputTokens + outputTokens
-          : null;
+      const inputTokens = hasInput ? Math.max(0, Math.floor(input.inputTokens!)) : null;
+      const outputTokens = hasOutput ? Math.max(0, Math.floor(input.outputTokens!)) : null;
+      const cachedTokens = hasCached ? Math.max(0, Math.floor(input.cachedTokens!)) : null;
+      const thinkingTokens = hasThinking ? Math.max(0, Math.floor(input.thinkingTokens!)) : null;
 
-    const estimatedCostUsd = this.computeEstimatedCostUsd(inputTokens, outputTokens);
+      const taskType = (input.taskType as AiTaskType) || this.inferTaskType(input.operation, input.assetSlot, input.gameType);
 
-    db.prepare(
-      `INSERT INTO ai_usage_logs (
-        log_id, user_id, game_id, asset_slot, provider, model, operation, status, error_code,
-        latency_ms, input_tokens, output_tokens, total_tokens, usage_is_estimated,
-        estimated_cost_usd, requested_questions, generated_questions, valid_questions,
-        rejected_questions, duplicate_questions, diagnostics_count, game_type,
-        difficulty, source_count, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      logId,
-      input.userId ?? null,
-      input.gameId ?? null,
-      input.assetSlot ?? null,
-      input.provider,
-      input.model,
-      input.operation,
-      input.status,
-      input.errorCode ?? null,
-      Math.max(0, Math.round(input.latencyMs)),
-      inputTokens,
-      outputTokens,
-      totalTokens,
-      input.usageIsEstimated ? 1 : 0,
-      estimatedCostUsd,
-      input.requestedQuestions ?? 0,
-      input.generatedQuestions ?? 0,
-      input.validQuestions ?? 0,
-      input.rejectedQuestions ?? 0,
-      input.duplicateQuestions ?? 0,
-      input.diagnosticsCount ?? 0,
-      input.gameType ?? null,
-      input.difficulty ?? null,
-      input.sourceCount ?? 0,
-      nowIso
-    );
+      const costCalc = calculateAiCallCost({
+        provider: input.provider,
+        model: input.model,
+        status: input.status,
+        taskType,
+        inputTokens,
+        outputTokens,
+        cachedTokens,
+        thinkingTokens,
+        totalTokens:
+          typeof input.totalTokens === 'number' && Number.isFinite(input.totalTokens)
+            ? Math.max(0, Math.floor(input.totalTokens))
+            : null,
+        billingMode: input.billingMode,
+      });
+
+      const totalTokens = costCalc.totalTokens;
+      const estimatedCostUsd = this.computeEstimatedCostUsd(
+        inputTokens,
+        outputTokens,
+        input.model,
+        input.provider,
+        cachedTokens,
+        thinkingTokens
+      );
+
+      db.prepare(
+        `INSERT INTO ai_usage_logs (
+          log_id, request_id, generation_id, user_id, game_id, game_title_snapshot, asset_slot,
+          provider, model, operation, task_type, source_type, status, error_code,
+          latency_ms, input_tokens, output_tokens, cached_tokens, thinking_tokens, total_tokens,
+          usage_is_estimated, estimated_cost_usd,
+          billing_mode, pricing_version, pricing_status,
+          cost_usd, cost_vnd, paid_equivalent_cost_usd, paid_equivalent_cost_vnd,
+          exchange_rate_usd_vnd, input_price_per_1m_usd, output_price_per_1m_usd,
+          cached_price_per_1m_usd, image_price_usd, data_note,
+          requested_questions, generated_questions, valid_questions,
+          rejected_questions, duplicate_questions, diagnostics_count, game_type,
+          difficulty, source_count, created_at
+        ) VALUES (
+          ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?, ?,
+          ?, ?, ?, ?, ?, ?,
+          ?, ?,
+          ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?, ?,
+          ?, ?, ?
+        )`
+      ).run(
+        logId,
+        logId,
+        input.generationId ?? null,
+        input.userId ?? null,
+        input.gameId ?? null,
+        input.gameTitleSnapshot ?? null,
+        input.assetSlot ?? null,
+        input.provider,
+        input.model,
+        input.operation,
+        taskType,
+        input.sourceType ?? null,
+        input.status,
+        input.errorCode ?? null,
+        Math.max(0, Math.round(input.latencyMs)),
+        costCalc.inputTokens,
+        costCalc.outputTokens,
+        costCalc.cachedTokens,
+        costCalc.thinkingTokens,
+        totalTokens,
+        input.usageIsEstimated ? 1 : 0,
+        estimatedCostUsd,
+        costCalc.billingMode,
+        costCalc.pricingVersion,
+        costCalc.pricingStatus,
+        costCalc.actualCostUsd,
+        costCalc.actualCostVnd,
+        costCalc.paidEquivalentCostUsd,
+        costCalc.paidEquivalentCostVnd,
+        costCalc.exchangeRateUsdVnd,
+        costCalc.inputPricePer1MUsd,
+        costCalc.outputPricePer1MUsd,
+        costCalc.cachedPricePer1MUsd,
+        costCalc.imagePriceUsd,
+        costCalc.dataNote,
+        input.requestedQuestions ?? 0,
+        input.generatedQuestions ?? 0,
+        input.validQuestions ?? 0,
+        input.rejectedQuestions ?? 0,
+        input.duplicateQuestions ?? 0,
+        input.diagnosticsCount ?? 0,
+        input.gameType ?? null,
+        input.difficulty ?? null,
+        input.sourceCount ?? 0,
+        nowIso
+      );
+    } catch (err) {
+      // Never allow observability logging failure to crash game generation
+      console.error('[AiObservabilityService.recordAiCall] Non-fatal logging error:', err);
+    }
 
     return logId;
+  }
+
+  /**
+   * Links all AI logs sharing a `generationId` to the final `gameId` and `gameTitle` once created.
+   */
+  public linkGenerationLogsToGame(generationId: string, gameId: string, gameTitle?: string | null): void {
+    if (!generationId || !gameId) return;
+    try {
+      const db = getDatabase();
+      if (gameTitle && gameTitle.trim()) {
+        db.prepare(
+          `UPDATE ai_usage_logs
+           SET game_id = COALESCE(game_id, ?),
+               game_title_snapshot = COALESCE(game_title_snapshot, ?)
+           WHERE generation_id = ?`
+        ).run(gameId, gameTitle.trim(), generationId);
+      } else {
+        db.prepare(
+          `UPDATE ai_usage_logs
+           SET game_id = COALESCE(game_id, ?)
+           WHERE generation_id = ?`
+        ).run(gameId, generationId);
+      }
+    } catch (err) {
+      console.error('[AiObservabilityService.linkGenerationLogsToGame] Non-fatal error:', err);
+    }
   }
 
   /**
@@ -388,6 +711,641 @@ export class AiObservabilityService {
         difficulty: r.difficulty ? String(r.difficulty) : null,
         createdAt: String(r.created_at),
       })),
+    };
+  }
+
+  /**
+   * Resolves date bounds from preset or explicit `from`/`to` ISO strings.
+   */
+  public resolveDateBounds(filters: AdminAiCostReportFilters = {}): {
+    preset: string;
+    from: string | null;
+    to: string | null;
+  } {
+    const preset = (filters.preset || 'ALL').toUpperCase();
+    const now = new Date();
+
+    if (filters.from || filters.to) {
+      let fromIso = filters.from ? String(filters.from).trim() : null;
+      let toIso = filters.to ? String(filters.to).trim() : null;
+      if (fromIso && /^\d{4}-\d{2}-\d{2}$/.test(fromIso)) {
+        fromIso = `${fromIso}T00:00:00.000Z`;
+      }
+      if (toIso && /^\d{4}-\d{2}-\d{2}$/.test(toIso)) {
+        toIso = `${toIso}T23:59:59.999Z`;
+      }
+      return { preset: filters.preset || 'CUSTOM', from: fromIso, to: toIso };
+    }
+
+    if (preset === 'TODAY') {
+      const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0));
+      return { preset: 'TODAY', from: start.toISOString(), to: now.toISOString() };
+    }
+    if (preset === 'LAST_7_DAYS') {
+      const start = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+      return { preset: 'LAST_7_DAYS', from: start.toISOString(), to: now.toISOString() };
+    }
+    if (preset === 'LAST_30_DAYS') {
+      const start = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+      return { preset: 'LAST_30_DAYS', from: start.toISOString(), to: now.toISOString() };
+    }
+    if (preset === 'THIS_MONTH') {
+      const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1, 0, 0, 0, 0));
+      return { preset: 'THIS_MONTH', from: start.toISOString(), to: now.toISOString() };
+    }
+
+    return { preset: 'ALL', from: null, to: null };
+  }
+
+  /**
+   * Builds the comprehensive Admin AI Token & Cost Report (used by both Admin UI and Excel Export).
+   */
+  public getAdminAiCostReport(filters: AdminAiCostReportFilters = {}): AdminAiCostReport {
+    const db = getDatabase();
+    const dateBounds = this.resolveDateBounds(filters);
+    const conditions: string[] = [];
+    const params: any[] = [];
+
+    if (dateBounds.from) {
+      conditions.push('l.created_at >= ?');
+      params.push(dateBounds.from);
+    }
+    if (dateBounds.to) {
+      conditions.push('l.created_at <= ?');
+      params.push(dateBounds.to);
+    }
+    if (filters.model && filters.model.trim() && filters.model.trim().toUpperCase() !== 'ALL') {
+      conditions.push('LOWER(l.model) = LOWER(?)');
+      params.push(filters.model.trim());
+    }
+    if (filters.gameType && filters.gameType.trim() && filters.gameType.trim().toUpperCase() !== 'ALL') {
+      conditions.push('UPPER(COALESCE(l.game_type, g.game_type, \'\')) = UPPER(?)');
+      params.push(filters.gameType.trim());
+    }
+    if (filters.taskType && filters.taskType.trim() && filters.taskType.trim().toUpperCase() !== 'ALL') {
+      conditions.push('UPPER(COALESCE(l.task_type, \'\')) = UPPER(?)');
+      params.push(filters.taskType.trim());
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const rawRows = db
+      .prepare(
+        `SELECT
+          l.*,
+          g.title AS joined_game_title,
+          g.game_type AS joined_game_type,
+          CASE WHEN g.game_id IS NOT NULL THEN 1 ELSE 0 END AS is_saved_in_library
+        FROM ai_usage_logs l
+        LEFT JOIN games g ON g.game_id = l.game_id
+        ${whereClause}
+        ORDER BY l.created_at DESC`
+      )
+      .all(...params) as Record<string, any>[];
+
+    const exchange = getExchangeRateConfig();
+    const configuredBillingMode = getConfiguredBillingMode();
+
+    const apiLogs: AdminAiCostApiLogItem[] = rawRows.map((row) => {
+      const logId = String(row.log_id);
+      const requestId = row.request_id ? String(row.request_id) : logId;
+      const provider = String(row.provider || 'gemini');
+      const model = String(row.model || 'unknown');
+      const operation = String(row.operation || 'GENERATE');
+      const assetSlot = row.asset_slot ? String(row.asset_slot) : null;
+      const gameType = row.game_type
+        ? String(row.game_type)
+        : row.joined_game_type
+          ? String(row.joined_game_type)
+          : null;
+      const taskType = row.task_type
+        ? String(row.task_type)
+        : this.inferTaskType(operation, assetSlot, gameType);
+      const status = String(row.status || 'SUCCESS');
+
+      const rawIn = row.input_tokens !== null && row.input_tokens !== undefined ? Number(row.input_tokens) : null;
+      const rawOut = row.output_tokens !== null && row.output_tokens !== undefined ? Number(row.output_tokens) : null;
+      const rawCached = row.cached_tokens !== null && row.cached_tokens !== undefined ? Number(row.cached_tokens) : null;
+      const rawThinking = row.thinking_tokens !== null && row.thinking_tokens !== undefined ? Number(row.thinking_tokens) : null;
+      const rawTotal = row.total_tokens !== null && row.total_tokens !== undefined ? Number(row.total_tokens) : null;
+
+      // For legacy rows recorded before Migration 9, compute cost dynamically from catalog
+      const hasM9Pricing = row.pricing_status !== null && row.pricing_status !== undefined;
+      const fallbackCalc = !hasM9Pricing
+        ? calculateAiCallCost({
+            provider,
+            model,
+            status,
+            taskType,
+            inputTokens: rawIn,
+            outputTokens: rawOut,
+            cachedTokens: rawCached,
+            thinkingTokens: rawThinking,
+            totalTokens: rawTotal,
+            billingMode: row.billing_mode ? String(row.billing_mode) : configuredBillingMode,
+          })
+        : null;
+
+      const billingMode: AiBillingMode = row.billing_mode
+        ? (String(row.billing_mode) as AiBillingMode)
+        : fallbackCalc?.billingMode || configuredBillingMode;
+      const pricingVersion = row.pricing_version
+        ? String(row.pricing_version)
+        : fallbackCalc?.pricingVersion || 'LEGACY';
+      const pricingStatus: AiPricingStatus = row.pricing_status
+        ? (String(row.pricing_status) as AiPricingStatus)
+        : fallbackCalc?.pricingStatus || 'OK';
+
+      const actualCostUsd =
+        row.cost_usd !== null && row.cost_usd !== undefined
+          ? Number(row.cost_usd)
+          : fallbackCalc
+            ? fallbackCalc.actualCostUsd
+            : null;
+      const actualCostVnd =
+        row.cost_vnd !== null && row.cost_vnd !== undefined
+          ? Number(row.cost_vnd)
+          : fallbackCalc
+            ? fallbackCalc.actualCostVnd
+            : null;
+      const paidEquivalentCostUsd =
+        row.paid_equivalent_cost_usd !== null && row.paid_equivalent_cost_usd !== undefined
+          ? Number(row.paid_equivalent_cost_usd)
+          : fallbackCalc
+            ? fallbackCalc.paidEquivalentCostUsd
+            : row.estimated_cost_usd !== null && row.estimated_cost_usd !== undefined
+              ? Number(row.estimated_cost_usd)
+              : null;
+      const paidEquivalentCostVnd =
+        row.paid_equivalent_cost_vnd !== null && row.paid_equivalent_cost_vnd !== undefined
+          ? Number(row.paid_equivalent_cost_vnd)
+          : fallbackCalc
+            ? fallbackCalc.paidEquivalentCostVnd
+            : paidEquivalentCostUsd !== null
+              ? Math.round(paidEquivalentCostUsd * exchange.usdToVndRate)
+              : null;
+
+      const gameTitle = row.joined_game_title
+        ? String(row.joined_game_title)
+        : row.game_title_snapshot
+          ? String(row.game_title_snapshot)
+          : null;
+
+      return {
+        requestId,
+        logId,
+        generationId: row.generation_id ? String(row.generation_id) : null,
+        gameId: row.game_id ? String(row.game_id) : null,
+        gameTitle,
+        gameType,
+        userId: row.user_id ? String(row.user_id) : null,
+        createdAt: String(row.created_at),
+        provider,
+        model,
+        operation,
+        taskType,
+        sourceType: row.source_type ? String(row.source_type) : null,
+        assetSlot,
+        status,
+        errorCode: row.error_code ? String(row.error_code) : null,
+        latencyMs: Number(row.latency_ms || 0),
+        inputTokens: rawIn,
+        outputTokens: rawOut,
+        cachedTokens: rawCached,
+        thinkingTokens: rawThinking,
+        totalTokens: fallbackCalc ? fallbackCalc.totalTokens : rawTotal,
+        billingMode,
+        pricingVersion,
+        pricingStatus,
+        inputPricePer1MUsd:
+          row.input_price_per_1m_usd !== null && row.input_price_per_1m_usd !== undefined
+            ? Number(row.input_price_per_1m_usd)
+            : fallbackCalc?.inputPricePer1MUsd ?? null,
+        outputPricePer1MUsd:
+          row.output_price_per_1m_usd !== null && row.output_price_per_1m_usd !== undefined
+            ? Number(row.output_price_per_1m_usd)
+            : fallbackCalc?.outputPricePer1MUsd ?? null,
+        cachedPricePer1MUsd:
+          row.cached_price_per_1m_usd !== null && row.cached_price_per_1m_usd !== undefined
+            ? Number(row.cached_price_per_1m_usd)
+            : fallbackCalc?.cachedPricePer1MUsd ?? null,
+        imagePriceUsd:
+          row.image_price_usd !== null && row.image_price_usd !== undefined
+            ? Number(row.image_price_usd)
+            : fallbackCalc?.imagePriceUsd ?? null,
+        exchangeRateUsdVnd:
+          row.exchange_rate_usd_vnd !== null && row.exchange_rate_usd_vnd !== undefined
+            ? Number(row.exchange_rate_usd_vnd)
+            : exchange.usdToVndRate,
+        actualCostUsd,
+        actualCostVnd,
+        paidEquivalentCostUsd,
+        paidEquivalentCostVnd,
+        dataNote: row.data_note ? String(row.data_note) : fallbackCalc?.dataNote ?? null,
+      };
+    });
+
+    // Aggregate per Game / Generation
+    const gameGroups = new Map<
+      string,
+      {
+        generationKey: string;
+        generationId: string | null;
+        gameId: string | null;
+        gameTitle: string;
+        gameType: string;
+        createdAt: string;
+        modelsSet: Set<string>;
+        requests: AdminAiCostApiLogItem[];
+        isSavedInLibrary: boolean;
+      }
+    >();
+
+    rawRows.forEach((rawRow, idx) => {
+      const item = apiLogs[idx];
+      // Group by gameId if present, else by generationId if present, else by logId
+      const key = item.gameId
+        ? `game:${item.gameId}`
+        : item.generationId
+          ? `gen:${item.generationId}`
+          : `req:${item.logId}`;
+
+      const existing = gameGroups.get(key);
+      if (!existing) {
+        const fallbackTitle = item.gameTitle
+          ? item.gameTitle
+          : item.gameId
+            ? `Game ${item.gameId}`
+            : item.generationId
+              ? `Lượt tạo AI (${item.generationId.slice(0, 14)})`
+              : `Tác vụ AI lẻ (${item.logId.slice(0, 12)})`;
+        gameGroups.set(key, {
+          generationKey: key,
+          generationId: item.generationId,
+          gameId: item.gameId,
+          gameTitle: fallbackTitle,
+          gameType: item.gameType || 'UNKNOWN',
+          createdAt: item.createdAt,
+          modelsSet: new Set([item.model]),
+          requests: [item],
+          isSavedInLibrary: Boolean(rawRow.is_saved_in_library),
+        });
+      } else {
+        existing.modelsSet.add(item.model);
+        existing.requests.push(item);
+        if (item.gameId && !existing.gameId) existing.gameId = item.gameId;
+        if (item.generationId && !existing.generationId) existing.generationId = item.generationId;
+        if (item.gameTitle && existing.gameTitle.startsWith('Lượt tạo AI')) {
+          existing.gameTitle = item.gameTitle;
+        }
+        if (item.gameType && existing.gameType === 'UNKNOWN') {
+          existing.gameType = item.gameType;
+        }
+        if (rawRow.is_saved_in_library) {
+          existing.isSavedInLibrary = true;
+        }
+        if (item.createdAt > existing.createdAt) {
+          existing.createdAt = item.createdAt;
+        }
+      }
+    });
+
+    const byGame: AdminAiCostGameItem[] = Array.from(gameGroups.values()).map((grp) => {
+      let reqCount = grp.requests.length;
+      let successCount = 0;
+      let failedCount = 0;
+      let sumIn = 0;
+      let sumOut = 0;
+      let sumCached = 0;
+      let sumThinking = 0;
+      let sumTotal = 0;
+      let hasAnyTokens = false;
+      let hasUnknownUsage = false;
+      let hasPriceUnavailable = false;
+      let sumActualUsd = 0;
+      let sumActualVnd = 0;
+      let hasActualCost = false;
+      let sumPaidUsd = 0;
+      let sumPaidVnd = 0;
+      let hasPaidCost = false;
+
+      for (const r of grp.requests) {
+        if (r.status === 'SUCCESS') successCount++;
+        else failedCount++;
+
+        if (r.inputTokens !== null && r.outputTokens !== null) {
+          hasAnyTokens = true;
+          sumIn += r.inputTokens;
+          sumOut += r.outputTokens;
+          sumCached += r.cachedTokens || 0;
+          sumThinking += r.thinkingTokens || 0;
+          sumTotal += r.totalTokens !== null ? r.totalTokens : r.inputTokens + r.outputTokens + (r.thinkingTokens || 0);
+        } else if (r.pricingStatus === 'USAGE_UNAVAILABLE') {
+          hasUnknownUsage = true;
+        }
+
+        if (r.pricingStatus === 'PRICE_UNAVAILABLE') {
+          hasPriceUnavailable = true;
+        }
+
+        if (r.actualCostUsd !== null && r.actualCostVnd !== null) {
+          hasActualCost = true;
+          sumActualUsd += r.actualCostUsd;
+          sumActualVnd += r.actualCostVnd;
+        }
+        if (r.paidEquivalentCostUsd !== null && r.paidEquivalentCostVnd !== null) {
+          hasPaidCost = true;
+          sumPaidUsd += r.paidEquivalentCostUsd;
+          sumPaidVnd += r.paidEquivalentCostVnd;
+        }
+      }
+
+      let status: AdminAiCostGameItem['status'] = 'SUCCESS';
+      if (failedCount === reqCount) {
+        status = 'FAILED';
+      } else if (hasPriceUnavailable && !hasPaidCost) {
+        status = 'PRICE_UNAVAILABLE';
+      } else if (hasUnknownUsage && !hasAnyTokens && !hasPaidCost) {
+        status = 'USAGE_UNAVAILABLE';
+      } else if (failedCount > 0) {
+        status = 'PARTIAL_FAILURE';
+      }
+
+      return {
+        generationKey: grp.generationKey,
+        generationId: grp.generationId,
+        gameId: grp.gameId,
+        gameTitle: grp.gameTitle,
+        gameType: grp.gameType,
+        createdAt: grp.createdAt,
+        modelsUsed: Array.from(grp.modelsSet),
+        requestCount: reqCount,
+        successCount,
+        failedCount,
+        inputTokens: hasAnyTokens ? sumIn : null,
+        outputTokens: hasAnyTokens ? sumOut : null,
+        cachedTokens: hasAnyTokens ? sumCached : null,
+        thinkingTokens: hasAnyTokens ? sumThinking : null,
+        totalTokens: hasAnyTokens ? sumTotal : null,
+        actualCostUsd: hasActualCost && !hasPriceUnavailable ? Number(sumActualUsd.toFixed(8)) : null,
+        actualCostVnd: hasActualCost && !hasPriceUnavailable ? Math.round(sumActualVnd) : null,
+        paidEquivalentCostUsd: hasPaidCost && !hasPriceUnavailable ? Number(sumPaidUsd.toFixed(8)) : null,
+        paidEquivalentCostVnd: hasPaidCost && !hasPriceUnavailable ? Math.round(sumPaidVnd) : null,
+        status,
+        hasUnknownUsage,
+        hasPriceUnavailable,
+        isSavedInLibrary: grp.isSavedInLibrary,
+        requests: grp.requests,
+      };
+    });
+
+    // Aggregate by Model
+    const modelMap = new Map<string, Omit<AdminAiCostModelBreakdownItem, 'shareOfPaidCostPercent'>>();
+    for (const r of apiLogs) {
+      const key = `${r.provider}::${r.model}`;
+      const existing = modelMap.get(key) || {
+        provider: r.provider,
+        model: r.model,
+        requestCount: 0,
+        successCount: 0,
+        failedCount: 0,
+        inputTokens: 0,
+        outputTokens: 0,
+        cachedTokens: 0,
+        thinkingTokens: 0,
+        totalTokens: 0,
+        actualCostUsd: 0,
+        actualCostVnd: 0,
+        paidEquivalentCostUsd: 0,
+        paidEquivalentCostVnd: 0,
+        pricingStatus: r.pricingStatus === 'PRICE_UNAVAILABLE' ? 'PRICE_UNAVAILABLE' : 'OK',
+      };
+      existing.requestCount += 1;
+      if (r.status === 'SUCCESS') existing.successCount += 1;
+      else existing.failedCount += 1;
+      existing.inputTokens += r.inputTokens || 0;
+      existing.outputTokens += r.outputTokens || 0;
+      existing.cachedTokens += r.cachedTokens || 0;
+      existing.thinkingTokens += r.thinkingTokens || 0;
+      existing.totalTokens += r.totalTokens || 0;
+      existing.actualCostUsd = Number((existing.actualCostUsd + (r.actualCostUsd || 0)).toFixed(8));
+      existing.actualCostVnd += r.actualCostVnd || 0;
+      existing.paidEquivalentCostUsd = Number(
+        (existing.paidEquivalentCostUsd + (r.paidEquivalentCostUsd || 0)).toFixed(8)
+      );
+      existing.paidEquivalentCostVnd += r.paidEquivalentCostVnd || 0;
+      if (r.pricingStatus === 'PRICE_UNAVAILABLE') {
+        existing.pricingStatus = 'PRICE_UNAVAILABLE';
+      }
+      modelMap.set(key, existing);
+    }
+
+    const totalPaidCostAllModels = Array.from(modelMap.values()).reduce(
+      (acc, m) => acc + m.paidEquivalentCostUsd,
+      0
+    );
+
+    const byModel: AdminAiCostModelBreakdownItem[] = Array.from(modelMap.values())
+      .map((m) => ({
+        ...m,
+        actualCostVnd: Math.round(m.actualCostVnd),
+        paidEquivalentCostVnd: Math.round(m.paidEquivalentCostVnd),
+        shareOfPaidCostPercent:
+          totalPaidCostAllModels > 0
+            ? Number(((m.paidEquivalentCostUsd / totalPaidCostAllModels) * 100).toFixed(2))
+            : 0,
+      }))
+      .sort((a, b) => b.paidEquivalentCostUsd - a.paidEquivalentCostUsd || b.totalTokens - a.totalTokens);
+
+    // Compute overall summary KPIs
+    let totalIn = 0;
+    let totalOut = 0;
+    let totalCached = 0;
+    let totalThinking = 0;
+    let totalTok = 0;
+    let totalActualUsd = 0;
+    let totalActualVnd = 0;
+    let totalPaidUsd = 0;
+    let totalPaidVnd = 0;
+    let successReq = 0;
+    let failedReq = 0;
+    let reqWithReportedTokens = 0;
+    let reqWithUnknownUsage = 0;
+    let reqWithPriceUnavailable = 0;
+    let reqWithUnknownBilling = 0;
+
+    for (const r of apiLogs) {
+      if (r.status === 'SUCCESS') successReq++;
+      else failedReq++;
+
+      if (r.inputTokens !== null && r.outputTokens !== null) {
+        reqWithReportedTokens++;
+        totalIn += r.inputTokens;
+        totalOut += r.outputTokens;
+        totalCached += r.cachedTokens || 0;
+        totalThinking += r.thinkingTokens || 0;
+        totalTok += r.totalTokens || 0;
+      } else {
+        reqWithUnknownUsage++;
+      }
+
+      if (r.pricingStatus === 'PRICE_UNAVAILABLE') {
+        reqWithPriceUnavailable++;
+      }
+      if (r.billingMode === 'UNKNOWN') {
+        reqWithUnknownBilling++;
+      }
+
+      totalActualUsd += r.actualCostUsd || 0;
+      totalActualVnd += r.actualCostVnd || 0;
+      totalPaidUsd += r.paidEquivalentCostUsd || 0;
+      totalPaidVnd += r.paidEquivalentCostVnd || 0;
+    }
+
+    totalActualUsd = Number(totalActualUsd.toFixed(8));
+    totalActualVnd = Math.round(totalActualVnd);
+    totalPaidUsd = Number(totalPaidUsd.toFixed(8));
+    totalPaidVnd = Math.round(totalPaidVnd);
+
+    // Eligible generations for Average Cost Per Game & Scaling Projections:
+    // Only include game generations that have valid paidEquivalentCostUsd !== null and !hasPriceUnavailable and !hasUnknownUsage
+    const eligibleGames = byGame.filter(
+      (g) =>
+        g.paidEquivalentCostUsd !== null &&
+        !g.hasPriceUnavailable &&
+        !g.hasUnknownUsage &&
+        g.status !== 'FAILED'
+    );
+    const eligibleCount = eligibleGames.length;
+
+    const avgTokensPerGame =
+      eligibleCount > 0
+        ? Math.round(eligibleGames.reduce((acc, g) => acc + (g.totalTokens || 0), 0) / eligibleCount)
+        : null;
+
+    const eligibleActualGames = eligibleGames.filter((g) => g.actualCostUsd !== null);
+    const avgActualCostPerGameUsd =
+      eligibleActualGames.length > 0
+        ? Number(
+            (
+              eligibleActualGames.reduce((acc, g) => acc + (g.actualCostUsd || 0), 0) /
+              eligibleActualGames.length
+            ).toFixed(8)
+          )
+        : null;
+    const avgActualCostPerGameVnd =
+      avgActualCostPerGameUsd !== null ? Math.round(avgActualCostPerGameUsd * exchange.usdToVndRate) : null;
+
+    const avgPaidEquivalentCostPerGameUsd =
+      eligibleCount > 0
+        ? Number(
+            (
+              eligibleGames.reduce((acc, g) => acc + (g.paidEquivalentCostUsd || 0), 0) / eligibleCount
+            ).toFixed(8)
+          )
+        : null;
+    const avgPaidEquivalentCostPerGameVnd =
+      avgPaidEquivalentCostPerGameUsd !== null
+        ? Math.round(avgPaidEquivalentCostPerGameUsd * exchange.usdToVndRate)
+        : null;
+
+    const scales = [
+      { scale: 100, label: '100 lượt tạo game' },
+      { scale: 1000, label: '1.000 lượt tạo game' },
+      { scale: 10000, label: '10.000 lượt tạo game' },
+    ];
+
+    const scalingProjections: AdminAiCostScalingProjectionItem[] = scales.map(({ scale, label }) => {
+      const projTokens = avgTokensPerGame !== null ? avgTokensPerGame * scale : null;
+      const projActualUsd =
+        avgActualCostPerGameUsd !== null ? Number((avgActualCostPerGameUsd * scale).toFixed(6)) : null;
+      const projActualVnd =
+        projActualUsd !== null ? Math.round(projActualUsd * exchange.usdToVndRate) : null;
+      const projPaidUsd =
+        avgPaidEquivalentCostPerGameUsd !== null
+          ? Number((avgPaidEquivalentCostPerGameUsd * scale).toFixed(6))
+          : null;
+      const projPaidVnd =
+        projPaidUsd !== null ? Math.round(projPaidUsd * exchange.usdToVndRate) : null;
+
+      return {
+        scaleGenerations: scale,
+        label,
+        basisEligibleGenerations: eligibleCount,
+        avgTokensPerGeneration: avgTokensPerGame,
+        projectedTotalTokens: projTokens,
+        avgActualCostPerGameUsd,
+        avgActualCostPerGameVnd,
+        projectedActualCostUsd: projActualUsd,
+        projectedActualCostVnd: projActualVnd,
+        avgPaidEquivalentCostPerGameUsd,
+        avgPaidEquivalentCostPerGameVnd,
+        projectedPaidEquivalentCostUsd: projPaidUsd,
+        projectedPaidEquivalentCostVnd: projPaidVnd,
+        formulaNote:
+          eligibleCount > 0
+            ? `Dự phóng dựa trên trung bình ${eligibleCount} lượt tạo game hợp lệ (Chi phí TB × ${scale.toLocaleString('vi-VN')} lượt)`
+            : 'Chưa đủ dữ liệu lượt tạo game hợp lệ để dự phóng',
+      };
+    });
+
+    const dbPath = resolveDefaultDatabasePath();
+    const isRenderEnv = Boolean(process.env.RENDER || process.env.RENDER_SERVICE_ID);
+    const hasCustomPersistentDbPath = Boolean(
+      process.env.DATABASE_PATH && !process.env.DATABASE_PATH.includes('data/platform.sqlite')
+    );
+    const isEphemeralWarning = isRenderEnv && !hasCustomPersistentDbPath;
+
+    return {
+      generatedAt: new Date().toISOString(),
+      filtersApplied: {
+        preset: dateBounds.preset,
+        from: dateBounds.from,
+        to: dateBounds.to,
+        model: filters.model || null,
+        gameType: filters.gameType || null,
+        taskType: filters.taskType || null,
+      },
+      billingModeConfigured: configuredBillingMode,
+      exchangeRate: exchange,
+      persistenceStatus: {
+        databasePath: dbPath,
+        isEphemeralWarning,
+        warningMessage: isEphemeralWarning
+          ? 'Cảnh báo: Render đang dùng ổ đĩa tạm (ephemeral filesystem). Khi redeploy/restart container, dữ liệu SQLite cục bộ sẽ bị reset trừ khi gắn Render Persistent Disk (DATABASE_PATH=/var/data/platform.sqlite). Nên xuất báo cáo Excel định kỳ.'
+          : null,
+      },
+      summary: {
+        totalGameGenerations: byGame.length,
+        eligibleGenerationsForAverage: eligibleCount,
+        totalAiRequests: apiLogs.length,
+        successfulRequests: successReq,
+        failedRequests: failedReq,
+        requestsWithReportedTokens: reqWithReportedTokens,
+        requestsWithUnknownUsage: reqWithUnknownUsage,
+        requestsWithPriceUnavailable: reqWithPriceUnavailable,
+        requestsWithUnknownBilling: reqWithUnknownBilling,
+        inputTokens: totalIn,
+        outputTokens: totalOut,
+        cachedTokens: totalCached,
+        thinkingTokens: totalThinking,
+        totalTokens: totalTok,
+        actualCostUsd: totalActualUsd,
+        actualCostVnd: totalActualVnd,
+        paidEquivalentCostUsd: totalPaidUsd,
+        paidEquivalentCostVnd: totalPaidVnd,
+        avgTokensPerGame,
+        avgActualCostPerGameUsd,
+        avgActualCostPerGameVnd,
+        avgPaidEquivalentCostPerGameUsd,
+        avgPaidEquivalentCostPerGameVnd,
+        highestCostModel: byModel.length > 0 ? byModel[0].model : null,
+      },
+      scalingProjections,
+      byModel,
+      byGame,
+      apiLogs,
+      pricingCatalog: AI_MODEL_PRICING_CATALOG,
     };
   }
 

@@ -1,15 +1,92 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { gameStore } from '../game/game.store.js';
-import { requireAdminMiddleware } from '../middleware/auth.middleware.js';
+import {
+  isAdminCostDemoModeEnabled,
+  requireAdminCostAnalyticsMiddleware,
+  requireAdminMiddleware,
+} from '../middleware/auth.middleware.js';
 import { roomStore } from '../multiplayer/room.store.js';
+import { aiObservabilityService } from '../services/ai.observability.service.js';
 import { exportService } from '../services/export.service.js';
 import { persistenceRepo } from '../storage/persistence.repository.js';
 import { AppError, createSuccessResponse } from '../utils/errors.js';
 
 export const adminRouter = Router();
 
-// Apply requireAdminMiddleware to all routes in this router
+/**
+ * GET /api/admin/ai-costs
+ * Comprehensive AI Token & Cost Tracking Report (KPIs, 100/1000/10000 scaling projections, per-game & per-model breakdown)
+ */
+adminRouter.get(
+  '/ai-costs',
+  requireAdminCostAnalyticsMiddleware,
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const presetRaw = typeof req.query.preset === 'string' ? req.query.preset.trim().toUpperCase() : undefined;
+      const from = typeof req.query.from === 'string' ? req.query.from.trim() : undefined;
+      const to = typeof req.query.to === 'string' ? req.query.to.trim() : undefined;
+      const model = typeof req.query.model === 'string' ? req.query.model.trim() : undefined;
+      const gameType = typeof req.query.gameType === 'string' ? req.query.gameType.trim() : undefined;
+      const taskType = typeof req.query.taskType === 'string' ? req.query.taskType.trim() : undefined;
+
+      const report = aiObservabilityService.getAdminAiCostReport({
+        preset: (presetRaw as any) || undefined,
+        from,
+        to,
+        model,
+        gameType,
+        taskType,
+      });
+
+      res.status(200).json(
+        createSuccessResponse({
+          ...report,
+          demoMode: isAdminCostDemoModeEnabled(),
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * GET /api/admin/ai-costs/export
+ * On-demand 4-Sheet Excel (.xlsx) Export for AI Token & Cost Budget Management
+ */
+adminRouter.get(
+  '/ai-costs/export',
+  requireAdminCostAnalyticsMiddleware,
+  (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const presetRaw = typeof req.query.preset === 'string' ? req.query.preset.trim().toUpperCase() : undefined;
+      const from = typeof req.query.from === 'string' ? req.query.from.trim() : undefined;
+      const to = typeof req.query.to === 'string' ? req.query.to.trim() : undefined;
+      const model = typeof req.query.model === 'string' ? req.query.model.trim() : undefined;
+      const gameType = typeof req.query.gameType === 'string' ? req.query.gameType.trim() : undefined;
+      const taskType = typeof req.query.taskType === 'string' ? req.query.taskType.trim() : undefined;
+
+      const report = aiObservabilityService.getAdminAiCostReport({
+        preset: (presetRaw as any) || undefined,
+        from,
+        to,
+        model,
+        gameType,
+        taskType,
+      });
+
+      const exported = exportService.exportAdminAiCostReportExcel(report);
+      res.setHeader('Content-Type', exported.contentType);
+      res.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
+      res.status(200).send(exported.body);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+// Apply requireAdminMiddleware to all remaining routes in this router
 adminRouter.use(requireAdminMiddleware);
 
 /**
@@ -229,4 +306,6 @@ adminRouter.get('/ai-logs/export', (req: Request, res: Response, next: NextFunct
     next(err);
   }
 });
+
+
 

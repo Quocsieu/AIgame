@@ -134,11 +134,15 @@ export class GeminiModelProvider implements AiModelProvider {
       if (usage && typeof usage === 'object') {
         const inTok = typeof usage.promptTokenCount === 'number' ? usage.promptTokenCount : null;
         const outTok = typeof usage.candidatesTokenCount === 'number' ? usage.candidatesTokenCount : null;
+        const cachedTok =
+          typeof usage.cachedContentTokenCount === 'number' ? usage.cachedContentTokenCount : null;
+        const thinkingTok =
+          typeof usage.thoughtsTokenCount === 'number' ? usage.thoughtsTokenCount : null;
         const totTok =
           typeof usage.totalTokenCount === 'number'
             ? usage.totalTokenCount
             : inTok !== null && outTok !== null
-              ? inTok + outTok
+              ? inTok + outTok + (thinkingTok || 0)
               : null;
 
         this.lastUsageMetadata = {
@@ -146,6 +150,8 @@ export class GeminiModelProvider implements AiModelProvider {
           model: this.model,
           inputTokens: inTok,
           outputTokens: outTok,
+          cachedTokens: cachedTok,
+          thinkingTokens: thinkingTok,
           totalTokens: totTok,
           usageReportedByProvider: inTok !== null || outTok !== null || totTok !== null,
         };
@@ -853,7 +859,11 @@ export class AiQuestionService {
   public async generateGame(
     documents: CanonicalDocument[],
     request: GenerateGameRequest,
-    context?: { userId?: string | null; skipObservabilityLog?: boolean }
+    context?: {
+      userId?: string | null;
+      generationId?: string | null;
+      skipObservabilityLog?: boolean;
+    }
   ): Promise<GameSpecification> {
     if (documents.length === 0) {
       throw new AppError('EMPTY_SOURCE_CONTENT', 'No source documents provided for game generation.', 400);
@@ -877,6 +887,18 @@ export class AiQuestionService {
     const questionCount = request.questionCount || 5;
     const gameType = request.gameType;
     const gameId = `game_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    const generationId =
+      context?.generationId && String(context.generationId).trim()
+        ? String(context.generationId).trim()
+        : `gen_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const resolvedSourceType = (() => {
+      const types = new Set(documents.map(d => String(d.sourceType || '').toUpperCase()));
+      if (types.size > 1) return 'MIXED';
+      const single = Array.from(types)[0] || '';
+      if (single === 'URL' || single === 'WEBSITE') return 'URL';
+      if (single === 'PROMPT' || single === 'TOPIC') return 'TOPIC';
+      return 'FILE';
+    })();
     const getGameTypeLabelVi = (type: GameType): string => {
       switch (type) {
         case 'QUIZ': return 'Quiz (Trắc nghiệm)';
@@ -988,16 +1010,22 @@ export class AiQuestionService {
 
       if (!context?.skipObservabilityLog) {
         aiObservabilityService.recordAiCall({
+          generationId,
           userId: context?.userId ?? null,
           gameId,
+          gameTitleSnapshot: title,
           provider: usageMeta?.provider || (this.provider instanceof GeminiModelProvider ? 'gemini' : 'custom'),
           model: usageMeta?.model || 'gemini-2.5-flash',
           operation: 'GENERATE_QUESTIONS',
+          taskType: 'QUESTION_GENERATION',
+          sourceType: resolvedSourceType,
           status: 'FAILED',
           errorCode: appErr.code,
           latencyMs,
           inputTokens: usageMeta?.inputTokens ?? null,
           outputTokens: usageMeta?.outputTokens ?? null,
+          cachedTokens: usageMeta?.cachedTokens ?? null,
+          thinkingTokens: usageMeta?.thinkingTokens ?? null,
           totalTokens: usageMeta?.totalTokens ?? null,
           usageIsEstimated: false,
           requestedQuestions: questionCount,
@@ -1011,7 +1039,9 @@ export class AiQuestionService {
     }
 
     const latencyMs = Date.now() - startTime;
-    const usageMeta = this.provider.getLastUsageMetadata?.() || null;
+    const usageMeta = this.provider.getLastUsageMetadata?.()
+      ? { ...this.provider.getLastUsageMetadata()! }
+      : null;
 
     // Validate that response is an array
     const rawQuestions = Array.isArray(rawResponse)
@@ -1021,16 +1051,22 @@ export class AiQuestionService {
     if (!rawQuestions || rawQuestions.length === 0) {
       if (!context?.skipObservabilityLog) {
         aiObservabilityService.recordAiCall({
+          generationId,
           userId: context?.userId ?? null,
           gameId,
+          gameTitleSnapshot: title,
           provider: usageMeta?.provider || (this.provider instanceof GeminiModelProvider ? 'gemini' : 'custom'),
           model: usageMeta?.model || 'gemini-2.5-flash',
           operation: 'GENERATE_QUESTIONS',
+          taskType: 'QUESTION_GENERATION',
+          sourceType: resolvedSourceType,
           status: 'FAILED',
           errorCode: 'AI_VALIDATION_ERROR',
           latencyMs,
           inputTokens: usageMeta?.inputTokens ?? null,
           outputTokens: usageMeta?.outputTokens ?? null,
+          cachedTokens: usageMeta?.cachedTokens ?? null,
+          thinkingTokens: usageMeta?.thinkingTokens ?? null,
           totalTokens: usageMeta?.totalTokens ?? null,
           usageIsEstimated: false,
           requestedQuestions: questionCount,
@@ -1483,20 +1519,84 @@ export class AiQuestionService {
           .filter(Boolean)
           .join('\n');
 
+        const suppStartTime = Date.now();
         try {
           const suppResponse = await this.provider.generateJson(
             supplementalPrompt,
             systemInstruction
           );
+          const suppLatencyMs = Date.now() - suppStartTime;
+          const suppUsageMeta = this.provider.getLastUsageMetadata?.()
+            ? { ...this.provider.getLastUsageMetadata()! }
+            : null;
           const suppQuestions = Array.isArray(suppResponse)
             ? suppResponse
             : suppResponse?.questions && Array.isArray(suppResponse.questions)
               ? suppResponse.questions
               : [];
+          const beforeValidCount = validatedQuestions.length;
           if (suppQuestions.length > 0) {
             processRawQuestionBatch(suppQuestions);
           }
+          const addedValidCount = Math.max(0, validatedQuestions.length - beforeValidCount);
+          if (!context?.skipObservabilityLog) {
+            aiObservabilityService.recordAiCall({
+              generationId,
+              userId: context?.userId ?? null,
+              gameId,
+              gameTitleSnapshot: title,
+              provider: suppUsageMeta?.provider || (this.provider instanceof GeminiModelProvider ? 'gemini' : 'custom'),
+              model: suppUsageMeta?.model || 'gemini-2.5-flash',
+              operation: `GENERATE_QUESTIONS_SUPPLEMENTAL_${attempt + 1}`,
+              taskType: 'QUESTION_SUPPLEMENTAL_RETRY',
+              sourceType: resolvedSourceType,
+              status: 'SUCCESS',
+              latencyMs: suppLatencyMs,
+              inputTokens: suppUsageMeta?.inputTokens ?? null,
+              outputTokens: suppUsageMeta?.outputTokens ?? null,
+              cachedTokens: suppUsageMeta?.cachedTokens ?? null,
+              thinkingTokens: suppUsageMeta?.thinkingTokens ?? null,
+              totalTokens: suppUsageMeta?.totalTokens ?? null,
+              usageIsEstimated: false,
+              requestedQuestions: totalMissing,
+              generatedQuestions: suppQuestions.length,
+              validQuestions: addedValidCount,
+              gameType,
+              difficulty: effectiveDifficulty,
+              sourceCount: documents.length,
+            });
+          }
         } catch (suppErr) {
+          const suppLatencyMs = Date.now() - suppStartTime;
+          const suppUsageMeta = this.provider.getLastUsageMetadata?.()
+            ? { ...this.provider.getLastUsageMetadata()! }
+            : null;
+          if (!context?.skipObservabilityLog) {
+            aiObservabilityService.recordAiCall({
+              generationId,
+              userId: context?.userId ?? null,
+              gameId,
+              gameTitleSnapshot: title,
+              provider: suppUsageMeta?.provider || (this.provider instanceof GeminiModelProvider ? 'gemini' : 'custom'),
+              model: suppUsageMeta?.model || 'gemini-2.5-flash',
+              operation: `GENERATE_QUESTIONS_SUPPLEMENTAL_${attempt + 1}`,
+              taskType: 'QUESTION_SUPPLEMENTAL_RETRY',
+              sourceType: resolvedSourceType,
+              status: 'FAILED',
+              errorCode: suppErr instanceof AppError ? suppErr.code : 'AI_SUPPLEMENTAL_FAILED',
+              latencyMs: suppLatencyMs,
+              inputTokens: suppUsageMeta?.inputTokens ?? null,
+              outputTokens: suppUsageMeta?.outputTokens ?? null,
+              cachedTokens: suppUsageMeta?.cachedTokens ?? null,
+              thinkingTokens: suppUsageMeta?.thinkingTokens ?? null,
+              totalTokens: suppUsageMeta?.totalTokens ?? null,
+              usageIsEstimated: false,
+              requestedQuestions: totalMissing,
+              gameType,
+              difficulty: effectiveDifficulty,
+              sourceCount: documents.length,
+            });
+          }
           generationDiagnostics.push(
             `Supplemental generation attempt ${attempt + 1} failed: ${suppErr instanceof Error ? suppErr.message : String(suppErr)}`
           );
@@ -1520,6 +1620,37 @@ export class AiQuestionService {
         rejectedReasons.length === 0;
 
       if (remainingDeficits.length > 0 && !isSingleTypeAdventurePartialValid) {
+        if (!context?.skipObservabilityLog) {
+          aiObservabilityService.recordAiCall({
+            generationId,
+            userId: context?.userId ?? null,
+            gameId,
+            gameTitleSnapshot: title,
+            provider: usageMeta?.provider || (this.provider instanceof GeminiModelProvider ? 'gemini' : 'custom'),
+            model: usageMeta?.model || 'gemini-2.5-flash',
+            operation: 'GENERATE_QUESTIONS',
+            taskType: 'QUESTION_GENERATION',
+            sourceType: resolvedSourceType,
+            status: 'FAILED',
+            errorCode: 'AI_QUESTION_DISTRIBUTION_UNMET',
+            latencyMs,
+            inputTokens: usageMeta?.inputTokens ?? null,
+            outputTokens: usageMeta?.outputTokens ?? null,
+            cachedTokens: usageMeta?.cachedTokens ?? null,
+            thinkingTokens: usageMeta?.thinkingTokens ?? null,
+            totalTokens: usageMeta?.totalTokens ?? null,
+            usageIsEstimated: false,
+            requestedQuestions: questionCount,
+            generatedQuestions: rawQuestions.length,
+            validQuestions: validatedQuestions.length,
+            rejectedQuestions: rejectedReasons.length,
+            duplicateQuestions: duplicateCount,
+            diagnosticsCount: generationDiagnostics.length,
+            gameType,
+            difficulty: effectiveDifficulty,
+            sourceCount: documents.length,
+          });
+        }
         const actualTypeCounts: Record<BaseDistributionQuestionType, number> = {
           MULTIPLE_CHOICE: bucketedQuestions.MULTIPLE_CHOICE.length,
           QUICK_BUTTON: bucketedQuestions.QUICK_BUTTON.length,
@@ -1553,16 +1684,22 @@ export class AiQuestionService {
     if (validatedQuestions.length === 0) {
       if (!context?.skipObservabilityLog) {
         aiObservabilityService.recordAiCall({
+          generationId,
           userId: context?.userId ?? null,
           gameId,
+          gameTitleSnapshot: title,
           provider: usageMeta?.provider || (this.provider instanceof GeminiModelProvider ? 'gemini' : 'custom'),
           model: usageMeta?.model || 'gemini-2.5-flash',
           operation: 'GENERATE_QUESTIONS',
+          taskType: 'QUESTION_GENERATION',
+          sourceType: resolvedSourceType,
           status: 'FAILED',
           errorCode: rejectedReasons.length > 0 ? 'AI_QUESTION_VALIDATION_FAILED' : 'AI_VALIDATION_ERROR',
           latencyMs,
           inputTokens: usageMeta?.inputTokens ?? null,
           outputTokens: usageMeta?.outputTokens ?? null,
+          cachedTokens: usageMeta?.cachedTokens ?? null,
+          thinkingTokens: usageMeta?.thinkingTokens ?? null,
           totalTokens: usageMeta?.totalTokens ?? null,
           usageIsEstimated: false,
           requestedQuestions: questionCount,
@@ -1590,15 +1727,21 @@ export class AiQuestionService {
 
     if (!context?.skipObservabilityLog) {
       aiObservabilityService.recordAiCall({
+        generationId,
         userId: context?.userId ?? null,
         gameId,
+        gameTitleSnapshot: title,
         provider: usageMeta?.provider || (this.provider instanceof GeminiModelProvider ? 'gemini' : 'custom'),
         model: usageMeta?.model || 'gemini-2.5-flash',
         operation: 'GENERATE_QUESTIONS',
+        taskType: 'QUESTION_GENERATION',
+        sourceType: resolvedSourceType,
         status: 'SUCCESS',
         latencyMs,
         inputTokens: usageMeta?.inputTokens ?? null,
         outputTokens: usageMeta?.outputTokens ?? null,
+        cachedTokens: usageMeta?.cachedTokens ?? null,
+        thinkingTokens: usageMeta?.thinkingTokens ?? null,
         totalTokens: usageMeta?.totalTokens ?? null,
         usageIsEstimated: false,
         requestedQuestions: questionCount,
