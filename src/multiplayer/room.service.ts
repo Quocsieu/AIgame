@@ -91,7 +91,7 @@ export class MultiplayerRoom {
   }
 
   public canRevealFinishedAnswersToPlayers(): boolean {
-    if (this.getSessionMode() !== 'EXAM') return true;
+    if (this.getSessionMode() !== 'EXAM') return false;
     const policy = this.getExamAnswerRevealPolicy();
     return (
       this.answersPublished ||
@@ -834,6 +834,37 @@ export class MultiplayerRoom {
       this.submittedReason = this.submittedReason || 'ROOM_CLOSED_BY_HOST';
       this.state = 'FINISHED';
       this.persistHistory();
+    } else if (!this.startedAtIso && this.state !== 'FINISHED' && this.state !== 'CLOSED' && this.players.size > 0) {
+      const nowIso = new Date().toISOString();
+      const maxPossibleScore = this.getMaxPossibleScore();
+      const totalQuestions = this.gameSpecification.questions.length;
+      const sessionMode = this.getSessionMode();
+      const passThresholdPercent = this.getPassThresholdPercent();
+      for (const player of this.players.values()) {
+        try {
+          persistenceRepo.recordParticipantAttemptCompletion({
+            attemptId: player.attemptId ?? undefined,
+            roomId: this.roomId,
+            participantId: player.participantId ?? null,
+            gameId: this.gameId,
+            displayName: player.displayName,
+            departmentUnit: player.departmentUnit || '',
+            deliveryMode: 'MULTIPLAYER',
+            sessionMode,
+            state: 'ABANDONED',
+            score: player.score,
+            maxPossibleScore,
+            correctAnswers: player.correctCount,
+            totalQuestions,
+            durationMs: player.totalResponseTimeMs,
+            passThresholdPercent,
+            answers: [],
+            finishedAt: nowIso,
+          });
+        } catch {
+          // Graceful fallback in isolated memory tests
+        }
+      }
     }
     this.state = 'CLOSED';
     this.updatedAt = Date.now();

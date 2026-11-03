@@ -416,8 +416,13 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
         answersPublished: msg.answersPublished,
       });
       setLeaderboard(msg.leaderboard || []);
-      if (Array.isArray(msg.questions) && msg.questions.length > 0) {
+      setCorrectAnswer('');
+      setExplanation(undefined);
+      const effectiveMode = msg.sessionMode === 'EXAM' || msg.sessionMode === 'PLAY' ? msg.sessionMode : sessionMode;
+      if (effectiveMode === 'EXAM' && Array.isArray(msg.questions) && msg.questions.length > 0) {
         setPublishedAnswersList(msg.questions);
+      } else {
+        setPublishedAnswersList([]);
       }
       const myId = playerIdRef.current;
       let myRank: number | null = null;
@@ -2002,7 +2007,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             )}
           </div>
 
-          {publishedAnswersList.length > 0 && (
+          {sessionMode === 'EXAM' && publishedAnswersList.length > 0 && (
             <div
               data-testid="published-exam-answers-list"
               style={{

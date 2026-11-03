@@ -172,17 +172,31 @@ roomRouter.post('/:roomCode/close', (req: Request, res: Response, next: NextFunc
 
     const isHostTokenValid = Boolean(providedHostToken && providedHostToken === room.hostToken);
 
+    if (!isHostTokenValid) {
+      rejectGuestOrPlayerWrite(req, 'đóng phòng chơi');
+    }
+
     const storedSpec = gameStore.get(room.gameId);
     const ownerInfo = persistenceRepo.getGameOwnerInfo(room.gameId);
-    const gameOwnerUserId =
-      storedSpec?.ownerUserId ?? ownerInfo?.ownerUserId ?? room.gameSpecification.ownerUserId ?? null;
+    const rawGameOwner =
+      storedSpec?.ownerUserId || ownerInfo?.ownerUserId || room.gameSpecification.ownerUserId || null;
+    const gameOwnerUserId = rawGameOwner && rawGameOwner !== 'legacy_local' ? rawGameOwner : null;
+    const roomOwnerUserId =
+      room.ownerUserId && room.ownerUserId !== 'legacy_local' ? room.ownerUserId : null;
 
-    const currentUserId = req.user?.userId ?? null;
-    const isAdmin = req.user?.role === 'ADMIN';
-    const isRoomOwner = Boolean(room.ownerUserId && currentUserId === room.ownerUserId);
-    const isGameOwner = Boolean(gameOwnerUserId && currentUserId === gameOwnerUserId);
+    const currentUserId = !req.isGuest ? (req.user?.userId ?? null) : null;
+    const isAdmin = Boolean(req.user?.role === 'ADMIN' && !req.isGuest);
+    const isRoomOwner = Boolean(roomOwnerUserId && currentUserId && currentUserId === roomOwnerUserId);
+    const isGameOwner = Boolean(gameOwnerUserId && currentUserId && currentUserId === gameOwnerUserId);
+    const isUnownedLocal = Boolean(
+      !gameOwnerUserId &&
+        !roomOwnerUserId &&
+        !providedHostToken &&
+        !req.query?.hostToken &&
+        !req.isGuest
+    );
 
-    if (!isHostTokenValid && !isAdmin && !isRoomOwner && !isGameOwner) {
+    if (!isHostTokenValid && !isAdmin && !isRoomOwner && !isGameOwner && !isUnownedLocal) {
       throw new AppError(
         'ACCESS_DENIED',
         'Bạn không có quyền đóng phòng chơi này. Yêu cầu token của chủ phòng hoặc quyền quản lý bộ câu hỏi.',

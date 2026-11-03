@@ -676,6 +676,9 @@ export class GameSession {
    * Abandons the game session.
    */
   public abandon(): void {
+    if (this.state === 'FINISHED' || this.state === 'ABANDONED') {
+      return;
+    }
     this.state = 'ABANDONED';
     this.finishedAt = new Date().toISOString();
     try {

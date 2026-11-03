@@ -33,6 +33,7 @@ import {
   duplicateGameApi,
   endPracticeSession,
   fetchCurrentUser,
+  fetchGameActiveStatus,
   fetchGameById,
   fetchGameParticipantsApi,
   fetchGameQr,
@@ -74,6 +75,7 @@ export interface LibraryFilterPreset {
 
 interface AnalyticsPageProps {
   mode?: 'overview' | 'library';
+  currentUser?: AuthenticatedUser | null;
   initialFilterPreset?: LibraryFilterPreset | null;
   onNavigateToLibrary?: (preset?: LibraryFilterPreset) => void;
   onSelectSavedGame?: (spec: GameSpecification, autoStartSolo?: boolean) => void;
@@ -816,6 +818,7 @@ export const GameCoverIllustration: React.FC<{
 
 export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   mode = 'overview',
+  currentUser: propCurrentUser,
   initialFilterPreset,
   onNavigateToLibrary,
   onSelectSavedGame,
@@ -920,7 +923,12 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const [isOpeningRoomGameId, setIsOpeningRoomGameId] = useState<string | null>(null);
 
   // Người dùng hiện tại & Modal chọn chế độ chơi (Luồng 2 & Luồng 3)
-  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(null);
+  const [currentUser, setCurrentUser] = useState<AuthenticatedUser | null>(propCurrentUser ?? null);
+  useEffect(() => {
+    if (propCurrentUser !== undefined) {
+      setCurrentUser(propCurrentUser);
+    }
+  }, [propCurrentUser]);
   const [isModeModalOpen, setIsModeModalOpen] = useState(false);
   const [modeModalSpec, setModeModalSpec] = useState<GameSpecification | null>(null);
 
@@ -1008,7 +1016,10 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   useEffect(() => {
     Promise.all([fetchWhoAmI().catch(() => null), fetchCurrentUser().catch(() => null)]).then(
       ([whoAmIRes, currentRes]) => {
-        setCurrentUser(whoAmIRes?.user || currentRes?.user || null);
+        const fetchedUser = whoAmIRes?.user || currentRes?.user || null;
+        if (fetchedUser) {
+          setCurrentUser(fetchedUser);
+        }
       }
     );
   }, []);
@@ -1281,10 +1292,12 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const canManageGame = (game: { ownerUserId?: string | null } | null | undefined): boolean => {
     if (!game) return false;
     if (currentUser?.role === 'ADMIN') return true;
+    const owner =
+      game.ownerUserId && game.ownerUserId !== 'legacy_local' ? game.ownerUserId : null;
     if (currentUser?.userId) {
-      return game.ownerUserId === currentUser.userId;
+      return owner === currentUser.userId || !owner;
     }
-    return !game.ownerUserId;
+    return !owner;
   };
 
   const handleViewOrEditGame = async (gameId: string, startInEditMode: boolean = false) => {
@@ -1292,10 +1305,16 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     resetRosterDraftInputs();
     setDetailSaveBanner(null);
     try {
-      const [spec] = await Promise.all([
+      const [spec, activeStatus] = await Promise.all([
         fetchGameById(gameId, { mode: isLibraryMode ? 'manage' : 'public' }),
+        fetchGameActiveStatus(gameId).catch(() => null),
         loadGameParticipants(gameId, isLibraryMode),
       ]);
+      if (activeStatus) {
+        setSavedGames((prev) =>
+          prev.map((item) => (item.gameId === gameId ? { ...item, activeStatus } : item))
+        );
+      }
       setActiveGameSpec(spec);
       syncEditorFromSpec(spec);
       setIsEditMode(isLibraryMode && startInEditMode && canManageGame(spec));
@@ -1722,7 +1741,28 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     const { game, sessionId } = confirmEndSessionModal;
     setIsEndingSession(true);
     try {
-      await endPracticeSession(sessionId);
+      const activeIds = (game.activeStatus?.activeSessions || [])
+        .map((s) => s.sessionId)
+        .filter(Boolean);
+      const idsToEnd = Array.from(new Set([sessionId, ...activeIds].filter(Boolean)));
+      for (const id of idsToEnd) {
+        await endPracticeSession(id);
+      }
+      setSavedGames((prev) =>
+        prev.map((item) =>
+          item.gameId === game.gameId && item.activeStatus
+            ? {
+                ...item,
+                activeStatus: {
+                  ...item.activeStatus,
+                  hasActiveSession: false,
+                  activeSessionCount: 0,
+                  activeSessions: [],
+                },
+              }
+            : item
+        )
+      );
       toast.success(
         `Đã kết thúc phiên luyện tập chơi đơn cho "${game.title}". Bạn có thể tiếp tục quản lý hoặc xóa game.`,
         'Kết thúc phiên thành công'
@@ -1741,7 +1781,28 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     const { game, roomCode } = confirmCloseRoomModal;
     setIsClosingRoom(true);
     try {
-      await closeMultiplayerRoom(roomCode);
+      const activeRoomCodes = (game.activeStatus?.activeRooms || [])
+        .map((r) => r.roomCode)
+        .filter(Boolean);
+      const codesToClose = Array.from(new Set([roomCode, ...activeRoomCodes].filter(Boolean)));
+      for (const code of codesToClose) {
+        await closeMultiplayerRoom(code);
+      }
+      setSavedGames((prev) =>
+        prev.map((item) =>
+          item.gameId === game.gameId && item.activeStatus
+            ? {
+                ...item,
+                activeStatus: {
+                  ...item.activeStatus,
+                  hasActiveRoom: false,
+                  activeRoomCount: 0,
+                  activeRooms: [],
+                },
+              }
+            : item
+        )
+      );
       toast.success(
         `Đã đóng phòng chơi trực tiếp (PIN: ${roomCode}) cho "${game.title}".`,
         'Đóng phòng thành công'
@@ -4210,6 +4271,92 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       >
                         Xuất JSON
                       </button>
+                      {(() => {
+                        const matchedActiveGame = savedGames.find(
+                          (item) => item.gameId === activeGameSpec.gameId
+                        );
+                        const firstActiveSessionId =
+                          matchedActiveGame?.activeStatus?.activeSessions?.[0]?.sessionId;
+                        const firstActiveRoomCode =
+                          matchedActiveGame?.activeStatus?.activeRooms?.[0]?.roomCode;
+                        const fallbackGameSummary: PersistedGameSummary = matchedActiveGame || {
+                          gameId: activeGameSpec.gameId,
+                          title: activeGameSpec.title,
+                          description: activeGameSpec.description,
+                          gameType: activeGameSpec.gameType,
+                          scoringMode: activeGameSpec.settings.scoringMode,
+                          questionCount: activeGameSpec.questions.length,
+                          timePerQuestion: activeGameSpec.settings.timePerQuestion,
+                          isPublic: Boolean(activeGameSpec.isPublic),
+                          ownerUserId: activeGameSpec.ownerUserId ?? null,
+                          sourceCount: activeGameSpec.sourceSummary?.sourceCount || 1,
+                          generatedAt: activeGameSpec.generatedAt,
+                          createdAt: activeGameSpec.generatedAt,
+                          updatedAt: activeGameSpec.generatedAt,
+                        };
+                        return (
+                          <>
+                            {matchedActiveGame?.activeStatus?.hasActiveSession &&
+                              firstActiveSessionId && (
+                                <button
+                                  type="button"
+                                  data-testid="library-detail-end-session-btn"
+                                  onClick={() =>
+                                    setConfirmEndSessionModal({
+                                      game: fallbackGameSummary,
+                                      sessionId: firstActiveSessionId,
+                                    })
+                                  }
+                                  style={{
+                                    backgroundColor: 'var(--accent-amber-subtle)',
+                                    color: 'var(--accent-amber)',
+                                    border: '1px solid rgba(245, 158, 11, 0.45)',
+                                    borderRadius: '8px',
+                                    padding: '0 12px',
+                                    height: '38px',
+                                    fontWeight: 700,
+                                    fontSize: '0.82rem',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                  }}
+                                >
+                                  <span>Kết thúc phiên chơi</span>
+                                </button>
+                              )}
+                            {matchedActiveGame?.activeStatus?.hasActiveRoom &&
+                              firstActiveRoomCode && (
+                                <button
+                                  type="button"
+                                  data-testid="library-detail-close-room-btn"
+                                  onClick={() =>
+                                    setConfirmCloseRoomModal({
+                                      game: fallbackGameSummary,
+                                      roomCode: firstActiveRoomCode,
+                                    })
+                                  }
+                                  style={{
+                                    backgroundColor: 'var(--accent-sky-subtle)',
+                                    color: 'var(--accent-sky)',
+                                    border: '1px solid rgba(56, 189, 248, 0.45)',
+                                    borderRadius: '8px',
+                                    padding: '0 12px',
+                                    height: '38px',
+                                    fontWeight: 700,
+                                    fontSize: '0.82rem',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '5px',
+                                  }}
+                                >
+                                  <span>Đóng phòng chơi</span>
+                                </button>
+                              )}
+                          </>
+                        );
+                      })()}
                       <button
                         type="button"
                         data-testid="library-detail-delete-game-btn"
@@ -6565,7 +6712,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
 
                       {/* Trạng thái phiên / phòng đang hoạt động (nếu có) */}
                       {(g.activeStatus?.hasActiveSession || g.activeStatus?.hasActiveRoom) && (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
                           {g.activeStatus?.hasActiveSession && (
                             <span
                               style={{
@@ -6584,6 +6731,36 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                               <span>Đang chơi đơn ({g.activeStatus.activeSessionCount})</span>
                             </span>
                           )}
+                          {isLibraryMode &&
+                            canManageGame(g) &&
+                            g.activeStatus?.hasActiveSession &&
+                            g.activeStatus.activeSessions?.[0]?.sessionId && (
+                              <button
+                                type="button"
+                                data-testid={`library-card-end-session-btn-${g.gameId}`}
+                                onClick={() =>
+                                  setConfirmEndSessionModal({
+                                    game: g,
+                                    sessionId: g.activeStatus!.activeSessions[0].sessionId,
+                                  })
+                                }
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  backgroundColor: 'rgba(245, 158, 11, 0.16)',
+                                  border: '1px solid rgba(245, 158, 11, 0.5)',
+                                  borderRadius: '5px',
+                                  padding: '2px 8px',
+                                  fontSize: '0.7rem',
+                                  color: 'var(--accent-amber)',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Kết thúc phiên chơi
+                              </button>
+                            )}
                           {g.activeStatus?.hasActiveRoom && (
                             <span
                               style={{
@@ -6602,6 +6779,36 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                               <span>PIN: {g.activeStatus.activeRooms?.[0]?.roomCode}</span>
                             </span>
                           )}
+                          {isLibraryMode &&
+                            canManageGame(g) &&
+                            g.activeStatus?.hasActiveRoom &&
+                            g.activeStatus.activeRooms?.[0]?.roomCode && (
+                              <button
+                                type="button"
+                                data-testid={`library-card-close-room-btn-${g.gameId}`}
+                                onClick={() =>
+                                  setConfirmCloseRoomModal({
+                                    game: g,
+                                    roomCode: g.activeStatus!.activeRooms[0].roomCode,
+                                  })
+                                }
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  backgroundColor: 'rgba(56, 189, 248, 0.16)',
+                                  border: '1px solid rgba(56, 189, 248, 0.5)',
+                                  borderRadius: '5px',
+                                  padding: '2px 8px',
+                                  fontSize: '0.7rem',
+                                  color: 'var(--accent-sky)',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Đóng phòng chơi
+                              </button>
+                            )}
                         </div>
                       )}
                     </div>
@@ -7664,6 +7871,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               </button>
               <button
                 type="button"
+                data-testid="confirm-end-session-btn"
                 disabled={isEndingSession}
                 onClick={handleExecuteEndSession}
                 style={{
@@ -7740,6 +7948,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               </button>
               <button
                 type="button"
+                data-testid="confirm-close-room-btn"
                 disabled={isClosingRoom}
                 onClick={handleExecuteCloseRoom}
                 style={{

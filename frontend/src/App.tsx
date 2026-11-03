@@ -664,6 +664,7 @@ export const AppContent: React.FC = () => {
             {activeTab === 'analytics' && (
               <AnalyticsPage
                 mode="overview"
+                currentUser={currentUser}
                 onNavigateToLibrary={handleNavigateToLibrary}
                 onSelectSavedGame={handleSelectSavedGame}
                 onNavigateToCreate={handleNavigateToCreate}
@@ -674,6 +675,7 @@ export const AppContent: React.FC = () => {
 
             {activeTab === 'library' && (
               <LibraryPage
+                currentUser={currentUser}
                 initialFilterPreset={libraryFilterPreset}
                 onSelectSavedGame={handleSelectSavedGame}
                 onNavigateToCreate={handleNavigateToCreate}

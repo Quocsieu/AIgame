@@ -51,7 +51,13 @@ export class GameEngine {
     } else {
       // Validate provided custom specification
       GameSpecificationSchema.parse(spec);
-      gameStore.save(spec, Date.now(), ownerUserId);
+      const specOwner =
+        spec.ownerUserId !== undefined
+          ? spec.ownerUserId
+          : ownerUserId && !ownerUserId.startsWith('guest_')
+            ? ownerUserId
+            : null;
+      gameStore.save(spec, Date.now(), specOwner, spec.isPublic);
     }
 
     const sessionId = `session_${crypto.randomUUID()}`;
@@ -200,12 +206,12 @@ export class GameEngine {
   }
 
   /**
-   * Retrieves the final GameResult once the game is finished (from memory or SQLite history).
+   * Retrieves the final GameResult once the game is finished or ended (from memory or SQLite history).
    */
   public getResult(sessionId: string): GameResult {
     const inMemory = sessionStore.get(sessionId);
     if (inMemory) {
-      if (inMemory.state !== 'FINISHED') {
+      if (inMemory.state !== 'FINISHED' && inMemory.state !== 'ABANDONED') {
         throw new AppError('INVALID_GAME_STATE', 'Game session is not finished yet.', 400);
       }
       return inMemory.getResult();
@@ -213,7 +219,7 @@ export class GameEngine {
 
     const persisted = persistenceRepo.getPracticeSessionById(sessionId);
     if (persisted) {
-      if (persisted.state !== 'FINISHED') {
+      if (persisted.state !== 'FINISHED' && persisted.state !== 'ABANDONED') {
         throw new AppError('INVALID_GAME_STATE', 'Game session is not finished yet.', 400);
       }
       const spec = gameStore.get(persisted.gameId);

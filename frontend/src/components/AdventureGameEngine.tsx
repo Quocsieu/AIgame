@@ -3413,12 +3413,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     game.settings?.examAnswerRevealPolicy ||
                     'AFTER_PUBLISH';
                   const canShowResultAnswers =
-                    !isExam ||
-                    isPlaytest ||
-                    Boolean(resObj?.canRevealAnswers) ||
-                    Boolean(resObj?.answersPublished) ||
-                    policy === 'IMMEDIATE' ||
-                    policy === 'AFTER_SUBMIT';
+                    isExam &&
+                    (isPlaytest ||
+                      Boolean(resObj?.canRevealAnswers) ||
+                      Boolean(resObj?.answersPublished) ||
+                      policy === 'IMMEDIATE' ||
+                      policy === 'AFTER_SUBMIT');
                   const qResults = Array.isArray(resObj?.questionResults)
                     ? resObj!.questionResults!
                     : [];

@@ -12,6 +12,8 @@ import {
   GameResult,
   SubmitAnswerRequestSchema,
 } from '../game/game.types.js';
+import { rejectGuestOrPlayerWrite } from '../middleware/auth.middleware.js';
+import { roomStore } from '../multiplayer/room.store.js';
 import { authService } from '../services/auth.service.js';
 import { exportService, ExportFormat } from '../services/export.service.js';
 import { quotaService } from '../services/quota.service.js';
@@ -41,6 +43,7 @@ function resolveGameExamState(
   canRevealAnswers: boolean;
   autoAdvanceMs: number;
   passThresholdPercent: number;
+  isOwnerOrAdmin?: boolean;
 } {
   const liveSpec = gameStore.get(gameId) || fallbackSpec;
   const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
@@ -88,14 +91,17 @@ function resolveGameExamState(
     Boolean(currentUser?.role === 'ADMIN') ||
     Boolean(currentUser?.userId && ownerUserId && currentUser.userId === ownerUserId);
 
-  const isSessionFinished = options?.sessionState === 'FINISHED';
+  const isSessionFinished =
+    options?.sessionState === 'FINISHED' || options?.sessionState === 'ABANDONED';
   const canRevealQuestionAnswers =
     sessionMode === 'PLAY' ||
     answersPublished ||
     examAnswerRevealPolicy === 'IMMEDIATE';
   const canRevealAnswers =
-    canRevealQuestionAnswers ||
-    (examAnswerRevealPolicy === 'AFTER_SUBMIT' && isSessionFinished);
+    sessionMode === 'EXAM' &&
+    (answersPublished ||
+      examAnswerRevealPolicy === 'IMMEDIATE' ||
+      (examAnswerRevealPolicy === 'AFTER_SUBMIT' && isSessionFinished));
 
   const autoAdvanceMs =
     typeof liveSpec?.settings?.autoAdvanceDelayMs === 'number'
@@ -145,6 +151,30 @@ function sanitizeGameResultForClient(
       sessionMode: examState.sessionMode,
       passThresholdPercent: examState.passThresholdPercent,
     });
+
+  if (examState.sessionMode === 'PLAY') {
+    return {
+      ...result,
+      sessionMode: 'PLAY',
+      examAnswerRevealPolicy: examState.examAnswerRevealPolicy || 'AFTER_PUBLISH',
+      examStatus: examState.examStatus || 'OPEN',
+      answersPublished: false,
+      canRevealAnswers: false,
+      evaluation,
+      questionResults: (result.questionResults || []).map(qr => ({
+        questionId: qr.questionId,
+        answer: qr.answer,
+        isCorrect: qr.isCorrect,
+        pointsEarned: qr.pointsEarned,
+        responseTimeMs: qr.responseTimeMs,
+        answeredAt: qr.answeredAt,
+        timedOut: qr.timedOut,
+        correctAnswer: undefined as any,
+        explanation: undefined,
+        sourceReference: undefined,
+      })),
+    } as any;
+  }
 
   if (examState.canRevealAnswers) {
     return {
@@ -903,52 +933,90 @@ sessionRouter.post('/:sessionId/next', (req: Request, res: Response, next: NextF
  */
 function handleEndSession(req: Request, res: Response, next: NextFunction) {
   try {
+    rejectGuestOrPlayerWrite(req, 'kết thúc phiên chơi');
+
     const sessionId = String(req.params.sessionId);
     const session = gameEngine.getSession(sessionId);
 
     const gameId = session.specification.gameId;
     const storedSpec = gameStore.get(gameId);
     const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+    const rawGameOwner =
+      storedSpec?.ownerUserId ||
+      ownerInfo?.ownerUserId ||
+      session.specification.ownerUserId ||
+      null;
     const gameOwnerUserId =
-      storedSpec?.ownerUserId ?? ownerInfo?.ownerUserId ?? session.specification.ownerUserId ?? null;
+      rawGameOwner && rawGameOwner !== 'legacy_local' ? rawGameOwner : null;
 
-    const currentUserId = req.user?.userId ?? null;
-    const isAdmin = req.user?.role === 'ADMIN';
+    const currentUserId = req.user && !req.isGuest ? req.user.userId : null;
+    const isAdmin = Boolean(req.user && !req.isGuest && req.user.role === 'ADMIN');
+    const isGameOwner = Boolean(
+      gameOwnerUserId && currentUserId && currentUserId === gameOwnerUserId
+    );
+
+    const providedHostToken =
+      (typeof req.headers['x-host-token'] === 'string'
+        ? req.headers['x-host-token'].trim()
+        : '') ||
+      (typeof req.body?.hostToken === 'string' ? req.body.hostToken.trim() : '');
+    const isHostForGame = Boolean(
+      providedHostToken &&
+        roomStore
+          .getAll()
+          .some((room) => room.gameId === gameId && room.hostToken === providedHostToken)
+    );
+
     const providedLockToken =
       (typeof req.headers['x-participant-token'] === 'string'
         ? req.headers['x-participant-token'].trim()
         : '') ||
       (typeof req.query?.lockToken === 'string' ? req.query.lockToken.trim() : '') ||
       (typeof req.body?.lockToken === 'string' ? req.body.lockToken.trim() : '');
-    const isMatchedLockToken = Boolean(
-      session.lockToken && providedLockToken && providedLockToken === session.lockToken
-    );
-    const isSessionOwner =
-      isMatchedLockToken ||
-      Boolean(session.ownerUserId && currentUserId === session.ownerUserId);
-    const isGameOwner = Boolean(gameOwnerUserId && currentUserId === gameOwnerUserId);
-    const isUnowned = !session.ownerUserId && !gameOwnerUserId && !session.lockToken;
 
-    if (session.lockToken && providedLockToken && providedLockToken !== session.lockToken && !isAdmin && !isGameOwner) {
+    // Reject participant/player tokens attempting to invoke the management end-session endpoint
+    if (providedLockToken && !isAdmin && !isGameOwner && !isHostForGame) {
       throw new AppError(
         'ACCESS_DENIED',
-        'Mã xác thực phiên làm bài (lockToken) không khớp với phiên này.',
+        'Người chơi hoặc thí sinh không có quyền kết thúc phiên luyện tập từ phía quản lý.',
         403
       );
     }
 
-    if (!isAdmin && !isSessionOwner && !isGameOwner && !isUnowned) {
-      throw new AppError(
-        'ACCESS_DENIED',
-        'Bạn không có quyền kết thúc phiên luyện tập này.',
-        403
+    if (gameOwnerUserId) {
+      if (!isAdmin && !isGameOwner && !isHostForGame) {
+        throw new AppError(
+          'ACCESS_DENIED',
+          'Bạn không có quyền kết thúc phiên luyện tập này.',
+          403
+        );
+      }
+    } else {
+      // Unowned local organizer game: allow local organizer or Admin, but block different registered user if session belonged to another user
+      const isNonGuestSessionUser = Boolean(
+        session.ownerUserId && !session.ownerUserId.startsWith('guest_')
       );
+      if (
+        isNonGuestSessionUser &&
+        currentUserId &&
+        currentUserId !== session.ownerUserId &&
+        !isAdmin &&
+        !isHostForGame
+      ) {
+        throw new AppError(
+          'ACCESS_DENIED',
+          'Bạn không có quyền kết thúc phiên luyện tập này.',
+          403
+        );
+      }
     }
 
+    const alreadyEnded = session.state === 'FINISHED' || session.state === 'ABANDONED';
     const summary = gameEngine.endSession(sessionId);
     res.status(200).json(
       createSuccessResponse({
         ended: true,
+        alreadyEnded,
         session: summary,
       })
     );
@@ -1012,7 +1080,7 @@ sessionRouter.get('/:sessionId/result', (req: Request, res: Response, next: Next
       'read'
     );
 
-    if (persisted.state !== 'FINISHED') {
+    if (persisted.state !== 'FINISHED' && persisted.state !== 'ABANDONED') {
       throw new AppError('GAME_NOT_FINISHED', 'Game session is not finished yet.', 400);
     }
 
@@ -1030,19 +1098,32 @@ sessionRouter.get('/:sessionId/result', (req: Request, res: Response, next: Next
       passThresholdPercent: examState.passThresholdPercent,
     });
 
-    const sanitizedResults = examState.canRevealAnswers
-      ? persisted.questionResults
-      : (persisted.questionResults || []).map(qr => ({
-          questionId: qr.questionId,
-          answer: qr.answer,
-          isCorrect: null as any,
-          pointsEarned: null as any,
-          responseTimeMs: qr.responseTimeMs,
-          answeredAt: qr.answeredAt,
-          correctAnswer: undefined,
-          explanation: undefined,
-          sourceReference: undefined,
-        }));
+    const sanitizedResults =
+      examState.sessionMode === 'PLAY'
+        ? (persisted.questionResults || []).map(qr => ({
+            questionId: qr.questionId,
+            answer: qr.answer,
+            isCorrect: qr.isCorrect,
+            pointsEarned: qr.pointsEarned,
+            responseTimeMs: qr.responseTimeMs,
+            answeredAt: qr.answeredAt,
+            correctAnswer: undefined,
+            explanation: undefined,
+            sourceReference: undefined,
+          }))
+        : examState.canRevealAnswers
+          ? persisted.questionResults
+          : (persisted.questionResults || []).map(qr => ({
+              questionId: qr.questionId,
+              answer: qr.answer,
+              isCorrect: null as any,
+              pointsEarned: null as any,
+              responseTimeMs: qr.responseTimeMs,
+              answeredAt: qr.answeredAt,
+              correctAnswer: undefined,
+              explanation: undefined,
+              sourceReference: undefined,
+            }));
 
     res.status(200).json(
       createSuccessResponse({
@@ -1052,9 +1133,9 @@ sessionRouter.get('/:sessionId/result', (req: Request, res: Response, next: Next
         gameType: persisted.gameType,
         sessionMode: examState.sessionMode,
         examAnswerRevealPolicy: examState.examAnswerRevealPolicy,
-        answersPublished: examState.answersPublished,
-        canRevealAnswers: examState.canRevealAnswers,
-        state: 'FINISHED',
+        answersPublished: examState.sessionMode === 'PLAY' ? false : examState.answersPublished,
+        canRevealAnswers: examState.sessionMode === 'PLAY' ? false : examState.canRevealAnswers,
+        state: persisted.state,
         totalScore: persisted.totalScore,
         score: persisted.totalScore,
         maxPossibleScore: persisted.maxPossibleScore,
@@ -1130,7 +1211,7 @@ sessionRouter.get('/:sessionId/export', (req: Request, res: Response, next: Next
       persistedSessionMode: persisted.sessionMode,
       persistedExamRevealPolicy: persisted.examAnswerRevealPolicy,
     });
-    if (!examState.canRevealAnswers) {
+    if (examState.sessionMode === 'EXAM' && !examState.canRevealAnswers) {
       throw new AppError(
         'EXAM_ANSWERS_LOCKED',
         'Đáp án kỳ thi chưa được Ban Tổ Chức công bố nên chưa thể xuất chi tiết bài làm.',
@@ -1138,7 +1219,20 @@ sessionRouter.get('/:sessionId/export', (req: Request, res: Response, next: Next
       );
     }
 
-    const payload = exportService.exportPracticeSession(persisted, format);
+    const sessionForExport =
+      examState.sessionMode === 'PLAY' && !examState.isOwnerOrAdmin
+        ? {
+            ...persisted,
+            questionResults: (persisted.questionResults || []).map(qr => ({
+              ...qr,
+              correctAnswer: '' as any,
+              explanation: undefined,
+              sourceReference: undefined,
+            })),
+          }
+        : persisted;
+
+    const payload = exportService.exportPracticeSession(sessionForExport, format);
     res.setHeader('Content-Type', payload.contentType);
     res.setHeader('Content-Disposition', `attachment; filename="${payload.filename}"`);
     res.status(200).send(payload.body);

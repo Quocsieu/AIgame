@@ -939,12 +939,26 @@ export class PersistenceRepository {
       metaCache?.set(mapped.gameId, meta);
     }
     const isExam = mapped.sessionMode === 'EXAM' || meta.sessionMode === 'EXAM';
+    if (!isExam) {
+      const safePlayResults = Array.isArray(mapped.questionResults)
+        ? mapped.questionResults.map(qr => ({
+            ...qr,
+            correctAnswer: undefined as any,
+            explanation: undefined,
+            sourceReference: undefined,
+          }))
+        : [];
+      return {
+        ...mapped,
+        sessionMode: 'PLAY',
+        questionResults: safePlayResults,
+      };
+    }
     const effectivePolicy = mapped.examAnswerRevealPolicy
       ? resolveEffectiveExamRevealPolicy(mapped.examAnswerRevealPolicy)
       : meta.examAnswerRevealPolicy;
     const isFinished = mapped.state === 'FINISHED';
     const canRevealAnswers =
-      !isExam ||
       meta.answersPublished ||
       effectivePolicy === 'IMMEDIATE' ||
       (effectivePolicy === 'AFTER_SUBMIT' && isFinished);
@@ -2329,34 +2343,36 @@ export class PersistenceRepository {
 
       if (existingRow) {
         targetAttemptId = String(existingRow.attempt_id);
-        const finishedAt =
-          params.state === 'FINISHED' || params.state === 'ABANDONED'
-            ? params.finishedAt || existingRow.finished_at || nowIso
-            : null;
-        const answersJson =
-          params.answers !== undefined ? JSON.stringify(params.answers) : String(existingRow.answers_json || '[]');
+        if (!(wasAlreadyFinished && params.state === 'ABANDONED')) {
+          const finishedAt =
+            params.state === 'FINISHED' || params.state === 'ABANDONED'
+              ? params.finishedAt || existingRow.finished_at || nowIso
+              : null;
+          const answersJson =
+            params.answers !== undefined ? JSON.stringify(params.answers) : String(existingRow.answers_json || '[]');
 
-        db.prepare(
-          `UPDATE game_participant_attempts
-           SET state = ?, score = ?, max_possible_score = ?,
-               correct_answers = ?, total_questions = ?, accuracy_percent = ?,
-               duration_ms = ?, is_passed = ?, answers_json = ?,
-               finished_at = ?, updated_at = ?
-           WHERE attempt_id = ?`
-        ).run(
-          params.state,
-          Math.max(0, Math.round(params.score)),
-          Math.max(0, Math.round(params.maxPossibleScore)),
-          safeCorrect,
-          safeTotal,
-          accuracyPercent,
-          Math.max(0, Math.round(params.durationMs)),
-          isPassed,
-          answersJson,
-          finishedAt,
-          nowIso,
-          targetAttemptId
-        );
+          db.prepare(
+            `UPDATE game_participant_attempts
+             SET state = ?, score = ?, max_possible_score = ?,
+                 correct_answers = ?, total_questions = ?, accuracy_percent = ?,
+                 duration_ms = ?, is_passed = ?, answers_json = ?,
+                 finished_at = ?, updated_at = ?
+             WHERE attempt_id = ?`
+          ).run(
+            params.state,
+            Math.max(0, Math.round(params.score)),
+            Math.max(0, Math.round(params.maxPossibleScore)),
+            safeCorrect,
+            safeTotal,
+            accuracyPercent,
+            Math.max(0, Math.round(params.durationMs)),
+            isPassed,
+            answersJson,
+            finishedAt,
+            nowIso,
+            targetAttemptId
+          );
+        }
       } else {
         // Create on-the-fly if not started earlier (e.g., free-text player in room or solo)
         let attemptNumber = 1;
@@ -2456,6 +2472,20 @@ export class PersistenceRepository {
             resolvedParticipantId
           );
         }
+      } else if (resolvedParticipantId && params.state === 'ABANDONED' && !wasAlreadyFinished) {
+        db.prepare(
+          `UPDATE game_participants
+           SET status = CASE
+                 WHEN status = 'IN_PROGRESS' THEN (CASE WHEN used_attempts > 0 THEN 'COMPLETED' ELSE 'PENDING' END)
+                 ELSE status
+               END,
+               active_session_id = NULL,
+               active_room_code = NULL,
+               active_lock_token = NULL,
+               active_locked_at = NULL,
+               updated_at = ?
+           WHERE game_id = ? AND participant_id = ?`
+        ).run(nowIso, params.gameId, resolvedParticipantId);
       }
 
       const finalRow = db

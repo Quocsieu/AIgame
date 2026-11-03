@@ -1111,8 +1111,18 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           'Đợt thi đã kết thúc'
         );
       } else if (err.message?.includes('abandoned') || err.message?.includes('đã bị kết thúc')) {
-        toast.warning('Phiên luyện tập này đã được kết thúc bởi người tạo. Đang chuyển hướng...', 'Phiên đã đóng');
-        setTimeout(() => handleLeave(), 1500);
+        stopTimer();
+        clearAutoAdvanceTimer();
+        try {
+          const res = await fetchPracticeResult(sessionId);
+          soundManager.stopAll();
+          setFinalResult(res);
+          setCurrentQuestion(null);
+          toast.warning('Phiên chơi đã được kết thúc. Đây là kết quả tổng kết của bạn.', 'Phiên đã kết thúc');
+        } catch {
+          toast.warning('Phiên luyện tập này đã được kết thúc bởi người tạo. Đang chuyển hướng...', 'Phiên đã đóng');
+          setTimeout(() => handleLeave(), 1500);
+        }
       } else if (
         err.code === 'ANSWER_TIMEOUT' ||
         err.message?.includes('time limit expired') ||
@@ -1166,12 +1176,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             1,
             Math.round((Date.now() - playtestStartedAtRef.current) / 1000)
           );
+          const isPlaytestExam = spec?.settings?.sessionMode === 'EXAM';
           const localFinal: PracticeFinalResult = {
             sessionId: 'playtest-local-session',
             gameId: spec?.gameId || 'playtest-game',
             title: spec?.title || 'Chơi thử',
             gameType: spec?.gameType || 'MIXED',
             sessionMode: spec?.settings?.sessionMode || 'PLAY',
+            canRevealAnswers: isPlaytestExam,
             totalScore: playerScore,
             score: playerScore,
             maxPossibleScore: maxScore,
@@ -1185,7 +1197,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             performanceEvaluation: perfEval,
             durationMs: durationSeconds * 1000,
             finishedAt: new Date().toISOString(),
-            questionResults: [...playtestQuestionResultsRef.current],
+            questionResults: isPlaytestExam
+              ? [...playtestQuestionResultsRef.current]
+              : playtestQuestionResultsRef.current.map((qr) => ({
+                  ...qr,
+                  correctAnswer: undefined,
+                  explanation: undefined,
+                })),
           };
           soundManager.stopAll();
           soundManager.playVictory();
@@ -1232,8 +1250,18 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       }
     } catch (err: any) {
       if (err.message?.includes('abandoned') || err.message?.includes('đã bị kết thúc')) {
-        toast.warning('Phiên luyện tập này đã được kết thúc bởi người tạo. Đang chuyển hướng...', 'Phiên đã đóng');
-        setTimeout(() => handleLeave(), 1500);
+        stopTimer();
+        clearAutoAdvanceTimer();
+        try {
+          const res = await fetchPracticeResult(sessionId);
+          soundManager.stopAll();
+          setFinalResult(res);
+          setCurrentQuestion(null);
+          toast.warning('Phiên chơi đã được kết thúc. Đây là kết quả tổng kết của bạn.', 'Phiên đã kết thúc');
+        } catch {
+          toast.warning('Phiên luyện tập này đã được kết thúc bởi người tạo. Đang chuyển hướng...', 'Phiên đã đóng');
+          setTimeout(() => handleLeave(), 1500);
+        }
       } else {
         toast.error(err.message || 'Không thể tải câu hỏi tiếp theo.', 'Lỗi chuyển câu');
       }
@@ -2770,12 +2798,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         {/* Per-Question Answer & Explanation Review */}
         {(() => {
           const canShowResultAnswers =
-            !isExamMode ||
-            playtestMode ||
-            Boolean(finalResult.canRevealAnswers) ||
-            Boolean(finalResult.answersPublished) ||
-            effectiveExamRevealPolicy === 'IMMEDIATE' ||
-            effectiveExamRevealPolicy === 'AFTER_SUBMIT';
+            isExamMode &&
+            (playtestMode ||
+              Boolean(finalResult.canRevealAnswers) ||
+              Boolean(finalResult.answersPublished) ||
+              effectiveExamRevealPolicy === 'IMMEDIATE' ||
+              effectiveExamRevealPolicy === 'AFTER_SUBMIT');
           const qResults = Array.isArray(finalResult.questionResults)
             ? finalResult.questionResults
             : [];

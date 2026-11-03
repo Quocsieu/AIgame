@@ -472,10 +472,10 @@ export async function fetchGameActiveStatus(gameId: string): Promise<GameActiveS
   return data.data;
 }
 
-export async function endPracticeSession(sessionId: string): Promise<{ ended: boolean; session: any }> {
+export async function endPracticeSession(sessionId: string): Promise<{ ended: boolean; alreadyEnded?: boolean; session: any }> {
   const res = await fetch(`${API_BASE_URL}/games/sessions/${encodeURIComponent(sessionId)}/end`, {
     method: 'POST',
-    headers: buildAuthHeaders(undefined, { isGuestPlayer: true, sessionId }),
+    headers: buildAuthHeaders(),
   });
   const data = await res.json();
   if (!data.success) {

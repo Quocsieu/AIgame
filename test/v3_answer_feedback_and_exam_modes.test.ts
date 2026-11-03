@@ -308,14 +308,18 @@ describe('V3 ANSWER FEEDBACK & EXAM MODES VERIFICATION', () => {
     assert.equal(q6Res.body.data.isCorrect, true);
     assert.equal(q6Res.body.data.correctAnswer, '1945');
 
-    // Finish session
+    // Finish session -> PLAY mode hides post-game correct answers & explanations while preserving score summary
     const finishRes = await supertest(app)
       .post(`/api/games/sessions/${sessionId}/next`)
       .set('X-Participant-Token', pToken)
       .expect(200);
     assert.equal(finishRes.body.data.finished, true);
-    assert.equal(finishRes.body.data.result.canRevealAnswers, true);
+    assert.equal(finishRes.body.data.result.canRevealAnswers, false);
     assert.equal(finishRes.body.data.result.questionResults.length, 6);
+    for (const qr of finishRes.body.data.result.questionResults) {
+      assert.equal(qr.correctAnswer, undefined);
+      assert.equal(qr.explanation, undefined);
+    }
   });
 
   it('2. EXAM Mode Policy 1 (IMMEDIATE - Hiển thị đáp án sau mỗi câu): reveals right/wrong + correctAnswer + explanation immediately after locking answer or timeout, prevents re-answering', async () => {
