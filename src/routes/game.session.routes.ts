@@ -342,6 +342,7 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
 
     const {
       gameId,
+      batchId: rawBatchId,
       gameSpecification,
       publicPlay,
       participantId,
@@ -352,14 +353,20 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
       employeeCode,
       lockToken,
     } = parseResult.data;
+    const requestedBatchId =
+      typeof rawBatchId === 'string' && rawBatchId.trim() ? rawBatchId.trim() : null;
 
     // Verify draft access: public play MUST be on a published game
     const storedSpec = gameStore.get(gameId);
     const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
     const resolvedIsPublic = storedSpec?.isPublic ?? ownerInfo?.isPublic ?? gameSpecification?.isPublic ?? false;
     const resolvedOwnerUserId = storedSpec?.ownerUserId ?? ownerInfo?.ownerUserId ?? gameSpecification?.ownerUserId ?? null;
+    const effectiveSpec = storedSpec || gameSpecification;
+    const isExamBatchJoin = Boolean(
+      requestedBatchId && effectiveSpec?.settings?.sessionMode === 'EXAM'
+    );
 
-    if (publicPlay && !resolvedIsPublic) {
+    if (publicPlay && !resolvedIsPublic && !isExamBatchJoin) {
       throw new AppError(
         'GAME_NOT_PUBLISHED',
         'Game này chưa được xuất bản nên không thể bắt đầu phiên chơi công khai.',
@@ -367,8 +374,8 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
       );
     }
 
-    // If game is draft (unpublished), caller MUST be owner or Admin to preview/play
-    if (!resolvedIsPublic) {
+    // If game is draft (unpublished), caller MUST be owner or Admin to preview/play (unless joining an EXAM batch via QR/link)
+    if (!resolvedIsPublic && !isExamBatchJoin) {
       authService.assertResourceAccess({
         resourceType: 'bộ câu hỏi',
         ownerUserId: resolvedOwnerUserId,
@@ -378,19 +385,73 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
       });
     }
 
-    const effectiveSpec = storedSpec || gameSpecification;
     const rosterMode = effectiveSpec?.settings?.rosterMode || 'FREE_TEXT';
     const sessionMode: 'PLAY' | 'EXAM' =
       effectiveSpec?.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
     const examStatus = effectiveSpec?.settings?.examStatus || 'OPEN';
 
-    // V3 Stage 4 & 5: Enforce examStatus and examOpenAt / examCloseAt window on backend clock
+    // V3 Stage 4 & 5: Enforce examStatus and per-batch status on backend clock
     if (examStatus === 'CLOSED' || examStatus === 'CLOSING') {
       throw new AppError(
         'EXAM_CLOSED',
         'Đợt thi này đã kết thúc, không thể bắt đầu lượt thi mới.',
         403
       );
+    }
+
+    if (sessionMode === 'EXAM' && requestedBatchId) {
+      const storedBatches = Array.isArray(effectiveSpec?.settings?.examBatches)
+        ? effectiveSpec!.settings.examBatches
+        : [];
+      let matchedBatch: { batchId: string; batchName?: string; status?: string } | undefined =
+        storedBatches.find((b) => b.batchId === requestedBatchId);
+
+      if (!matchedBatch && storedBatches.length === 0 && requestedBatchId === 'batch-1') {
+        matchedBatch = {
+          batchId: 'batch-1',
+          batchName: 'Đợt 1',
+          status: 'OPEN',
+        };
+      }
+      if (!matchedBatch && requestedBatchId.startsWith('room:')) {
+        const reqRoomId = requestedBatchId.slice(5);
+        const activeRoom = roomStore
+          .getActiveRoomsForGame(gameId)
+          .find((r) => r.roomId === reqRoomId && r.state !== 'FINISHED');
+        if (activeRoom) {
+          matchedBatch = {
+            batchId: requestedBatchId,
+            batchName: `Phòng ${activeRoom.roomCode}`,
+            status: 'OPEN',
+          };
+        }
+      }
+      if (!matchedBatch) {
+        const reportDetail = persistenceRepo.getGameReportsDetail(gameId);
+        const fromReport = reportDetail?.examBatches?.find((b) => b.batchId === requestedBatchId);
+        if (fromReport) {
+          matchedBatch = {
+            batchId: fromReport.batchId,
+            batchName: fromReport.batchName,
+            status: fromReport.status,
+          };
+        }
+      }
+
+      if (!matchedBatch) {
+        throw new AppError(
+          'EXAM_BATCH_NOT_FOUND',
+          'Đợt thi không tồn tại hoặc liên kết tham gia không hợp lệ.',
+          404
+        );
+      }
+      if (matchedBatch.status === 'CLOSED' || matchedBatch.status === 'CLOSING') {
+        throw new AppError(
+          'EXAM_CLOSED',
+          'Đợt thi này đã kết thúc, không thể bắt đầu lượt thi mới.',
+          403
+        );
+      }
     }
 
     const examOpenAtStr = effectiveSpec?.settings?.examOpenAt;
@@ -552,10 +613,13 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
           session.specification.settings.scoringMode
         );
         const activeBatchId =
-          typeof session.specification.settings?.activeBatchId === 'string' &&
+          requestedBatchId ||
+          (typeof session.specification.settings?.activeBatchId === 'string' &&
           session.specification.settings.activeBatchId.trim()
             ? session.specification.settings.activeBatchId.trim()
-            : null;
+            : sessionMode === 'EXAM'
+              ? 'batch-1'
+              : null);
         const attempt = persistenceRepo.recordParticipantAttemptStart({
           gameId: session.specification.gameId,
           participantId: participantId ?? null,
@@ -576,10 +640,20 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
       }
     }
 
+    const effectiveResponseBatchId =
+      requestedBatchId ||
+      (typeof session.specification.settings?.activeBatchId === 'string' &&
+      session.specification.settings.activeBatchId.trim()
+        ? session.specification.settings.activeBatchId.trim()
+        : sessionMode === 'EXAM'
+          ? 'batch-1'
+          : null);
+
     res.status(200).json(
       createSuccessResponse({
         sessionId: session.sessionId,
         gameId: session.specification.gameId,
+        batchId: effectiveResponseBatchId,
         state: session.state,
         sessionMode,
         resumed: false,

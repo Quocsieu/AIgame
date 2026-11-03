@@ -252,15 +252,16 @@ function createSampleQuizSpec(
     gameType: 'QUIZ',
     settings: {
       questionCount: 5,
+      timePerQuestion: 30,
       timeLimitSeconds: 150,
       pointsPerQuestion: 200,
-      scoringMode: 'FIXED',
+      scoringMode: 'STANDARD',
       sessionMode: 'PLAY',
       rosterMode: 'FREE_TEXT',
       maxAttemptsPerParticipant: 1,
       officialAttemptPolicy: 'HIGHEST_SCORE',
       passThresholdPercent: 60,
-      examAnswerRevealPolicy: 'NEVER',
+      examAnswerRevealPolicy: 'AFTER_PUBLISH',
       answersPublished: false,
       examStatus: 'OPEN',
       examClosedAt: null,
@@ -432,6 +433,7 @@ describe('V3 Reports 2.0 — History, Leaderboard, Exam Batches, Retake Granting
    */
   async function runSoloAttempt(params: {
     gameId: string;
+    batchId?: string;
     participantId?: string;
     playerName: string;
     departmentUnit?: string;
@@ -442,6 +444,7 @@ describe('V3 Reports 2.0 — History, Leaderboard, Exam Batches, Retake Granting
       method: 'POST',
       body: {
         gameId: params.gameId,
+        ...(params.batchId ? { batchId: params.batchId } : {}),
         participantId: params.participantId,
         playerName: params.playerName,
         departmentUnit: params.departmentUnit,
@@ -557,7 +560,7 @@ describe('V3 Reports 2.0 — History, Leaderboard, Exam Batches, Retake Granting
         maxAttemptsPerParticipant: 1,
         passThresholdPercent: 60,
         officialAttemptPolicy: 'HIGHEST_SCORE',
-        examAnswerRevealPolicy: 'NEVER',
+        examAnswerRevealPolicy: 'AFTER_PUBLISH',
       }
     );
     gameStore.save(examSpec, Date.now() - 10000, null, true);
@@ -1306,6 +1309,509 @@ describe('V3 Reports 2.0 — History, Leaderboard, Exam Batches, Retake Granting
       [],
       `Unexpected 5xx responses: ${page.server5xxErrors.join('; ')}`
     );
+
+    await page.close();
+  });
+
+  // =========================================================================
+  // 14. KIỂM THỬ QR RIÊNG CHO TỪNG ĐỢT THI EXAM TRONG REPORTS (T01 – T24)
+  // =========================================================================
+  it('T01 – T24: Per-batch EXAM QR & joinUrl isolation (5 distinct batches, read-only QR opening, closed batch QR rejection, in-place batch reopening preserving batchId & history, expired PIN refresh, RBAC 403, PLAY mode untouched, and Chromium E2E across desktop & mobile)', async () => {
+    // Setup a dedicated EXAM game with 5 batches to test T01–T24 deterministically
+    const qrExamGameId = `game_exam_5batches_${Date.now()}`;
+    const qrExamSpec = createSampleQuizSpec(
+      qrExamGameId,
+      'Kỳ Thi Sát Hạch Chuyên Đề 5 Đợt',
+      {
+        sessionMode: 'EXAM',
+        rosterMode: 'PRECONFIGURED',
+        maxAttemptsPerParticipant: 1,
+        passThresholdPercent: 60,
+        officialAttemptPolicy: 'HIGHEST_SCORE',
+        examAnswerRevealPolicy: 'AFTER_PUBLISH',
+      }
+    );
+    gameStore.save(qrExamSpec, Date.now() - 4000, null, true);
+
+    const qrRoster = persistenceRepo.upsertParticipants(
+      qrExamGameId,
+      [
+        {
+          fullName: 'Vũ Minh Quân',
+          departmentUnit: 'Phòng An Ninh Mạng',
+          employeeCode: 'QR001',
+          allowedAttempts: 2,
+        },
+        {
+          fullName: 'Hoàng Thanh Mai',
+          departmentUnit: 'Phòng Kiểm Toán',
+          employeeCode: 'QR002',
+          allowedAttempts: 2,
+        },
+        {
+          fullName: 'Trịnh Quốc Khánh',
+          departmentUnit: 'Phòng Pháp Chế',
+          employeeCode: 'QR003',
+          allowedAttempts: 2,
+        },
+      ],
+      true
+    );
+    const qrP1Id = qrRoster.find((p) => p.employeeCode === 'QR001')!.participantId;
+    const qrP2Id = qrRoster.find((p) => p.employeeCode === 'QR002')!.participantId;
+    const qrP3Id = qrRoster.find((p) => p.employeeCode === 'QR003')!.participantId;
+
+    // T06: Candidate 1 scans/opens Batch 1 link (batch-1) and completes exam -> recorded in Đợt 1
+    const qrBatch1Res = await apiFetch(`/api/games/${qrExamGameId}/batches/batch-1/qr`);
+    assert.equal(qrBatch1Res.status, 200);
+    assert.equal(qrBatch1Res.json.data.batchId, 'batch-1');
+    assert.equal(qrBatch1Res.json.data.status, 'OPEN');
+    assert.ok(qrBatch1Res.json.data.joinUrl.includes(`play=${qrExamGameId}&batch=batch-1`));
+    assert.ok(qrBatch1Res.json.data.qrDataUrl.startsWith('data:image/png;base64,'));
+
+    const p1Batch1Attempt = await runSoloAttempt({
+      gameId: qrExamGameId,
+      batchId: 'batch-1',
+      participantId: qrP1Id,
+      playerName: 'Vũ Minh Quân',
+      correctCount: 3, // 300 pts (60% -> PASSED)
+    });
+    assert.equal(p1Batch1Attempt.status, 200);
+
+    // Close Batch 1 and open Batch 2 (with a room PIN to also test T15 expired PIN refresh later!)
+    await apiFetch(`/api/games/${qrExamGameId}/close-exam`, {
+      method: 'POST',
+      body: { batchId: 'batch-1' },
+    });
+    const openBatch2Res = await apiFetch(`/api/games/${qrExamGameId}/reopen-exam`, {
+      method: 'POST',
+      body: { createNewBatch: true, withRoomPin: true },
+    });
+    assert.equal(openBatch2Res.status, 200);
+    assert.equal(openBatch2Res.json.data.batchId, 'batch-2');
+    const batch2InitialPin = openBatch2Res.json.data.pin as string;
+    assert.ok(batch2InitialPin && batch2InitialPin.length >= 4, 'Batch 2 must have an initial room PIN');
+
+    // T07: Candidate 2 scans/opens Batch 2 link (batch-2) and completes exam -> recorded in Đợt 2 (NOT Đợt 1)
+    const p2Batch2Attempt = await runSoloAttempt({
+      gameId: qrExamGameId,
+      batchId: 'batch-2',
+      participantId: qrP2Id,
+      playerName: 'Hoàng Thanh Mai',
+      correctCount: 4, // 400 pts (80% -> PASSED)
+    });
+    assert.equal(p2Batch2Attempt.status, 200);
+
+    // Create Batches 3, 4, and 5 (so Batch 1..4 are CLOSED and Batch 5 is OPEN, with Room PIN on Batch 3)
+    for (const num of [3, 4, 5]) {
+      await apiFetch(`/api/games/${qrExamGameId}/close-exam`, {
+        method: 'POST',
+        body: {},
+      });
+      const openNext = await apiFetch(`/api/games/${qrExamGameId}/reopen-exam`, {
+        method: 'POST',
+        body: { createNewBatch: true, withRoomPin: num === 3 },
+      });
+      assert.equal(openNext.status, 200);
+      assert.equal(openNext.json.data.batchId, `batch-${num}`);
+    }
+
+    // T02 & T03: Verify all 5 batches have distinct QR codes and distinct joinUrls
+    const batchQrMap = new Map<string, { joinUrl: string; qrDataUrl: string; status: string }>();
+    for (let i = 1; i <= 5; i++) {
+      const bId = `batch-${i}`;
+      const qrRes = await apiFetch(`/api/games/${qrExamGameId}/batches/${bId}/qr`);
+      assert.equal(qrRes.status, 200);
+      assert.equal(qrRes.json.data.batchId, bId);
+      assert.equal(qrRes.json.data.batchNumber, i);
+      assert.ok(
+        qrRes.json.data.joinUrl.endsWith(`/?play=${qrExamGameId}&batch=${bId}`),
+        `Batch ${i} joinUrl must end with /?play=${qrExamGameId}&batch=${bId}, got ${qrRes.json.data.joinUrl}`
+      );
+      assert.equal(qrRes.json.data.status, i === 5 ? 'OPEN' : 'CLOSED');
+      batchQrMap.set(bId, {
+        joinUrl: qrRes.json.data.joinUrl,
+        qrDataUrl: qrRes.json.data.qrDataUrl,
+        status: qrRes.json.data.status,
+      });
+    }
+
+    const uniqueJoinUrls = new Set(Array.from(batchQrMap.values()).map((v) => v.joinUrl));
+    const uniqueQrImages = new Set(Array.from(batchQrMap.values()).map((v) => v.qrDataUrl));
+    assert.equal(uniqueJoinUrls.size, 5, 'T02 & T03: All 5 batches must have 5 distinct joinUrls');
+    assert.equal(uniqueQrImages.size, 5, 'T02 & T03: All 5 batches must have 5 distinct QR code images');
+
+    // T04: Opening QR of any batch does NOT create a 6th batch and does NOT create any new attempt
+    const reportCheckT04 = await apiFetch(`/api/games/${qrExamGameId}/reports`);
+    assert.equal(reportCheckT04.status, 200);
+    assert.equal(reportCheckT04.json.data.examBatches.length, 5, 'T04: Opening QR must not create a new batch');
+    assert.equal(reportCheckT04.json.data.examOverview.totalAttempts, 2, 'T04: Opening QR must not create a new attempt');
+
+    // Verify T06 & T07 attribution: P1 is in Batch 1 (not Batch 2), P2 is in Batch 2 (not Batch 1 or Batch 3)
+    const rBatch1 = reportCheckT04.json.data.examBatches.find((b: any) => b.batchId === 'batch-1');
+    const rBatch2 = reportCheckT04.json.data.examBatches.find((b: any) => b.batchId === 'batch-2');
+    const rBatch3 = reportCheckT04.json.data.examBatches.find((b: any) => b.batchId === 'batch-3');
+    assert.equal(rBatch1.completedCount, 1);
+    assert.equal(rBatch1.participants.find((p: any) => p.participantId === qrP1Id).status, 'COMPLETED');
+    assert.equal(rBatch1.participants.find((p: any) => p.participantId === qrP2Id).status, 'PENDING');
+    assert.equal(rBatch2.completedCount, 1);
+    assert.equal(rBatch2.participants.find((p: any) => p.participantId === qrP2Id).status, 'COMPLETED');
+    assert.equal(rBatch2.participants.find((p: any) => p.participantId === qrP1Id).status, 'PENDING');
+    assert.equal(rBatch3.completedCount, 0);
+
+    // T10: Scanning/opening QR of a CLOSED batch (e.g. batch-1 or batch-2) while batch-5 is OPEN must reject starting a new attempt (403 EXAM_CLOSED)
+    const closedBatchParticipantsCheck = await apiFetch(
+      `/api/games/${qrExamGameId}/participants?mode=public&batchId=batch-2`
+    );
+    assert.equal(closedBatchParticipantsCheck.status, 200);
+    assert.equal(
+      closedBatchParticipantsCheck.json.data.examStatus,
+      'CLOSED',
+      'T10: Participants endpoint with batchId=batch-2 must report examStatus=CLOSED'
+    );
+
+    const closedBatchAttempt = await runSoloAttempt({
+      gameId: qrExamGameId,
+      batchId: 'batch-2',
+      participantId: qrP3Id,
+      playerName: 'Trịnh Quốc Khánh',
+      correctCount: 5,
+    });
+    assert.equal(closedBatchAttempt.status, 403, 'T10: Starting session on closed batch-2 must return 403');
+    assert.equal(closedBatchAttempt.json.error.code, 'EXAM_CLOSED');
+
+    // T15 (part 1): Before reopening Batch 2, its old room PIN is expired and never returned as active pin
+    assert.equal(rBatch2.pin, null, 'T15: Closed batch must not expose expired PIN as active pin');
+    assert.equal(rBatch2.roomCode, null, 'T15: Closed batch must not expose expired roomCode as active');
+    assert.equal(rBatch2.expiredPin, batch2InitialPin, 'T15: Expired PIN is tracked in expiredPin');
+    assert.equal(rBatch2.pinStatus, 'EXPIRED');
+
+    // T11 & T15 (part 2): Reopen existing closed Batch 2 (createNewBatch: false, batchId: 'batch-2')
+    // Must keep batchId === 'batch-2', keep total batches === 5 (NOT create batch-6), and allocate a fresh active PIN for batch-2!
+    const reopenBatch2Res = await apiFetch(`/api/games/${qrExamGameId}/reopen-exam`, {
+      method: 'POST',
+      body: { batchId: 'batch-2', createNewBatch: false },
+    });
+    assert.equal(reopenBatch2Res.status, 200);
+    assert.equal(reopenBatch2Res.json.data.batchId, 'batch-2', 'T11: Reopening Batch 2 must preserve batchId="batch-2"');
+    assert.ok(
+      reopenBatch2Res.json.data.joinUrl.endsWith(`/?play=${qrExamGameId}&batch=batch-2`),
+      'T11: Reopened Batch 2 must preserve its batch-2 joinUrl'
+    );
+    const batch2NewPin = reopenBatch2Res.json.data.pin as string;
+    assert.ok(batch2NewPin && batch2NewPin !== batch2InitialPin, 'T15: Reopening Batch 2 with expired PIN must allocate a new active PIN');
+
+    const reportAfterReopenB2 = await apiFetch(`/api/games/${qrExamGameId}/reports`);
+    assert.equal(reportAfterReopenB2.status, 200);
+    assert.equal(reportAfterReopenB2.json.data.examBatches.length, 5, 'T11: Reopening Batch 2 must not create a 6th batch');
+    const rBatch2AfterReopen = reportAfterReopenB2.json.data.examBatches.find(
+      (b: any) => b.batchId === 'batch-2'
+    );
+    assert.equal(rBatch2AfterReopen.status, 'OPEN');
+    assert.equal(rBatch2AfterReopen.pin, batch2NewPin);
+    assert.equal(rBatch2AfterReopen.pinStatus, 'ACTIVE');
+
+    // T12 & T13: Candidate 2 (who already had Attempt 1 = 400 pts in Batch 2 and has 2 allowedAttempts) takes Attempt 2 in reopened Batch 2
+    // Must record Attempt 2 into Batch 2 and preserve Attempt 1 in Batch 2!
+    const p2Batch2Retake = await runSoloAttempt({
+      gameId: qrExamGameId,
+      batchId: 'batch-2',
+      participantId: qrP2Id,
+      playerName: 'Hoàng Thanh Mai',
+      correctCount: 5, // 500 pts (100% -> PASSED)
+    });
+    assert.equal(p2Batch2Retake.status, 200);
+
+    const reportAfterB2Retake = await apiFetch(`/api/games/${qrExamGameId}/reports`);
+    const rBatch2With2Attempts = reportAfterB2Retake.json.data.examBatches.find(
+      (b: any) => b.batchId === 'batch-2'
+    );
+    const p2InBatch2 = rBatch2With2Attempts.participants.find(
+      (p: any) => p.participantId === qrP2Id
+    );
+    assert.equal(p2InBatch2.batchAttemptsCount, 2, 'T12: Both attempts of P2 in Batch 2 must belong to Batch 2');
+    assert.equal(p2InBatch2.attempts.length, 2, 'T13: Historical attempt 1 and new attempt 2 must both be preserved');
+    assert.equal(p2InBatch2.attempts[0].attemptNumber, 1);
+    assert.equal(p2InBatch2.attempts[0].score, 400);
+    assert.equal(p2InBatch2.attempts[1].attemptNumber, 2);
+    assert.equal(p2InBatch2.attempts[1].score, 500);
+
+    // T14: Granting +1 retake to P2 does NOT alter Batch 2's QR or joinUrl
+    const qrB2BeforeGrant = await apiFetch(`/api/games/${qrExamGameId}/batches/batch-2/qr`);
+    const grantP2InB2 = await apiFetch(
+      `/api/games/${qrExamGameId}/participants/${qrP2Id}/grant-retake`,
+      {
+        method: 'POST',
+        body: { additionalAttempts: 1 },
+      }
+    );
+    assert.equal(grantP2InB2.status, 200);
+    assert.equal(grantP2InB2.json.data.participant.allowedAttempts, 3);
+    const qrB2AfterGrant = await apiFetch(`/api/games/${qrExamGameId}/batches/batch-2/qr`);
+    assert.equal(qrB2AfterGrant.json.data.joinUrl, qrB2BeforeGrant.json.data.joinUrl, 'T14: Granting retake must not change batch joinUrl');
+    assert.equal(qrB2AfterGrant.json.data.qrDataUrl, qrB2BeforeGrant.json.data.qrDataUrl, 'T14: Granting retake must not change batch QR');
+
+    // Close Batch 2 so we have Batch 5 OPEN and Batches 1..4 CLOSED for UI testing
+    await apiFetch(`/api/games/${qrExamGameId}/close-exam`, {
+      method: 'POST',
+      body: { batchId: 'batch-2' },
+    });
+
+    // T16: RBAC on Batch QR endpoint -> Guest, Player, and other Creator (creatorBToken) are rejected with 403
+    const regOwner = await apiFetch('/api/auth/register', {
+      method: 'POST',
+      body: {
+        email: `qr_owner_${Date.now()}@example.com`,
+        password: 'Password123!',
+        displayName: 'QR Owner Creator',
+      },
+    });
+    const qrOwnerId = regOwner.json.data.user.userId;
+    const qrOwnerToken = regOwner.json.data.token;
+    const currentQrSpec = gameStore.get(qrExamGameId)!;
+    gameStore.save(currentQrSpec, Date.now(), qrOwnerId, true);
+    getDatabase().prepare(`UPDATE games SET owner_user_id = ? WHERE game_id = ?`).run(
+      qrOwnerId,
+      qrExamGameId
+    );
+
+    const ownerQrCheck = await apiFetch(`/api/games/${qrExamGameId}/batches/batch-1/qr`, {
+      headers: { Authorization: `Bearer ${qrOwnerToken}` },
+    });
+    assert.equal(ownerQrCheck.status, 200);
+
+    const otherCreatorQrCheck = await apiFetch(`/api/games/${qrExamGameId}/batches/batch-1/qr`, {
+      headers: { Authorization: `Bearer ${creatorBToken}` },
+    });
+    assert.equal(otherCreatorQrCheck.status, 403, 'T16: Other creator must get 403 on batch QR');
+
+    const guestQrCheck = await apiFetch(`/api/games/${qrExamGameId}/batches/batch-1/qr`, {
+      headers: { 'X-Guest-Token': 'gt_0123456789abcdef0123456789abcdef' },
+    });
+    assert.equal(guestQrCheck.status, 403, 'T16: Guest must get 403 on batch QR');
+
+    const playerQrCheck = await apiFetch(`/api/games/${qrExamGameId}/batches/batch-1/qr`, {
+      headers: { 'X-Player-Token': 'player_tok_999' },
+    });
+    assert.equal(playerQrCheck.status, 403, 'T16: Player must get 403 on batch QR');
+
+    // Restore unauthenticated local creator access for browser E2E
+    gameStore.save(currentQrSpec, Date.now(), null, true);
+    getDatabase().prepare(`UPDATE games SET owner_user_id = NULL WHERE game_id = ?`).run(
+      qrExamGameId
+    );
+
+    // =========================================================================
+    // Real Chromium Browser E2E for T01, T05, T08, T09, T10, T11, T17, T18–T24
+    // =========================================================================
+    if (!browser) {
+      browser = await Browser.launch(1440, 900);
+    }
+    const page = await browser.newPage(1440, 900);
+
+    // T17: Verify PLAY mode detail view still has Link tham gia, Sao chép Link, + Tạo mã PIN phòng trực tiếp
+    await page.goto(`${baseUrl}/?tab=reports&reportGameId=${playGameOldId}`);
+    await page.waitForSelector('[data-testid="reports-game-detail-screen"]');
+    await page.waitForSelector('[data-testid="reports-play-detail-view"]');
+    const playBarCheck = await page.eval<{
+      hasSoloUrl: boolean;
+      hasCopyBtn: boolean;
+      hasCreatePinBtn: boolean;
+      hasBatchQrBtn: boolean;
+    }>(`(() => ({
+      hasSoloUrl: Boolean(document.querySelector('[data-testid="reports-solo-play-url"]')),
+      hasCopyBtn: Boolean(document.querySelector('[data-testid="copy-solo-link-btn"]')),
+      hasCreatePinBtn: Boolean(document.querySelector('[data-testid="create-room-pin-btn"]') || document.querySelector('[data-testid="reports-active-room-pin"]')),
+      hasBatchQrBtn: Boolean(document.querySelector('[data-testid="open-selected-batch-qr-btn"]')),
+    }))()`);
+    assert.equal(playBarCheck.hasSoloUrl, true, 'T17: PLAY mode must keep reports-solo-play-url');
+    assert.equal(playBarCheck.hasCopyBtn, true, 'T17: PLAY mode must keep copy-solo-link-btn');
+    assert.equal(playBarCheck.hasCreatePinBtn, true, 'T17: PLAY mode must keep create-room-pin-btn');
+    assert.equal(playBarCheck.hasBatchQrBtn, false, 'T17: PLAY mode must not show exam batch QR button');
+
+    // T01 & T18: Open EXAM detail view for qrExamGameId
+    await page.goto(`${baseUrl}/?tab=reports&reportGameId=${qrExamGameId}`);
+    await page.waitForSelector('[data-testid="reports-game-detail-screen"]');
+    await page.waitForSelector('[data-testid="reports-exam-detail-view"]');
+    await page.waitForSelector('[data-testid="open-selected-batch-qr-btn"]');
+
+    const examBarAudit = await page.eval<{
+      hasSharedSoloUrl: boolean;
+      hasSharedCopyBtn: boolean;
+      hasCreateRoomPinBtn: boolean;
+      hasOpenSelectedBatchQrBtn: boolean;
+      selectedBatchTitle: string;
+      selectedBatchQrBtnText: string;
+    }>(`(() => ({
+      hasSharedSoloUrl: Boolean(document.querySelector('[data-testid="reports-solo-play-url"]')),
+      hasSharedCopyBtn: Boolean(document.querySelector('[data-testid="copy-solo-link-btn"]')),
+      hasCreateRoomPinBtn: Boolean(document.querySelector('[data-testid="create-room-pin-btn"]')),
+      hasOpenSelectedBatchQrBtn: Boolean(document.querySelector('[data-testid="open-selected-batch-qr-btn"]')),
+      selectedBatchTitle: (document.querySelector('[data-testid="reports-selected-batch-title"]')?.textContent || '').trim(),
+      selectedBatchQrBtnText: (document.querySelector('[data-testid="open-selected-batch-qr-btn"]')?.textContent || '').trim(),
+    }))()`);
+
+    assert.equal(examBarAudit.hasSharedSoloUrl, false, 'T01: EXAM detail must remove shared Link tham gia');
+    assert.equal(examBarAudit.hasSharedCopyBtn, false, 'T01: EXAM detail must remove shared Sao chép Link');
+    assert.equal(examBarAudit.hasCreateRoomPinBtn, false, 'T01: EXAM detail must remove + Tạo mã PIN phòng trực tiếp');
+    assert.equal(examBarAudit.hasOpenSelectedBatchQrBtn, true, 'T01: EXAM detail must show Mở mã QR đợt <N>');
+    assert.ok(examBarAudit.selectedBatchQrBtnText.includes('Mở mã QR đợt 5'));
+
+    // Visual Screenshot: EXAM detail screen with new Batch QR bar & 5 batch cards
+    await page.scrollToSelector('[data-testid="reports-game-detail-topbar"]');
+    await sleep(200);
+    await page.screenshot(path.join(ARTIFACT_DIR, 'v3_exam_batch_qr_reports_detail_1440x900.png'));
+
+    // Select Batch 2 in the detail view
+    await page.clickSelector('[data-testid="select-exam-batch-batch-2"]');
+    await sleep(150);
+
+    // T08 & T19: While viewing Batch 2 detail, click "Xem mã QR" on Batch 1 card!
+    // Must open QR modal for Batch 1 without changing the selected batch in detail table (Batch 2) and without opening GameModeSelectionModal!
+    await page.clickSelector('[data-testid="view-batch-qr-btn-batch-1"]');
+    await page.waitForSelector('[data-testid="exam-batch-qr-modal"]');
+    await page.waitForSelector('[data-testid="exam-batch-qr-image"]');
+
+    const qrModalBatch1Audit = await page.eval<{
+      joinUrl: string;
+      qrSrc: string;
+      hasClosedNotice: boolean;
+      hasModeSelectionModal: boolean;
+      selectedBatchBtnTextOnB2: string;
+    }>(`(() => ({
+      joinUrl: (document.querySelector('[data-testid="exam-batch-qr-join-url"]')?.textContent || '').trim(),
+      qrSrc: document.querySelector('[data-testid="exam-batch-qr-image"]')?.getAttribute('src') || '',
+      hasClosedNotice: Boolean(document.querySelector('[data-testid="exam-batch-qr-closed-notice"]')),
+      hasModeSelectionModal: document.body.innerText.includes('Chọn chế độ tổ chức') || document.body.innerText.includes('Chơi đơn (Solo)'),
+      selectedBatchBtnTextOnB2: (document.querySelector('[data-testid="select-exam-batch-batch-2"]')?.textContent || '').trim(),
+    }))()`);
+
+    assert.ok(
+      qrModalBatch1Audit.joinUrl.includes(`play=${qrExamGameId}&batch=batch-1`),
+      `T08: QR modal for Batch 1 must show batch-1 joinUrl, got ${qrModalBatch1Audit.joinUrl}`
+    );
+    assert.ok(qrModalBatch1Audit.qrSrc.startsWith('data:image/png;base64,'));
+    assert.equal(qrModalBatch1Audit.hasClosedNotice, true, 'T08/T10: Closed Batch 1 QR modal must show closed notice');
+    assert.equal(qrModalBatch1Audit.hasModeSelectionModal, false, 'T08: Must not show Solo/Group selection modal');
+    assert.equal(
+      qrModalBatch1Audit.selectedBatchBtnTextOnB2,
+      'Đang xem đợt này',
+      'T08: Clicking Xem mã QR on Batch 1 must keep Batch 2 selected in the detail table'
+    );
+
+    // Visual Screenshot: Closed Batch QR Modal
+    await sleep(200);
+    await page.screenshot(path.join(ARTIFACT_DIR, 'v3_exam_batch_qr_modal_closed_batch_1440x900.png'));
+
+    // Close QR modal
+    await page.clickSelector('[data-testid="exam-batch-qr-close-btn"]');
+    await sleep(150);
+
+    // T09: Select Batch 1 in detail table, then click "Xem mã QR" on Batch 5 (OPEN batch)
+    await page.clickSelector('[data-testid="select-exam-batch-batch-1"]');
+    await sleep(150);
+    await page.clickSelector('[data-testid="view-batch-qr-btn-batch-5"]');
+    await page.waitForSelector('[data-testid="exam-batch-qr-modal"]');
+    await page.waitForSelector('[data-testid="exam-batch-qr-image"]');
+
+    const qrModalBatch5Audit = await page.eval<{
+      joinUrl: string;
+      qrSrc: string;
+      hasClosedNotice: boolean;
+      selectedBatchBtnTextOnB1: string;
+    }>(`(() => ({
+      joinUrl: (document.querySelector('[data-testid="exam-batch-qr-join-url"]')?.textContent || '').trim(),
+      qrSrc: document.querySelector('[data-testid="exam-batch-qr-image"]')?.getAttribute('src') || '',
+      hasClosedNotice: Boolean(document.querySelector('[data-testid="exam-batch-qr-closed-notice"]')),
+      selectedBatchBtnTextOnB1: (document.querySelector('[data-testid="select-exam-batch-batch-1"]')?.textContent || '').trim(),
+    }))()`);
+
+    assert.ok(
+      qrModalBatch5Audit.joinUrl.includes(`play=${qrExamGameId}&batch=batch-5`),
+      `T09: QR modal for Batch 5 must show batch-5 joinUrl, got ${qrModalBatch5Audit.joinUrl}`
+    );
+    assert.notEqual(
+      qrModalBatch5Audit.qrSrc,
+      qrModalBatch1Audit.qrSrc,
+      'T02/T09: Batch 5 QR image must differ from Batch 1 QR image'
+    );
+    assert.equal(qrModalBatch5Audit.hasClosedNotice, false, 'Open Batch 5 QR modal must not show closed notice');
+    assert.equal(
+      qrModalBatch5Audit.selectedBatchBtnTextOnB1,
+      'Đang xem đợt này',
+      'T09: Clicking Xem mã QR on Batch 5 must keep Batch 1 selected in the detail table'
+    );
+
+    // Visual Screenshot: Open Batch QR Modal
+    await sleep(200);
+    await page.screenshot(path.join(ARTIFACT_DIR, 'v3_exam_batch_qr_modal_open_batch_1440x900.png'));
+
+    await page.clickSelector('[data-testid="exam-batch-qr-close-btn"]');
+    await sleep(150);
+
+    // T05: Refresh Reports page and verify Batch 5 joinUrl & QR image remain identical
+    await page.goto(`${baseUrl}/?tab=reports&reportGameId=${qrExamGameId}`);
+    await page.waitForSelector('[data-testid="open-selected-batch-qr-btn"]');
+    await page.clickSelector('[data-testid="open-selected-batch-qr-btn"]');
+    await page.waitForSelector('[data-testid="exam-batch-qr-image"]');
+
+    const afterRefreshQrAudit = await page.eval<{ joinUrl: string; qrSrc: string }>(`(() => ({
+      joinUrl: (document.querySelector('[data-testid="exam-batch-qr-join-url"]')?.textContent || '').trim(),
+      qrSrc: document.querySelector('[data-testid="exam-batch-qr-image"]')?.getAttribute('src') || '',
+    }))()`);
+    assert.equal(afterRefreshQrAudit.joinUrl, qrModalBatch5Audit.joinUrl, 'T05: Refresh must not change batch joinUrl');
+    assert.equal(afterRefreshQrAudit.qrSrc, qrModalBatch5Audit.qrSrc, 'T05: Refresh must not change batch QR image');
+
+    await page.clickSelector('[data-testid="exam-batch-qr-close-btn"]');
+    await sleep(150);
+
+    // T20 & T21: Open player page in browser with CLOSED Batch 1 URL vs OPEN Batch 5 URL
+    const playerPage = await browser.newPage(1440, 900);
+    await playerPage.goto(qrModalBatch1Audit.joinUrl);
+    await sleep(400);
+    const closedPlayerText = await playerPage.eval<string>(`document.body.innerText`);
+    assert.ok(
+      closedPlayerText.includes('kết thúc') || closedPlayerText.includes('đã đóng'),
+      `T21: Player opening closed batch URL must see closed exam message, got: ${closedPlayerText.slice(0, 200)}`
+    );
+
+    // Now open OPEN Batch 5 URL in playerPage -> sees Roster gate and can select candidate QR003
+    await playerPage.goto(qrModalBatch5Audit.joinUrl);
+    await sleep(400);
+    const openPlayerText = await playerPage.eval<string>(`document.body.innerText`);
+    assert.ok(
+      openPlayerText.includes('Trịnh Quốc Khánh') || openPlayerText.includes('Xác nhận danh tính'),
+      `T20: Player opening open batch-5 URL must see the exam roster gate`
+    );
+    await playerPage.close();
+
+    // T23: Mobile viewports (390x844 and 360x800) on EXAM Batch QR bar & modal without horizontal overflow
+    for (const vp of [
+      { width: 390, height: 844 },
+      { width: 360, height: 800 },
+    ]) {
+      await page.setViewport(vp.width, vp.height, true);
+      await sleep(200);
+      const overflowDetail = await page.eval<number>(
+        `document.documentElement.scrollWidth - window.innerWidth`
+      );
+      assert.ok(overflowDetail <= 1, `T23: No horizontal overflow at ${vp.width}x${vp.height} on detail screen`);
+      if (vp.width === 390) {
+        await page.screenshot(path.join(ARTIFACT_DIR, 'v3_exam_batch_qr_mobile_390x844.png'));
+      }
+    }
+
+    // T24: Browser Back/Forward preserves Reports navigation state
+    await page.setViewport(1440, 900, false);
+    await page.clickSelector('[data-testid="back-to-reports-overview-btn"]');
+    await page.waitForSelector('[data-testid="reports-v2-game-hub"]');
+    await page.eval(`window.history.back()`);
+    await page.waitForSelector('[data-testid="reports-game-detail-screen"]');
+    await page.waitForSelector('[data-testid="open-selected-batch-qr-btn"]');
+
+    assert.deepEqual(page.consoleErrors, [], `Unexpected console.error: ${page.consoleErrors.join('; ')}`);
+    assert.deepEqual(page.pageErrors, [], `Unexpected pageerror: ${page.pageErrors.join('; ')}`);
+    assert.deepEqual(page.server5xxErrors, [], `Unexpected 5xx: ${page.server5xxErrors.join('; ')}`);
 
     await page.close();
   });

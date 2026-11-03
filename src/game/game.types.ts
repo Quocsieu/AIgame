@@ -120,6 +120,7 @@ export interface GameSessionSummary {
  */
 export const CreateSessionRequestSchema = z.object({
   gameId: z.string().min(1),
+  batchId: z.string().trim().min(1).optional(),
   gameSpecification: GameSpecificationSchema.optional(),
   publicPlay: z.boolean().optional(),
   participantId: z.string().trim().min(1).optional(),

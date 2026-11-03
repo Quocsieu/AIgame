@@ -775,6 +775,41 @@ export async function createRoom(params: {
   return data.data;
 }
 
+export interface ExamBatchQrApiResult {
+  gameId: string;
+  title: string;
+  batchId: string;
+  batchNumber: number;
+  batchName: string;
+  status: 'OPEN' | 'CLOSED';
+  deliveryMode: string;
+  joinUrl: string;
+  playUrl: string;
+  pin: string | null;
+  expiredPin: string | null;
+  pinStatus: 'ACTIVE' | 'EXPIRED' | 'NONE';
+  qrDataUrl: string;
+}
+
+export async function fetchExamBatchQrApi(
+  gameId: string,
+  batchId: string
+): Promise<ExamBatchQrApiResult> {
+  const res = await fetch(
+    `${API_BASE_URL}/games/${encodeURIComponent(gameId)}/batches/${encodeURIComponent(batchId)}/qr`,
+    {
+      headers: buildAuthHeaders(),
+    }
+  );
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải mã QR của đợt thi.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
 export async function fetchGameQr(gameId: string): Promise<{
   gameId: string;
   title: string;
@@ -863,7 +898,13 @@ export async function uploadCustomAudioApi(file: File): Promise<{
 
 export async function fetchGameParticipantsApi(
   gameId: string,
-  options?: { mode?: 'public' | 'manage' | 'admin'; search?: string; status?: string; hostToken?: string }
+  options?: {
+    mode?: 'public' | 'manage' | 'admin';
+    search?: string;
+    status?: string;
+    batchId?: string;
+    hostToken?: string;
+  }
 ): Promise<{
   gameId: string;
   rosterMode: RosterMode;
@@ -879,6 +920,7 @@ export async function fetchGameParticipantsApi(
   }
   if (options?.search) query.set('search', options.search);
   if (options?.status) query.set('status', options.status);
+  if (options?.batchId) query.set('batchId', options.batchId);
   const qs = query.toString();
 
   const extraHeaders: Record<string, string> = {};
@@ -1162,12 +1204,12 @@ export async function publishExamAnswersApi(
 
 export async function closeGameExamApi(
   gameId: string,
-  hostToken?: string
+  optionsOrHostToken?: string | { batchId?: string; hostToken?: string }
 ): Promise<{
   gameId: string;
   alreadyClosed: boolean;
-  examStatus: 'CLOSED';
-  examClosedAt: string;
+  examStatus: 'OPEN' | 'CLOSED';
+  examClosedAt: string | null;
   answersPublished: boolean;
   autoSubmittedSoloCount: number;
   autoSubmittedRoomPlayersCount: number;
@@ -1175,14 +1217,24 @@ export async function closeGameExamApi(
   totalAutoSubmitted: number;
   closedRoomCodes: string[];
 }> {
+  const isObj = typeof optionsOrHostToken === 'object' && optionsOrHostToken !== null;
+  const resolvedHostToken = isObj
+    ? optionsOrHostToken.hostToken
+    : typeof optionsOrHostToken === 'string'
+      ? optionsOrHostToken
+      : undefined;
   const extraHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (hostToken) {
-    extraHeaders['x-host-token'] = hostToken;
+  if (resolvedHostToken) {
+    extraHeaders['x-host-token'] = resolvedHostToken;
   }
+  const payload: Record<string, unknown> = {};
+  if (resolvedHostToken) payload.hostToken = resolvedHostToken;
+  if (isObj && optionsOrHostToken.batchId) payload.batchId = optionsOrHostToken.batchId;
+
   const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/close-exam`, {
     method: 'POST',
     headers: buildAuthHeaders(extraHeaders),
-    body: JSON.stringify(hostToken ? { hostToken } : {}),
+    body: JSON.stringify(payload),
   });
   const data = await res.json();
   if (!data.success) {
@@ -1201,6 +1253,8 @@ export async function reopenGameExamApi(
         batchId?: string;
         createNewBatch?: boolean;
         batchName?: string;
+        withRoomPin?: boolean;
+        refreshExpiredPin?: boolean;
         hostToken?: string;
       }
 ): Promise<{
@@ -1209,7 +1263,9 @@ export async function reopenGameExamApi(
   batchName?: string;
   examStatus: 'OPEN';
   examClosedAt: null;
+  joinUrl?: string;
   soloExamUrl?: string;
+  pin?: string | null;
   activeStatus?: GameActiveStatus;
 }> {
   const isObj = typeof optionsOrHostToken === 'object' && optionsOrHostToken !== null;
@@ -1230,6 +1286,12 @@ export async function reopenGameExamApi(
       payload.createNewBatch = optionsOrHostToken.createNewBatch;
     }
     if (optionsOrHostToken.batchName) payload.batchName = optionsOrHostToken.batchName;
+    if (optionsOrHostToken.withRoomPin !== undefined) {
+      payload.withRoomPin = optionsOrHostToken.withRoomPin;
+    }
+    if (optionsOrHostToken.refreshExpiredPin !== undefined) {
+      payload.refreshExpiredPin = optionsOrHostToken.refreshExpiredPin;
+    }
   }
 
   const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/reopen-exam`, {
@@ -1329,6 +1391,7 @@ export async function downloadGameScoreboardExport(
 
 export async function createPracticeSession(params: {
   gameId: string;
+  batchId?: string;
   gameSpecification?: GameSpecification;
   publicPlay?: boolean;
   participantId?: string;
@@ -2152,7 +2215,12 @@ export interface ReportsExamBatchItem {
   batchName: string;
   deliveryMode: 'SOLO' | 'MULTIPLAYER' | 'MIXED';
   roomId: string | null;
+  roomIds?: string[];
   roomCode: string | null;
+  joinUrl?: string;
+  pin?: string | null;
+  expiredPin?: string | null;
+  pinStatus?: 'ACTIVE' | 'EXPIRED' | 'NONE';
   openedAt: string;
   closedAt: string | null;
   status: 'OPEN' | 'CLOSED';

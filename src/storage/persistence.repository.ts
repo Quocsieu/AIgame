@@ -4795,9 +4795,11 @@ export class PersistenceRepository {
       deliveryMode: 'SOLO' | 'MULTIPLAYER' | 'MIXED';
       roomId: string | null;
       roomCode: string | null;
+      roomIds?: string[];
       openedAt: string;
       closedAt: string | null;
       status: 'OPEN' | 'CLOSED';
+      fromStored?: boolean;
     }> = [];
 
     const seenBatchIds = new Set<string>();
@@ -4810,10 +4812,19 @@ export class PersistenceRepository {
       if (seenBatchIds.has(bId)) continue;
       seenBatchIds.add(bId);
       if (b.roomId) seenBatchRoomIds.add(String(b.roomId));
+      const storedRoomIds = Array.isArray(b.roomIds)
+        ? b.roomIds.map((rid: any) => String(rid)).filter(Boolean)
+        : [];
+      for (const rid of storedRoomIds) {
+        seenBatchRoomIds.add(rid);
+      }
+      if (bId.startsWith('room:')) {
+        seenBatchRoomIds.add(bId.slice(5));
+      }
 
       const isLastStoredBatch = i === rawStoredBatches.length - 1;
       const resolvedStatus: 'OPEN' | 'CLOSED' =
-        b.status === 'CLOSED' || (isLastStoredBatch && examStatus === 'CLOSED')
+        b.status === 'CLOSED' || examStatus === 'CLOSED'
           ? 'CLOSED'
           : 'OPEN';
       const resolvedClosedAt =
@@ -4832,9 +4843,11 @@ export class PersistenceRepository {
             : 'MIXED',
         roomId: b.roomId ? String(b.roomId) : null,
         roomCode: b.roomCode ? String(b.roomCode) : null,
+        roomIds: storedRoomIds.length > 0 ? storedRoomIds : b.roomId ? [String(b.roomId)] : undefined,
         openedAt: String(b.openedAt || settings.examOpenAt || gameRow.created_at),
         closedAt: resolvedClosedAt,
         status: resolvedStatus,
+        fromStored: true,
       });
     }
 
@@ -4854,6 +4867,7 @@ export class PersistenceRepository {
             ? String(settings.examClosedAt || gameRow.updated_at || new Date().toISOString())
             : null,
         status: examStatus === 'CLOSED' ? 'CLOSED' : 'OPEN',
+        fromStored: true,
       });
       seenBatchIds.add('batch-1');
     }
@@ -4872,14 +4886,18 @@ export class PersistenceRepository {
         deliveryMode: 'MULTIPLAYER',
         roomId: rId,
         roomCode: rCode || null,
+        roomIds: [rId],
         openedAt: String(r.started_at || r.created_at),
         closedAt: r.finished_at ? String(r.finished_at) : String(r.updated_at || r.created_at),
         status: 'CLOSED',
       });
     }
 
-    // Normalize batch numbers 1..N in chronological order
+    // Normalize batch numbers 1..N preserving explicit stored batch order first, then chronological order
     batchDefinitions.sort((a, b) => {
+      if (a.fromStored && b.fromStored && a.batchNumber !== b.batchNumber) {
+        return a.batchNumber - b.batchNumber;
+      }
       const tA = Date.parse(a.openedAt) || 0;
       const tB = Date.parse(b.openedAt) || 0;
       if (tA !== tB) return tA - tB;
@@ -5166,6 +5184,7 @@ export class PersistenceRepository {
         deliveryMode: batchDef.deliveryMode,
         roomId: batchDef.roomId,
         roomCode: batchDef.roomCode,
+        roomIds: (batchDef as any).roomIds,
         openedAt: batchDef.openedAt,
         closedAt: batchDef.closedAt,
         status: batchDef.status,
@@ -5188,17 +5207,26 @@ export class PersistenceRepository {
     const nonRoomBatches = batchDefinitions.filter(b => !b.roomId);
     const examBatches: ReportsExamBatchItem[] = batchDefinitions.map(bDef => {
       const bAttempts = unifiedAttempts.filter(att => {
+        if (att.batchId) {
+          return att.batchId === bDef.batchId;
+        }
         if (bDef.roomId) {
-          return att.roomId === bDef.roomId;
+          return (
+            att.roomId === bDef.roomId ||
+            (Array.isArray(bDef.roomIds) && Boolean(att.roomId) && bDef.roomIds.includes(att.roomId!))
+          );
         }
         if (att.roomId && !att.roomId.startsWith('batch:')) {
           // Belongs to a specific multiplayer room batch if that room batch exists
-          if (batchDefinitions.some(rb => rb.roomId === att.roomId)) {
+          if (
+            batchDefinitions.some(
+              rb =>
+                rb.roomId === att.roomId ||
+                (Array.isArray(rb.roomIds) && rb.roomIds.includes(att.roomId!))
+            )
+          ) {
             return false;
           }
-        }
-        if (att.batchId) {
-          return att.batchId === bDef.batchId;
         }
         if (nonRoomBatches.length <= 1) {
           return true;
@@ -5685,6 +5713,11 @@ export interface ReportsExamBatchItem {
   deliveryMode: 'SOLO' | 'MULTIPLAYER' | 'MIXED';
   roomId: string | null;
   roomCode: string | null;
+  roomIds?: string[];
+  joinUrl?: string;
+  pin?: string | null;
+  expiredPin?: string | null;
+  pinStatus?: 'ACTIVE' | 'EXPIRED' | 'NONE';
   openedAt: string;
   closedAt: string | null;
   status: 'OPEN' | 'CLOSED';

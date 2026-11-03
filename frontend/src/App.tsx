@@ -52,6 +52,7 @@ export const AppContent: React.FC = () => {
   const [displayName, setDisplayName] = useState('');
   const [selectedSavedSpec, setSelectedSavedSpec] = useState<GameSpecification | null>(null);
   const [soloGameId, setSoloGameId] = useState<string | null>(null);
+  const [soloBatchId, setSoloBatchId] = useState<string | null>(null);
   const [soloGameSpec, setSoloGameSpec] = useState<GameSpecification | null>(null);
   const [soloPlayLoading, setSoloPlayLoading] = useState(false);
   const [soloPlayError, setSoloPlayError] = useState<string | null>(null);
@@ -139,7 +140,8 @@ export const AppContent: React.FC = () => {
     }
 
     if (playGameId) {
-      handleLoadGameForSoloPlay(playGameId);
+      const batchParam = (params.get('batch') || '').trim();
+      handleLoadGameForSoloPlay(playGameId, batchParam || null);
       return;
     }
 
@@ -219,14 +221,18 @@ export const AppContent: React.FC = () => {
     navigateWithHistory('library', '/?tab=library');
   };
 
-  const handleLoadGameForSoloPlay = (gameId: string) => {
+  const handleLoadGameForSoloPlay = (gameId: string, batchId?: string | null) => {
     setSoloPlayLoading(true);
     setSoloPlayError(null);
     fetchGameById(gameId, { mode: 'public' })
       .then((spec) => {
         setSoloGameId(gameId);
+        setSoloBatchId(batchId || null);
         setSoloGameSpec(spec);
-        window.history.replaceState({}, '', `/?play=${gameId}`);
+        const nextUrl = batchId
+          ? `/?play=${gameId}&batch=${encodeURIComponent(batchId)}`
+          : `/?play=${gameId}`;
+        window.history.replaceState({}, '', nextUrl);
         setActiveTab('play');
       })
       .catch((err: any) => {
@@ -318,9 +324,13 @@ export const AppContent: React.FC = () => {
     if (targetGameId) {
       try {
         sessionStorage.removeItem(`active_solo_session_${targetGameId}`);
+        if (soloBatchId) {
+          sessionStorage.removeItem(`active_solo_session_${targetGameId}_${soloBatchId}`);
+        }
       } catch {}
     }
     setSoloGameId(null);
+    setSoloBatchId(null);
     setSoloGameSpec(null);
     setRoomCode('');
     setDisplayName('');
@@ -721,6 +731,7 @@ export const AppContent: React.FC = () => {
               soloGameId ? (
                 <SoloPlayer
                   gameId={soloGameId}
+                  batchId={soloBatchId}
                   initialSpec={soloGameSpec}
                   onLeave={handleLeaveSoloPlay}
                 />

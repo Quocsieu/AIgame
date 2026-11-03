@@ -1,6 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import type { GameSpecification } from '../types/index.js';
-import { fetchGameQr, publishGame } from '../services/api.js';
+import {
+  fetchExamBatchQrApi,
+  fetchGameQr,
+  publishGame,
+  type ExamBatchQrApiResult,
+} from '../services/api.js';
 import { useToast } from '../components/ToastContext.js';
 import {
   ArrowLeftIcon,
@@ -9,29 +14,42 @@ import {
   EyeIcon,
   EyeOffIcon,
   GamepadIcon,
-  PlayIcon,
   QrCodeIcon,
   SpinnerIcon,
 } from '../components/Icons.js';
 
+export interface ExamBatchQRContext {
+  gameId: string;
+  gameTitle: string;
+  batchId: string;
+  batchNumber: number;
+  batchName: string;
+  status: 'OPEN' | 'CLOSED';
+  pin?: string | null;
+  expiredPin?: string | null;
+  pinStatus?: 'ACTIVE' | 'EXPIRED' | 'NONE';
+}
+
 interface SoloPresentationPageProps {
   gameSpec: GameSpecification | null;
   gameId?: string;
-  onStartPlay: (spec: GameSpecification) => void;
+  onStartPlay?: (spec: GameSpecification) => void;
   onBack: () => void;
+  examBatchContext?: ExamBatchQRContext | null;
 }
 
 export const SoloPresentationPage: React.FC<SoloPresentationPageProps> = ({
   gameSpec,
   gameId,
-  onStartPlay,
   onBack,
+  examBatchContext,
 }) => {
   const toast = useToast();
-  const effectiveGameId = gameSpec?.gameId || gameId || '';
+  const effectiveGameId = examBatchContext?.gameId || gameSpec?.gameId || gameId || '';
 
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
   const [playUrl, setPlayUrl] = useState<string>('');
+  const [batchQrData, setBatchQrData] = useState<ExamBatchQrApiResult | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
@@ -49,6 +67,20 @@ export const SoloPresentationPage: React.FC<SoloPresentationPageProps> = ({
       setIsLoading(true);
       setError(null);
       try {
+        if (examBatchContext?.batchId) {
+          const data = await fetchExamBatchQrApi(effectiveGameId, examBatchContext.batchId);
+          if (isMounted) {
+            setBatchQrData(data);
+            setQrDataUrl(data.qrDataUrl);
+            setPlayUrl(
+              data.joinUrl ||
+                data.playUrl ||
+                `${window.location.origin}/?play=${effectiveGameId}&batch=${encodeURIComponent(examBatchContext.batchId)}`
+            );
+          }
+          return;
+        }
+
         if (gameSpec && !gameSpec.isPublic) {
           try {
             await publishGame(effectiveGameId);
@@ -60,13 +92,18 @@ export const SoloPresentationPage: React.FC<SoloPresentationPageProps> = ({
 
         const data = await fetchGameQr(effectiveGameId);
         if (isMounted) {
+          setBatchQrData(null);
           setQrDataUrl(data.qrDataUrl);
           setPlayUrl(data.playUrl || `${window.location.origin}/?play=${effectiveGameId}`);
         }
       } catch (err: any) {
         if (isMounted) {
           setError(err.message || 'Không thể tạo mã QR cho trò chơi.');
-          setPlayUrl(`${window.location.origin}/?play=${effectiveGameId}`);
+          setPlayUrl(
+            examBatchContext?.batchId
+              ? `${window.location.origin}/?play=${effectiveGameId}&batch=${encodeURIComponent(examBatchContext.batchId)}`
+              : `${window.location.origin}/?play=${effectiveGameId}`
+          );
         }
       } finally {
         if (isMounted) {
@@ -80,13 +117,28 @@ export const SoloPresentationPage: React.FC<SoloPresentationPageProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [effectiveGameId, gameSpec]);
+  }, [effectiveGameId, gameSpec, examBatchContext?.batchId]);
+
+  const effectiveBatchStatus = batchQrData?.status || examBatchContext?.status || 'OPEN';
+  const effectiveBatchName = batchQrData?.batchName || examBatchContext?.batchName || '';
+  const effectiveActivePin =
+    batchQrData?.pinStatus === 'ACTIVE'
+      ? batchQrData.pin
+      : examBatchContext?.pinStatus === 'ACTIVE'
+        ? examBatchContext.pin
+        : null;
+  const effectiveExpiredPin =
+    batchQrData?.pinStatus === 'EXPIRED'
+      ? batchQrData.expiredPin
+      : examBatchContext?.pinStatus === 'EXPIRED'
+        ? examBatchContext.expiredPin
+        : null;
 
   const handleCopyLink = () => {
     if (!playUrl) return;
     navigator.clipboard.writeText(playUrl);
     setCopied(true);
-    toast.success('Đã sao chép liên kết chơi đơn vào clipboard!', 'Đã chép link');
+    toast.success('Đã sao chép liên kết vào clipboard!', 'Đã chép link');
     setTimeout(() => setCopied(false), 2500);
   };
 
@@ -126,6 +178,7 @@ export const SoloPresentationPage: React.FC<SoloPresentationPageProps> = ({
       >
         <button
           type="button"
+          data-testid="exam-batch-qr-close-btn"
           onClick={onBack}
           style={{
             backgroundColor: 'var(--bg-card)',
@@ -142,7 +195,7 @@ export const SoloPresentationPage: React.FC<SoloPresentationPageProps> = ({
             minHeight: '44px',
           }}
         >
-          <ArrowLeftIcon size={16} /> Quay lại
+          <ArrowLeftIcon size={16} /> {examBatchContext ? 'Đóng QR' : 'Quay lại'}
         </button>
 
         <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
@@ -181,32 +234,109 @@ export const SoloPresentationPage: React.FC<SoloPresentationPageProps> = ({
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: '0.4rem',
-            backgroundColor: 'var(--primary-subtle)',
-            color: 'var(--primary)',
-            padding: '0.35rem 0.85rem',
-            borderRadius: '20px',
-            fontSize: '0.8rem',
-            fontWeight: 800,
-            textTransform: 'uppercase',
-            letterSpacing: '0.08em',
+            justifyContent: 'center',
+            flexWrap: 'wrap',
+            gap: '0.5rem',
             marginBottom: '0.75rem',
           }}
         >
-          <GamepadIcon size={14} /> CHƠI ĐƠN
+          <div
+            data-testid="exam-batch-qr-badge"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              backgroundColor: 'var(--primary-subtle)',
+              color: 'var(--primary)',
+              padding: '0.35rem 0.85rem',
+              borderRadius: '20px',
+              fontSize: '0.8rem',
+              fontWeight: 800,
+              textTransform: 'uppercase',
+              letterSpacing: '0.08em',
+            }}
+          >
+            <GamepadIcon size={14} />{' '}
+            {examBatchContext ? `THI / KIỂM TRA — ${effectiveBatchName}` : 'CHƠI ĐƠN'}
+          </div>
+          {examBatchContext && (
+            <span
+              data-testid="exam-batch-qr-status"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.35rem',
+                padding: '0.35rem 0.85rem',
+                borderRadius: '20px',
+                fontSize: '0.8rem',
+                fontWeight: 800,
+                backgroundColor:
+                  effectiveBatchStatus === 'OPEN'
+                    ? 'var(--accent-emerald-subtle)'
+                    : 'rgba(244, 63, 94, 0.14)',
+                color:
+                  effectiveBatchStatus === 'OPEN'
+                    ? 'var(--accent-emerald)'
+                    : 'var(--accent-rose)',
+                border:
+                  effectiveBatchStatus === 'OPEN'
+                    ? '1px solid var(--accent-emerald)'
+                    : '1px solid var(--accent-rose)',
+              }}
+            >
+              Trạng thái: {effectiveBatchStatus === 'OPEN' ? 'Đang mở' : 'Đã đóng'}
+            </span>
+          )}
         </div>
 
         <h1
+          data-testid="exam-batch-qr-title"
           style={{
             color: 'var(--text-primary)',
-            fontSize: 'clamp(2rem, 4.5vw, 2.8rem)',
+            fontSize: 'clamp(1.75rem, 4vw, 2.6rem)',
             fontWeight: 900,
-            margin: '0 0 1.5rem 0',
+            margin: '0 0 0.5rem 0',
             letterSpacing: '-0.02em',
           }}
         >
-          {gameSpec?.title || 'Trò Chơi Trắc Nghiệm'}
+          {batchQrData?.title ||
+            examBatchContext?.gameTitle ||
+            gameSpec?.title ||
+            'Trò Chơi Trắc Nghiệm'}
         </h1>
+
+        {examBatchContext && (
+          <div
+            data-testid="exam-batch-qr-batch-name"
+            style={{
+              color: 'var(--text-secondary)',
+              fontSize: '1.05rem',
+              fontWeight: 800,
+              marginBottom: '1.25rem',
+            }}
+          >
+            Mã QR riêng của {effectiveBatchName}
+          </div>
+        )}
+
+        {examBatchContext && effectiveBatchStatus === 'CLOSED' && (
+          <div
+            data-testid="exam-batch-qr-closed-notice"
+            style={{
+              padding: '0.85rem 1.15rem',
+              backgroundColor: 'rgba(244, 63, 94, 0.12)',
+              border: '1px solid var(--accent-rose)',
+              borderRadius: '12px',
+              color: 'var(--accent-rose)',
+              fontWeight: 700,
+              fontSize: '0.88rem',
+              maxWidth: '680px',
+              margin: '0 auto 1.25rem auto',
+            }}
+          >
+            Đợt thi này đang ở trạng thái Đã đóng. Thí sinh quét mã QR hoặc mở liên kết sẽ không thể bắt đầu lượt thi mới cho đến khi Ban Tổ Chức mở lại đợt thi.
+          </div>
+        )}
 
         {isLoading && (
           <div style={{ padding: '3.5rem 1rem' }}>
@@ -256,8 +386,9 @@ export const SoloPresentationPage: React.FC<SoloPresentationPageProps> = ({
                 }}
               >
                 <img
+                  data-testid="exam-batch-qr-image"
                   src={qrDataUrl}
-                  alt="Mã QR Chơi Đơn"
+                  alt={examBatchContext ? `Mã QR ${effectiveBatchName}` : 'Mã QR Chơi Đơn'}
                   style={{
                     width: 'clamp(230px, 30vw, 300px)',
                     height: 'clamp(230px, 30vw, 300px)',
@@ -278,7 +409,9 @@ export const SoloPresentationPage: React.FC<SoloPresentationPageProps> = ({
                 }}
               >
                 <QrCodeIcon size={20} style={{ color: 'var(--primary)' }} />
-                <span>Quét mã để chơi</span>
+                <span>
+                  {examBatchContext ? `Quét mã để vào ${effectiveBatchName}` : 'Quét mã để chơi'}
+                </span>
               </div>
             </div>
 
@@ -293,6 +426,60 @@ export const SoloPresentationPage: React.FC<SoloPresentationPageProps> = ({
                 gap: '1rem',
               }}
             >
+              {examBatchContext && effectiveActivePin && (
+                <div
+                  data-testid="exam-batch-qr-active-pin"
+                  style={{
+                    backgroundColor: 'var(--bg-card)',
+                    padding: '1rem 1.25rem',
+                    borderRadius: '16px',
+                    border: '1px solid var(--accent-emerald)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '0.75rem',
+                  }}
+                >
+                  <span
+                    style={{
+                      color: 'var(--text-secondary)',
+                      fontSize: '0.84rem',
+                      fontWeight: 800,
+                    }}
+                  >
+                    MÃ PIN PHÒNG THI:
+                  </span>
+                  <span
+                    style={{
+                      fontFamily: 'monospace',
+                      fontSize: '1.3rem',
+                      fontWeight: 900,
+                      letterSpacing: '0.1em',
+                      color: 'var(--accent-emerald)',
+                    }}
+                  >
+                    {effectiveActivePin}
+                  </span>
+                </div>
+              )}
+
+              {examBatchContext && !effectiveActivePin && effectiveExpiredPin && (
+                <div
+                  data-testid="exam-batch-qr-expired-pin-notice"
+                  style={{
+                    backgroundColor: 'var(--bg-card)',
+                    padding: '0.9rem 1.15rem',
+                    borderRadius: '14px',
+                    border: '1px dashed var(--border-strong)',
+                    color: 'var(--text-secondary)',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                  }}
+                >
+                  Mã PIN phòng cũ đã hết hiệu lực khi đợt thi đóng. Bấm &ldquo;Mở lại đợt thi&rdquo; trong Reports để cấp mã PIN mới cho đợt này.
+                </div>
+              )}
+
               <div
                 style={{
                   backgroundColor: 'var(--bg-card)',
@@ -318,7 +505,7 @@ export const SoloPresentationPage: React.FC<SoloPresentationPageProps> = ({
                       letterSpacing: '0.06em',
                     }}
                   >
-                    Liên kết chơi:
+                    {examBatchContext ? 'Liên kết tham gia đợt thi:' : 'Liên kết chơi:'}
                   </span>
                   <button
                     type="button"
@@ -353,6 +540,7 @@ export const SoloPresentationPage: React.FC<SoloPresentationPageProps> = ({
 
                 {isLinkVisible ? (
                   <div
+                    data-testid="exam-batch-qr-join-url"
                     style={{
                       color: 'var(--accent-sky)',
                       fontWeight: 700,
@@ -388,6 +576,7 @@ export const SoloPresentationPage: React.FC<SoloPresentationPageProps> = ({
 
                 <button
                   type="button"
+                  data-testid="exam-batch-qr-copy-btn"
                   onClick={handleCopyLink}
                   style={{
                     width: '100%',

@@ -7,11 +7,13 @@ import {
   ClockIcon,
   FlameIcon,
   PlusIcon,
+  QrCodeIcon,
   RefreshIcon,
   SparklesIcon,
   TrophyIcon,
   UsersIcon,
 } from '../components/Icons.js';
+import { SoloPresentationPage, type ExamBatchQRContext } from './SoloPresentationPage.js';
 import {
   closeGameExamApi,
   createRoom,
@@ -180,6 +182,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
   } | null>(null);
   const [isGrantingRetake, setIsGrantingRetake] = useState<boolean>(false);
   const [grantRetakeError, setGrantRetakeError] = useState<string | null>(null);
+  const [examBatchQrModal, setExamBatchQrModal] = useState<ExamBatchQRContext | null>(null);
 
   const [isReopeningExam, setIsReopeningExam] = useState<boolean>(false);
   const [isClosingExam, setIsClosingExam] = useState<boolean>(false);
@@ -307,6 +310,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
       setParticipantAttemptsModal(null);
       setPlayAttemptBreakdownModal(null);
       setGrantRetakeModal(null);
+      setExamBatchQrModal(null);
       if (!skipUrlPush) {
         syncReportGameIdInUrl(null, 'push');
       }
@@ -424,17 +428,44 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     }
   };
 
-  const handleReopenExamFromReports = async (gameId: string) => {
+  const handleOpenBatchQrModal = (batch: ReportsExamBatchItem) => {
+    if (!selectedGameReport) return;
+    setExamBatchQrModal({
+      gameId: selectedGameReport.gameId,
+      gameTitle: selectedGameReport.title,
+      batchId: batch.batchId,
+      batchNumber: batch.batchNumber,
+      batchName: batch.batchName,
+      status: batch.status,
+      pin: batch.pin ?? batch.roomCode ?? null,
+      expiredPin: batch.expiredPin ?? null,
+      pinStatus: batch.pinStatus ?? (batch.roomCode ? 'ACTIVE' : 'NONE'),
+    });
+  };
+
+  const handleReopenExamFromReports = async (
+    gameId: string,
+    options?: { batchId?: string; createNewBatch?: boolean }
+  ) => {
     if (isReopeningExam) return;
     setIsReopeningExam(true);
     setReportsActionNotice(null);
     try {
-      const res = await reopenGameExamApi(gameId, { createNewBatch: true });
+      const isNewBatch = Boolean(options?.createNewBatch);
+      const res = await reopenGameExamApi(gameId, {
+        batchId: options?.batchId,
+        createNewBatch: isNewBatch,
+      });
+      if (res.batchId) {
+        setSelectedExamBatchId(res.batchId);
+      }
       setReportsActionNotice({
         type: 'success',
         message:
           (res as any).message ||
-          `Đã mở lại đợt thi (${res.batchName || 'Đợt mới'}) thành công. Lịch sử và điểm các lần thi trước được giữ nguyên.`,
+          (isNewBatch
+            ? `Đã tạo và mở đợt thi mới (${res.batchName || 'Đợt mới'}) thành công.`
+            : `Đã mở lại đợt thi (${res.batchName || 'Đợt thi'}) thành công. Lịch sử và điểm các lần thi trước được giữ nguyên.`),
       });
       await Promise.all([
         handleOpenGameReportsDetail(gameId, true),
@@ -451,19 +482,19 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     }
   };
 
-  const handleCloseExamFromReports = async (gameId: string) => {
+  const handleCloseExamFromReports = async (gameId: string, batchId?: string) => {
     if (isClosingExam) return;
     setIsClosingExam(true);
     setReportsActionNotice(null);
     try {
-      const res = await closeGameExamApi(gameId);
+      const res = await closeGameExamApi(gameId, batchId ? { batchId } : undefined);
       setReportsActionNotice({
         type: 'success',
         message:
           (res as any).message || 'Đã đóng đợt thi hiện tại và lưu kết quả vào lịch sử đợt thi.',
       });
       await Promise.all([
-        handleOpenGameReportsDetail(gameId, false),
+        handleOpenGameReportsDetail(gameId, true),
         loadReportsGamesOverview(),
         loadHistoryActivities(),
       ]);
@@ -1142,7 +1173,7 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                   </div>
                 )}
 
-                {/* Thanh Link tham gia Solo, Mã PIN phòng trực tiếp & Mở lại / Đóng đợt thi */}
+                {/* Thanh truy cập: PLAY giữ Link tham gia / PIN phòng; EXAM hiển thị QR riêng & quản lý theo từng đợt thi */}
                 <div
                   data-testid="reports-game-access-bar"
                   style={{
@@ -1157,105 +1188,38 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                     gap: '12px',
                   }}
                 >
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', minWidth: 0 }}>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-                      Link tham gia:{' '}
-                      <code
-                        data-testid="reports-solo-play-url"
-                        style={{
-                          padding: '3px 7px',
-                          borderRadius: '5px',
-                          backgroundColor: 'var(--bg-subtle)',
-                          color: 'var(--primary)',
-                          fontWeight: 700,
-                        }}
-                      >
-                        {typeof window !== 'undefined' &&
-                        !selectedGameReport.soloPlayUrl.startsWith('http')
-                          ? `${window.location.origin}${selectedGameReport.soloPlayUrl}`
-                          : selectedGameReport.soloPlayUrl}
-                      </code>
-                    </div>
-                    <button
-                      type="button"
-                      data-testid="copy-solo-link-btn"
-                      onClick={() =>
-                        handleCopyText(
-                          'solo-link',
-                          typeof window !== 'undefined' &&
-                            !selectedGameReport.soloPlayUrl.startsWith('http')
-                            ? `${window.location.origin}${selectedGameReport.soloPlayUrl}`
-                            : selectedGameReport.soloPlayUrl
-                        )
-                      }
-                      style={{
-                        padding: '8px 12px',
-                        minHeight: '44px',
-                        minWidth: '44px',
-                        borderRadius: '6px',
-                        border: '1px solid var(--border-strong)',
-                        backgroundColor: 'var(--bg-subtle)',
-                        color: 'var(--text-primary)',
-                        fontSize: '0.76rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {copiedNoticeKey === 'solo-link' ? 'Đã sao chép Link!' : 'Sao chép Link'}
-                    </button>
-
-                    {selectedGameReport.activeStatus?.activeRooms &&
-                    selectedGameReport.activeStatus.activeRooms.length > 0 ? (
-                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                        <span
-                          data-testid="reports-active-room-pin"
+                  {selectedGameReport.sessionMode === 'PLAY' ? (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', minWidth: 0 }}>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        Link tham gia:{' '}
+                        <code
+                          data-testid="reports-solo-play-url"
                           style={{
-                            padding: '4px 10px',
-                            borderRadius: '6px',
-                            backgroundColor: 'var(--primary-subtle)',
-                            color: 'var(--primary)',
-                            fontSize: '0.8rem',
-                            fontWeight: 800,
-                            fontFamily: 'monospace',
-                          }}
-                        >
-                          PIN: {selectedGameReport.activeStatus.activeRooms[0].roomCode}
-                        </span>
-                        <button
-                          type="button"
-                          data-testid="copy-room-pin-btn"
-                          onClick={() =>
-                            handleCopyText(
-                              'room-pin',
-                              selectedGameReport.activeStatus.activeRooms[0].roomCode
-                            )
-                          }
-                          style={{
-                            padding: '8px 12px',
-                            minHeight: '44px',
-                            minWidth: '44px',
-                            borderRadius: '6px',
-                            border: '1px solid var(--border-strong)',
+                            padding: '3px 7px',
+                            borderRadius: '5px',
                             backgroundColor: 'var(--bg-subtle)',
-                            color: 'var(--text-primary)',
-                            fontSize: '0.76rem',
+                            color: 'var(--primary)',
                             fontWeight: 700,
-                            cursor: 'pointer',
                           }}
                         >
-                          {copiedNoticeKey === 'room-pin' ? 'Đã sao chép PIN!' : 'Sao chép PIN'}
-                        </button>
+                          {typeof window !== 'undefined' &&
+                          !selectedGameReport.soloPlayUrl.startsWith('http')
+                            ? `${window.location.origin}${selectedGameReport.soloPlayUrl}`
+                            : selectedGameReport.soloPlayUrl}
+                        </code>
                       </div>
-                    ) : (
                       <button
                         type="button"
-                        data-testid="create-room-pin-btn"
-                        disabled={
-                          isCreatingRoomPin ||
-                          (selectedGameReport.sessionMode === 'EXAM' &&
-                            selectedGameReport.examStatus === 'CLOSED')
+                        data-testid="copy-solo-link-btn"
+                        onClick={() =>
+                          handleCopyText(
+                            'solo-link',
+                            typeof window !== 'undefined' &&
+                              !selectedGameReport.soloPlayUrl.startsWith('http')
+                              ? `${window.location.origin}${selectedGameReport.soloPlayUrl}`
+                              : selectedGameReport.soloPlayUrl
+                          )
                         }
-                        onClick={() => handleCreateRoomPinFromReports(selectedGameReport.gameId)}
                         style={{
                           padding: '8px 12px',
                           minHeight: '44px',
@@ -1266,93 +1230,254 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                           color: 'var(--text-primary)',
                           fontSize: '0.76rem',
                           fontWeight: 700,
-                          cursor:
-                            isCreatingRoomPin ||
-                            (selectedGameReport.sessionMode === 'EXAM' &&
-                              selectedGameReport.examStatus === 'CLOSED')
-                              ? 'not-allowed'
-                              : 'pointer',
-                          opacity:
-                            selectedGameReport.sessionMode === 'EXAM' &&
-                            selectedGameReport.examStatus === 'CLOSED'
-                              ? 0.55
-                              : 1,
+                          cursor: 'pointer',
                         }}
                       >
-                        {isCreatingRoomPin ? 'Đang tạo PIN...' : '+ Tạo mã PIN phòng trực tiếp'}
+                        {copiedNoticeKey === 'solo-link' ? 'Đã sao chép Link!' : 'Sao chép Link'}
                       </button>
-                    )}
-                  </div>
 
-                  {/* Điều khiển Mở lại đợt thi / Đóng đợt thi cho chế độ EXAM */}
-                  {selectedGameReport.sessionMode === 'EXAM' && (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      <span
-                        data-testid="reports-exam-status-badge"
-                        style={{
-                          padding: '4px 10px',
-                          borderRadius: '6px',
-                          fontSize: '0.76rem',
-                          fontWeight: 800,
-                          backgroundColor:
-                            selectedGameReport.examStatus === 'CLOSED'
-                              ? 'rgba(239, 68, 68, 0.14)'
-                              : 'rgba(16, 185, 129, 0.14)',
-                          color:
-                            selectedGameReport.examStatus === 'CLOSED'
-                              ? 'var(--accent-rose)'
-                              : 'var(--accent-emerald)',
-                        }}
-                      >
-                        {selectedGameReport.examStatus === 'CLOSED'
-                          ? 'Trạng thái: Đợt thi đã đóng'
-                          : 'Trạng thái: Đợt thi đang mở'}
-                      </span>
-
-                      {selectedGameReport.examStatus === 'CLOSED' ? (
-                        <button
-                          type="button"
-                          data-testid="reopen-exam-btn"
-                          disabled={isReopeningExam}
-                          onClick={() => handleReopenExamFromReports(selectedGameReport.gameId)}
-                          style={{
-                            padding: '8px 14px',
-                            minHeight: '44px',
-                            minWidth: '44px',
-                            borderRadius: '7px',
-                            border: '1px solid var(--primary)',
-                            backgroundColor: 'var(--primary)',
-                            color: 'var(--primary-ink, #060913)',
-                            fontSize: '0.78rem',
-                            fontWeight: 800,
-                            cursor: isReopeningExam ? 'not-allowed' : 'pointer',
-                          }}
-                        >
-                          {isReopeningExam ? 'Đang mở lại...' : 'Mở lại đợt thi'}
-                        </button>
+                      {selectedGameReport.activeStatus?.activeRooms &&
+                      selectedGameReport.activeStatus.activeRooms.length > 0 ? (
+                        <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                          <span
+                            data-testid="reports-active-room-pin"
+                            style={{
+                              padding: '4px 10px',
+                              borderRadius: '6px',
+                              backgroundColor: 'var(--primary-subtle)',
+                              color: 'var(--primary)',
+                              fontSize: '0.8rem',
+                              fontWeight: 800,
+                              fontFamily: 'monospace',
+                            }}
+                          >
+                            PIN: {selectedGameReport.activeStatus.activeRooms[0].roomCode}
+                          </span>
+                          <button
+                            type="button"
+                            data-testid="copy-room-pin-btn"
+                            onClick={() =>
+                              handleCopyText(
+                                'room-pin',
+                                selectedGameReport.activeStatus.activeRooms[0].roomCode
+                              )
+                            }
+                            style={{
+                              padding: '8px 12px',
+                              minHeight: '44px',
+                              minWidth: '44px',
+                              borderRadius: '6px',
+                              border: '1px solid var(--border-strong)',
+                              backgroundColor: 'var(--bg-subtle)',
+                              color: 'var(--text-primary)',
+                              fontSize: '0.76rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {copiedNoticeKey === 'room-pin' ? 'Đã sao chép PIN!' : 'Sao chép PIN'}
+                          </button>
+                        </div>
                       ) : (
                         <button
                           type="button"
-                          data-testid="close-exam-from-reports-btn"
-                          disabled={isClosingExam}
-                          onClick={() => handleCloseExamFromReports(selectedGameReport.gameId)}
+                          data-testid="create-room-pin-btn"
+                          disabled={isCreatingRoomPin}
+                          onClick={() => handleCreateRoomPinFromReports(selectedGameReport.gameId)}
                           style={{
-                            padding: '8px 14px',
+                            padding: '8px 12px',
                             minHeight: '44px',
                             minWidth: '44px',
-                            borderRadius: '7px',
-                            border: '1px solid rgba(239, 68, 68, 0.45)',
-                            backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                            color: 'var(--accent-rose)',
-                            fontSize: '0.78rem',
-                            fontWeight: 800,
-                            cursor: isClosingExam ? 'not-allowed' : 'pointer',
+                            borderRadius: '6px',
+                            border: '1px solid var(--border-strong)',
+                            backgroundColor: 'var(--bg-subtle)',
+                            color: 'var(--text-primary)',
+                            fontSize: '0.76rem',
+                            fontWeight: 700,
+                            cursor: isCreatingRoomPin ? 'not-allowed' : 'pointer',
                           }}
                         >
-                          {isClosingExam ? 'Đang đóng...' : 'Đóng đợt thi hiện tại'}
+                          {isCreatingRoomPin ? 'Đang tạo PIN...' : '+ Tạo mã PIN phòng trực tiếp'}
                         </button>
                       )}
                     </div>
+                  ) : (
+                    (() => {
+                      const managedBatch: ReportsExamBatchItem | null =
+                        selectedGameReport.examBatches.find((b) => b.batchId === selectedExamBatchId) ||
+                        selectedGameReport.examBatches[selectedGameReport.examBatches.length - 1] ||
+                        null;
+                      const activeBatchPin =
+                        managedBatch?.pinStatus === 'ACTIVE' && managedBatch.pin
+                          ? managedBatch.pin
+                          : managedBatch?.roomCode || null;
+                      const rawTitle = managedBatch
+                        ? managedBatch.batchName.replace(/\s*\(Phòng\s+[A-Z0-9]+\)/i, '').trim()
+                        : 'Đợt 1';
+                      const batchDisplayTitle = activeBatchPin
+                        ? `${rawTitle} — Phòng ${activeBatchPin}`
+                        : rawTitle;
+                      const isBatchClosed = managedBatch
+                        ? managedBatch.status === 'CLOSED'
+                        : selectedGameReport.examStatus === 'CLOSED';
+
+                      return (
+                        <>
+                          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', minWidth: 0 }}>
+                            <span
+                              data-testid="reports-selected-batch-title"
+                              style={{
+                                fontSize: '0.88rem',
+                                fontWeight: 800,
+                                color: 'var(--text-primary)',
+                              }}
+                            >
+                              {batchDisplayTitle}
+                            </span>
+
+                            <span
+                              data-testid="reports-exam-status-badge"
+                              style={{
+                                padding: '4px 10px',
+                                borderRadius: '6px',
+                                fontSize: '0.76rem',
+                                fontWeight: 800,
+                                backgroundColor: isBatchClosed
+                                  ? 'rgba(239, 68, 68, 0.14)'
+                                  : 'rgba(16, 185, 129, 0.14)',
+                                color: isBatchClosed ? 'var(--accent-rose)' : 'var(--accent-emerald)',
+                              }}
+                            >
+                              {isBatchClosed ? 'Trạng thái: Đã đóng' : 'Trạng thái: Đang mở'}
+                            </span>
+
+                            {managedBatch?.pinStatus === 'EXPIRED' && managedBatch.expiredPin && (
+                              <span
+                                data-testid="reports-expired-pin-badge"
+                                style={{
+                                  padding: '4px 9px',
+                                  borderRadius: '6px',
+                                  fontSize: '0.73rem',
+                                  fontWeight: 700,
+                                  backgroundColor: 'var(--bg-subtle)',
+                                  border: '1px dashed var(--border-strong)',
+                                  color: 'var(--text-secondary)',
+                                }}
+                              >
+                                Mã PIN phòng cũ đã hết hiệu lực
+                              </span>
+                            )}
+                          </div>
+
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            {managedBatch && (
+                              <button
+                                type="button"
+                                data-testid="open-selected-batch-qr-btn"
+                                onClick={() => handleOpenBatchQrModal(managedBatch)}
+                                style={{
+                                  padding: '8px 14px',
+                                  minHeight: '44px',
+                                  minWidth: '44px',
+                                  borderRadius: '7px',
+                                  border: '1px solid var(--primary)',
+                                  backgroundColor: 'var(--primary-subtle)',
+                                  color: 'var(--primary)',
+                                  fontSize: '0.78rem',
+                                  fontWeight: 800,
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '6px',
+                                }}
+                              >
+                                <QrCodeIcon size={15} />
+                                <span>Mở mã QR đợt {managedBatch.batchNumber}</span>
+                              </button>
+                            )}
+
+                            {isBatchClosed ? (
+                              <button
+                                type="button"
+                                data-testid="reopen-exam-btn"
+                                disabled={isReopeningExam}
+                                onClick={() =>
+                                  handleReopenExamFromReports(selectedGameReport.gameId, {
+                                    batchId: managedBatch?.batchId,
+                                    createNewBatch: false,
+                                  })
+                                }
+                                style={{
+                                  padding: '8px 14px',
+                                  minHeight: '44px',
+                                  minWidth: '44px',
+                                  borderRadius: '7px',
+                                  border: '1px solid var(--primary)',
+                                  backgroundColor: 'var(--primary)',
+                                  color: 'var(--primary-ink, #060913)',
+                                  fontSize: '0.78rem',
+                                  fontWeight: 800,
+                                  cursor: isReopeningExam ? 'not-allowed' : 'pointer',
+                                }}
+                              >
+                                {isReopeningExam ? 'Đang mở lại...' : 'Mở lại đợt thi'}
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                data-testid="close-exam-from-reports-btn"
+                                disabled={isClosingExam}
+                                onClick={() =>
+                                  handleCloseExamFromReports(
+                                    selectedGameReport.gameId,
+                                    managedBatch?.batchId
+                                  )
+                                }
+                                style={{
+                                  padding: '8px 14px',
+                                  minHeight: '44px',
+                                  minWidth: '44px',
+                                  borderRadius: '7px',
+                                  border: '1px solid rgba(239, 68, 68, 0.45)',
+                                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                                  color: 'var(--accent-rose)',
+                                  fontSize: '0.78rem',
+                                  fontWeight: 800,
+                                  cursor: isClosingExam ? 'not-allowed' : 'pointer',
+                                }}
+                              >
+                                {isClosingExam ? 'Đang đóng...' : 'Đóng đợt thi hiện tại'}
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              data-testid="create-new-exam-batch-btn"
+                              disabled={isReopeningExam}
+                              onClick={() =>
+                                handleReopenExamFromReports(selectedGameReport.gameId, {
+                                  createNewBatch: true,
+                                })
+                              }
+                              style={{
+                                padding: '8px 12px',
+                                minHeight: '44px',
+                                minWidth: '44px',
+                                borderRadius: '7px',
+                                border: '1px solid var(--border-strong)',
+                                backgroundColor: 'var(--bg-subtle)',
+                                color: 'var(--text-primary)',
+                                fontSize: '0.76rem',
+                                fontWeight: 700,
+                                cursor: isReopeningExam ? 'not-allowed' : 'pointer',
+                              }}
+                            >
+                              + Tạo đợt thi mới
+                            </button>
+                          </div>
+                        </>
+                      );
+                    })()
                   )}
                 </div>
 
@@ -2038,25 +2163,52 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                                 </span>
                               </div>
 
-                              <button
-                                type="button"
-                                data-testid={`select-exam-batch-${batch.batchId}`}
-                                onClick={() => setSelectedExamBatchId(batch.batchId)}
-                                style={{
-                                  padding: '8px 12px',
-                                  minHeight: '44px',
-                                  minWidth: '44px',
-                                  borderRadius: '6px',
-                                  border: '1px solid var(--primary)',
-                                  backgroundColor: isSelectedBatch ? 'var(--primary)' : 'var(--bg-surface)',
-                                  color: isSelectedBatch ? 'var(--primary-ink, #060913)' : 'var(--primary)',
-                                  fontSize: '0.75rem',
-                                  fontWeight: 800,
-                                  cursor: 'pointer',
-                                }}
-                              >
-                                {isSelectedBatch ? 'Đang xem đợt này' : 'Xem chi tiết đợt'}
-                              </button>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  data-testid={`select-exam-batch-${batch.batchId}`}
+                                  onClick={() => setSelectedExamBatchId(batch.batchId)}
+                                  style={{
+                                    flex: '1 1 auto',
+                                    padding: '8px 12px',
+                                    minHeight: '44px',
+                                    minWidth: '44px',
+                                    borderRadius: '6px',
+                                    border: '1px solid var(--primary)',
+                                    backgroundColor: isSelectedBatch ? 'var(--primary)' : 'var(--bg-surface)',
+                                    color: isSelectedBatch ? 'var(--primary-ink, #060913)' : 'var(--primary)',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 800,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  {isSelectedBatch ? 'Đang xem đợt này' : 'Xem chi tiết đợt'}
+                                </button>
+                                <button
+                                  type="button"
+                                  data-testid={`view-batch-qr-btn-${batch.batchId}`}
+                                  onClick={() => handleOpenBatchQrModal(batch)}
+                                  style={{
+                                    padding: '8px 12px',
+                                    minHeight: '44px',
+                                    minWidth: '44px',
+                                    borderRadius: '6px',
+                                    border: '1px solid var(--border-strong)',
+                                    backgroundColor: 'var(--bg-surface)',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 800,
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    gap: '5px',
+                                  }}
+                                >
+                                  <QrCodeIcon size={14} />
+                                  <span>Xem mã QR</span>
+                                </button>
+                              </div>
                             </div>
                           );
                         })}
@@ -4836,6 +4988,52 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                   : `Xác nhận cấp +${grantRetakeModal.additionalAttempts} lượt`}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================================
+          MODAL QR RIÊNG CHO TỪNG ĐỢT THI EXAM (TÁI SỬ DỤNG SOLOPRESENTATIONPAGE)
+         ===================================================================== */}
+      {examBatchQrModal && (
+        <div
+          data-testid="exam-batch-qr-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Mã QR ${examBatchQrModal.batchName}`}
+          onClick={() => setExamBatchQrModal(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            backgroundColor: 'rgba(6, 9, 19, 0.82)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            overflowY: 'auto',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: '100%',
+              maxWidth: '1040px',
+              maxHeight: '92vh',
+              overflowY: 'auto',
+              backgroundColor: 'var(--bg-main, #0b0f19)',
+              borderRadius: '20px',
+              border: '1px solid var(--border-strong)',
+              boxShadow: '0 24px 64px rgba(0, 0, 0, 0.55)',
+            }}
+          >
+            <SoloPresentationPage
+              gameSpec={null}
+              gameId={examBatchQrModal.gameId}
+              examBatchContext={examBatchQrModal}
+              onBack={() => setExamBatchQrModal(null)}
+            />
           </div>
         </div>
       )}

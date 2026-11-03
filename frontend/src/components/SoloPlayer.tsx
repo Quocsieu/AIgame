@@ -42,6 +42,7 @@ import {
 
 interface SoloPlayerProps {
   gameId?: string;
+  batchId?: string | null;
   initialSpec?: GameSpecification | null;
   onLeave: () => void;
   playtestMode?: boolean;
@@ -323,12 +324,20 @@ function calculatePlaytestPoints(
 
 export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   gameId,
+  batchId,
   initialSpec,
   onLeave,
   playtestMode = false,
   onSpecUpdated,
 }) => {
   const toast = useToast();
+  const effectiveBatchId =
+    batchId !== undefined && batchId !== null && String(batchId).trim()
+      ? String(batchId).trim()
+      : typeof window !== 'undefined'
+        ? (new URLSearchParams(window.location.search).get('batch') || '').trim() || null
+        : null;
+  const prevBatchIdRef = useRef<string | null | undefined>(undefined);
 
   const [isLoading, setIsLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -592,14 +601,18 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       }
     }
 
-    const sessionKey = targetGameId ? `active_solo_session_${targetGameId}` : null;
+    const sessionKey = targetGameId
+      ? effectiveBatchId
+        ? `active_solo_session_${targetGameId}_${effectiveBatchId}`
+        : `active_solo_session_${targetGameId}`
+      : null;
     const identityKey = targetGameId ? `solo_roster_identity_${targetGameId}` : null;
     if (isForceRestart && sessionKey) {
       sessionStorage.removeItem(sessionKey);
     }
 
     // Restore saved roster identity from sessionStorage if present
-    if (!confirmedIdentityRef.current && identityKey) {
+    if (!confirmedIdentityRef.current && identityKey && !effectiveBatchId) {
       try {
         const rawIdent = sessionStorage.getItem(identityKey);
         if (rawIdent) {
@@ -674,7 +687,10 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     // Check Roster / Free-Text Name / Exam requirements before creating session
     if (targetGameId && !confirmedIdentityRef.current) {
       try {
-        const rosterRes = await fetchGameParticipantsApi(targetGameId, { mode: 'public' });
+        const rosterRes = await fetchGameParticipantsApi(targetGameId, {
+          mode: 'public',
+          batchId: effectiveBatchId || undefined,
+        });
         const mode = rosterRes.rosterMode || resolvedSpec?.settings?.rosterMode || 'FREE_TEXT';
         const effectiveSessionMode =
           rosterRes.sessionMode || resolvedSpec?.settings?.sessionMode || 'PLAY';
@@ -733,6 +749,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       if (gameId) {
         const sessionRes = await createPracticeSession({
           gameId,
+          batchId: effectiveBatchId || undefined,
           publicPlay: true,
           participantId: ident?.participantId,
           playerName: ident?.playerName,
@@ -750,6 +767,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       } else if (initialSpec?.gameId) {
         const sessionRes = await createPracticeSession({
           gameId: initialSpec.gameId,
+          batchId: effectiveBatchId || undefined,
           gameSpecification: resolvedSpec || initialSpec,
           participantId: ident?.participantId,
           playerName: ident?.playerName,
@@ -790,13 +808,18 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   };
 
   useEffect(() => {
+    if (prevBatchIdRef.current !== undefined && prevBatchIdRef.current !== effectiveBatchId) {
+      confirmedIdentityRef.current = null;
+      setRosterGateOpen(false);
+    }
+    prevBatchIdRef.current = effectiveBatchId;
     initializeSession();
     return () => {
       stopTimer();
       clearAutoAdvanceTimer();
       soundManager.stopAll();
     };
-  }, [gameId, initialSpec]);
+  }, [gameId, effectiveBatchId, initialSpec]);
 
   // V3 Stage 5: Poll session status during active Solo Exam to detect BTC Close Exam & auto-submit immediately
   useEffect(() => {

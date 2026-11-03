@@ -24,6 +24,7 @@ import {
 import { gameStore, sessionStore } from '../game/game.store.js';
 import { gameDeleteRateLimiter, generateRateLimiter } from '../middleware/rateLimiter.js';
 import { rejectGuestOrPlayerWrite } from '../middleware/auth.middleware.js';
+import { roomService } from '../multiplayer/room.service.js';
 import { roomStore } from '../multiplayer/room.store.js';
 import { multiplayerWsServer } from '../multiplayer/room.websocket.js';
 import {
@@ -658,14 +659,16 @@ export function computeGameActiveStatus(gameId: string): GameActiveStatus {
   };
 }
 
-function buildSoloPlayUrl(req: Request, gameId: string): string {
+function buildSoloPlayUrl(req: Request, gameId: string, batchId?: string | null): string {
   const frontendUrl = (process.env.FRONTEND_URL || '').trim().replace(/\/+$/, '');
-  if (frontendUrl) {
-    return `${frontendUrl}/?play=${encodeURIComponent(gameId)}`;
+  const baseUrl = frontendUrl
+    ? frontendUrl
+    : `${req.protocol || 'http'}://${req.get('host') || 'localhost:3000'}`;
+  const cleanBatchId = typeof batchId === 'string' && batchId.trim() ? batchId.trim() : null;
+  if (cleanBatchId) {
+    return `${baseUrl}/?play=${encodeURIComponent(gameId)}&batch=${encodeURIComponent(cleanBatchId)}`;
   }
-  const host = req.get('host') || 'localhost:3000';
-  const protocol = req.protocol || 'http';
-  return `${protocol}://${host}/?play=${encodeURIComponent(gameId)}`;
+  return `${baseUrl}/?play=${encodeURIComponent(gameId)}`;
 }
 
 /**
@@ -1182,7 +1185,8 @@ gameRouter.get(
       const queryMode = String(req.query.mode || '').toLowerCase();
       const isPublicQuery = queryMode === 'public';
       const isManageQuery = queryMode === 'manage' || queryMode === 'admin';
-      if (isPublicQuery && !isPublic) {
+      const isExamPublicJoin = isPublicQuery && spec.settings?.sessionMode === 'EXAM';
+      if (isPublicQuery && !isPublic && !isExamPublicJoin) {
         throw new AppError(
           'GAME_NOT_PUBLISHED',
           'Game này chưa được xuất bản nên không thể mở ở chế độ chơi công khai.',
@@ -1204,7 +1208,7 @@ gameRouter.get(
           ownerUserId,
           currentUser: req.user,
           mode: 'read',
-          isPublic,
+          isPublic: isPublic || isExamPublicJoin,
         });
       }
 
@@ -1861,7 +1865,44 @@ gameRouter.get(
       const list = result.participants;
       const rosterMode = spec.settings?.rosterMode || 'FREE_TEXT';
       const sessionMode = spec.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
-      const examStatus = spec.settings?.examStatus || 'OPEN';
+      let examStatus = spec.settings?.examStatus || 'OPEN';
+      const requestedBatchId =
+        typeof req.query.batchId === 'string' && req.query.batchId.trim()
+          ? req.query.batchId.trim()
+          : null;
+
+      if (sessionMode === 'EXAM' && requestedBatchId && examStatus !== 'CLOSED') {
+        const storedBatches = Array.isArray(spec.settings?.examBatches)
+          ? spec.settings.examBatches
+          : [];
+        let matchedBatch: { batchId: string; status?: string } | undefined = storedBatches.find(
+          (b) => b.batchId === requestedBatchId
+        );
+        if (!matchedBatch && storedBatches.length === 0 && requestedBatchId === 'batch-1') {
+          matchedBatch = { batchId: 'batch-1', status: examStatus };
+        }
+        if (!matchedBatch && requestedBatchId.startsWith('room:')) {
+          const reqRoomId = requestedBatchId.slice(5);
+          const activeRoom = roomStore
+            .getActiveRoomsForGame(gameId)
+            .find((r) => r.roomId === reqRoomId && r.state !== 'FINISHED');
+          if (activeRoom) {
+            matchedBatch = { batchId: requestedBatchId, status: 'OPEN' };
+          }
+        }
+        if (!matchedBatch) {
+          const reportDetail = persistenceRepo.getGameReportsDetail(gameId);
+          const fromReport = reportDetail?.examBatches?.find(
+            (b) => b.batchId === requestedBatchId
+          );
+          if (fromReport) {
+            matchedBatch = { batchId: fromReport.batchId, status: fromReport.status };
+          }
+        }
+        if (!matchedBatch || matchedBatch.status === 'CLOSED' || matchedBatch.status === 'CLOSING') {
+          examStatus = 'CLOSED';
+        }
+      }
 
       if (isManager && String(req.query.mode || '').toLowerCase() !== 'public') {
         res.status(200).json(
@@ -2391,10 +2432,18 @@ gameRouter.post(
 
       const activeSessions = sessionStore.getActiveSessionsForGame(gameId);
       const activeRooms = roomStore.getActiveRoomsForGame(gameId);
+      const targetCloseBatchId =
+        typeof req.body?.batchId === 'string' && req.body.batchId.trim()
+          ? req.body.batchId.trim()
+          : null;
+      const hasOpenBatchInSpec = Array.isArray(spec.settings?.examBatches)
+        ? spec.settings.examBatches.some((b) => b.status === 'OPEN')
+        : false;
 
-      // Idempotent fast-path if already CLOSED and no straggling sessions/rooms exist
+      // Idempotent fast-path if already CLOSED and no straggling sessions/rooms/open batches exist
       if (
         spec.settings?.examStatus === 'CLOSED' &&
+        !hasOpenBatchInSpec &&
         activeSessions.length === 0 &&
         activeRooms.length === 0
       ) {
@@ -2477,17 +2526,64 @@ gameRouter.post(
           maxPossibleScore,
         });
       } finally {
-        // Step 5: Always transition examStatus -> CLOSED while preserving answersPublished & updating examBatches
+        // Step 5: Always transition targeted or open examBatches -> CLOSED while preserving answersPublished
+        const detailBeforeClose = persistenceRepo.getGameReportsDetail(gameId);
         const existingBatches = Array.isArray(spec.settings?.examBatches)
           ? [...spec.settings.examBatches]
           : [];
+        if (detailBeforeClose?.examBatches) {
+          for (const dbBatch of detailBeforeClose.examBatches) {
+            if (!existingBatches.some((eb) => eb.batchId === dbBatch.batchId)) {
+              existingBatches.push({
+                batchId: dbBatch.batchId,
+                batchNumber: dbBatch.batchNumber,
+                batchName: dbBatch.batchName,
+                deliveryMode: dbBatch.deliveryMode,
+                roomId: dbBatch.roomId,
+                roomIds: dbBatch.roomIds,
+                roomCode: dbBatch.roomCode,
+                openedAt: dbBatch.openedAt,
+                closedAt: dbBatch.closedAt,
+                status: dbBatch.status,
+              });
+            }
+          }
+        }
+        for (const ar of activeRooms) {
+          if (
+            !existingBatches.some(
+              (eb) =>
+                eb.roomCode === ar.roomCode ||
+                eb.roomId === ar.roomId ||
+                (Array.isArray(eb.roomIds) && eb.roomIds.includes(ar.roomId))
+            )
+          ) {
+            const nextNum = existingBatches.length + 1;
+            existingBatches.push({
+              batchId: `room:${ar.roomId}`,
+              batchNumber: nextNum,
+              batchName: `Đợt ${nextNum} (Phòng ${ar.roomCode})`,
+              deliveryMode: 'MULTIPLAYER',
+              roomId: ar.roomId,
+              roomIds: [ar.roomId],
+              roomCode: ar.roomCode,
+              openedAt: new Date(ar.createdAt).toISOString(),
+              closedAt: closedAtIso,
+              status: 'CLOSED',
+            });
+          }
+        }
+
         const nextBatches =
           existingBatches.length > 0
-            ? existingBatches.map((b, idx) =>
-                b.status === 'OPEN' || idx === existingBatches.length - 1
+            ? existingBatches.map((b, idx) => {
+                const shouldClose = targetCloseBatchId
+                  ? b.batchId === targetCloseBatchId
+                  : b.status === 'OPEN' || idx === existingBatches.length - 1;
+                return shouldClose
                   ? { ...b, status: 'CLOSED' as const, closedAt: b.closedAt || closedAtIso }
-                  : b
-              )
+                  : b;
+              })
             : [
                 {
                   batchId: 'batch-1',
@@ -2502,24 +2598,31 @@ gameRouter.post(
                 },
               ];
 
+        const remainingOpenBatch = nextBatches.find((b) => b.status === 'OPEN');
+        const nextExamStatus = remainingOpenBatch ? 'OPEN' : 'CLOSED';
+
         const closedSpec: GameSpecification = {
           ...spec,
           settings: {
             ...spec.settings,
-            examStatus: 'CLOSED',
-            examClosedAt: closedAtIso,
+            examStatus: nextExamStatus,
+            examClosedAt: nextExamStatus === 'CLOSED' ? closedAtIso : null,
             examBatches: nextBatches,
+            ...(remainingOpenBatch ? { activeBatchId: remainingOpenBatch.batchId } : {}),
           },
         };
         gameStore.save(closedSpec, Date.now(), ownerUserId, isPublic);
       }
 
+      const updatedSpecAfterClose = gameStore.get(gameId);
+      const finalExamStatus = updatedSpecAfterClose?.settings?.examStatus || 'CLOSED';
+
       res.status(200).json(
         createSuccessResponse({
           gameId,
           alreadyClosed: false,
-          examStatus: 'CLOSED',
-          examClosedAt: closedAtIso,
+          examStatus: finalExamStatus,
+          examClosedAt: finalExamStatus === 'CLOSED' ? closedAtIso : null,
           answersPublished: Boolean(spec.settings?.answersPublished),
           autoSubmittedSoloCount,
           autoSubmittedRoomPlayersCount,
@@ -2581,36 +2684,105 @@ gameRouter.post(
           ? req.body.batchId.trim()
           : null;
       const createNewBatch = Boolean(req.body?.createNewBatch);
+      const withRoomPin = Boolean(req.body?.withRoomPin);
+      const refreshExpiredPin = Boolean(req.body?.refreshExpiredPin);
 
+      const detailBeforeReopen = persistenceRepo.getGameReportsDetail(gameId);
+      const activeRoomsBeforeReopen = roomStore.getActiveRoomsForGame(gameId);
       const existingBatches = Array.isArray(spec.settings?.examBatches)
         ? [...spec.settings.examBatches]
-        : [
-            {
-              batchId: 'batch-1',
-              batchNumber: 1,
-              batchName: 'Đợt 1',
-              deliveryMode: 'MIXED' as const,
-              roomId: null,
-              roomCode: null,
-              openedAt: spec.settings?.examOpenAt || spec.generatedAt || nowIso,
-              closedAt: spec.settings?.examClosedAt || null,
-              status: (spec.settings?.examStatus === 'CLOSED' ? 'CLOSED' : 'OPEN') as
-                | 'OPEN'
-                | 'CLOSED',
-            },
-          ];
+        : [];
+      if (detailBeforeReopen?.examBatches) {
+        for (const dbBatch of detailBeforeReopen.examBatches) {
+          if (!existingBatches.some((eb) => eb.batchId === dbBatch.batchId)) {
+            existingBatches.push({
+              batchId: dbBatch.batchId,
+              batchNumber: dbBatch.batchNumber,
+              batchName: dbBatch.batchName,
+              deliveryMode: dbBatch.deliveryMode,
+              roomId: dbBatch.roomId,
+              roomIds: dbBatch.roomIds,
+              roomCode: dbBatch.roomCode,
+              openedAt: dbBatch.openedAt,
+              closedAt: dbBatch.closedAt,
+              status: dbBatch.status,
+            });
+          }
+        }
+      }
+      for (const ar of activeRoomsBeforeReopen) {
+        if (
+          !existingBatches.some(
+            (eb) =>
+              eb.roomCode === ar.roomCode ||
+              eb.roomId === ar.roomId ||
+              (Array.isArray(eb.roomIds) && eb.roomIds.includes(ar.roomId))
+          )
+        ) {
+          const nextNum = existingBatches.length + 1;
+          existingBatches.push({
+            batchId: `room:${ar.roomId}`,
+            batchNumber: nextNum,
+            batchName: `Đợt ${nextNum} (Phòng ${ar.roomCode})`,
+            deliveryMode: 'MULTIPLAYER',
+            roomId: ar.roomId,
+            roomIds: [ar.roomId],
+            roomCode: ar.roomCode,
+            openedAt: new Date(ar.createdAt).toISOString(),
+            closedAt: null,
+            status: 'OPEN',
+          });
+        }
+      }
+      if (existingBatches.length === 0) {
+        existingBatches.push({
+          batchId: 'batch-1',
+          batchNumber: 1,
+          batchName: 'Đợt 1',
+          deliveryMode: 'MIXED',
+          roomId: null,
+          roomCode: null,
+          openedAt: spec.settings?.examOpenAt || spec.generatedAt || nowIso,
+          closedAt: spec.settings?.examClosedAt || null,
+          status: spec.settings?.examStatus === 'CLOSED' ? 'CLOSED' : 'OPEN',
+        });
+      }
 
       let reopenedBatchId = existingBatches[existingBatches.length - 1]?.batchId || 'batch-1';
       let reopenedBatchName = existingBatches[existingBatches.length - 1]?.batchName || 'Đợt 1';
+      let reopenedPin: string | null = null;
       let nextBatches = existingBatches;
 
       if (createNewBatch) {
-        const nextNum = existingBatches.length + 1;
+        // Close any active rooms from previous batches so their PIN is never reused by the new batch
+        for (const room of activeRoomsBeforeReopen) {
+          try {
+            const leaderboard = room.forceFinishOnExamClose(nowIso);
+            multiplayerWsServer.broadcastExamClosedForRoom(room, leaderboard, nowIso);
+          } catch (err) {
+            console.error(`[ReopenExam] Failed to close previous active room ${room.roomCode}:`, err);
+          }
+        }
+        const maxNum = existingBatches.reduce((max, b) => Math.max(max, b.batchNumber || 0), 0);
+        let nextNum = Math.max(existingBatches.length + 1, maxNum + 1);
+        while (existingBatches.some((b) => b.batchId === `batch-${nextNum}`)) {
+          nextNum++;
+        }
         reopenedBatchId = `batch-${nextNum}`;
         reopenedBatchName =
           typeof req.body?.batchName === 'string' && req.body.batchName.trim()
             ? req.body.batchName.trim()
             : `Đợt ${nextNum}`;
+
+        let newRoomId: string | null = null;
+        let newRoomCode: string | null = null;
+        if (withRoomPin) {
+          const createdRoom = roomService.createRoom(spec, undefined, ownerUserId);
+          newRoomId = createdRoom.roomId;
+          newRoomCode = createdRoom.roomCode;
+          reopenedPin = newRoomCode;
+        }
+
         nextBatches = [
           ...existingBatches.map((b) =>
             b.status === 'OPEN' ? { ...b, status: 'CLOSED' as const, closedAt: b.closedAt || nowIso } : b
@@ -2620,8 +2792,9 @@ gameRouter.post(
             batchNumber: nextNum,
             batchName: reopenedBatchName,
             deliveryMode: 'MIXED' as const,
-            roomId: null,
-            roomCode: null,
+            roomId: newRoomId,
+            roomIds: newRoomId ? [newRoomId] : [],
+            roomCode: newRoomCode,
             openedAt: nowIso,
             closedAt: null,
             status: 'OPEN' as const,
@@ -2631,13 +2804,50 @@ gameRouter.post(
         const idxToReopen = targetBatchId
           ? existingBatches.findIndex((b) => b.batchId === targetBatchId)
           : existingBatches.length - 1;
+        if (targetBatchId && idxToReopen < 0) {
+          throw new AppError('EXAM_BATCH_NOT_FOUND', `Đợt thi "${targetBatchId}" không tồn tại.`, 404);
+        }
         const resolvedIdx = idxToReopen >= 0 ? idxToReopen : existingBatches.length - 1;
         nextBatches = existingBatches.map((b, idx) => {
           if (idx === resolvedIdx) {
             reopenedBatchId = b.batchId;
-            reopenedBatchName = b.batchName;
+            let updatedBatchName = b.batchName;
+            let updatedRoomId = b.roomId ?? null;
+            let updatedRoomCode = b.roomCode ?? null;
+            const prevRoomIds = Array.from(
+              new Set([...(Array.isArray(b.roomIds) ? b.roomIds : []), ...(b.roomId ? [b.roomId] : [])])
+            );
+
+            const isCurrentPinActive = Boolean(
+              updatedRoomCode &&
+                activeRoomsBeforeReopen.some((ar) => ar.roomCode === updatedRoomCode)
+            );
+            const hadRoomPin = Boolean(
+              updatedRoomCode || b.deliveryMode === 'MULTIPLAYER' || b.batchId.startsWith('room:')
+            );
+
+            if ((hadRoomPin || refreshExpiredPin || withRoomPin) && !isCurrentPinActive) {
+              const createdRoom = roomService.createRoom(spec, undefined, ownerUserId);
+              updatedRoomId = createdRoom.roomId;
+              updatedRoomCode = createdRoom.roomCode;
+              prevRoomIds.push(createdRoom.roomId);
+              if (/\(Phòng\s+[A-Z0-9]+\)/i.test(updatedBatchName)) {
+                updatedBatchName = updatedBatchName.replace(
+                  /\(Phòng\s+[A-Z0-9]+\)/i,
+                  `(Phòng ${createdRoom.roomCode})`
+                );
+              }
+            }
+
+            reopenedBatchName = updatedBatchName;
+            reopenedPin = updatedRoomCode;
+
             return {
               ...b,
+              batchName: updatedBatchName,
+              roomId: updatedRoomId,
+              roomIds: prevRoomIds,
+              roomCode: updatedRoomCode,
               status: 'OPEN' as const,
               closedAt: null,
             };
@@ -2659,7 +2869,7 @@ gameRouter.post(
       gameStore.save(reopenedSpec, Date.now(), ownerUserId, isPublic);
 
       const activeStatus = computeGameActiveStatus(gameId);
-      const soloExamUrl = buildSoloPlayUrl(req, gameId);
+      const joinUrl = buildSoloPlayUrl(req, gameId, reopenedBatchId);
 
       res.status(200).json(
         createSuccessResponse({
@@ -2668,7 +2878,9 @@ gameRouter.post(
           batchName: reopenedBatchName,
           examStatus: 'OPEN',
           examClosedAt: null,
-          soloExamUrl,
+          joinUrl,
+          soloExamUrl: joinUrl,
+          pin: reopenedPin,
           activeStatus,
         })
       );
@@ -2720,25 +2932,74 @@ gameRouter.get(
         joinUrl: `${hostBaseUrl}/?room=${encodeURIComponent(r.roomCode)}`,
       }));
 
-      // Sync live active rooms into examBatches status if any active room exists for this game
+      // Sync live active rooms into examBatches status and compute per-batch joinUrl & PIN status
       const syncedBatches = detail.examBatches.map((b) => {
-        if (b.roomCode && activeRoomsWithUrl.some((ar) => ar.roomCode === b.roomCode)) {
-          return { ...b, status: 'OPEN' as const, closedAt: null };
+        const batchJoinUrl = buildSoloPlayUrl(req, gameId, b.batchId);
+        const activeRoom = b.roomCode
+          ? activeRoomsWithUrl.find(
+              (ar) =>
+                ar.roomCode === b.roomCode ||
+                ar.roomId === b.roomId ||
+                (Array.isArray(b.roomIds) && b.roomIds.includes(ar.roomId))
+            )
+          : undefined;
+        if (activeRoom) {
+          return {
+            ...b,
+            status: 'OPEN' as const,
+            closedAt: null,
+            roomCode: activeRoom.roomCode,
+            pin: activeRoom.roomCode,
+            expiredPin: null,
+            pinStatus: 'ACTIVE' as const,
+            joinUrl: batchJoinUrl,
+          };
         }
-        return b;
+        if (b.roomCode) {
+          return {
+            ...b,
+            roomCode: null,
+            pin: null,
+            expiredPin: b.roomCode,
+            pinStatus: 'EXPIRED' as const,
+            joinUrl: batchJoinUrl,
+          };
+        }
+        return {
+          ...b,
+          roomCode: null,
+          pin: null,
+          expiredPin: null,
+          pinStatus: 'NONE' as const,
+          joinUrl: batchJoinUrl,
+        };
       });
       if (detail.sessionMode === 'EXAM') {
         for (const ar of activeRoomsWithUrl) {
-          if (!syncedBatches.some((b) => b.roomCode === ar.roomCode)) {
+          if (
+            !syncedBatches.some(
+              (b) =>
+                b.pin === ar.roomCode ||
+                b.expiredPin === ar.roomCode ||
+                b.roomId === ar.roomId ||
+                (Array.isArray(b.roomIds) && b.roomIds.includes(ar.roomId))
+            )
+          ) {
             const nextNum = syncedBatches.length + 1;
+            const dynamicBatchId = `room:${ar.roomId}`;
             syncedBatches.push({
               ...detail.examOverallBatch,
-              batchId: `room:${ar.roomId}`,
+              batchId: dynamicBatchId,
               batchNumber: nextNum,
               batchName: `Đợt ${nextNum} (Phòng ${ar.roomCode})`,
               deliveryMode: 'MULTIPLAYER',
               roomId: ar.roomId,
+              roomIds: [ar.roomId],
               roomCode: ar.roomCode,
+              pin: ar.roomCode,
+              expiredPin: null,
+              pinStatus: 'ACTIVE',
+              joinUrl: buildSoloPlayUrl(req, gameId, dynamicBatchId),
               openedAt: new Date(ar.createdAt).toISOString(),
               closedAt: null,
               status: 'OPEN',
@@ -3080,6 +3341,171 @@ gameRouter.get('/:gameId/status', (req: Request, res: Response, next: NextFuncti
 });
 
 /**
+ * GET /api/games/:gameId/batches/:batchId/qr
+ * Generate a real per-batch QR code and participation link for a specific EXAM batch in Reports.
+ * Read-only: does not create a batch, room, or attempt, and does not reopen a closed batch.
+ */
+gameRouter.get(
+  '/:gameId/batches/:batchId/qr',
+  async (req: Request, res: Response, next: NextFunction) => {
+    try {
+      const gameId = String(req.params.gameId || '');
+      const batchId = String(req.params.batchId || '').trim();
+      const spec = gameStore.get(gameId);
+      const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
+      if (!spec && !ownerInfo) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const ownerUserId = spec?.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
+
+      if (!hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+        rejectGuestOrPlayerWrite(req, 'xem mã QR đợt thi');
+        authService.assertResourceAccess({
+          resourceType: 'mã QR đợt thi',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      }
+
+      if (spec?.settings?.sessionMode === 'EXAM') {
+        const rosterCheck = persistenceRepo.listParticipants(gameId, { limit: 1 });
+        if (rosterCheck.total === 0) {
+          throw new AppError(
+            'EXAM_ROSTER_REQUIRED',
+            'Chế độ Thi bắt buộc phải có danh sách thí sinh hợp lệ trước khi mở mã QR hoặc liên kết kỳ thi.',
+            400
+          );
+        }
+      }
+
+      const detail = persistenceRepo.getGameReportsDetail(gameId);
+      if (!detail) {
+        throw new AppError('GAME_NOT_FOUND', `Game specification "${gameId}" not found.`, 404);
+      }
+
+      const activeStatus = computeGameActiveStatus(gameId);
+      const syncedBatches: Array<{
+        batchId: string;
+        batchNumber: number;
+        batchName: string;
+        status: 'OPEN' | 'CLOSED';
+        deliveryMode: string;
+        roomId: string | null;
+        roomCode: string | null;
+        pin: string | null;
+        expiredPin: string | null;
+        pinStatus: 'ACTIVE' | 'EXPIRED' | 'NONE';
+      }> = detail.examBatches.map((b) => {
+        const activeRoom = b.roomCode
+          ? activeStatus.activeRooms.find(
+              (ar) =>
+                ar.roomCode === b.roomCode ||
+                ar.roomId === b.roomId ||
+                (Array.isArray(b.roomIds) && b.roomIds.includes(ar.roomId))
+            )
+          : undefined;
+        if (activeRoom) {
+          return {
+            batchId: b.batchId,
+            batchNumber: b.batchNumber,
+            batchName: b.batchName,
+            status: 'OPEN',
+            deliveryMode: b.deliveryMode,
+            roomId: activeRoom.roomId,
+            roomCode: activeRoom.roomCode,
+            pin: activeRoom.roomCode,
+            expiredPin: null,
+            pinStatus: 'ACTIVE',
+          };
+        }
+        if (b.roomCode) {
+          return {
+            batchId: b.batchId,
+            batchNumber: b.batchNumber,
+            batchName: b.batchName,
+            status: b.status,
+            deliveryMode: b.deliveryMode,
+            roomId: b.roomId,
+            roomCode: null,
+            pin: null,
+            expiredPin: b.roomCode,
+            pinStatus: 'EXPIRED',
+          };
+        }
+        return {
+          batchId: b.batchId,
+          batchNumber: b.batchNumber,
+          batchName: b.batchName,
+          status: b.status,
+          deliveryMode: b.deliveryMode,
+          roomId: b.roomId,
+          roomCode: null,
+          pin: null,
+          expiredPin: null,
+          pinStatus: 'NONE',
+        };
+      });
+
+      for (const ar of activeStatus.activeRooms) {
+        if (
+          !syncedBatches.some(
+            (b) => b.pin === ar.roomCode || b.expiredPin === ar.roomCode || b.roomId === ar.roomId
+          )
+        ) {
+          const nextNum = syncedBatches.length + 1;
+          syncedBatches.push({
+            batchId: `room:${ar.roomId}`,
+            batchNumber: nextNum,
+            batchName: `Đợt ${nextNum} (Phòng ${ar.roomCode})`,
+            status: 'OPEN',
+            deliveryMode: 'MULTIPLAYER',
+            roomId: ar.roomId,
+            roomCode: ar.roomCode,
+            pin: ar.roomCode,
+            expiredPin: null,
+            pinStatus: 'ACTIVE',
+          });
+        }
+      }
+
+      const matchedBatch = syncedBatches.find((b) => b.batchId === batchId);
+      if (!matchedBatch) {
+        throw new AppError('EXAM_BATCH_NOT_FOUND', `Đợt thi "${batchId}" không tồn tại.`, 404);
+      }
+
+      const joinUrl = buildSoloPlayUrl(req, gameId, matchedBatch.batchId);
+      const qrDataUrl = await QRCode.toDataURL(joinUrl, {
+        margin: 1,
+        width: 256,
+        errorCorrectionLevel: 'M',
+      });
+
+      res.status(200).json(
+        createSuccessResponse({
+          gameId,
+          title: spec?.title || detail.title,
+          batchId: matchedBatch.batchId,
+          batchNumber: matchedBatch.batchNumber,
+          batchName: matchedBatch.batchName,
+          status: matchedBatch.status,
+          deliveryMode: matchedBatch.deliveryMode,
+          joinUrl,
+          playUrl: joinUrl,
+          pin: matchedBatch.pin,
+          expiredPin: matchedBatch.expiredPin,
+          pinStatus: matchedBatch.pinStatus,
+          qrDataUrl,
+        })
+      );
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
  * GET /api/games/:gameId/qr
  * Generate a real QR code and public solo-play link for a published game.
  */
@@ -3115,7 +3541,11 @@ gameRouter.get(
         }
       }
 
-      const playUrl = buildSoloPlayUrl(req, gameId);
+      const requestedBatchId =
+        typeof req.query.batchId === 'string' && req.query.batchId.trim()
+          ? req.query.batchId.trim()
+          : undefined;
+      const playUrl = buildSoloPlayUrl(req, gameId, requestedBatchId);
       const qrDataUrl = await QRCode.toDataURL(playUrl, {
         margin: 1,
         width: 256,
@@ -3126,6 +3556,7 @@ gameRouter.get(
         createSuccessResponse({
           gameId,
           title: spec.title,
+          ...(requestedBatchId ? { batchId: requestedBatchId } : {}),
           playUrl,
           qrDataUrl,
         })

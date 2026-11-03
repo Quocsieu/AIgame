@@ -717,6 +717,7 @@ export const ExamBatchMetaSchema = z.object({
   deliveryMode: z.enum(['SOLO', 'MULTIPLAYER', 'MIXED']).optional().default('MIXED'),
   roomId: z.string().nullable().optional(),
   roomCode: z.string().nullable().optional(),
+  roomIds: z.array(z.string()).optional(),
   openedAt: z.string(),
   closedAt: z.string().nullable().optional(),
   status: ExamStatusEnum.optional().default('OPEN'),
