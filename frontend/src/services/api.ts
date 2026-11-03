@@ -1072,21 +1072,58 @@ export async function clearGameParticipantsApi(
 export async function grantParticipantRetakeApi(
   gameId: string,
   participantId: string,
-  incrementOrHostToken?: number | string,
+  incrementOrHostToken?:
+    | number
+    | string
+    | {
+        additionalAttempts?: number;
+        requestId?: string;
+        hostToken?: string;
+      },
   hostToken?: string
-): Promise<{ granted: boolean; participant: ParticipantRosterItem }> {
-  const resolvedHostToken =
-    typeof incrementOrHostToken === 'string' ? incrementOrHostToken : hostToken;
+): Promise<{
+  granted: boolean;
+  additionalAttempts?: number;
+  preservedActiveSession?: boolean;
+  participant: ParticipantRosterItem;
+}> {
+  const isObj =
+    typeof incrementOrHostToken === 'object' && incrementOrHostToken !== null;
+  const resolvedHostToken = isObj
+    ? incrementOrHostToken.hostToken || hostToken
+    : typeof incrementOrHostToken === 'string'
+      ? incrementOrHostToken
+      : hostToken;
+  const resolvedAdditionalAttempts = isObj
+    ? incrementOrHostToken.additionalAttempts
+    : typeof incrementOrHostToken === 'number'
+      ? incrementOrHostToken
+      : undefined;
+  const resolvedRequestId = isObj ? incrementOrHostToken.requestId : undefined;
+
   const extraHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
   if (resolvedHostToken) {
     extraHeaders['x-host-token'] = resolvedHostToken;
   }
+  if (resolvedRequestId) {
+    extraHeaders['x-idempotency-key'] = resolvedRequestId;
+  }
+
+  const payload: Record<string, unknown> = {};
+  if (resolvedHostToken) payload.hostToken = resolvedHostToken;
+  if (resolvedAdditionalAttempts !== undefined) {
+    payload.additionalAttempts = resolvedAdditionalAttempts;
+  }
+  if (resolvedRequestId) {
+    payload.requestId = resolvedRequestId;
+  }
+
   const res = await fetch(
     `${API_BASE_URL}/games/${encodeURIComponent(gameId)}/participants/${encodeURIComponent(participantId)}/grant-retake`,
     {
       method: 'POST',
       headers: buildAuthHeaders(extraHeaders),
-      body: JSON.stringify(resolvedHostToken ? { hostToken: resolvedHostToken } : {}),
+      body: JSON.stringify(payload),
     }
   );
   const data = await res.json();
@@ -1158,20 +1195,47 @@ export async function closeGameExamApi(
 
 export async function reopenGameExamApi(
   gameId: string,
-  hostToken?: string
+  optionsOrHostToken?:
+    | string
+    | {
+        batchId?: string;
+        createNewBatch?: boolean;
+        batchName?: string;
+        hostToken?: string;
+      }
 ): Promise<{
   gameId: string;
+  batchId?: string;
+  batchName?: string;
   examStatus: 'OPEN';
   examClosedAt: null;
+  soloExamUrl?: string;
+  activeStatus?: GameActiveStatus;
 }> {
+  const isObj = typeof optionsOrHostToken === 'object' && optionsOrHostToken !== null;
+  const resolvedHostToken = isObj
+    ? optionsOrHostToken.hostToken
+    : typeof optionsOrHostToken === 'string'
+      ? optionsOrHostToken
+      : undefined;
   const extraHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
-  if (hostToken) {
-    extraHeaders['x-host-token'] = hostToken;
+  if (resolvedHostToken) {
+    extraHeaders['x-host-token'] = resolvedHostToken;
   }
+  const payload: Record<string, unknown> = {};
+  if (resolvedHostToken) payload.hostToken = resolvedHostToken;
+  if (isObj) {
+    if (optionsOrHostToken.batchId) payload.batchId = optionsOrHostToken.batchId;
+    if (optionsOrHostToken.createNewBatch !== undefined) {
+      payload.createNewBatch = optionsOrHostToken.createNewBatch;
+    }
+    if (optionsOrHostToken.batchName) payload.batchName = optionsOrHostToken.batchName;
+  }
+
   const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/reopen-exam`, {
     method: 'POST',
     headers: buildAuthHeaders(extraHeaders),
-    body: JSON.stringify(hostToken ? { hostToken } : {}),
+    body: JSON.stringify(payload),
   });
   const data = await res.json();
   if (!data.success) {
@@ -1866,7 +1930,7 @@ export async function fetchPlayExamHistoryApi(options?: {
   const qs = query.toString();
 
   const res = await fetch(`${API_BASE_URL}/history/activities${qs ? `?${qs}` : ''}`, {
-    headers: buildAuthHeaders(),
+    headers: buildAuthHeaders({ 'X-Creator-Library': '1' }),
   });
   const data = await res.json();
   if (!data.success) {
@@ -1883,7 +1947,7 @@ export async function fetchPlayExamHistoryDetailApi(
   const res = await fetch(
     `${API_BASE_URL}/history/activities/${encodeURIComponent(historyId)}`,
     {
-      headers: buildAuthHeaders(),
+      headers: buildAuthHeaders({ 'X-Creator-Library': '1' }),
     }
   );
   const data = await res.json();
@@ -1902,7 +1966,7 @@ export async function downloadPlayExamHistoryExport(
   const res = await fetch(
     `${API_BASE_URL}/history/activities/${encodeURIComponent(historyId)}/export?format=${format}`,
     {
-      headers: buildAuthHeaders(),
+      headers: buildAuthHeaders({ 'X-Creator-Library': '1' }),
     }
   );
   if (!res.ok) {
@@ -1925,4 +1989,308 @@ export async function downloadPlayExamHistoryExport(
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// ==========================================
+// V3 Reports 2.0 APIs (/api/games/reports/overview & /api/games/:gameId/reports)
+// ==========================================
+
+export interface ReportsGameOverviewItem {
+  gameId: string;
+  title: string;
+  description: string;
+  gameType: string;
+  sessionMode: 'PLAY' | 'EXAM';
+  scoringMode: ScoringMode;
+  rosterMode: RosterMode;
+  isPublic: boolean;
+  ownerUserId: string | null;
+  questionCount: number;
+  timePerQuestion: number;
+  passThresholdPercent: number;
+  officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
+  examStatus: 'OPEN' | 'CLOSING' | 'CLOSED';
+  examClosedAt: string | null;
+  answersPublished: boolean;
+  rosterCount: number;
+  participantCount: number;
+  totalAttempts: number;
+  completedAttempts: number;
+  passedCount: number;
+  failedCount: number;
+  averageScore: number;
+  highestScore: number;
+  lastActivityAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  soloPlayUrl?: string;
+  activeStatus?: GameActiveStatus;
+}
+
+export interface ReportsOverviewResult {
+  games: ReportsGameOverviewItem[];
+  total: number;
+  page: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  summary: {
+    totalGames: number;
+    playGamesCount: number;
+    examGamesCount: number;
+    gamesWithActivityCount: number;
+    totalAttemptsAllGames: number;
+  };
+}
+
+export interface ReportsPlayLeaderboardEntry {
+  rank: number;
+  playerKey: string;
+  participantId: string | null;
+  fullName: string;
+  departmentUnit: string;
+  employeeCode: string;
+  highestScore: number;
+  maxPossibleScore: number;
+  attemptsCount: number;
+  completedAttemptsCount: number;
+  usedAttempts: number;
+  allowedAttempts: number | null;
+  bestAttemptNumber: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number;
+  durationMs: number;
+  status: 'COMPLETED' | 'IN_PROGRESS' | 'ABANDONED';
+  lastPlayedAt: string | null;
+}
+
+export interface ReportsPlayAttemptHistoryRow {
+  attemptId: string;
+  historyId: string | null;
+  gameId: string;
+  batchId?: string | null;
+  participantId: string | null;
+  sessionId: string | null;
+  roomId: string | null;
+  roomCode: string | null;
+  deliveryMode: 'SOLO' | 'MULTIPLAYER';
+  sessionMode: 'PLAY' | 'EXAM';
+  attemptNumber: number;
+  playerName: string;
+  departmentUnit: string;
+  employeeCode: string;
+  state: 'IN_PROGRESS' | 'FINISHED' | 'ABANDONED';
+  status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'IN_PROGRESS' | 'ABANDONED';
+  submittedReason: string | null;
+  score: number;
+  maxPossibleScore: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number;
+  durationMs: number;
+  isPassed: boolean | null;
+  startedAt: string;
+  finishedAt: string | null;
+  createdAt: string;
+  questionBreakdown: PlayExamHistoryQuestionRow[];
+}
+
+export interface ReportsExamAttemptItem {
+  attemptId: string;
+  attemptNumber: number;
+  deliveryMode: 'SOLO' | 'MULTIPLAYER';
+  roomCode: string | null;
+  score: number;
+  maxPossibleScore: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number;
+  durationMs: number;
+  isPassed: boolean | null;
+  status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'IN_PROGRESS' | 'ABANDONED';
+  submittedReason: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  questionBreakdown: PlayExamHistoryQuestionRow[];
+}
+
+export interface ReportsExamBatchParticipantRow {
+  rank: number | null;
+  participantId: string | null;
+  fullName: string;
+  departmentUnit: string;
+  employeeCode: string;
+  usedAttempts: number;
+  allowedAttempts: number;
+  remainingAttempts: number;
+  retakeGrantedCount: number;
+  retakeGrantedAt: string | null;
+  retakeGrantedBy: string | null;
+  batchAttemptsCount: number;
+  officialAttemptNumber: number | null;
+  score: number | null;
+  maxPossibleScore: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number | null;
+  durationMs: number;
+  isPassed: boolean | null;
+  status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'IN_PROGRESS' | 'PENDING' | 'ABANDONED';
+  submittedReason: string | null;
+  lastAttemptAt: string | null;
+  attempts: ReportsExamAttemptItem[];
+}
+
+export interface ReportsExamBatchItem {
+  batchId: string;
+  batchNumber: number;
+  batchName: string;
+  deliveryMode: 'SOLO' | 'MULTIPLAYER' | 'MIXED';
+  roomId: string | null;
+  roomCode: string | null;
+  openedAt: string;
+  closedAt: string | null;
+  status: 'OPEN' | 'CLOSED';
+  passThresholdPercent: number;
+  officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
+  totalParticipants: number;
+  completedCount: number;
+  inProgressCount: number;
+  pendingCount: number;
+  abandonedCount: number;
+  totalAttempts: number;
+  passedCount: number;
+  failedCount: number;
+  averageScore: number;
+  highestScore: number;
+  participants: ReportsExamBatchParticipantRow[];
+}
+
+export interface GameReportsDetailResult {
+  gameId: string;
+  title: string;
+  description: string;
+  gameType: string;
+  sessionMode: 'PLAY' | 'EXAM';
+  scoringMode: ScoringMode;
+  rosterMode: RosterMode;
+  isPublic: boolean;
+  questionCount: number;
+  timePerQuestion: number;
+  maxPossibleScore: number;
+  passThresholdPercent: number;
+  officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
+  examAnswerRevealPolicy: ExamAnswerRevealPolicy;
+  answersPublished: boolean;
+  examStatus: 'OPEN' | 'CLOSING' | 'CLOSED';
+  examOpenAt: string | null;
+  examCloseAt: string | null;
+  examClosedAt: string | null;
+  lastActivityAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  soloPlayUrl: string;
+  activeStatus: GameActiveStatus & {
+    activeRooms: Array<{
+      roomId: string;
+      roomCode: string;
+      state: string;
+      playerCount: number;
+      createdAt: number;
+      joinUrl?: string;
+    }>;
+  };
+  playOverview: {
+    totalPlays: number;
+    completedPlays: number;
+    inProgressPlays: number;
+    abandonedPlays: number;
+    uniquePlayers: number;
+    averageScore: number;
+    highestScore: number;
+    lastActivityAt: string | null;
+    rosterMode: RosterMode;
+    hasPreconfiguredRoster: boolean;
+    attemptLimitPolicyNote: string;
+  };
+  playLeaderboard: {
+    rule: 'HIGHEST_SCORE';
+    tieBreakingRuleText: string;
+    hasFreeTextPlayers: boolean;
+    top3: ReportsPlayLeaderboardEntry[];
+    entries: ReportsPlayLeaderboardEntry[];
+  };
+  playAttemptsHistory: ReportsPlayAttemptHistoryRow[];
+  rosterParticipants: ParticipantRosterItem[];
+  examOverview: {
+    totalBatches: number;
+    openBatchesCount: number;
+    closedBatchesCount: number;
+    totalParticipants: number;
+    completedCount: number;
+    inProgressCount: number;
+    pendingCount: number;
+    abandonedCount: number;
+    totalAttempts: number;
+    passedCount: number;
+    failedCount: number;
+    averageScore: number;
+    highestScore: number;
+    passThresholdPercent: number;
+    officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
+    examStatus: 'OPEN' | 'CLOSING' | 'CLOSED';
+    examClosedAt: string | null;
+    answersPublished: boolean;
+  };
+  examBatches: ReportsExamBatchItem[];
+  examOverallBatch: ReportsExamBatchItem;
+}
+
+export async function fetchCreatorReportsGamesApi(options?: {
+  sessionMode?: 'ALL' | 'PLAY' | 'EXAM';
+  search?: string;
+  page?: number;
+  limit?: number;
+}): Promise<ReportsOverviewResult> {
+  const query = new URLSearchParams();
+  if (options?.sessionMode && options.sessionMode !== 'ALL') {
+    query.set('sessionMode', options.sessionMode);
+  }
+  if (options?.search && options.search.trim()) {
+    query.set('search', options.search.trim());
+  }
+  if (options?.page) query.set('page', String(options.page));
+  if (options?.limit) query.set('limit', String(options.limit));
+  const qs = query.toString();
+
+  const res = await fetch(`${API_BASE_URL}/games/reports/overview${qs ? `?${qs}` : ''}`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải danh sách thống kê game.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
+}
+
+export async function fetchGameReportsDetailApi(
+  gameId: string
+): Promise<GameReportsDetailResult> {
+  const res = await fetch(`${API_BASE_URL}/games/${encodeURIComponent(gameId)}/reports`, {
+    headers: buildAuthHeaders(),
+  });
+  const data = await res.json();
+  if (!data.success) {
+    const err = new Error(data.error?.message || 'Không thể tải chi tiết thống kê game.');
+    (err as any).code = data.error?.code;
+    throw err;
+  }
+  return data.data;
 }

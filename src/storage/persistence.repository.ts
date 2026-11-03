@@ -8,6 +8,7 @@ import {
   GameSpecification,
   GameType,
   resolveEffectiveExamRevealPolicy,
+  RosterMode,
   ScoringMode,
 } from '../contracts/game.contract.js';
 import { GameResult } from '../game/game.types.js';
@@ -2495,21 +2496,41 @@ export class PersistenceRepository {
     });
   }
 
+  private retakeGrantIdempotencyMap = new Map<
+    string,
+    { timestampMs: number; result: PersistedParticipantRecord }
+  >();
+
   /**
    * Grants a retake to a participant safely.
-   * Marks any stuck IN_PROGRESS attempt as ABANDONED (preserving history),
-   * unlocks the participant slot, and ensures allowed_attempts >= used_attempts + additionalAttempts.
+   * - If `preserveActiveSession` is true (participant has a live active session/room), increments `allowed_attempts`
+   *   without terminating or abandoning their active in-progress session.
+   * - Otherwise, marks any stuck IN_PROGRESS attempt as ABANDONED (preserving history),
+   *   unlocks the participant slot, and ensures allowed_attempts >= used_attempts + additionalAttempts.
+   * - Supports `requestId` idempotency to prevent duplicate double-click grants.
    */
   public grantParticipantRetake(params: {
     gameId: string;
     participantId: string;
     grantedByUserId: string | null;
     additionalAttempts?: number;
+    preserveActiveSession?: boolean;
+    requestId?: string;
   }): PersistedParticipantRecord {
-    const nowIso = new Date().toISOString();
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
     const extra = Math.max(1, Math.min(10, Math.floor(Number(params.additionalAttempts) || 1)));
 
-    return runInTransaction(db => {
+    const cleanRequestId = typeof params.requestId === 'string' ? params.requestId.trim() : '';
+    if (cleanRequestId) {
+      const idempKey = `${params.gameId}::${params.participantId}::${cleanRequestId}`;
+      const existingGrant = this.retakeGrantIdempotencyMap.get(idempKey);
+      if (existingGrant && nowMs - existingGrant.timestampMs < 60_000) {
+        return existingGrant.result;
+      }
+    }
+
+    const updatedRecord = runInTransaction(db => {
       const row = db
         .prepare('SELECT * FROM game_participants WHERE game_id = ? AND participant_id = ?')
         .get(params.gameId, params.participantId) as Record<string, any> | undefined;
@@ -2522,41 +2543,61 @@ export class PersistenceRepository {
         );
       }
 
-      // Mark any stuck IN_PROGRESS attempts for this participant as ABANDONED without deleting them
-      db.prepare(
-        `UPDATE game_participant_attempts
-         SET state = 'ABANDONED', finished_at = COALESCE(finished_at, ?), updated_at = ?
-         WHERE game_id = ? AND participant_id = ? AND state = 'IN_PROGRESS'`
-      ).run(nowIso, nowIso, params.gameId, params.participantId);
-
       const used = Number(row.used_attempts || 0);
       const currentAllowed = Number(row.allowed_attempts || 1);
       // Whether two retake requests arrive sequentially or concurrently, increase allowed_attempts deterministically
       const nextAllowed = Math.max(used, currentAllowed) + extra;
       const nextRetakeCount = Number(row.retake_granted_count || 0) + extra;
 
-      db.prepare(
-        `UPDATE game_participants
-         SET allowed_attempts = ?,
-             status = CASE WHEN used_attempts > 0 THEN 'COMPLETED' ELSE 'PENDING' END,
-             active_session_id = NULL,
-             active_room_code = NULL,
-             active_lock_token = NULL,
-             active_locked_at = NULL,
-             retake_granted_count = ?,
-             retake_granted_by = ?,
-             retake_granted_at = ?,
-             updated_at = ?
-         WHERE game_id = ? AND participant_id = ?`
-      ).run(
-        nextAllowed,
-        nextRetakeCount,
-        params.grantedByUserId ?? 'HOST',
-        nowIso,
-        nowIso,
-        params.gameId,
-        params.participantId
-      );
+      if (params.preserveActiveSession) {
+        db.prepare(
+          `UPDATE game_participants
+           SET allowed_attempts = ?,
+               retake_granted_count = ?,
+               retake_granted_by = ?,
+               retake_granted_at = ?,
+               updated_at = ?
+           WHERE game_id = ? AND participant_id = ?`
+        ).run(
+          nextAllowed,
+          nextRetakeCount,
+          params.grantedByUserId ?? 'HOST',
+          nowIso,
+          nowIso,
+          params.gameId,
+          params.participantId
+        );
+      } else {
+        // Mark any stuck IN_PROGRESS attempts for this participant as ABANDONED without deleting them
+        db.prepare(
+          `UPDATE game_participant_attempts
+           SET state = 'ABANDONED', finished_at = COALESCE(finished_at, ?), updated_at = ?
+           WHERE game_id = ? AND participant_id = ? AND state = 'IN_PROGRESS'`
+        ).run(nowIso, nowIso, params.gameId, params.participantId);
+
+        db.prepare(
+          `UPDATE game_participants
+           SET allowed_attempts = ?,
+               status = CASE WHEN used_attempts > 0 THEN 'COMPLETED' ELSE 'PENDING' END,
+               active_session_id = NULL,
+               active_room_code = NULL,
+               active_lock_token = NULL,
+               active_locked_at = NULL,
+               retake_granted_count = ?,
+               retake_granted_by = ?,
+               retake_granted_at = ?,
+               updated_at = ?
+           WHERE game_id = ? AND participant_id = ?`
+        ).run(
+          nextAllowed,
+          nextRetakeCount,
+          params.grantedByUserId ?? 'HOST',
+          nowIso,
+          nowIso,
+          params.gameId,
+          params.participantId
+        );
+      }
 
       const updated = db
         .prepare('SELECT * FROM game_participants WHERE game_id = ? AND participant_id = ?')
@@ -2564,6 +2605,16 @@ export class PersistenceRepository {
 
       return this.mapParticipantRow(updated, true);
     });
+
+    if (cleanRequestId) {
+      const idempKey = `${params.gameId}::${params.participantId}::${cleanRequestId}`;
+      this.retakeGrantIdempotencyMap.set(idempKey, {
+        timestampMs: nowMs,
+        result: updatedRecord,
+      });
+    }
+
+    return updatedRecord;
   }
 
   /**
@@ -2718,6 +2769,12 @@ export class PersistenceRepository {
         ...ans,
         isCorrect: null,
         pointsEarned: null,
+        correctAnswer: null,
+        explanation: null,
+      }));
+    } else if (!isExamRow && Array.isArray(answers)) {
+      answers = answers.map(ans => ({
+        ...ans,
         correctAnswer: null,
         explanation: null,
       }));
@@ -3128,6 +3185,7 @@ export class PersistenceRepository {
   public listPlayExamHistory(options: {
     userId?: string | null;
     isAdmin?: boolean;
+    includeUnownedForCreatorLibrary?: boolean;
     gameId?: string;
     sessionMode?: 'ALL' | 'PLAY' | 'EXAM' | string;
     deliveryMode?: 'ALL' | 'SOLO' | 'MULTIPLAYER' | string;
@@ -3161,6 +3219,13 @@ export class PersistenceRepository {
           '(ps.owner_user_id = ? OR ps.game_id IN (SELECT game_id FROM games WHERE owner_user_id = ?))'
         );
         soloParams.push(options.userId, options.userId);
+      } else if (options.includeUnownedForCreatorLibrary) {
+        roomConditions.push(
+          "(rh.owner_user_id IS NULL OR rh.owner_user_id = 'legacy_local' OR rh.game_id IN (SELECT game_id FROM games WHERE owner_user_id IS NULL OR owner_user_id = 'legacy_local'))"
+        );
+        soloConditions.push(
+          "(ps.owner_user_id IS NULL OR ps.owner_user_id = 'legacy_local' OR ps.game_id IN (SELECT game_id FROM games WHERE owner_user_id IS NULL OR owner_user_id = 'legacy_local'))"
+        );
       } else {
         return {
           items: [],
@@ -3826,15 +3891,19 @@ export class PersistenceRepository {
       finishedAt: mapped.finishedAt || mapped.updatedAt,
     };
 
-    // Build questionBreakdown safely: never expose unrevealed EXAM correctAnswer/explanation/isCorrect/pointsEarned
+    // Build questionBreakdown safely: never expose unrevealed EXAM correctAnswer/explanation/isCorrect/pointsEarned,
+    // and never expose PLAY correctAnswer/explanation after session finishes.
+    const isPlayMode = sessionMode === 'PLAY';
     const effectiveRevealPolicy = mapped.examAnswerRevealPolicy
       ? resolveEffectiveExamRevealPolicy(mapped.examAnswerRevealPolicy)
       : meta.examAnswerRevealPolicy;
-    const canRevealAnswers =
-      sessionMode === 'PLAY' ||
+    const canRevealScoreAndCorrectness =
+      isPlayMode ||
       meta.answersPublished ||
       effectiveRevealPolicy === 'IMMEDIATE' ||
       effectiveRevealPolicy === 'AFTER_SUBMIT';
+    const canRevealCorrectAnswerAndExplanation =
+      !isPlayMode && canRevealScoreAndCorrectness;
     const rawResults = Array.isArray(mapped.questionResults) ? mapped.questionResults : [];
     const questionBreakdown: PlayExamHistoryQuestionRow[] = rawResults.map((qr, idx) => {
       const qMeta = meta.questionMap.get(String(qr.questionId));
@@ -3843,14 +3912,14 @@ export class PersistenceRepository {
         questionId: String(qr.questionId || `q_${idx + 1}`),
         questionText: qMeta?.question || `Câu hỏi ${idx + 1}`,
         playerAnswer: String(qr.answer ?? ''),
-        isCorrect: canRevealAnswers ? Boolean(qr.isCorrect) : null,
-        pointsEarned: canRevealAnswers ? Number(qr.pointsEarned || 0) : null,
+        isCorrect: canRevealScoreAndCorrectness ? Boolean(qr.isCorrect) : null,
+        pointsEarned: canRevealScoreAndCorrectness ? Number(qr.pointsEarned || 0) : null,
         responseTimeMs: Number(qr.responseTimeMs || 0),
         timedOut: Boolean((qr as any).timedOut),
-        correctAnswer: canRevealAnswers
+        correctAnswer: canRevealCorrectAnswerAndExplanation
           ? String(qr.correctAnswer ?? qMeta?.correctAnswer ?? '')
           : null,
-        explanation: canRevealAnswers
+        explanation: canRevealCorrectAnswerAndExplanation
           ? qr.explanation ?? qMeta?.explanation ?? null
           : null,
       };
@@ -3888,6 +3957,1355 @@ export class PersistenceRepository {
       averageAccuracy: accuracyPercent,
       participants: [participantEntry],
       questionBreakdown,
+    };
+  }
+
+  // =========================================================================
+  // V3 REPORTS 2.0: GAME-CENTRIC PLAY / EXAM HISTORY, LEADERBOARD, BATCHES & RETAKES
+  // =========================================================================
+
+  private collectUnifiedGameAttempts(
+    gameId: string,
+    meta: ReturnType<typeof this.resolveGameSettingsMeta>
+  ): ReportsUnifiedAttemptItem[] {
+    const db = getDatabase();
+    const canRevealExamAnswers =
+      meta.sessionMode === 'EXAM' &&
+      (meta.answersPublished ||
+        meta.examAnswerRevealPolicy === 'IMMEDIATE' ||
+        meta.examAnswerRevealPolicy === 'AFTER_SUBMIT');
+
+    const attemptRows = db
+      .prepare(
+        'SELECT * FROM game_participant_attempts WHERE game_id = ? ORDER BY attempt_number ASC, created_at ASC'
+      )
+      .all(gameId) as Record<string, any>[];
+
+    const soloRows = db
+      .prepare('SELECT * FROM practice_sessions WHERE game_id = ? ORDER BY created_at ASC')
+      .all(gameId) as Record<string, any>[];
+    const soloBySessionId = new Map<string, Record<string, any>>();
+    for (const s of soloRows) {
+      soloBySessionId.set(String(s.session_id), s);
+    }
+
+    const roomRows = db
+      .prepare('SELECT * FROM room_history WHERE game_id = ? ORDER BY created_at ASC')
+      .all(gameId) as Record<string, any>[];
+    const roomByRoomId = new Map<string, Record<string, any>>();
+    for (const r of roomRows) {
+      roomByRoomId.set(String(r.room_id), r);
+    }
+
+    const unified: ReportsUnifiedAttemptItem[] = [];
+    const seenSessionIds = new Set<string>();
+    const seenRoomPlayerKeys = new Set<string>();
+
+    const buildSanitizedQuestionBreakdown = (
+      rawAnswers: any[],
+      rowSessionMode: 'PLAY' | 'EXAM',
+      rowRevealPolicy?: string | null
+    ): PlayExamHistoryQuestionRow[] => {
+      if (!Array.isArray(rawAnswers) || rawAnswers.length === 0) return [];
+      const isPlay = rowSessionMode === 'PLAY';
+      const effPolicy = rowRevealPolicy
+        ? resolveEffectiveExamRevealPolicy(rowRevealPolicy)
+        : meta.examAnswerRevealPolicy;
+      const allowScore =
+        isPlay ||
+        meta.answersPublished ||
+        effPolicy === 'IMMEDIATE' ||
+        effPolicy === 'AFTER_SUBMIT';
+      const allowAnswerKey = !isPlay && (allowScore || canRevealExamAnswers);
+
+      return rawAnswers.map((qr, idx) => {
+        const qId = String(qr?.questionId || `q_${idx + 1}`);
+        const qMeta = meta.questionMap.get(qId);
+        return {
+          questionIndex: qMeta?.index ?? idx + 1,
+          questionId: qId,
+          questionText: qMeta?.question || String(qr?.questionText || `Câu hỏi ${idx + 1}`),
+          playerAnswer: String(qr?.answer ?? qr?.playerAnswer ?? ''),
+          isCorrect: allowScore && qr?.isCorrect !== undefined && qr?.isCorrect !== null ? Boolean(qr.isCorrect) : null,
+          pointsEarned:
+            allowScore && qr?.pointsEarned !== undefined && qr?.pointsEarned !== null
+              ? Number(qr.pointsEarned || 0)
+              : null,
+          responseTimeMs: Number(qr?.responseTimeMs || 0),
+          timedOut: Boolean(qr?.timedOut),
+          correctAnswer: allowAnswerKey
+            ? String(qr?.correctAnswer || qMeta?.correctAnswer || '')
+            : null,
+          explanation: allowAnswerKey
+            ? qr?.explanation ?? qMeta?.explanation ?? null
+            : null,
+        };
+      });
+    };
+
+    for (const r of attemptRows) {
+      const sessionId = r.session_id ? String(r.session_id) : null;
+      const rawRoomId = r.room_id ? String(r.room_id) : null;
+      const batchId =
+        rawRoomId && rawRoomId.startsWith('batch:') ? rawRoomId.slice(6) : null;
+      const roomId = rawRoomId && !rawRoomId.startsWith('batch:') ? rawRoomId : null;
+      const roomCode = r.room_code ? String(r.room_code) : null;
+      if (sessionId) seenSessionIds.add(sessionId);
+
+      const soloRow = sessionId ? soloBySessionId.get(sessionId) : undefined;
+      const roomRow = roomId ? roomByRoomId.get(roomId) : undefined;
+
+      const rowMode: 'PLAY' | 'EXAM' =
+        r.session_mode === 'EXAM' ||
+        soloRow?.session_mode === 'EXAM' ||
+        roomRow?.session_mode === 'EXAM' ||
+        meta.sessionMode === 'EXAM'
+          ? 'EXAM'
+          : 'PLAY';
+
+      const rawState = String(r.state || 'IN_PROGRESS');
+      const submittedReason =
+        (r.submitted_reason ? String(r.submitted_reason) : null) ||
+        (soloRow?.submitted_reason ? String(soloRow.submitted_reason) : null) ||
+        (roomRow?.submitted_reason ? String(roomRow.submitted_reason) : null) ||
+        null;
+
+      // Reconcile state with practice_session if practice_session finished or abandoned
+      const effectiveRawState: 'IN_PROGRESS' | 'FINISHED' | 'ABANDONED' =
+        rawState === 'FINISHED' || soloRow?.state === 'FINISHED'
+          ? 'FINISHED'
+          : rawState === 'ABANDONED' || soloRow?.state === 'ABANDONED'
+            ? 'ABANDONED'
+            : 'IN_PROGRESS';
+
+      const status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'IN_PROGRESS' | 'ABANDONED' =
+        effectiveRawState === 'FINISHED'
+          ? submittedReason === 'EXAM_CLOSED_BY_HOST'
+            ? 'AUTO_SUBMITTED'
+            : 'COMPLETED'
+          : effectiveRawState === 'ABANDONED'
+            ? 'ABANDONED'
+            : 'IN_PROGRESS';
+
+      const totalQuestions = Math.max(
+        1,
+        Number(r.total_questions || soloRow?.total_questions || meta.totalQuestions || 1)
+      );
+      const correctAnswers = Math.max(
+        0,
+        Number(r.correct_answers ?? soloRow?.correct_answers ?? 0)
+      );
+      const wrongAnswers =
+        effectiveRawState === 'FINISHED'
+          ? Math.max(0, totalQuestions - correctAnswers)
+          : Math.max(0, Number(soloRow?.wrong_answers || 0));
+      const score = Math.max(0, Number(r.score ?? soloRow?.total_score ?? 0));
+      const maxPossibleScore = Math.max(
+        score,
+        Number(r.max_possible_score || soloRow?.max_possible_score || meta.maxPossibleScore || totalQuestions * 100)
+      );
+      const accuracyPercent =
+        effectiveRawState === 'FINISHED'
+          ? Number.isFinite(Number(r.accuracy_percent)) && Number(r.accuracy_percent) > 0
+            ? Number(r.accuracy_percent)
+            : Math.round((correctAnswers / totalQuestions) * 100)
+          : Math.round((correctAnswers / totalQuestions) * 100);
+      const durationMs = Math.max(0, Number(r.duration_ms ?? soloRow?.duration_ms ?? 0));
+
+      const isPassed: boolean | null =
+        rowMode === 'EXAM' && effectiveRawState === 'FINISHED'
+          ? r.is_passed !== null && r.is_passed !== undefined
+            ? Boolean(r.is_passed)
+            : accuracyPercent >= meta.passThresholdPercent
+          : null;
+
+      let parsedAnswers: any[] = [];
+      try {
+        parsedAnswers = JSON.parse(String(r.answers_json || '[]'));
+      } catch {
+        parsedAnswers = [];
+      }
+      if ((!parsedAnswers || parsedAnswers.length === 0) && soloRow?.question_results_json) {
+        try {
+          parsedAnswers = JSON.parse(String(soloRow.question_results_json || '[]'));
+        } catch {
+          parsedAnswers = [];
+        }
+      }
+
+      const displayName =
+        String(r.display_name || soloRow?.player_name || 'Người chơi').trim() || 'Người chơi';
+      const departmentUnit = String(r.department_unit || soloRow?.department_unit || '').trim();
+      const employeeCode = String(r.employee_code || '').trim();
+      const participantId = r.participant_id
+        ? String(r.participant_id)
+        : soloRow?.participant_id
+          ? String(soloRow.participant_id)
+          : null;
+
+      if (roomId) {
+        const pKey = participantId || this.normalizeParticipantName(displayName);
+        seenRoomPlayerKeys.add(`${roomId}::${pKey}`);
+      }
+
+      unified.push({
+        attemptId: String(r.attempt_id),
+        historyId: roomId ? `room:${roomId}` : sessionId ? `solo:${sessionId}` : null,
+        gameId,
+        batchId,
+        participantId,
+        sessionId,
+        roomId,
+        roomCode,
+        deliveryMode: String(r.delivery_mode || (roomId ? 'MULTIPLAYER' : 'SOLO')) as
+          | 'SOLO'
+          | 'MULTIPLAYER',
+        sessionMode: rowMode,
+        attemptNumber: Math.max(1, Number(r.attempt_number || 1)),
+        playerName: displayName,
+        departmentUnit,
+        employeeCode,
+        state: effectiveRawState,
+        status,
+        submittedReason,
+        score,
+        maxPossibleScore,
+        correctAnswers,
+        wrongAnswers,
+        totalQuestions,
+        accuracyPercent,
+        durationMs,
+        isPassed,
+        startedAt: String(r.started_at || soloRow?.started_at || r.created_at),
+        finishedAt:
+          (r.finished_at ? String(r.finished_at) : null) ||
+          (soloRow?.finished_at ? String(soloRow.finished_at) : null),
+        createdAt: String(r.created_at),
+        questionBreakdown: buildSanitizedQuestionBreakdown(
+          parsedAnswers,
+          rowMode,
+          r.exam_answer_reveal_policy || soloRow?.exam_answer_reveal_policy
+        ),
+      });
+    }
+
+    // Include practice_sessions that were not recorded in game_participant_attempts
+    for (const s of soloRows) {
+      const sessionId = String(s.session_id);
+      if (seenSessionIds.has(sessionId)) continue;
+      seenSessionIds.add(sessionId);
+
+      const mapped = this.mapPracticeSessionRow(s);
+      const rowMode: 'PLAY' | 'EXAM' =
+        s.session_mode === 'EXAM' || meta.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+      const rawState: 'IN_PROGRESS' | 'FINISHED' | 'ABANDONED' =
+        mapped.state === 'FINISHED'
+          ? 'FINISHED'
+          : mapped.state === 'ABANDONED'
+            ? 'ABANDONED'
+            : 'IN_PROGRESS';
+      const status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'IN_PROGRESS' | 'ABANDONED' =
+        rawState === 'FINISHED'
+          ? mapped.submittedReason === 'EXAM_CLOSED_BY_HOST'
+            ? 'AUTO_SUBMITTED'
+            : 'COMPLETED'
+          : rawState === 'ABANDONED'
+            ? 'ABANDONED'
+            : 'IN_PROGRESS';
+      const totalQuestions = Math.max(1, mapped.totalQuestions || meta.totalQuestions || 1);
+      const accuracyPercent = Math.round((mapped.correctAnswers / totalQuestions) * 100);
+      const isPassed: boolean | null =
+        rowMode === 'EXAM' && rawState === 'FINISHED'
+          ? mapped.isPassed !== null && mapped.isPassed !== undefined
+            ? mapped.isPassed
+            : accuracyPercent >= meta.passThresholdPercent
+          : null;
+
+      unified.push({
+        attemptId: `solo_att_${sessionId}`,
+        historyId: rawState === 'FINISHED' ? `solo:${sessionId}` : null,
+        gameId,
+        participantId: mapped.participantId ?? null,
+        sessionId,
+        roomId: null,
+        roomCode: null,
+        deliveryMode: 'SOLO',
+        sessionMode: rowMode,
+        attemptNumber: 1,
+        playerName: (mapped.playerName && mapped.playerName.trim()) || 'Người chơi cá nhân',
+        departmentUnit: (mapped.departmentUnit && mapped.departmentUnit.trim()) || '',
+        employeeCode: '',
+        state: rawState,
+        status,
+        submittedReason: mapped.submittedReason ?? null,
+        score: mapped.totalScore,
+        maxPossibleScore:
+          mapped.maxPossibleScore > 0 ? mapped.maxPossibleScore : meta.maxPossibleScore,
+        correctAnswers: mapped.correctAnswers,
+        wrongAnswers: mapped.wrongAnswers,
+        totalQuestions,
+        accuracyPercent,
+        durationMs: mapped.durationMs,
+        isPassed,
+        startedAt: mapped.startedAt || mapped.createdAt,
+        finishedAt: mapped.finishedAt || null,
+        createdAt: mapped.createdAt,
+        questionBreakdown: buildSanitizedQuestionBreakdown(
+          mapped.questionResults || [],
+          rowMode,
+          mapped.examAnswerRevealPolicy
+        ),
+      });
+    }
+
+    // Include room_history leaderboard entries not already recorded in game_participant_attempts
+    for (const r of roomRows) {
+      const mapped = this.mapRoomHistoryRow(r);
+      const rowMode: 'PLAY' | 'EXAM' =
+        r.session_mode === 'EXAM' || meta.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+      const leaderboard = Array.isArray(mapped.leaderboard) ? mapped.leaderboard : [];
+      const totalQuestions = Math.max(1, mapped.totalQuestions || meta.totalQuestions || 1);
+      const maxScoreDefault =
+        mapped.maxPossibleScore && mapped.maxPossibleScore > 0
+          ? mapped.maxPossibleScore
+          : meta.maxPossibleScore || totalQuestions * 100;
+      const passThreshold = mapped.passThresholdPercent ?? meta.passThresholdPercent ?? 50;
+
+      for (let i = 0; i < leaderboard.length; i++) {
+        const entry = leaderboard[i];
+        const displayName = String(entry.displayName || `Người chơi ${i + 1}`).trim();
+        const pid = entry.participantId ? String(entry.participantId) : null;
+        const pKey = pid || this.normalizeParticipantName(displayName);
+        if (seenRoomPlayerKeys.has(`${mapped.roomId}::${pKey}`)) continue;
+        seenRoomPlayerKeys.add(`${mapped.roomId}::${pKey}`);
+
+        const correctAnswers = Math.max(0, Number(entry.correctCount || 0));
+        const qTotal = Math.max(1, Number(entry.totalQuestions || totalQuestions));
+        const wrongAnswers = Math.max(0, qTotal - correctAnswers);
+        const accuracyPercent =
+          typeof entry.accuracyPercent === 'number'
+            ? entry.accuracyPercent
+            : Math.round((correctAnswers / qTotal) * 100);
+        const score = Math.max(0, Number(entry.score || 0));
+        const maxPossibleScore = Math.max(
+          score,
+          Number(entry.maxPossibleScore || maxScoreDefault)
+        );
+        const durationMs = Math.max(0, Number(entry.totalResponseTimeMs || 0));
+        const isPassed: boolean | null =
+          rowMode === 'EXAM'
+            ? typeof entry.isPassed === 'boolean'
+              ? entry.isPassed
+              : accuracyPercent >= passThreshold
+            : null;
+        const status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'IN_PROGRESS' | 'ABANDONED' =
+          mapped.submittedReason === 'EXAM_CLOSED_BY_HOST' ? 'AUTO_SUBMITTED' : 'COMPLETED';
+
+        unified.push({
+          attemptId: `room_att_${mapped.roomId}_${i + 1}`,
+          historyId: `room:${mapped.roomId}`,
+          gameId,
+          participantId: pid,
+          sessionId: null,
+          roomId: mapped.roomId,
+          roomCode: mapped.roomCode,
+          deliveryMode: 'MULTIPLAYER',
+          sessionMode: rowMode,
+          attemptNumber: 1,
+          playerName: displayName,
+          departmentUnit: String(entry.departmentUnit || '').trim(),
+          employeeCode: '',
+          state: 'FINISHED',
+          status,
+          submittedReason: mapped.submittedReason ?? null,
+          score,
+          maxPossibleScore,
+          correctAnswers,
+          wrongAnswers,
+          totalQuestions: qTotal,
+          accuracyPercent,
+          durationMs,
+          isPassed,
+          startedAt: mapped.startedAt || mapped.createdAt,
+          finishedAt: mapped.finishedAt || mapped.updatedAt,
+          createdAt: mapped.createdAt,
+          questionBreakdown: [],
+        });
+      }
+    }
+
+    // Recompute sequential attemptNumber per distinct player in chronological order
+    const byPlayerChrono = new Map<string, ReportsUnifiedAttemptItem[]>();
+    const chronoSorted = [...unified].sort((a, b) => {
+      const tA = Date.parse(a.startedAt || a.createdAt) || 0;
+      const tB = Date.parse(b.startedAt || b.createdAt) || 0;
+      if (tA !== tB) return tA - tB;
+      return a.attemptNumber - b.attemptNumber;
+    });
+    for (const item of chronoSorted) {
+      const pKey = item.participantId
+        ? `pid:${item.participantId}`
+        : `ident:${this.normalizeParticipantName(item.playerName)}::${this.normalizeParticipantName(item.departmentUnit)}::${item.employeeCode.toLowerCase()}`;
+      const list = byPlayerChrono.get(pKey) || [];
+      list.push(item);
+      item.attemptNumber = Math.max(item.attemptNumber, list.length);
+      byPlayerChrono.set(pKey, list);
+    }
+
+    return unified;
+  }
+
+  public listCreatorReportsGames(options: {
+    userId?: string | null;
+    isAdmin?: boolean;
+    search?: string;
+    sessionMode?: 'ALL' | 'PLAY' | 'EXAM' | string;
+    page?: number;
+    limit?: number;
+  } = {}): ReportsOverviewResult {
+    const db = getDatabase();
+    const limit = Math.min(100, Math.max(1, Number(options.limit) || 20));
+    const page = Math.max(1, Number(options.page) || 1);
+    const offset = (page - 1) * limit;
+
+    // Use the exact same Creator Library ownership scope as Library (scope = 'mine')
+    const conditions: string[] = [];
+    const params: any[] = [];
+    if (options.isAdmin) {
+      if (options.userId) {
+        conditions.push(
+          "(g.owner_user_id = ? OR g.owner_user_id IS NULL OR g.owner_user_id = 'legacy_local')"
+        );
+        params.push(options.userId);
+      }
+    } else if (options.userId && options.userId !== 'legacy_local') {
+      conditions.push('g.owner_user_id = ?');
+      params.push(options.userId);
+    } else {
+      conditions.push("(g.owner_user_id IS NULL OR g.owner_user_id = 'legacy_local')");
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const gameRows = db
+      .prepare(
+        `SELECT g.*
+         FROM games g
+         ${whereClause}
+         ORDER BY g.created_at DESC`
+      )
+      .all(...params) as Record<string, any>[];
+
+    const allItems: ReportsGameOverviewItem[] = [];
+
+    for (const row of gameRows) {
+      const gameId = String(row.game_id);
+      let settings: Record<string, any> = {};
+      try {
+        settings = JSON.parse(String(row.settings_json || '{}')) || {};
+      } catch {
+        settings = {};
+      }
+
+      const sessionMode: 'PLAY' | 'EXAM' = settings.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+      const rosterMode: RosterMode =
+        settings.rosterMode === 'PRECONFIGURED' || settings.rosterMode === 'HYBRID'
+          ? settings.rosterMode
+          : 'FREE_TEXT';
+      const passThresholdPercent =
+        typeof settings.passThresholdPercent === 'number' &&
+        Number.isFinite(settings.passThresholdPercent)
+          ? Math.max(0, Math.min(100, settings.passThresholdPercent))
+          : 50;
+      const officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE' =
+        settings.officialAttemptPolicy === 'LATEST_ATTEMPT' ||
+        settings.officialAttemptPolicy === 'HIGHEST_SCORE'
+          ? settings.officialAttemptPolicy
+          : sessionMode === 'EXAM'
+            ? 'LATEST_ATTEMPT'
+            : 'HIGHEST_SCORE';
+      const examStatus: 'OPEN' | 'CLOSING' | 'CLOSED' =
+        settings.examStatus === 'CLOSED' || settings.examStatus === 'CLOSING'
+          ? settings.examStatus
+          : 'OPEN';
+
+      const meta = this.resolveGameSettingsMeta(gameId);
+      const unifiedAttempts = this.collectUnifiedGameAttempts(gameId, meta);
+      const rosterCountRow = db
+        .prepare('SELECT COUNT(*) as cnt FROM game_participants WHERE game_id = ?')
+        .get(gameId) as { cnt: number };
+      const rosterCount = Number(rosterCountRow?.cnt || 0);
+
+      const distinctPlayerKeys = new Set<string>();
+      for (const att of unifiedAttempts) {
+        const key = att.participantId
+          ? `pid:${att.participantId}`
+          : `ident:${this.normalizeParticipantName(att.playerName)}::${this.normalizeParticipantName(att.departmentUnit)}::${att.employeeCode.toLowerCase()}`;
+        distinctPlayerKeys.add(key);
+      }
+
+      const participantCount = Math.max(rosterCount, distinctPlayerKeys.size);
+      const totalAttempts = unifiedAttempts.length;
+      const completedAttemptsList = unifiedAttempts.filter(a => a.state === 'FINISHED');
+      const completedAttempts = completedAttemptsList.length;
+
+      let highestScore = 0;
+      let sumScore = 0;
+      for (const att of completedAttemptsList) {
+        sumScore += att.score;
+        if (att.score > highestScore) highestScore = att.score;
+      }
+      const averageScore =
+        completedAttempts > 0 ? Math.round(sumScore / completedAttempts) : 0;
+
+      // Also check room_history timestamps in case a room had 0 attempts but was opened/closed
+      const latestRoomRow = db
+        .prepare(
+          'SELECT COALESCE(finished_at, started_at, created_at) as last_ts FROM room_history WHERE game_id = ? ORDER BY created_at DESC LIMIT 1'
+        )
+        .get(gameId) as { last_ts?: string | null } | undefined;
+
+      let lastActivityMs = 0;
+      let lastActivityAt: string | null = null;
+
+      for (const att of unifiedAttempts) {
+        const candidateIso = att.finishedAt || att.startedAt || att.createdAt;
+        const ms = candidateIso ? Date.parse(candidateIso) : NaN;
+        if (Number.isFinite(ms) && ms > lastActivityMs) {
+          lastActivityMs = ms;
+          lastActivityAt = candidateIso;
+        }
+      }
+      if (latestRoomRow?.last_ts) {
+        const rMs = Date.parse(latestRoomRow.last_ts);
+        if (Number.isFinite(rMs) && rMs > lastActivityMs) {
+          lastActivityMs = rMs;
+          lastActivityAt = latestRoomRow.last_ts;
+        }
+      }
+
+      let passedCount = 0;
+      let failedCount = 0;
+      if (sessionMode === 'EXAM') {
+        const sb = this.getGameScoreboard(gameId, { limit: 1000 });
+        passedCount = sb.totals.passedCount;
+        failedCount = sb.totals.failedCount;
+      }
+
+      allItems.push({
+        gameId,
+        title: String(row.title || 'Game chưa đặt tên'),
+        description: String(row.description || ''),
+        gameType: String(row.game_type || 'QUIZ') as GameType,
+        sessionMode,
+        scoringMode: String(row.scoring_mode || 'STANDARD') as ScoringMode,
+        rosterMode,
+        isPublic: Boolean(row.is_public),
+        ownerUserId: row.owner_user_id ? String(row.owner_user_id) : null,
+        questionCount: Number(row.question_count || meta.totalQuestions || 0),
+        timePerQuestion: Number(row.time_per_question || 20),
+        passThresholdPercent,
+        officialAttemptPolicy,
+        examStatus,
+        examClosedAt: settings.examClosedAt ? String(settings.examClosedAt) : null,
+        answersPublished: Boolean(settings.answersPublished),
+        rosterCount,
+        participantCount,
+        totalAttempts,
+        completedAttempts,
+        passedCount,
+        failedCount,
+        averageScore,
+        highestScore,
+        lastActivityAt,
+        createdAt: String(row.created_at),
+        updatedAt: String(row.updated_at || row.created_at),
+      });
+    }
+
+    // Mandatory Sorting Rule (Section 3):
+    // 1. Games with lastActivityAt !== null come FIRST, ordered by lastActivityAt DESC
+    // 2. Games with lastActivityAt === null come AFTER, ordered by createdAt DESC
+    allItems.sort((a, b) => {
+      const hasActA = Boolean(a.lastActivityAt);
+      const hasActB = Boolean(b.lastActivityAt);
+      if (hasActA && !hasActB) return -1;
+      if (!hasActA && hasActB) return 1;
+      if (hasActA && hasActB) {
+        const actA = Date.parse(a.lastActivityAt!) || 0;
+        const actB = Date.parse(b.lastActivityAt!) || 0;
+        if (actB !== actA) return actB - actA;
+      }
+      const crA = Date.parse(a.createdAt) || 0;
+      const crB = Date.parse(b.createdAt) || 0;
+      if (crB !== crA) return crB - crA;
+      return a.gameId.localeCompare(b.gameId);
+    });
+
+    const summary = {
+      totalGames: allItems.length,
+      playGamesCount: allItems.filter(g => g.sessionMode === 'PLAY').length,
+      examGamesCount: allItems.filter(g => g.sessionMode === 'EXAM').length,
+      gamesWithActivityCount: allItems.filter(g => Boolean(g.lastActivityAt)).length,
+      totalAttemptsAllGames: allItems.reduce((sum, g) => sum + g.totalAttempts, 0),
+    };
+
+    let filtered = [...allItems];
+    const modeFilter = String(options.sessionMode || 'ALL').toUpperCase();
+    if (modeFilter === 'PLAY' || modeFilter === 'EXAM') {
+      filtered = filtered.filter(g => g.sessionMode === modeFilter);
+    }
+
+    if (options.search && options.search.trim()) {
+      const q = options.search.trim().toLowerCase();
+      filtered = filtered.filter(
+        g =>
+          g.title.toLowerCase().includes(q) ||
+          g.description.toLowerCase().includes(q) ||
+          g.gameId.toLowerCase().includes(q)
+      );
+    }
+
+    const total = filtered.length;
+    const paged = filtered.slice(offset, offset + limit);
+
+    return {
+      games: paged,
+      total,
+      page,
+      limit,
+      offset,
+      hasMore: offset + paged.length < total,
+      summary,
+    };
+  }
+
+  public getGameReportsDetail(gameId: string): GameReportsDetailResult | undefined {
+    const db = getDatabase();
+    const gameRow = db
+      .prepare('SELECT * FROM games WHERE game_id = ?')
+      .get(gameId) as Record<string, any> | undefined;
+    if (!gameRow) return undefined;
+
+    let settings: Record<string, any> = {};
+    try {
+      settings = JSON.parse(String(gameRow.settings_json || '{}')) || {};
+    } catch {
+      settings = {};
+    }
+
+    const meta = this.resolveGameSettingsMeta(gameId);
+    const sessionMode: 'PLAY' | 'EXAM' = settings.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY';
+    const rosterMode: RosterMode =
+      settings.rosterMode === 'PRECONFIGURED' || settings.rosterMode === 'HYBRID'
+        ? settings.rosterMode
+        : 'FREE_TEXT';
+    const examStatus: 'OPEN' | 'CLOSING' | 'CLOSED' =
+      settings.examStatus === 'CLOSED' || settings.examStatus === 'CLOSING'
+        ? settings.examStatus
+        : 'OPEN';
+
+    const rosterRows = db
+      .prepare(
+        'SELECT * FROM game_participants WHERE game_id = ? ORDER BY department_unit ASC, full_name ASC'
+      )
+      .all(gameId) as Record<string, any>[];
+    const rosterParticipants = rosterRows.map(r => this.mapParticipantRow(r, true));
+    const rosterById = new Map<string, PersistedParticipantRecord>();
+    for (const p of rosterParticipants) {
+      rosterById.set(p.participantId, p);
+    }
+
+    const unifiedAttempts = this.collectUnifiedGameAttempts(gameId, meta);
+    const completedAttempts = unifiedAttempts.filter(a => a.state === 'FINISHED');
+    const inProgressAttempts = unifiedAttempts.filter(a => a.state === 'IN_PROGRESS');
+    const abandonedAttempts = unifiedAttempts.filter(a => a.state === 'ABANDONED');
+
+    let lastActivityMs = 0;
+    let lastActivityAt: string | null = null;
+    for (const att of unifiedAttempts) {
+      const iso = att.finishedAt || att.startedAt || att.createdAt;
+      const ms = iso ? Date.parse(iso) : NaN;
+      if (Number.isFinite(ms) && ms > lastActivityMs) {
+        lastActivityMs = ms;
+        lastActivityAt = iso;
+      }
+    }
+
+    // =====================================================================
+    // PLAY MODE LEADERBOARD (HIGHEST_SCORE per distinct player, no summing)
+    // =====================================================================
+    const playPlayerGroups = new Map<
+      string,
+      {
+        playerKey: string;
+        participantId: string | null;
+        fullName: string;
+        departmentUnit: string;
+        employeeCode: string;
+        attempts: ReportsUnifiedAttemptItem[];
+      }
+    >();
+    let hasFreeTextPlayers = false;
+
+    for (const att of unifiedAttempts) {
+      let playerKey: string;
+      let fullName = att.playerName;
+      let departmentUnit = att.departmentUnit;
+      let employeeCode = att.employeeCode;
+
+      if (att.participantId && rosterById.has(att.participantId)) {
+        const rp = rosterById.get(att.participantId)!;
+        playerKey = `pid:${rp.participantId}`;
+        fullName = rp.fullName;
+        departmentUnit = rp.departmentUnit || departmentUnit;
+        employeeCode = rp.employeeCode || employeeCode;
+      } else if (att.participantId) {
+        playerKey = `pid:${att.participantId}`;
+      } else if (departmentUnit || employeeCode) {
+        playerKey = `ident:${this.normalizeParticipantName(fullName)}::${this.normalizeParticipantName(departmentUnit)}::${employeeCode.toLowerCase()}`;
+        hasFreeTextPlayers = true;
+      } else {
+        playerKey = `name:${this.normalizeParticipantName(fullName)}`;
+        hasFreeTextPlayers = true;
+      }
+
+      const existing = playPlayerGroups.get(playerKey);
+      if (existing) {
+        existing.attempts.push(att);
+      } else {
+        playPlayerGroups.set(playerKey, {
+          playerKey,
+          participantId: att.participantId,
+          fullName,
+          departmentUnit,
+          employeeCode,
+          attempts: [att],
+        });
+      }
+    }
+
+    const playLeaderboardEntries: ReportsPlayLeaderboardEntry[] = [];
+    for (const group of playPlayerGroups.values()) {
+      const finishedList = group.attempts.filter(a => a.state === 'FINISHED');
+      const pool = finishedList.length > 0 ? finishedList : group.attempts;
+      if (pool.length === 0) continue;
+
+      // Pick single best attempt (HIGHEST_SCORE): score DESC -> correctAnswers DESC -> durationMs ASC -> attemptNumber DESC
+      const best = [...pool].sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        if (b.correctAnswers !== a.correctAnswers) return b.correctAnswers - a.correctAnswers;
+        const durA = a.durationMs > 0 ? a.durationMs : Number.MAX_SAFE_INTEGER;
+        const durB = b.durationMs > 0 ? b.durationMs : Number.MAX_SAFE_INTEGER;
+        if (durA !== durB) return durA - durB;
+        return b.attemptNumber - a.attemptNumber;
+      })[0];
+
+      let lastPlayedAt: string | null = null;
+      let lastMs = 0;
+      for (const a of group.attempts) {
+        const iso = a.finishedAt || a.startedAt || a.createdAt;
+        const ms = iso ? Date.parse(iso) : NaN;
+        if (Number.isFinite(ms) && ms > lastMs) {
+          lastMs = ms;
+          lastPlayedAt = iso;
+        }
+      }
+
+      const rp = group.participantId ? rosterById.get(group.participantId) : undefined;
+      const usedAttempts = rp
+        ? Math.max(rp.usedAttempts, finishedList.length)
+        : group.attempts.length;
+      const allowedAttempts = rp ? rp.allowedAttempts : null;
+
+      playLeaderboardEntries.push({
+        rank: 0,
+        playerKey: group.playerKey,
+        participantId: group.participantId,
+        fullName: group.fullName,
+        departmentUnit: group.departmentUnit,
+        employeeCode: group.employeeCode,
+        highestScore: best.score,
+        maxPossibleScore: best.maxPossibleScore || meta.maxPossibleScore,
+        attemptsCount: group.attempts.length,
+        completedAttemptsCount: finishedList.length,
+        usedAttempts,
+        allowedAttempts,
+        bestAttemptNumber: best.attemptNumber,
+        correctAnswers: best.correctAnswers,
+        wrongAnswers: best.wrongAnswers,
+        totalQuestions: best.totalQuestions || meta.totalQuestions,
+        accuracyPercent: best.accuracyPercent,
+        durationMs: best.durationMs,
+        status:
+          finishedList.length > 0
+            ? 'COMPLETED'
+            : group.attempts.some(a => a.state === 'IN_PROGRESS')
+              ? 'IN_PROGRESS'
+              : 'ABANDONED',
+        lastPlayedAt,
+      });
+    }
+
+    // Deterministic tie-breaking: highestScore DESC -> correctAnswers DESC -> durationMs ASC -> fullName A-Z
+    playLeaderboardEntries.sort((a, b) => {
+      if (b.highestScore !== a.highestScore) return b.highestScore - a.highestScore;
+      if (b.correctAnswers !== a.correctAnswers) return b.correctAnswers - a.correctAnswers;
+      const durA = a.durationMs > 0 ? a.durationMs : Number.MAX_SAFE_INTEGER;
+      const durB = b.durationMs > 0 ? b.durationMs : Number.MAX_SAFE_INTEGER;
+      if (durA !== durB) return durA - durB;
+      return a.fullName.localeCompare(b.fullName, 'vi');
+    });
+    playLeaderboardEntries.forEach((entry, idx) => {
+      entry.rank = idx + 1;
+    });
+
+    const playAttemptsChronoDesc = [...unifiedAttempts].sort((a, b) => {
+      const tA = Date.parse(a.finishedAt || a.startedAt || a.createdAt) || 0;
+      const tB = Date.parse(b.finishedAt || b.startedAt || b.createdAt) || 0;
+      if (tB !== tA) return tB - tA;
+      return b.attemptNumber - a.attemptNumber;
+    });
+
+    const playAverageScore =
+      completedAttempts.length > 0
+        ? Math.round(
+            completedAttempts.reduce((sum, a) => sum + a.score, 0) / completedAttempts.length
+          )
+        : 0;
+    const playHighestScore =
+      completedAttempts.length > 0
+        ? Math.max(...completedAttempts.map(a => a.score))
+        : 0;
+
+    // =====================================================================
+    // EXAM MODE BATCHES (Danh sách đợt thi & Chi tiết từng đợt)
+    // =====================================================================
+    const roomRows = db
+      .prepare('SELECT * FROM room_history WHERE game_id = ? ORDER BY created_at ASC')
+      .all(gameId) as Record<string, any>[];
+
+    const rawStoredBatches: Array<Record<string, any>> = Array.isArray(settings.examBatches)
+      ? settings.examBatches
+      : [];
+
+    const batchDefinitions: Array<{
+      batchId: string;
+      batchNumber: number;
+      batchName: string;
+      deliveryMode: 'SOLO' | 'MULTIPLAYER' | 'MIXED';
+      roomId: string | null;
+      roomCode: string | null;
+      openedAt: string;
+      closedAt: string | null;
+      status: 'OPEN' | 'CLOSED';
+    }> = [];
+
+    const seenBatchIds = new Set<string>();
+    const seenBatchRoomIds = new Set<string>();
+
+    for (let i = 0; i < rawStoredBatches.length; i++) {
+      const b = rawStoredBatches[i];
+      if (!b || typeof b !== 'object') continue;
+      const bId = String(b.batchId || `batch-${i + 1}`).trim();
+      if (seenBatchIds.has(bId)) continue;
+      seenBatchIds.add(bId);
+      if (b.roomId) seenBatchRoomIds.add(String(b.roomId));
+
+      const isLastStoredBatch = i === rawStoredBatches.length - 1;
+      const resolvedStatus: 'OPEN' | 'CLOSED' =
+        b.status === 'CLOSED' || (isLastStoredBatch && examStatus === 'CLOSED')
+          ? 'CLOSED'
+          : 'OPEN';
+      const resolvedClosedAt =
+        resolvedStatus === 'CLOSED'
+          ? (b.closedAt ? String(b.closedAt) : null) ||
+            (isLastStoredBatch && settings.examClosedAt ? String(settings.examClosedAt) : null)
+          : null;
+
+      batchDefinitions.push({
+        batchId: bId,
+        batchNumber: Number(b.batchNumber || batchDefinitions.length + 1),
+        batchName: String(b.batchName || `Đợt ${batchDefinitions.length + 1}`),
+        deliveryMode:
+          b.deliveryMode === 'SOLO' || b.deliveryMode === 'MULTIPLAYER'
+            ? b.deliveryMode
+            : 'MIXED',
+        roomId: b.roomId ? String(b.roomId) : null,
+        roomCode: b.roomCode ? String(b.roomCode) : null,
+        openedAt: String(b.openedAt || settings.examOpenAt || gameRow.created_at),
+        closedAt: resolvedClosedAt,
+        status: resolvedStatus,
+      });
+    }
+
+    // If there are solo attempts or no batches yet, ensure a primary batch exists
+    const hasSoloAttempts = unifiedAttempts.some(a => a.deliveryMode === 'SOLO');
+    if (batchDefinitions.length === 0 && (hasSoloAttempts || roomRows.length === 0)) {
+      batchDefinitions.push({
+        batchId: 'batch-1',
+        batchNumber: 1,
+        batchName: 'Đợt 1',
+        deliveryMode: roomRows.length > 0 && hasSoloAttempts ? 'MIXED' : 'SOLO',
+        roomId: null,
+        roomCode: null,
+        openedAt: String(settings.examOpenAt || gameRow.created_at),
+        closedAt:
+          examStatus === 'CLOSED'
+            ? String(settings.examClosedAt || gameRow.updated_at || new Date().toISOString())
+            : null,
+        status: examStatus === 'CLOSED' ? 'CLOSED' : 'OPEN',
+      });
+      seenBatchIds.add('batch-1');
+    }
+
+    // Add any Multiplayer room runs not yet represented as a batch
+    for (const r of roomRows) {
+      const rId = String(r.room_id);
+      if (seenBatchRoomIds.has(rId)) continue;
+      seenBatchRoomIds.add(rId);
+      const nextNum = batchDefinitions.length + 1;
+      const rCode = String(r.room_code || '');
+      batchDefinitions.push({
+        batchId: `room:${rId}`,
+        batchNumber: nextNum,
+        batchName: rCode ? `Đợt ${nextNum} (Phòng ${rCode})` : `Đợt ${nextNum}`,
+        deliveryMode: 'MULTIPLAYER',
+        roomId: rId,
+        roomCode: rCode || null,
+        openedAt: String(r.started_at || r.created_at),
+        closedAt: r.finished_at ? String(r.finished_at) : String(r.updated_at || r.created_at),
+        status: 'CLOSED',
+      });
+    }
+
+    // Normalize batch numbers 1..N in chronological order
+    batchDefinitions.sort((a, b) => {
+      const tA = Date.parse(a.openedAt) || 0;
+      const tB = Date.parse(b.openedAt) || 0;
+      if (tA !== tB) return tA - tB;
+      return a.batchNumber - b.batchNumber;
+    });
+    batchDefinitions.forEach((b, idx) => {
+      b.batchNumber = idx + 1;
+      if (!b.batchName || /^Đợt \d+$/.test(b.batchName)) {
+        b.batchName = `Đợt ${idx + 1}`;
+      }
+    });
+
+    // Helper to build participant rows for a given subset of attempts (either a specific batch or ALL batches)
+    const buildBatchParticipantsAndStats = (
+      batchDef: {
+        batchId: string;
+        batchNumber: number;
+        batchName: string;
+        deliveryMode: 'SOLO' | 'MULTIPLAYER' | 'MIXED';
+        roomId: string | null;
+        roomCode: string | null;
+        openedAt: string;
+        closedAt: string | null;
+        status: 'OPEN' | 'CLOSED';
+      },
+      batchAttempts: ReportsUnifiedAttemptItem[]
+    ): ReportsExamBatchItem => {
+      const attemptsByPid = new Map<string, ReportsUnifiedAttemptItem[]>();
+      const adhocByKey = new Map<string, ReportsUnifiedAttemptItem[]>();
+      const allGameAttemptsByPid = new Map<string, ReportsUnifiedAttemptItem[]>();
+
+      for (const att of unifiedAttempts) {
+        if (att.participantId) {
+          const list = allGameAttemptsByPid.get(att.participantId) || [];
+          list.push(att);
+          allGameAttemptsByPid.set(att.participantId, list);
+        }
+      }
+
+      for (const att of batchAttempts) {
+        if (att.participantId && rosterById.has(att.participantId)) {
+          const list = attemptsByPid.get(att.participantId) || [];
+          list.push(att);
+          attemptsByPid.set(att.participantId, list);
+        } else {
+          const key = att.participantId
+            ? `pid:${att.participantId}`
+            : `ident:${this.normalizeParticipantName(att.playerName)}::${this.normalizeParticipantName(att.departmentUnit)}::${att.employeeCode.toLowerCase()}`;
+          const list = adhocByKey.get(key) || [];
+          list.push(att);
+          adhocByKey.set(key, list);
+        }
+      }
+
+      const selectOfficial = (
+        list: ReportsUnifiedAttemptItem[]
+      ): ReportsUnifiedAttemptItem | null => {
+        const finished = list.filter(a => a.state === 'FINISHED');
+        if (finished.length === 0) return null;
+        if (meta.officialAttemptPolicy === 'LATEST_ATTEMPT') {
+          return finished[finished.length - 1];
+        }
+        return [...finished].sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          if (b.accuracyPercent !== a.accuracyPercent) return b.accuracyPercent - a.accuracyPercent;
+          const durA = a.durationMs > 0 ? a.durationMs : Number.MAX_SAFE_INTEGER;
+          const durB = b.durationMs > 0 ? b.durationMs : Number.MAX_SAFE_INTEGER;
+          if (durA !== durB) return durA - durB;
+          return b.attemptNumber - a.attemptNumber;
+        })[0];
+      };
+
+      const participantRows: ReportsExamBatchParticipantRow[] = [];
+
+      for (const rp of rosterParticipants) {
+        const pBatchList = attemptsByPid.get(rp.participantId) || [];
+        const pAllList = allGameAttemptsByPid.get(rp.participantId) || pBatchList;
+        const finishedInBatch = pBatchList.filter(a => a.state === 'FINISHED');
+        const inProgressInBatch = pBatchList.filter(a => a.state === 'IN_PROGRESS');
+        const abandonedInBatch = pBatchList.filter(a => a.state === 'ABANDONED');
+        const official = selectOfficial(pBatchList);
+
+        let status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'IN_PROGRESS' | 'PENDING' | 'ABANDONED';
+        if (finishedInBatch.length > 0 && official) {
+          status = official.status === 'AUTO_SUBMITTED' ? 'AUTO_SUBMITTED' : 'COMPLETED';
+        } else if (
+          inProgressInBatch.length > 0 ||
+          (rp.status === 'IN_PROGRESS' && batchDef.status === 'OPEN')
+        ) {
+          status = 'IN_PROGRESS';
+        } else if (abandonedInBatch.length > 0) {
+          status = 'ABANDONED';
+        } else {
+          status = 'PENDING';
+        }
+
+        // Section 5.C: Never mark PENDING/IN_PROGRESS/ABANDONED as failed (isPassed = null)
+        const isPassed: boolean | null =
+          (status === 'COMPLETED' || status === 'AUTO_SUBMITTED') && official
+            ? official.accuracyPercent >= meta.passThresholdPercent
+            : null;
+
+        const allFinishedCount = pAllList.filter(a => a.state === 'FINISHED').length;
+        const usedAttempts = Math.max(rp.usedAttempts, allFinishedCount);
+        const allowedAttempts = rp.allowedAttempts;
+        const remainingAttempts = Math.max(0, allowedAttempts - usedAttempts);
+
+        const latestAtt = pBatchList.length > 0 ? pBatchList[pBatchList.length - 1] : null;
+        const lastAttemptAt = latestAtt
+          ? latestAtt.finishedAt || latestAtt.startedAt || latestAtt.createdAt
+          : null;
+
+        participantRows.push({
+          rank: null,
+          participantId: rp.participantId,
+          fullName: rp.fullName,
+          departmentUnit: rp.departmentUnit,
+          employeeCode: rp.employeeCode,
+          usedAttempts,
+          allowedAttempts,
+          remainingAttempts,
+          retakeGrantedCount: rp.retakeGrantedCount,
+          retakeGrantedAt: rp.retakeGrantedAt,
+          retakeGrantedBy: rp.retakeGrantedBy,
+          batchAttemptsCount: pBatchList.length,
+          officialAttemptNumber: official ? official.attemptNumber : null,
+          score: official ? official.score : null,
+          maxPossibleScore: official ? official.maxPossibleScore : meta.maxPossibleScore,
+          correctAnswers: official ? official.correctAnswers : 0,
+          wrongAnswers: official ? official.wrongAnswers : 0,
+          totalQuestions: official ? official.totalQuestions : meta.totalQuestions,
+          accuracyPercent: official ? official.accuracyPercent : null,
+          durationMs: official ? official.durationMs : 0,
+          isPassed,
+          status,
+          submittedReason: official?.submittedReason ?? latestAtt?.submittedReason ?? null,
+          lastAttemptAt,
+          attempts: pAllList.map((a, idx) => ({
+            attemptId: a.attemptId,
+            attemptNumber: a.attemptNumber || idx + 1,
+            deliveryMode: a.deliveryMode,
+            roomCode: a.roomCode,
+            score: a.score,
+            maxPossibleScore: a.maxPossibleScore,
+            correctAnswers: a.correctAnswers,
+            wrongAnswers: a.wrongAnswers,
+            totalQuestions: a.totalQuestions,
+            accuracyPercent: a.accuracyPercent,
+            durationMs: a.durationMs,
+            isPassed: a.state === 'FINISHED' ? a.accuracyPercent >= meta.passThresholdPercent : null,
+            status: a.status,
+            submittedReason: a.submittedReason,
+            startedAt: a.startedAt,
+            finishedAt: a.finishedAt,
+            questionBreakdown: a.questionBreakdown,
+          })),
+        });
+      }
+
+      // Include any ad-hoc attempts not matching a roster participantId
+      for (const [, list] of adhocByKey.entries()) {
+        const first = list[0];
+        const finishedInBatch = list.filter(a => a.state === 'FINISHED');
+        const inProgressInBatch = list.filter(a => a.state === 'IN_PROGRESS');
+        const abandonedInBatch = list.filter(a => a.state === 'ABANDONED');
+        const official = selectOfficial(list);
+
+        let status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'IN_PROGRESS' | 'PENDING' | 'ABANDONED';
+        if (finishedInBatch.length > 0 && official) {
+          status = official.status === 'AUTO_SUBMITTED' ? 'AUTO_SUBMITTED' : 'COMPLETED';
+        } else if (inProgressInBatch.length > 0) {
+          status = 'IN_PROGRESS';
+        } else if (abandonedInBatch.length > 0) {
+          status = 'ABANDONED';
+        } else {
+          status = 'PENDING';
+        }
+
+        const isPassed: boolean | null =
+          (status === 'COMPLETED' || status === 'AUTO_SUBMITTED') && official
+            ? official.accuracyPercent >= meta.passThresholdPercent
+            : null;
+        const usedAttempts = finishedInBatch.length || list.length;
+        const allowedAttempts = Math.max(1, usedAttempts);
+        const latestAtt = list[list.length - 1];
+
+        participantRows.push({
+          rank: null,
+          participantId: first.participantId,
+          fullName: first.playerName,
+          departmentUnit: first.departmentUnit,
+          employeeCode: first.employeeCode,
+          usedAttempts,
+          allowedAttempts,
+          remainingAttempts: Math.max(0, allowedAttempts - usedAttempts),
+          retakeGrantedCount: 0,
+          retakeGrantedAt: null,
+          retakeGrantedBy: null,
+          batchAttemptsCount: list.length,
+          officialAttemptNumber: official ? official.attemptNumber : null,
+          score: official ? official.score : null,
+          maxPossibleScore: official ? official.maxPossibleScore : meta.maxPossibleScore,
+          correctAnswers: official ? official.correctAnswers : 0,
+          wrongAnswers: official ? official.wrongAnswers : 0,
+          totalQuestions: official ? official.totalQuestions : meta.totalQuestions,
+          accuracyPercent: official ? official.accuracyPercent : null,
+          durationMs: official ? official.durationMs : 0,
+          isPassed,
+          status,
+          submittedReason: official?.submittedReason ?? latestAtt?.submittedReason ?? null,
+          lastAttemptAt: latestAtt.finishedAt || latestAtt.startedAt || latestAtt.createdAt,
+          attempts: list.map((a, idx) => ({
+            attemptId: a.attemptId,
+            attemptNumber: a.attemptNumber || idx + 1,
+            deliveryMode: a.deliveryMode,
+            roomCode: a.roomCode,
+            score: a.score,
+            maxPossibleScore: a.maxPossibleScore,
+            correctAnswers: a.correctAnswers,
+            wrongAnswers: a.wrongAnswers,
+            totalQuestions: a.totalQuestions,
+            accuracyPercent: a.accuracyPercent,
+            durationMs: a.durationMs,
+            isPassed: a.state === 'FINISHED' ? a.accuracyPercent >= meta.passThresholdPercent : null,
+            status: a.status,
+            submittedReason: a.submittedReason,
+            startedAt: a.startedAt,
+            finishedAt: a.finishedAt,
+            questionBreakdown: a.questionBreakdown,
+          })),
+        });
+      }
+
+      // Rank completed participants in this batch
+      const completedRows = participantRows
+        .filter(p => p.status === 'COMPLETED' || p.status === 'AUTO_SUBMITTED')
+        .sort((a, b) => {
+          const scA = a.score ?? 0;
+          const scB = b.score ?? 0;
+          if (scB !== scA) return scB - scA;
+          if (b.correctAnswers !== a.correctAnswers) return b.correctAnswers - a.correctAnswers;
+          const durA = a.durationMs > 0 ? a.durationMs : Number.MAX_SAFE_INTEGER;
+          const durB = b.durationMs > 0 ? b.durationMs : Number.MAX_SAFE_INTEGER;
+          if (durA !== durB) return durA - durB;
+          return a.fullName.localeCompare(b.fullName, 'vi');
+        });
+      completedRows.forEach((p, idx) => {
+        p.rank = idx + 1;
+      });
+
+      // Sort participantRows: ranked completed first, then IN_PROGRESS, then ABANDONED, then PENDING
+      const statusOrder: Record<string, number> = {
+        COMPLETED: 1,
+        AUTO_SUBMITTED: 1,
+        IN_PROGRESS: 2,
+        ABANDONED: 3,
+        PENDING: 4,
+      };
+      participantRows.sort((a, b) => {
+        const ordA = statusOrder[a.status] ?? 5;
+        const ordB = statusOrder[b.status] ?? 5;
+        if (ordA !== ordB) return ordA - ordB;
+        if (a.rank !== null && b.rank !== null && a.rank !== b.rank) return a.rank - b.rank;
+        return a.fullName.localeCompare(b.fullName, 'vi');
+      });
+
+      const completedCount = completedRows.length;
+      const inProgressCount = participantRows.filter(p => p.status === 'IN_PROGRESS').length;
+      const pendingCount = participantRows.filter(p => p.status === 'PENDING').length;
+      const abandonedCount = participantRows.filter(p => p.status === 'ABANDONED').length;
+      const passedCount = completedRows.filter(p => p.isPassed === true).length;
+      const failedCount = completedRows.filter(p => p.isPassed === false).length;
+      const averageScore =
+        completedCount > 0
+          ? Math.round(completedRows.reduce((s, p) => s + (p.score ?? 0), 0) / completedCount)
+          : 0;
+      const highestScore =
+        completedCount > 0 ? Math.max(...completedRows.map(p => p.score ?? 0)) : 0;
+
+      return {
+        batchId: batchDef.batchId,
+        batchNumber: batchDef.batchNumber,
+        batchName: batchDef.batchName,
+        deliveryMode: batchDef.deliveryMode,
+        roomId: batchDef.roomId,
+        roomCode: batchDef.roomCode,
+        openedAt: batchDef.openedAt,
+        closedAt: batchDef.closedAt,
+        status: batchDef.status,
+        passThresholdPercent: meta.passThresholdPercent,
+        officialAttemptPolicy: meta.officialAttemptPolicy,
+        totalParticipants: participantRows.length,
+        completedCount,
+        inProgressCount,
+        pendingCount,
+        abandonedCount,
+        totalAttempts: batchAttempts.length,
+        passedCount,
+        failedCount,
+        averageScore,
+        highestScore,
+        participants: participantRows,
+      };
+    };
+
+    const nonRoomBatches = batchDefinitions.filter(b => !b.roomId);
+    const examBatches: ReportsExamBatchItem[] = batchDefinitions.map(bDef => {
+      const bAttempts = unifiedAttempts.filter(att => {
+        if (bDef.roomId) {
+          return att.roomId === bDef.roomId;
+        }
+        if (att.roomId && !att.roomId.startsWith('batch:')) {
+          // Belongs to a specific multiplayer room batch if that room batch exists
+          if (batchDefinitions.some(rb => rb.roomId === att.roomId)) {
+            return false;
+          }
+        }
+        if (att.batchId) {
+          return att.batchId === bDef.batchId;
+        }
+        if (nonRoomBatches.length <= 1) {
+          return true;
+        }
+        const attMs = Date.parse(att.startedAt || att.createdAt) || 0;
+        const openMs = Date.parse(bDef.openedAt) || 0;
+        const closeMs = bDef.closedAt ? Date.parse(bDef.closedAt) : Number.MAX_SAFE_INTEGER;
+        if (bDef.batchId === 'batch-1') {
+          const nextOpenMs = nonRoomBatches[1]
+            ? Date.parse(nonRoomBatches[1].openedAt) || Number.MAX_SAFE_INTEGER
+            : Number.MAX_SAFE_INTEGER;
+          return attMs <= Math.min(closeMs, nextOpenMs);
+        }
+        return attMs >= openMs && attMs <= closeMs;
+      });
+
+      return buildBatchParticipantsAndStats(bDef, bAttempts);
+    });
+
+    // Overall exam stats across all batches
+    const overallBatch = buildBatchParticipantsAndStats(
+      {
+        batchId: 'all',
+        batchNumber: 0,
+        batchName: 'Tổng hợp toàn kỳ thi',
+        deliveryMode: 'MIXED',
+        roomId: null,
+        roomCode: null,
+        openedAt: String(settings.examOpenAt || gameRow.created_at),
+        closedAt: settings.examClosedAt ? String(settings.examClosedAt) : null,
+        status: examStatus === 'CLOSED' ? 'CLOSED' : 'OPEN',
+      },
+      unifiedAttempts
+    );
+
+    return {
+      gameId,
+      ownerUserId: gameRow.owner_user_id ? String(gameRow.owner_user_id) : null,
+      title: String(gameRow.title || 'Game chưa đặt tên'),
+      description: String(gameRow.description || ''),
+      gameType: String(gameRow.game_type || 'QUIZ') as GameType,
+      sessionMode,
+      scoringMode: String(gameRow.scoring_mode || 'STANDARD') as ScoringMode,
+      rosterMode,
+      isPublic: Boolean(gameRow.is_public),
+      questionCount: Number(gameRow.question_count || meta.totalQuestions || 0),
+      timePerQuestion: Number(gameRow.time_per_question || 20),
+      maxPossibleScore: meta.maxPossibleScore,
+      passThresholdPercent: meta.passThresholdPercent,
+      officialAttemptPolicy: meta.officialAttemptPolicy,
+      examAnswerRevealPolicy: meta.examAnswerRevealPolicy,
+      answersPublished: meta.answersPublished,
+      examStatus,
+      examOpenAt: settings.examOpenAt ? String(settings.examOpenAt) : null,
+      examCloseAt: settings.examCloseAt ? String(settings.examCloseAt) : null,
+      examClosedAt: settings.examClosedAt ? String(settings.examClosedAt) : null,
+      lastActivityAt,
+      createdAt: String(gameRow.created_at),
+      updatedAt: String(gameRow.updated_at || gameRow.created_at),
+      playOverview: {
+        totalPlays: unifiedAttempts.length,
+        completedPlays: completedAttempts.length,
+        inProgressPlays: inProgressAttempts.length,
+        abandonedPlays: abandonedAttempts.length,
+        uniquePlayers: playLeaderboardEntries.length,
+        averageScore: playAverageScore,
+        highestScore: playHighestScore,
+        lastActivityAt,
+        rosterMode,
+        hasPreconfiguredRoster: rosterParticipants.length > 0,
+        attemptLimitPolicyNote:
+          rosterParticipants.length === 0
+            ? 'Chế độ CHƠI (PLAY) nhập tên tự do không khóa giới hạn lượt theo người chơi. Người chơi có thể tham gia nhiều lượt và Bảng xếp hạng tự động lấy điểm cao nhất (HIGHEST_SCORE).'
+            : 'Chế độ CHƠI (PLAY) có danh sách người tham gia: Bảng xếp hạng lấy điểm cao nhất (HIGHEST_SCORE) của mỗi người chơi. Bạn có thể cấp thêm lượt cho người tham gia trong danh sách bên dưới.',
+      },
+      playLeaderboard: {
+        rule: 'HIGHEST_SCORE',
+        tieBreakingRuleText:
+          'Điểm cao nhất giảm dần → Số câu đúng giảm dần → Thời gian hoàn thành nhanh nhất → Tên A–Z',
+        hasFreeTextPlayers,
+        top3: playLeaderboardEntries.slice(0, 3),
+        entries: playLeaderboardEntries,
+      },
+      playAttemptsHistory: playAttemptsChronoDesc,
+      rosterParticipants,
+      examOverview: {
+        totalBatches: examBatches.length,
+        openBatchesCount: examBatches.filter(b => b.status === 'OPEN').length,
+        closedBatchesCount: examBatches.filter(b => b.status === 'CLOSED').length,
+        totalParticipants: overallBatch.totalParticipants,
+        completedCount: overallBatch.completedCount,
+        inProgressCount: overallBatch.inProgressCount,
+        pendingCount: overallBatch.pendingCount,
+        abandonedCount: overallBatch.abandonedCount,
+        totalAttempts: overallBatch.totalAttempts,
+        passedCount: overallBatch.passedCount,
+        failedCount: overallBatch.failedCount,
+        averageScore: overallBatch.averageScore,
+        highestScore: overallBatch.highestScore,
+        passThresholdPercent: meta.passThresholdPercent,
+        officialAttemptPolicy: meta.officialAttemptPolicy,
+        examStatus,
+        examClosedAt: settings.examClosedAt ? String(settings.examClosedAt) : null,
+        answersPublished: meta.answersPublished,
+      },
+      examBatches,
+      examOverallBatch: overallBatch,
     };
   }
 }
@@ -4109,6 +5527,250 @@ export interface GameScoreboardSummary {
   offset: number;
   hasMore: boolean;
   departments: string[];
+}
+
+export interface ReportsUnifiedAttemptItem {
+  attemptId: string;
+  historyId: string | null;
+  gameId: string;
+  batchId?: string | null;
+  participantId: string | null;
+  sessionId: string | null;
+  roomId: string | null;
+  roomCode: string | null;
+  deliveryMode: 'SOLO' | 'MULTIPLAYER';
+  sessionMode: 'PLAY' | 'EXAM';
+  attemptNumber: number;
+  playerName: string;
+  departmentUnit: string;
+  employeeCode: string;
+  state: 'IN_PROGRESS' | 'FINISHED' | 'ABANDONED';
+  status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'IN_PROGRESS' | 'ABANDONED';
+  submittedReason: string | null;
+  score: number;
+  maxPossibleScore: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number;
+  durationMs: number;
+  isPassed: boolean | null;
+  startedAt: string;
+  finishedAt: string | null;
+  createdAt: string;
+  questionBreakdown: PlayExamHistoryQuestionRow[];
+}
+
+export interface ReportsGameOverviewItem {
+  gameId: string;
+  title: string;
+  description: string;
+  gameType: GameType;
+  sessionMode: 'PLAY' | 'EXAM';
+  scoringMode: ScoringMode;
+  rosterMode: RosterMode;
+  isPublic: boolean;
+  ownerUserId: string | null;
+  questionCount: number;
+  timePerQuestion: number;
+  passThresholdPercent: number;
+  officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
+  examStatus: 'OPEN' | 'CLOSING' | 'CLOSED';
+  examClosedAt: string | null;
+  answersPublished: boolean;
+  rosterCount: number;
+  participantCount: number;
+  totalAttempts: number;
+  completedAttempts: number;
+  passedCount: number;
+  failedCount: number;
+  averageScore: number;
+  highestScore: number;
+  lastActivityAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReportsOverviewResult {
+  games: ReportsGameOverviewItem[];
+  total: number;
+  page: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  summary: {
+    totalGames: number;
+    playGamesCount: number;
+    examGamesCount: number;
+    gamesWithActivityCount: number;
+    totalAttemptsAllGames: number;
+  };
+}
+
+export interface ReportsPlayLeaderboardEntry {
+  rank: number;
+  playerKey: string;
+  participantId: string | null;
+  fullName: string;
+  departmentUnit: string;
+  employeeCode: string;
+  highestScore: number;
+  maxPossibleScore: number;
+  attemptsCount: number;
+  completedAttemptsCount: number;
+  usedAttempts: number;
+  allowedAttempts: number | null;
+  bestAttemptNumber: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number;
+  durationMs: number;
+  status: 'COMPLETED' | 'IN_PROGRESS' | 'ABANDONED';
+  lastPlayedAt: string | null;
+}
+
+export interface ReportsExamAttemptItem {
+  attemptId: string;
+  attemptNumber: number;
+  deliveryMode: 'SOLO' | 'MULTIPLAYER';
+  roomCode: string | null;
+  score: number;
+  maxPossibleScore: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number;
+  durationMs: number;
+  isPassed: boolean | null;
+  status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'IN_PROGRESS' | 'ABANDONED';
+  submittedReason: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  questionBreakdown: PlayExamHistoryQuestionRow[];
+}
+
+export interface ReportsExamBatchParticipantRow {
+  rank: number | null;
+  participantId: string | null;
+  fullName: string;
+  departmentUnit: string;
+  employeeCode: string;
+  usedAttempts: number;
+  allowedAttempts: number;
+  remainingAttempts: number;
+  retakeGrantedCount: number;
+  retakeGrantedAt: string | null;
+  retakeGrantedBy: string | null;
+  batchAttemptsCount: number;
+  officialAttemptNumber: number | null;
+  score: number | null;
+  maxPossibleScore: number;
+  correctAnswers: number;
+  wrongAnswers: number;
+  totalQuestions: number;
+  accuracyPercent: number | null;
+  durationMs: number;
+  isPassed: boolean | null;
+  status: 'COMPLETED' | 'AUTO_SUBMITTED' | 'IN_PROGRESS' | 'PENDING' | 'ABANDONED';
+  submittedReason: string | null;
+  lastAttemptAt: string | null;
+  attempts: ReportsExamAttemptItem[];
+}
+
+export interface ReportsExamBatchItem {
+  batchId: string;
+  batchNumber: number;
+  batchName: string;
+  deliveryMode: 'SOLO' | 'MULTIPLAYER' | 'MIXED';
+  roomId: string | null;
+  roomCode: string | null;
+  openedAt: string;
+  closedAt: string | null;
+  status: 'OPEN' | 'CLOSED';
+  passThresholdPercent: number;
+  officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
+  totalParticipants: number;
+  completedCount: number;
+  inProgressCount: number;
+  pendingCount: number;
+  abandonedCount: number;
+  totalAttempts: number;
+  passedCount: number;
+  failedCount: number;
+  averageScore: number;
+  highestScore: number;
+  participants: ReportsExamBatchParticipantRow[];
+}
+
+export interface GameReportsDetailResult {
+  gameId: string;
+  ownerUserId: string | null;
+  title: string;
+  description: string;
+  gameType: GameType;
+  sessionMode: 'PLAY' | 'EXAM';
+  scoringMode: ScoringMode;
+  rosterMode: RosterMode;
+  isPublic: boolean;
+  questionCount: number;
+  timePerQuestion: number;
+  maxPossibleScore: number;
+  passThresholdPercent: number;
+  officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
+  examAnswerRevealPolicy: ExamAnswerRevealPolicy;
+  answersPublished: boolean;
+  examStatus: 'OPEN' | 'CLOSING' | 'CLOSED';
+  examOpenAt: string | null;
+  examCloseAt: string | null;
+  examClosedAt: string | null;
+  lastActivityAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  playOverview: {
+    totalPlays: number;
+    completedPlays: number;
+    inProgressPlays: number;
+    abandonedPlays: number;
+    uniquePlayers: number;
+    averageScore: number;
+    highestScore: number;
+    lastActivityAt: string | null;
+    rosterMode: RosterMode;
+    hasPreconfiguredRoster: boolean;
+    attemptLimitPolicyNote: string;
+  };
+  playLeaderboard: {
+    rule: 'HIGHEST_SCORE';
+    tieBreakingRuleText: string;
+    hasFreeTextPlayers: boolean;
+    top3: ReportsPlayLeaderboardEntry[];
+    entries: ReportsPlayLeaderboardEntry[];
+  };
+  playAttemptsHistory: ReportsUnifiedAttemptItem[];
+  rosterParticipants: PersistedParticipantRecord[];
+  examOverview: {
+    totalBatches: number;
+    openBatchesCount: number;
+    closedBatchesCount: number;
+    totalParticipants: number;
+    completedCount: number;
+    inProgressCount: number;
+    pendingCount: number;
+    abandonedCount: number;
+    totalAttempts: number;
+    passedCount: number;
+    failedCount: number;
+    averageScore: number;
+    highestScore: number;
+    passThresholdPercent: number;
+    officialAttemptPolicy: 'LATEST_ATTEMPT' | 'HIGHEST_SCORE';
+    examStatus: 'OPEN' | 'CLOSING' | 'CLOSED';
+    examClosedAt: string | null;
+    answersPublished: boolean;
+  };
+  examBatches: ReportsExamBatchItem[];
+  examOverallBatch: ReportsExamBatchItem;
 }
 
 export const persistenceRepo = new PersistenceRepository();

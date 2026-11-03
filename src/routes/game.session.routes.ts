@@ -551,10 +551,16 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
           session.specification.questions,
           session.specification.settings.scoringMode
         );
+        const activeBatchId =
+          typeof session.specification.settings?.activeBatchId === 'string' &&
+          session.specification.settings.activeBatchId.trim()
+            ? session.specification.settings.activeBatchId.trim()
+            : null;
         const attempt = persistenceRepo.recordParticipantAttemptStart({
           gameId: session.specification.gameId,
           participantId: participantId ?? null,
           sessionId: session.sessionId,
+          roomId: activeBatchId ? `batch:${activeBatchId}` : null,
           deliveryMode: 'SOLO',
           sessionMode,
           displayName: effectiveDisplayName,

@@ -710,6 +710,19 @@ export function normalizeBackendAudioConfig(
   };
 }
 
+export const ExamBatchMetaSchema = z.object({
+  batchId: z.string().trim().min(1),
+  batchNumber: z.number().int().min(1),
+  batchName: z.string().trim().min(1),
+  deliveryMode: z.enum(['SOLO', 'MULTIPLAYER', 'MIXED']).optional().default('MIXED'),
+  roomId: z.string().nullable().optional(),
+  roomCode: z.string().nullable().optional(),
+  openedAt: z.string(),
+  closedAt: z.string().nullable().optional(),
+  status: ExamStatusEnum.optional().default('OPEN'),
+});
+export type ExamBatchMeta = z.infer<typeof ExamBatchMetaSchema>;
+
 export const GameSettingsSchema = z.object({
   questionCount: z.number().int().min(1).max(100).default(5),
   timePerQuestion: z.number().int().min(5).max(300).default(20),
@@ -731,6 +744,8 @@ export const GameSettingsSchema = z.object({
   examOpenAt: z.string().nullable().optional(),
   examCloseAt: z.string().nullable().optional(),
   examClosedAt: z.string().nullable().optional(),
+  examBatches: z.array(ExamBatchMetaSchema).optional(),
+  activeBatchId: z.string().nullable().optional(),
   allowReplay: z.boolean().optional(),
   audioConfig: GameAudioConfigSchema.optional(),
 });

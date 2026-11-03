@@ -205,7 +205,8 @@ historyRouter.get(
   (req: Request, res: Response, next: NextFunction) => {
     try {
       rejectGuestOrPlayerWrite(req, 'xem lịch sử quản trị của BTC');
-      if (!req.user || !req.user.userId) {
+      const isCreatorLibraryScope = req.headers['x-creator-library'] === '1';
+      if ((!req.user || !req.user.userId) && !isCreatorLibraryScope) {
         throw new AppError('UNAUTHORIZED', 'Yêu cầu đăng nhập để xem lịch sử quản trị của BTC.', 401);
       }
 
@@ -234,8 +235,9 @@ historyRouter.get(
           : undefined;
 
       const result = persistenceRepo.listPlayExamHistory({
-        userId: req.user.userId,
-        isAdmin: req.user.role === 'ADMIN',
+        userId: req.user?.userId ?? null,
+        isAdmin: req.user?.role === 'ADMIN',
+        includeUnownedForCreatorLibrary: isCreatorLibraryScope && !req.user?.userId,
         gameId,
         sessionMode,
         deliveryMode,
@@ -263,7 +265,8 @@ historyRouter.get(
   (req: Request, res: Response, next: NextFunction) => {
     try {
       rejectGuestOrPlayerWrite(req, 'xem chi tiết lịch sử quản trị của BTC');
-      if (!req.user || !req.user.userId) {
+      const isCreatorLibraryScope = req.headers['x-creator-library'] === '1';
+      if ((!req.user || !req.user.userId) && !isCreatorLibraryScope) {
         throw new AppError('UNAUTHORIZED', 'Yêu cầu đăng nhập để xem chi tiết lịch sử.', 401);
       }
 
@@ -279,7 +282,8 @@ historyRouter.get(
 
       if (
         (!detail.ownerUserId || detail.ownerUserId === 'legacy_local') &&
-        req.user.role !== 'ADMIN'
+        req.user?.role !== 'ADMIN' &&
+        !(isCreatorLibraryScope && !req.user?.userId)
       ) {
         throw new AppError(
           'ACCESS_DENIED',
@@ -313,7 +317,8 @@ historyRouter.get(
   (req: Request, res: Response, next: NextFunction) => {
     try {
       rejectGuestOrPlayerWrite(req, 'xuất dữ liệu lịch sử quản trị của BTC');
-      if (!req.user || !req.user.userId) {
+      const isCreatorLibraryScope = req.headers['x-creator-library'] === '1';
+      if ((!req.user || !req.user.userId) && !isCreatorLibraryScope) {
         throw new AppError('UNAUTHORIZED', 'Yêu cầu đăng nhập để xuất dữ liệu lịch sử.', 401);
       }
 
@@ -329,7 +334,8 @@ historyRouter.get(
 
       if (
         (!detail.ownerUserId || detail.ownerUserId === 'legacy_local') &&
-        req.user.role !== 'ADMIN'
+        req.user?.role !== 'ADMIN' &&
+        !(isCreatorLibraryScope && !req.user?.userId)
       ) {
         throw new AppError(
           'ACCESS_DENIED',

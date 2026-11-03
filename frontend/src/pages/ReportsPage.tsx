@@ -13,13 +13,25 @@ import {
   UsersIcon,
 } from '../components/Icons.js';
 import {
+  closeGameExamApi,
+  createRoom,
   downloadPlayExamHistoryExport,
+  fetchCreatorReportsGamesApi,
+  fetchGameReportsDetailApi,
   fetchLearningAnalytics,
   fetchPlayExamHistoryApi,
   fetchPlayExamHistoryDetailApi,
   fetchPracticeHistory,
+  grantParticipantRetakeApi,
+  reopenGameExamApi,
+  type GameReportsDetailResult,
   type PlayExamHistoryDetail,
   type PlayExamHistoryListResult,
+  type PlayExamHistoryQuestionRow,
+  type ReportsExamBatchItem,
+  type ReportsExamBatchParticipantRow,
+  type ReportsGameOverviewItem,
+  type ReportsOverviewResult,
 } from '../services/api.js';
 import type { LibraryFilterPreset } from './AnalyticsPage.js';
 import type {
@@ -104,6 +116,279 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
   const [exportingKey, setExportingKey] = useState<string | null>(null);
   const [exportErrorMsg, setExportErrorMsg] = useState<string | null>(null);
 
+  // V3 Reports 2.0: Creator Library Games Hub + PLAY/EXAM Detail + Retake & Exam Reopen
+  const [reportsGamesData, setReportsGamesData] = useState<ReportsOverviewResult | null>(null);
+  const [reportsGamesLoading, setReportsGamesLoading] = useState<boolean>(false);
+  const [reportsGamesError, setReportsGamesError] = useState<string | null>(null);
+  const [reportsGameModeFilter, setReportsGameModeFilter] = useState<'ALL' | 'PLAY' | 'EXAM'>('ALL');
+  const [reportsGameSearch, setReportsGameSearch] = useState<string>('');
+  const [reportsGamePage, setReportsGamePage] = useState<number>(1);
+  const reportsGameLimit = 10;
+
+  const [selectedGameReport, setSelectedGameReport] = useState<GameReportsDetailResult | null>(null);
+  const [selectedGameReportLoading, setSelectedGameReportLoading] = useState<boolean>(false);
+  const [selectedGameReportError, setSelectedGameReportError] = useState<string | null>(null);
+
+  const [selectedExamBatchId, setSelectedExamBatchId] = useState<string>('LATEST');
+  const [examParticipantSearch, setExamParticipantSearch] = useState<string>('');
+  const [examParticipantFilter, setExamParticipantFilter] = useState<
+    'ALL' | 'COMPLETED' | 'PENDING' | 'IN_PROGRESS' | 'ABANDONED' | 'PASSED' | 'FAILED'
+  >('ALL');
+
+  const [participantAttemptsModal, setParticipantAttemptsModal] =
+    useState<ReportsExamBatchParticipantRow | null>(null);
+  const [expandedAttemptIdInModal, setExpandedAttemptIdInModal] = useState<string | null>(null);
+
+  const [playAttemptBreakdownModal, setPlayAttemptBreakdownModal] = useState<{
+    attemptNumber: number;
+    playerName: string;
+    score: number;
+    correctAnswers: number;
+    wrongAnswers: number;
+    totalQuestions: number;
+    durationMs: number;
+    questionBreakdown: PlayExamHistoryQuestionRow[];
+  } | null>(null);
+
+  const [grantRetakeModal, setGrantRetakeModal] = useState<{
+    gameId: string;
+    participantId: string;
+    fullName: string;
+    departmentUnit: string;
+    employeeCode: string;
+    usedAttempts: number;
+    allowedAttempts: number;
+    additionalAttempts: number;
+    requestId: string;
+  } | null>(null);
+  const [isGrantingRetake, setIsGrantingRetake] = useState<boolean>(false);
+  const [grantRetakeError, setGrantRetakeError] = useState<string | null>(null);
+
+  const [isReopeningExam, setIsReopeningExam] = useState<boolean>(false);
+  const [isClosingExam, setIsClosingExam] = useState<boolean>(false);
+  const [isCreatingRoomPin, setIsCreatingRoomPin] = useState<boolean>(false);
+  const [copiedNoticeKey, setCopiedNoticeKey] = useState<string | null>(null);
+  const [reportsActionNotice, setReportsActionNotice] = useState<{
+    type: 'success' | 'error';
+    message: string;
+  } | null>(null);
+
+  const loadReportsGamesOverview = useCallback(async () => {
+    setReportsGamesLoading(true);
+    setReportsGamesError(null);
+    try {
+      const res = await fetchCreatorReportsGamesApi({
+        sessionMode: reportsGameModeFilter,
+        search: reportsGameSearch,
+        page: reportsGamePage,
+        limit: reportsGameLimit,
+      });
+      setReportsGamesData(res);
+    } catch (err: any) {
+      setReportsGamesError(err?.message || 'Không thể tải danh sách game trong Thư viện.');
+    } finally {
+      setReportsGamesLoading(false);
+    }
+  }, [reportsGameModeFilter, reportsGameSearch, reportsGamePage]);
+
+  useEffect(() => {
+    loadReportsGamesOverview();
+  }, [loadReportsGamesOverview, currentUser?.userId]);
+
+  const handleOpenGameReportsDetail = useCallback(
+    async (gameId: string, preserveBatchSelection: boolean = false) => {
+      setSelectedGameReportLoading(true);
+      setSelectedGameReportError(null);
+      if (!preserveBatchSelection) {
+        setReportsActionNotice(null);
+      }
+      try {
+        const detail = await fetchGameReportsDetailApi(gameId);
+        setSelectedGameReport(detail);
+        if (!preserveBatchSelection) {
+          if (detail.examBatches && detail.examBatches.length > 0) {
+            const latestBatch = detail.examBatches[detail.examBatches.length - 1];
+            setSelectedExamBatchId(latestBatch.batchId);
+          } else {
+            setSelectedExamBatchId('ALL');
+          }
+          setExamParticipantSearch('');
+          setExamParticipantFilter('ALL');
+        }
+        // Also keep participantAttemptsModal synced if currently open
+        setParticipantAttemptsModal((prev) => {
+          if (!prev || !prev.participantId) return prev;
+          for (const b of detail.examBatches || []) {
+            const match = b.participants.find((p) => p.participantId === prev.participantId);
+            if (match && (!preserveBatchSelection || b.batchId === selectedExamBatchId)) {
+              return match;
+            }
+          }
+          const overallMatch = detail.examOverallBatch?.participants.find(
+            (p) => p.participantId === prev.participantId
+          );
+          return overallMatch || prev;
+        });
+      } catch (err: any) {
+        setSelectedGameReportError(err?.message || 'Không thể tải chi tiết báo cáo của game.');
+      } finally {
+        setSelectedGameReportLoading(false);
+      }
+    },
+    [selectedExamBatchId]
+  );
+
+  const handleOpenGrantRetakeModal = (params: {
+    gameId: string;
+    participantId: string;
+    fullName: string;
+    departmentUnit?: string;
+    employeeCode?: string;
+    usedAttempts: number;
+    allowedAttempts: number;
+  }) => {
+    setGrantRetakeError(null);
+    setGrantRetakeModal({
+      gameId: params.gameId,
+      participantId: params.participantId,
+      fullName: params.fullName,
+      departmentUnit: params.departmentUnit || '',
+      employeeCode: params.employeeCode || '',
+      usedAttempts: params.usedAttempts,
+      allowedAttempts: params.allowedAttempts,
+      additionalAttempts: 1,
+      requestId: `retake_${params.participantId}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    });
+  };
+
+  const handleConfirmGrantRetake = async () => {
+    if (!grantRetakeModal || isGrantingRetake) return;
+    const count = Number(grantRetakeModal.additionalAttempts);
+    if (!Number.isInteger(count) || count < 1 || count > 10) {
+      setGrantRetakeError('Số lượt cấp thêm phải là số nguyên từ 1 đến 10.');
+      return;
+    }
+    setIsGrantingRetake(true);
+    setGrantRetakeError(null);
+    try {
+      const updated = await grantParticipantRetakeApi(
+        grantRetakeModal.gameId,
+        grantRetakeModal.participantId,
+        {
+          additionalAttempts: count,
+          requestId: grantRetakeModal.requestId,
+        }
+      );
+      const pInfo = updated.participant || (updated as any);
+      setReportsActionNotice({
+        type: 'success',
+        message: `Đã cấp thêm +${count} lượt cho "${pInfo.fullName || grantRetakeModal.fullName}" (Đã dùng: ${pInfo.usedAttempts ?? grantRetakeModal.usedAttempts}/${pInfo.allowedAttempts ?? grantRetakeModal.allowedAttempts + count} lượt).`,
+      });
+      const targetGameId = grantRetakeModal.gameId;
+      setGrantRetakeModal(null);
+      await Promise.all([
+        handleOpenGameReportsDetail(targetGameId, true),
+        loadReportsGamesOverview(),
+        loadHistoryActivities(),
+      ]);
+    } catch (err: any) {
+      setGrantRetakeError(err?.message || 'Không thể cấp thêm lượt cho người tham gia này.');
+    } finally {
+      setIsGrantingRetake(false);
+    }
+  };
+
+  const handleReopenExamFromReports = async (gameId: string) => {
+    if (isReopeningExam) return;
+    setIsReopeningExam(true);
+    setReportsActionNotice(null);
+    try {
+      const res = await reopenGameExamApi(gameId, { createNewBatch: true });
+      setReportsActionNotice({
+        type: 'success',
+        message:
+          (res as any).message ||
+          `Đã mở lại đợt thi (${res.batchName || 'Đợt mới'}) thành công. Lịch sử và điểm các lần thi trước được giữ nguyên.`,
+      });
+      await Promise.all([
+        handleOpenGameReportsDetail(gameId, true),
+        loadReportsGamesOverview(),
+        loadHistoryActivities(),
+      ]);
+    } catch (err: any) {
+      setReportsActionNotice({
+        type: 'error',
+        message: err?.message || 'Không thể mở lại đợt thi.',
+      });
+    } finally {
+      setIsReopeningExam(false);
+    }
+  };
+
+  const handleCloseExamFromReports = async (gameId: string) => {
+    if (isClosingExam) return;
+    setIsClosingExam(true);
+    setReportsActionNotice(null);
+    try {
+      const res = await closeGameExamApi(gameId);
+      setReportsActionNotice({
+        type: 'success',
+        message:
+          (res as any).message || 'Đã đóng đợt thi hiện tại và lưu kết quả vào lịch sử đợt thi.',
+      });
+      await Promise.all([
+        handleOpenGameReportsDetail(gameId, false),
+        loadReportsGamesOverview(),
+        loadHistoryActivities(),
+      ]);
+    } catch (err: any) {
+      setReportsActionNotice({
+        type: 'error',
+        message: err?.message || 'Không thể đóng đợt thi.',
+      });
+    } finally {
+      setIsClosingExam(false);
+    }
+  };
+
+  const handleCreateRoomPinFromReports = async (gameId: string) => {
+    if (isCreatingRoomPin) return;
+    setIsCreatingRoomPin(true);
+    setReportsActionNotice(null);
+    try {
+      const created = await createRoom({ gameId, requirePublished: false });
+      setReportsActionNotice({
+        type: 'success',
+        message: `Đã tạo phòng trực tiếp mới thành công • Mã PIN: ${created.roomCode}`,
+      });
+      await Promise.all([
+        handleOpenGameReportsDetail(gameId, true),
+        loadReportsGamesOverview(),
+      ]);
+    } catch (err: any) {
+      setReportsActionNotice({
+        type: 'error',
+        message: err?.message || 'Không thể tạo mã PIN phòng mới.',
+      });
+    } finally {
+      setIsCreatingRoomPin(false);
+    }
+  };
+
+  const handleCopyText = async (key: string, textToCopy: string) => {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(textToCopy);
+      }
+      setCopiedNoticeKey(key);
+      setTimeout(() => {
+        setCopiedNoticeKey((prev) => (prev === key ? null : prev));
+      }, 2200);
+    } catch {
+      setCopiedNoticeKey(key);
+    }
+  };
+
   const loadHistoryActivities = useCallback(async () => {
     setHistoryLoading(true);
     setHistoryError(null);
@@ -171,6 +456,10 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         }
         if (alsoReloadHistory) {
           loadHistoryActivities();
+          loadReportsGamesOverview();
+          if (selectedGameReport?.gameId) {
+            handleOpenGameReportsDetail(selectedGameReport.gameId, true);
+          }
         }
       } catch (err: any) {
         setErrorMessage(err?.message || 'Không thể tải dữ liệu thống kê hoạt động.');
@@ -178,7 +467,13 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         setIsLoading(false);
       }
     },
-    [activityRange, loadHistoryActivities]
+    [
+      activityRange,
+      loadHistoryActivities,
+      loadReportsGamesOverview,
+      selectedGameReport?.gameId,
+      handleOpenGameReportsDetail,
+    ]
   );
 
   useEffect(() => {
@@ -507,7 +802,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
               color: 'var(--text-primary)',
               border: '1px solid var(--border-strong)',
               borderRadius: '6px',
-              padding: '4px 12px',
+              padding: '8px 14px',
+              minHeight: '44px',
+              minWidth: '44px',
               fontSize: '0.78rem',
               fontWeight: 700,
               cursor: 'pointer',
@@ -662,6 +959,2064 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         </div>
       </section>
 
+      {/* REPORTS 2.0: TRUNG TÂM LỊCH SỬ CHƠI / THI, BẢNG XẾP HẠNG, ĐỢT THI & QUẢN LÝ LƯỢT THEO TỪNG GAME */}
+      <section
+        data-testid="reports-v2-game-hub"
+        aria-label="Trung tâm Thống kê Game, Bảng xếp hạng, Đợt thi và Quản lý Lượt"
+        style={{
+          backgroundColor: 'var(--bg-surface)',
+          border: '1px solid var(--border-subtle)',
+          borderRadius: '12px',
+          padding: 'clamp(14px, 3vw, 20px)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '16px',
+          minWidth: 0,
+          maxWidth: '100%',
+          boxSizing: 'border-box',
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'flex-start',
+            flexWrap: 'wrap',
+            gap: '12px',
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: '1.08rem',
+                fontWeight: 800,
+                color: 'var(--text-primary)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                flexWrap: 'wrap',
+              }}
+            >
+              <TrophyIcon size={18} />
+              <span>Danh sách Game trong Thư viện & Quản lý Lượt Chơi / Thi</span>
+            </h2>
+            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+              Tự động đẩy game vừa có hoạt động chơi/thi mới nhất lên đầu. Bấm <strong>Xem chi tiết</strong> để theo dõi Bảng xếp hạng PLAY, kết quả từng Đợt thi EXAM, cấp thêm lượt hoặc mở lại đợt thi.
+            </p>
+          </div>
+
+          <div
+            data-testid="reports-games-sort-badge"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '8px',
+              flexWrap: 'wrap',
+              fontSize: '0.75rem',
+              fontWeight: 700,
+              color: 'var(--text-secondary)',
+              backgroundColor: 'var(--bg-subtle)',
+              padding: '6px 12px',
+              borderRadius: '8px',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            <span>
+              Thư viện: <strong style={{ color: 'var(--text-primary)' }}>{reportsGamesData?.summary.totalGames ?? 0}</strong> game
+            </span>
+            <span>•</span>
+            <span>
+              Chơi: <strong style={{ color: 'var(--accent-emerald)' }}>{reportsGamesData?.summary.playGamesCount ?? 0}</strong>
+            </span>
+            <span>•</span>
+            <span>
+              Thi: <strong style={{ color: 'var(--accent-amber)' }}>{reportsGamesData?.summary.examGamesCount ?? 0}</strong>
+            </span>
+            <span>•</span>
+            <span style={{ color: 'var(--primary)' }}>Sắp xếp: Hoạt động mới nhất lên đầu</span>
+          </div>
+        </div>
+
+        {/* Bộ lọc chế độ & Tìm kiếm game trong Thư viện */}
+        <div
+          data-testid="reports-games-filter-bar"
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: '10px',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '12px',
+            backgroundColor: 'var(--bg-subtle)',
+            borderRadius: '10px',
+            border: '1px solid var(--border-subtle)',
+          }}
+        >
+          <div style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
+            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginRight: '2px' }}>
+              Loại chế độ:
+            </span>
+            {(
+              [
+                { key: 'ALL', label: 'Tất cả game' },
+                { key: 'PLAY', label: 'Chế độ Chơi (PLAY)' },
+                { key: 'EXAM', label: 'Chế độ Thi (EXAM)' },
+              ] as const
+            ).map((opt) => {
+              const active = reportsGameModeFilter === opt.key;
+              return (
+                <button
+                  key={opt.key}
+                  type="button"
+                  data-testid={`reports-game-filter-${opt.key.toLowerCase()}`}
+                  onClick={() => {
+                    setReportsGameModeFilter(opt.key);
+                    setReportsGamePage(1);
+                  }}
+                  style={{
+                    padding: '8px 12px',
+                    minHeight: '44px',
+                    minWidth: '44px',
+                    borderRadius: '6px',
+                    fontSize: '0.76rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    border: active ? '1px solid var(--primary)' : '1px solid var(--border-strong)',
+                    backgroundColor: active ? 'var(--primary)' : 'var(--bg-surface)',
+                    color: active ? 'var(--primary-ink, #060913)' : 'var(--text-primary)',
+                  }}
+                >
+                  {opt.label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div
+            style={{
+              display: 'flex',
+              flexWrap: 'wrap',
+              gap: '8px',
+              alignItems: 'center',
+              flex: '1 1 220px',
+              minWidth: 0,
+              maxWidth: '100%',
+              justifyContent: 'flex-end',
+            }}
+          >
+            <input
+              type="search"
+              data-testid="reports-game-search-input"
+              value={reportsGameSearch}
+              onChange={(e) => {
+                setReportsGameSearch(e.target.value);
+                setReportsGamePage(1);
+              }}
+              placeholder="Tìm theo tên game trong Thư viện..."
+              style={{
+                padding: '8px 12px',
+                minHeight: '44px',
+                borderRadius: '7px',
+                border: '1px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                fontSize: '0.8rem',
+                minWidth: 'min(100%, 180px)',
+                flex: '1 1 180px',
+                maxWidth: '100%',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+        </div>
+
+        {/* Danh sách Game trong Thư viện được sắp theo lastActivityAt DESC NULLS LAST */}
+        {reportsGamesLoading ? (
+          <div
+            data-testid="reports-games-loading"
+            style={{
+              padding: '24px',
+              textAlign: 'center',
+              color: 'var(--text-secondary)',
+              fontSize: '0.85rem',
+              fontWeight: 600,
+            }}
+          >
+            Đang tải danh sách game trong Thư viện...
+          </div>
+        ) : reportsGamesError ? (
+          <div
+            data-testid="reports-games-error"
+            role="alert"
+            style={{
+              padding: '16px',
+              borderRadius: '10px',
+              backgroundColor: 'rgba(239, 68, 68, 0.08)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              color: 'var(--accent-rose)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '10px',
+            }}
+          >
+            <span style={{ fontSize: '0.84rem', fontWeight: 600 }}>{reportsGamesError}</span>
+            <button
+              type="button"
+              onClick={() => loadReportsGamesOverview()}
+              style={{
+                padding: '8px 14px',
+                minHeight: '44px',
+                minWidth: '44px',
+                borderRadius: '6px',
+                border: '1px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--text-primary)',
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Thử lại
+            </button>
+          </div>
+        ) : !reportsGamesData || reportsGamesData.games.length === 0 ? (
+          <div
+            data-testid="reports-games-empty"
+            style={{
+              padding: '28px 16px',
+              textAlign: 'center',
+              color: 'var(--text-muted)',
+              borderRadius: '10px',
+              border: '1px dashed var(--border-subtle)',
+              fontSize: '0.85rem',
+            }}
+          >
+            Chưa có game nào trong Thư viện phù hợp với bộ lọc hiện tại.
+          </div>
+        ) : (
+          <div style={{ overflowX: 'auto', width: '100%' }}>
+            <table
+              data-testid="reports-games-table"
+              style={{
+                width: '100%',
+                borderCollapse: 'collapse',
+                fontSize: '0.82rem',
+                minWidth: '760px',
+              }}
+            >
+              <thead>
+                <tr
+                  style={{
+                    borderBottom: '1px solid var(--border-subtle)',
+                    color: 'var(--text-secondary)',
+                    textAlign: 'left',
+                    fontSize: '0.74rem',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                  }}
+                >
+                  <th style={{ padding: '10px 8px' }}>Tên game</th>
+                  <th style={{ padding: '10px 8px' }}>Loại chế độ</th>
+                  <th style={{ padding: '10px 8px' }}>Người chơi / Thí sinh</th>
+                  <th style={{ padding: '10px 8px' }}>Tổng lượt chơi / thi</th>
+                  <th style={{ padding: '10px 8px' }}>Hoạt động gần nhất</th>
+                  <th style={{ padding: '10px 8px' }}>Trạng thái phiên / đợt</th>
+                  <th style={{ padding: '10px 8px', textAlign: 'right' }}>Thao tác</th>
+                </tr>
+              </thead>
+              <tbody>
+                {reportsGamesData.games.map((g: ReportsGameOverviewItem) => {
+                  const isExam = g.sessionMode === 'EXAM';
+                  const isSelected = selectedGameReport?.gameId === g.gameId;
+                  const activeRoomCodes = (g.activeStatus?.activeRooms || []).map((r) => r.roomCode);
+                  const activeSoloCount = g.activeStatus?.activeSessionCount || 0;
+                  const hasLiveActivity = activeRoomCodes.length > 0 || activeSoloCount > 0;
+                  return (
+                    <tr
+                      key={g.gameId}
+                      data-testid={`reports-game-row-${g.gameId}`}
+                      style={{
+                        borderBottom: '1px solid var(--border-subtle)',
+                        backgroundColor: isSelected ? 'var(--primary-subtle)' : 'transparent',
+                      }}
+                    >
+                      <td style={{ padding: '12px 8px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                        <div>{g.title}</div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500, marginTop: '2px' }}>
+                          {g.questionCount} câu hỏi • {g.rosterMode === 'PRECONFIGURED' ? 'Danh sách định danh' : 'Nhập tên tự do'}
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 8px' }}>
+                        <span
+                          data-testid={`reports-game-mode-badge-${g.gameId}`}
+                          style={{
+                            padding: '3px 8px',
+                            borderRadius: '999px',
+                            fontSize: '0.71rem',
+                            fontWeight: 800,
+                            backgroundColor: isExam ? 'rgba(245, 158, 11, 0.16)' : 'rgba(16, 185, 129, 0.15)',
+                            color: isExam ? 'var(--accent-amber)' : 'var(--accent-emerald)',
+                          }}
+                        >
+                          {isExam ? 'THI (EXAM)' : 'CHƠI (PLAY)'}
+                        </span>
+                      </td>
+                      <td style={{ padding: '12px 8px', fontVariantNumeric: 'tabular-nums' }}>
+                        <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                          {g.participantCount} {isExam ? 'thí sinh' : 'người chơi'}
+                        </div>
+                        {g.rosterCount > 0 && (
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                            Danh sách: {g.rosterCount} người
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 8px', fontVariantNumeric: 'tabular-nums' }}>
+                        <div style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
+                          {g.totalAttempts} lượt
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                          {g.completedAttempts} hoàn thành
+                          {isExam && g.completedAttempts > 0
+                            ? ` • ${g.passedCount} Đạt / ${g.failedCount} Chưa đạt`
+                            : g.highestScore > 0
+                              ? ` • Cao nhất: ${g.highestScore.toLocaleString('vi-VN')} đ`
+                              : ''}
+                        </div>
+                      </td>
+                      <td
+                        data-testid={`reports-game-last-activity-${g.gameId}`}
+                        style={{ padding: '12px 8px', fontSize: '0.76rem', fontVariantNumeric: 'tabular-nums' }}
+                      >
+                        {g.lastActivityAt ? (
+                          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                            {new Date(g.lastActivityAt).toLocaleString('vi-VN')}
+                          </span>
+                        ) : (
+                          <span
+                            data-testid={`reports-game-no-activity-${g.gameId}`}
+                            style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}
+                          >
+                            Chưa có lịch sử chơi/thi
+                          </span>
+                        )}
+                      </td>
+                      <td style={{ padding: '12px 8px' }}>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                          {isExam ? (
+                            <span
+                              style={{
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                fontSize: '0.71rem',
+                                fontWeight: 700,
+                                backgroundColor:
+                                  g.examStatus === 'CLOSED'
+                                    ? 'rgba(239, 68, 68, 0.12)'
+                                    : 'rgba(16, 185, 129, 0.14)',
+                                color:
+                                  g.examStatus === 'CLOSED' ? 'var(--accent-rose)' : 'var(--accent-emerald)',
+                              }}
+                            >
+                              {g.examStatus === 'CLOSED' ? 'Đợt thi đã đóng' : 'Đợt thi đang mở'}
+                            </span>
+                          ) : (
+                            <span
+                              style={{
+                                padding: '2px 8px',
+                                borderRadius: '6px',
+                                fontSize: '0.71rem',
+                                fontWeight: 700,
+                                backgroundColor: hasLiveActivity
+                                  ? 'rgba(14, 165, 233, 0.14)'
+                                  : 'var(--bg-subtle)',
+                                color: hasLiveActivity ? 'var(--accent-sky)' : 'var(--text-secondary)',
+                                border: '1px solid var(--border-subtle)',
+                              }}
+                            >
+                              {hasLiveActivity ? 'Đang có phiên chơi' : 'Sẵn sàng'}
+                            </span>
+                          )}
+                          {activeRoomCodes.length > 0 && (
+                            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--primary)' }}>
+                              PIN: {activeRoomCodes.join(', ')}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ padding: '12px 8px', textAlign: 'right' }}>
+                        <button
+                          type="button"
+                          data-testid={`reports-game-detail-btn-${g.gameId}`}
+                          onClick={() => handleOpenGameReportsDetail(g.gameId, false)}
+                          style={{
+                            padding: '8px 14px',
+                            minHeight: '44px',
+                            minWidth: '44px',
+                            borderRadius: '7px',
+                            border: '1px solid var(--primary)',
+                            backgroundColor: isSelected ? 'var(--primary)' : 'var(--primary-subtle)',
+                            color: isSelected ? 'var(--primary-ink, #060913)' : 'var(--primary)',
+                            fontSize: '0.76rem',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {isSelected ? 'Đang xem chi tiết' : 'Xem chi tiết'}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* Phân trang danh sách game trong Thư viện */}
+        {reportsGamesData && reportsGamesData.total > reportsGameLimit && (
+          <div
+            data-testid="reports-games-pagination"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '8px',
+              paddingTop: '6px',
+              fontSize: '0.78rem',
+              color: 'var(--text-secondary)',
+            }}
+          >
+            <span>
+              Trang {reportsGamePage} / {Math.max(1, Math.ceil(reportsGamesData.total / reportsGameLimit))}
+            </span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                type="button"
+                disabled={reportsGamePage <= 1}
+                onClick={() => setReportsGamePage((p) => Math.max(1, p - 1))}
+                style={{
+                  padding: '8px 14px',
+                  minHeight: '44px',
+                  minWidth: '44px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontWeight: 700,
+                  cursor: reportsGamePage <= 1 ? 'not-allowed' : 'pointer',
+                  opacity: reportsGamePage <= 1 ? 0.5 : 1,
+                }}
+              >
+                Trang trước
+              </button>
+              <button
+                type="button"
+                disabled={reportsGamePage >= Math.ceil(reportsGamesData.total / reportsGameLimit)}
+                onClick={() => setReportsGamePage((p) => p + 1)}
+                style={{
+                  padding: '8px 14px',
+                  minHeight: '44px',
+                  minWidth: '44px',
+                  borderRadius: '6px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontWeight: 700,
+                  cursor:
+                    reportsGamePage >= Math.ceil(reportsGamesData.total / reportsGameLimit)
+                      ? 'not-allowed'
+                      : 'pointer',
+                  opacity:
+                    reportsGamePage >= Math.ceil(reportsGamesData.total / reportsGameLimit) ? 0.5 : 1,
+                }}
+              >
+                Trang sau
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* PANEL CHI TIẾT BÁO CÁO GAME ĐANG CHỌN (PLAY / EXAM) */}
+        {(selectedGameReportLoading || selectedGameReportError || selectedGameReport) && (
+          <div
+            data-testid="reports-v2-game-detail"
+            style={{
+              marginTop: '8px',
+              padding: 'clamp(14px, 2.5vw, 20px)',
+              borderRadius: '12px',
+              border: '1px solid var(--primary)',
+              backgroundColor: 'var(--bg-subtle)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '18px',
+              minWidth: 0,
+              maxWidth: '100%',
+              boxSizing: 'border-box',
+            }}
+          >
+            {selectedGameReportLoading && !selectedGameReport ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                Đang tải chi tiết báo cáo của game...
+              </div>
+            ) : selectedGameReportError ? (
+              <div
+                role="alert"
+                style={{
+                  padding: '14px',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                  color: 'var(--accent-rose)',
+                  fontWeight: 600,
+                }}
+              >
+                {selectedGameReportError}
+              </div>
+            ) : selectedGameReport ? (
+              <>
+                {/* Header chi tiết game + Thanh điều khiển Link / PIN / Mở lại đợt thi */}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                    paddingBottom: '12px',
+                    borderBottom: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span
+                        style={{
+                          padding: '3px 9px',
+                          borderRadius: '999px',
+                          fontSize: '0.72rem',
+                          fontWeight: 800,
+                          backgroundColor:
+                            selectedGameReport.sessionMode === 'EXAM'
+                              ? 'rgba(245, 158, 11, 0.18)'
+                              : 'rgba(16, 185, 129, 0.16)',
+                          color:
+                            selectedGameReport.sessionMode === 'EXAM'
+                              ? 'var(--accent-amber)'
+                              : 'var(--accent-emerald)',
+                        }}
+                      >
+                        {selectedGameReport.sessionMode === 'EXAM' ? 'BÁO CÁO CHẾ ĐỘ THI (EXAM)' : 'BÁO CÁO CHẾ ĐỘ CHƠI (PLAY)'}
+                      </span>
+                      <h3 style={{ margin: 0, fontSize: '1.12rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                        {selectedGameReport.title}
+                      </h3>
+                    </div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                      Mã game: <code>{selectedGameReport.gameId}</code> • Số câu hỏi: <strong>{selectedGameReport.questionCount}</strong> • Điểm tối đa: <strong>{selectedGameReport.maxPossibleScore} đ</strong>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                    <button
+                      type="button"
+                      data-testid="refresh-selected-game-report-btn"
+                      onClick={() => handleOpenGameReportsDetail(selectedGameReport.gameId, true)}
+                      style={{
+                        padding: '8px 14px',
+                        minHeight: '44px',
+                        minWidth: '44px',
+                        borderRadius: '7px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-surface)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Làm mới chi tiết
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="close-selected-game-report-btn"
+                      onClick={() => {
+                        setSelectedGameReport(null);
+                        setSelectedGameReportError(null);
+                        setReportsActionNotice(null);
+                      }}
+                      style={{
+                        padding: '8px 14px',
+                        minHeight: '44px',
+                        minWidth: '44px',
+                        borderRadius: '7px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-surface)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.78rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Thu gọn
+                    </button>
+                  </div>
+                </div>
+
+                {/* Thông báo kết quả thao tác (Cấp lượt / Mở lại đợt thi / Tạo PIN) */}
+                {reportsActionNotice && (
+                  <div
+                    data-testid="reports-action-notice"
+                    role="status"
+                    style={{
+                      padding: '12px 16px',
+                      borderRadius: '8px',
+                      backgroundColor:
+                        reportsActionNotice.type === 'success'
+                          ? 'rgba(16, 185, 129, 0.14)'
+                          : 'rgba(239, 68, 68, 0.12)',
+                      border:
+                        reportsActionNotice.type === 'success'
+                          ? '1px solid rgba(16, 185, 129, 0.4)'
+                          : '1px solid rgba(239, 68, 68, 0.4)',
+                      color:
+                        reportsActionNotice.type === 'success'
+                          ? 'var(--accent-emerald)'
+                          : 'var(--accent-rose)',
+                      fontSize: '0.82rem',
+                      fontWeight: 700,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '10px',
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <span>{reportsActionNotice.message}</span>
+                    <button
+                      type="button"
+                      onClick={() => setReportsActionNotice(null)}
+                      style={{
+                        padding: '6px 12px',
+                        minHeight: '44px',
+                        minWidth: '44px',
+                        borderRadius: '6px',
+                        border: '1px solid currentColor',
+                        backgroundColor: 'transparent',
+                        color: 'inherit',
+                        fontSize: '0.75rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Đóng
+                    </button>
+                  </div>
+                )}
+
+                {/* Thanh Link tham gia Solo, Mã PIN phòng trực tiếp & Mở lại / Đóng đợt thi */}
+                <div
+                  data-testid="reports-game-access-bar"
+                  style={{
+                    padding: '12px 16px',
+                    borderRadius: '10px',
+                    backgroundColor: 'var(--bg-surface)',
+                    border: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                  }}
+                >
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', minWidth: 0 }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                      Link tham gia:{' '}
+                      <code
+                        data-testid="reports-solo-play-url"
+                        style={{
+                          padding: '3px 7px',
+                          borderRadius: '5px',
+                          backgroundColor: 'var(--bg-subtle)',
+                          color: 'var(--primary)',
+                          fontWeight: 700,
+                        }}
+                      >
+                        {typeof window !== 'undefined'
+                          ? `${window.location.origin}${selectedGameReport.soloPlayUrl}`
+                          : selectedGameReport.soloPlayUrl}
+                      </code>
+                    </div>
+                    <button
+                      type="button"
+                      data-testid="copy-solo-link-btn"
+                      onClick={() =>
+                        handleCopyText(
+                          'solo-link',
+                          typeof window !== 'undefined'
+                            ? `${window.location.origin}${selectedGameReport.soloPlayUrl}`
+                            : selectedGameReport.soloPlayUrl
+                        )
+                      }
+                      style={{
+                        padding: '8px 12px',
+                        minHeight: '44px',
+                        minWidth: '44px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-subtle)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {copiedNoticeKey === 'solo-link' ? 'Đã sao chép Link!' : 'Sao chép Link'}
+                    </button>
+
+                    {selectedGameReport.activeStatus?.activeRooms &&
+                    selectedGameReport.activeStatus.activeRooms.length > 0 ? (
+                      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span
+                          data-testid="reports-active-room-pin"
+                          style={{
+                            padding: '4px 10px',
+                            borderRadius: '6px',
+                            backgroundColor: 'var(--primary-subtle)',
+                            color: 'var(--primary)',
+                            fontSize: '0.8rem',
+                            fontWeight: 800,
+                            fontFamily: 'monospace',
+                          }}
+                        >
+                          PIN: {selectedGameReport.activeStatus.activeRooms[0].roomCode}
+                        </span>
+                        <button
+                          type="button"
+                          data-testid="copy-room-pin-btn"
+                          onClick={() =>
+                            handleCopyText(
+                              'room-pin',
+                              selectedGameReport.activeStatus.activeRooms[0].roomCode
+                            )
+                          }
+                          style={{
+                            padding: '8px 12px',
+                            minHeight: '44px',
+                            minWidth: '44px',
+                            borderRadius: '6px',
+                            border: '1px solid var(--border-strong)',
+                            backgroundColor: 'var(--bg-subtle)',
+                            color: 'var(--text-primary)',
+                            fontSize: '0.76rem',
+                            fontWeight: 700,
+                            cursor: 'pointer',
+                          }}
+                        >
+                          {copiedNoticeKey === 'room-pin' ? 'Đã sao chép PIN!' : 'Sao chép PIN'}
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        data-testid="create-room-pin-btn"
+                        disabled={
+                          isCreatingRoomPin ||
+                          (selectedGameReport.sessionMode === 'EXAM' &&
+                            selectedGameReport.examStatus === 'CLOSED')
+                        }
+                        onClick={() => handleCreateRoomPinFromReports(selectedGameReport.gameId)}
+                        style={{
+                          padding: '8px 12px',
+                          minHeight: '44px',
+                          minWidth: '44px',
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-subtle)',
+                          color: 'var(--text-primary)',
+                          fontSize: '0.76rem',
+                          fontWeight: 700,
+                          cursor:
+                            isCreatingRoomPin ||
+                            (selectedGameReport.sessionMode === 'EXAM' &&
+                              selectedGameReport.examStatus === 'CLOSED')
+                              ? 'not-allowed'
+                              : 'pointer',
+                          opacity:
+                            selectedGameReport.sessionMode === 'EXAM' &&
+                            selectedGameReport.examStatus === 'CLOSED'
+                              ? 0.55
+                              : 1,
+                        }}
+                      >
+                        {isCreatingRoomPin ? 'Đang tạo PIN...' : '+ Tạo mã PIN phòng trực tiếp'}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Điều khiển Mở lại đợt thi / Đóng đợt thi cho chế độ EXAM */}
+                  {selectedGameReport.sessionMode === 'EXAM' && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                      <span
+                        data-testid="reports-exam-status-badge"
+                        style={{
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          fontSize: '0.76rem',
+                          fontWeight: 800,
+                          backgroundColor:
+                            selectedGameReport.examStatus === 'CLOSED'
+                              ? 'rgba(239, 68, 68, 0.14)'
+                              : 'rgba(16, 185, 129, 0.14)',
+                          color:
+                            selectedGameReport.examStatus === 'CLOSED'
+                              ? 'var(--accent-rose)'
+                              : 'var(--accent-emerald)',
+                        }}
+                      >
+                        {selectedGameReport.examStatus === 'CLOSED'
+                          ? 'Trạng thái: Đợt thi đã đóng'
+                          : 'Trạng thái: Đợt thi đang mở'}
+                      </span>
+
+                      {selectedGameReport.examStatus === 'CLOSED' ? (
+                        <button
+                          type="button"
+                          data-testid="reopen-exam-btn"
+                          disabled={isReopeningExam}
+                          onClick={() => handleReopenExamFromReports(selectedGameReport.gameId)}
+                          style={{
+                            padding: '8px 14px',
+                            minHeight: '44px',
+                            minWidth: '44px',
+                            borderRadius: '7px',
+                            border: '1px solid var(--primary)',
+                            backgroundColor: 'var(--primary)',
+                            color: 'var(--primary-ink, #060913)',
+                            fontSize: '0.78rem',
+                            fontWeight: 800,
+                            cursor: isReopeningExam ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          {isReopeningExam ? 'Đang mở lại...' : 'Mở lại đợt thi'}
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          data-testid="close-exam-from-reports-btn"
+                          disabled={isClosingExam}
+                          onClick={() => handleCloseExamFromReports(selectedGameReport.gameId)}
+                          style={{
+                            padding: '8px 14px',
+                            minHeight: '44px',
+                            minWidth: '44px',
+                            borderRadius: '7px',
+                            border: '1px solid rgba(239, 68, 68, 0.45)',
+                            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                            color: 'var(--accent-rose)',
+                            fontSize: '0.78rem',
+                            fontWeight: 800,
+                            cursor: isClosingExam ? 'not-allowed' : 'pointer',
+                          }}
+                        >
+                          {isClosingExam ? 'Đang đóng...' : 'Đóng đợt thi hiện tại'}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* =========================================================
+                    CHẾ ĐỘ PLAY: TỔNG QUAN, BẢNG XẾP HẠNG HIGHEST_SCORE, LỊCH SỬ TỪNG LƯỢT & CẤP THÊM LƯỢT
+                   ========================================================= */}
+                {selectedGameReport.sessionMode === 'PLAY' ? (
+                  <div
+                    data-testid="reports-play-detail-view"
+                    style={{ display: 'flex', flexDirection: 'column', gap: '18px', minWidth: 0 }}
+                  >
+                    {/* A. Tổng quan PLAY */}
+                    <div
+                      data-testid="reports-play-overview"
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 170px), 1fr))',
+                        gap: '12px',
+                        minWidth: 0,
+                      }}
+                    >
+                      <div
+                        style={{
+                          backgroundColor: 'var(--bg-surface)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: '10px',
+                          padding: '12px 14px',
+                        }}
+                      >
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                          Tổng lượt chơi
+                        </div>
+                        <div
+                          data-testid="play-overview-total-plays"
+                          style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '4px' }}
+                        >
+                          {selectedGameReport.playOverview.totalPlays}
+                        </div>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                          {selectedGameReport.playOverview.completedPlays} hoàn thành •{' '}
+                          {selectedGameReport.playOverview.inProgressPlays} đang chơi •{' '}
+                          {selectedGameReport.playOverview.abandonedPlays} bỏ dở
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          backgroundColor: 'var(--bg-surface)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: '10px',
+                          padding: '12px 14px',
+                        }}
+                      >
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                          Số người chơi khác nhau
+                        </div>
+                        <div
+                          data-testid="play-overview-unique-players"
+                          style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--accent-sky)', marginTop: '4px' }}
+                        >
+                          {selectedGameReport.playOverview.uniquePlayers}
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          backgroundColor: 'var(--bg-surface)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: '10px',
+                          padding: '12px 14px',
+                        }}
+                      >
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                          Điểm trung bình
+                        </div>
+                        <div
+                          data-testid="play-overview-avg-score"
+                          style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--accent-amber)', marginTop: '4px' }}
+                        >
+                          {selectedGameReport.playOverview.averageScore.toLocaleString('vi-VN')} đ
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          backgroundColor: 'var(--bg-surface)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: '10px',
+                          padding: '12px 14px',
+                        }}
+                      >
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                          Điểm cao nhất
+                        </div>
+                        <div
+                          data-testid="play-overview-highest-score"
+                          style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--accent-emerald)', marginTop: '4px' }}
+                        >
+                          {selectedGameReport.playOverview.highestScore.toLocaleString('vi-VN')} đ
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          backgroundColor: 'var(--bg-surface)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: '10px',
+                          padding: '12px 14px',
+                        }}
+                      >
+                        <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)', fontWeight: 700 }}>
+                          Hoạt động gần nhất
+                        </div>
+                        <div
+                          style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-primary)', marginTop: '6px' }}
+                        >
+                          {selectedGameReport.playOverview.lastActivityAt
+                            ? new Date(selectedGameReport.playOverview.lastActivityAt).toLocaleString('vi-VN')
+                            : 'Chưa có lượt chơi'}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* B. Bảng xếp hạng PLAY (HIGHEST_SCORE) */}
+                    <div
+                      data-testid="reports-play-leaderboard"
+                      style={{
+                        backgroundColor: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '10px',
+                        padding: '16px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '14px',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'flex-start',
+                          flexWrap: 'wrap',
+                          gap: '8px',
+                        }}
+                      >
+                        <div>
+                          <h4 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                            Bảng xếp hạng Người chơi (Chế độ PLAY)
+                          </h4>
+                          <p
+                            data-testid="reports-play-leaderboard-rule"
+                            style={{ margin: '4px 0 0 0', fontSize: '0.76rem', color: 'var(--text-secondary)' }}
+                          >
+                            Quy tắc xếp hạng: <strong>Điểm cao nhất của mỗi người chơi (HIGHEST_SCORE)</strong> — mỗi người chỉ xuất hiện 1 lần, không cộng dồn điểm nhiều lượt. Khi bằng điểm: <em>{selectedGameReport.playLeaderboard.tieBreakingRuleText}</em>
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Top 3 Podium */}
+                      {selectedGameReport.playLeaderboard.top3.length > 0 && (
+                        <div
+                          data-testid="reports-play-podium"
+                          style={{
+                            display: 'grid',
+                            gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))',
+                            gap: '12px',
+                          }}
+                        >
+                          {selectedGameReport.playLeaderboard.top3.map((top) => (
+                            <div
+                              key={top.playerKey}
+                              data-testid={`play-podium-rank-${top.rank}`}
+                              style={{
+                                padding: '12px 14px',
+                                borderRadius: '10px',
+                                border:
+                                  top.rank === 1
+                                    ? '1px solid var(--accent-amber)'
+                                    : '1px solid var(--border-subtle)',
+                                backgroundColor:
+                                  top.rank === 1 ? 'rgba(245, 158, 11, 0.1)' : 'var(--bg-subtle)',
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                gap: '10px',
+                              }}
+                            >
+                              <div style={{ minWidth: 0 }}>
+                                <div style={{ fontSize: '0.74rem', fontWeight: 800, color: 'var(--accent-amber)' }}>
+                                  TOP {top.rank}
+                                </div>
+                                <div
+                                  style={{
+                                    fontSize: '0.9rem',
+                                    fontWeight: 800,
+                                    color: 'var(--text-primary)',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  {top.fullName}
+                                </div>
+                                {(top.employeeCode || top.departmentUnit) && (
+                                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                                    {[top.employeeCode, top.departmentUnit].filter(Boolean).join(' • ')}
+                                  </div>
+                                )}
+                                <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                                  {top.attemptsCount} lượt • Chính xác {top.accuracyPercent}% • {formatDuration(top.durationMs)}
+                                </div>
+                              </div>
+                              <div style={{ fontSize: '1.1rem', fontWeight: 800, color: 'var(--primary)', flexShrink: 0 }}>
+                                {top.highestScore.toLocaleString('vi-VN')} đ
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Bảng xếp hạng đầy đủ */}
+                      {selectedGameReport.playLeaderboard.entries.length === 0 ? (
+                        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.84rem' }}>
+                          Chưa có người chơi nào hoàn thành lượt chơi để xếp hạng.
+                        </div>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table
+                            data-testid="reports-play-leaderboard-table"
+                            style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: '640px' }}
+                          >
+                            <thead>
+                              <tr
+                                style={{
+                                  borderBottom: '1px solid var(--border-subtle)',
+                                  color: 'var(--text-secondary)',
+                                  textAlign: 'left',
+                                  fontSize: '0.73rem',
+                                }}
+                              >
+                                <th style={{ padding: '8px' }}>Hạng</th>
+                                <th style={{ padding: '8px' }}>Người chơi</th>
+                                <th style={{ padding: '8px' }}>Điểm cao nhất</th>
+                                <th style={{ padding: '8px' }}>Số lượt</th>
+                                <th style={{ padding: '8px' }}>Độ chính xác</th>
+                                <th style={{ padding: '8px' }}>Thời gian</th>
+                                <th style={{ padding: '8px', textAlign: 'right' }}>Thao tác</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {selectedGameReport.playLeaderboard.entries.map((entry) => (
+                                <tr
+                                  key={entry.playerKey}
+                                  data-testid={`play-leaderboard-row-${entry.rank}`}
+                                  style={{ borderBottom: '1px solid var(--border-subtle)' }}
+                                >
+                                  <td style={{ padding: '8px', fontWeight: 800 }}>#{entry.rank}</td>
+                                  <td style={{ padding: '8px' }}>
+                                    <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{entry.fullName}</div>
+                                    {(entry.employeeCode || entry.departmentUnit) && (
+                                      <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                                        {[entry.employeeCode, entry.departmentUnit].filter(Boolean).join(' • ')}
+                                      </div>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '8px', fontWeight: 800, color: 'var(--primary)' }}>
+                                    {entry.highestScore.toLocaleString('vi-VN')} đ
+                                  </td>
+                                  <td style={{ padding: '8px' }}>
+                                    {entry.allowedAttempts !== null
+                                      ? `${entry.usedAttempts}/${entry.allowedAttempts} lượt (Tổng ${entry.attemptsCount})`
+                                      : `${entry.attemptsCount} lượt`}
+                                  </td>
+                                  <td style={{ padding: '8px' }}>
+                                    {entry.correctAnswers}/{entry.totalQuestions} câu ({entry.accuracyPercent}%)
+                                  </td>
+                                  <td style={{ padding: '8px' }}>{formatDuration(entry.durationMs)}</td>
+                                  <td style={{ padding: '8px', textAlign: 'right' }}>
+                                    {entry.participantId ? (
+                                      <button
+                                        type="button"
+                                        data-testid={`grant-retake-btn-${entry.participantId}`}
+                                        onClick={() =>
+                                          handleOpenGrantRetakeModal({
+                                            gameId: selectedGameReport.gameId,
+                                            participantId: entry.participantId!,
+                                            fullName: entry.fullName,
+                                            departmentUnit: entry.departmentUnit,
+                                            employeeCode: entry.employeeCode,
+                                            usedAttempts: entry.usedAttempts,
+                                            allowedAttempts: entry.allowedAttempts ?? 1,
+                                          })
+                                        }
+                                        style={{
+                                          padding: '8px 12px',
+                                          minHeight: '44px',
+                                          minWidth: '44px',
+                                          borderRadius: '6px',
+                                          border: '1px solid var(--primary)',
+                                          backgroundColor: 'var(--primary-subtle)',
+                                          color: 'var(--primary)',
+                                          fontSize: '0.75rem',
+                                          fontWeight: 800,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        + Cấp thêm lượt
+                                      </button>
+                                    ) : (
+                                      <span style={{ fontSize: '0.73rem', color: 'var(--text-muted)' }}>
+                                        Tự do (Không giới hạn)
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* C. Lịch sử từng lượt chơi (Per-Play History) */}
+                    <div
+                      data-testid="reports-play-attempts-history"
+                      style={{
+                        backgroundColor: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '10px',
+                        padding: '16px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '12px',
+                      }}
+                    >
+                      <h4 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                        Lịch sử từng lượt chơi ({selectedGameReport.playAttemptsHistory.length} lượt)
+                      </h4>
+
+                      {selectedGameReport.playAttemptsHistory.length === 0 ? (
+                        <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.84rem' }}>
+                          Chưa có lượt chơi nào phát sinh cho game này.
+                        </div>
+                      ) : (
+                        <div style={{ overflowX: 'auto' }}>
+                          <table
+                            data-testid="reports-play-attempts-table"
+                            style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: '680px' }}
+                          >
+                            <thead>
+                              <tr
+                                style={{
+                                  borderBottom: '1px solid var(--border-subtle)',
+                                  color: 'var(--text-secondary)',
+                                  textAlign: 'left',
+                                  fontSize: '0.73rem',
+                                }}
+                              >
+                                <th style={{ padding: '8px' }}>Lần chơi</th>
+                                <th style={{ padding: '8px' }}>Người chơi</th>
+                                <th style={{ padding: '8px' }}>Hình thức</th>
+                                <th style={{ padding: '8px' }}>Thời gian chơi</th>
+                                <th style={{ padding: '8px' }}>Điểm đạt được</th>
+                                <th style={{ padding: '8px' }}>Số câu đúng / sai</th>
+                                <th style={{ padding: '8px' }}>Trạng thái</th>
+                                <th style={{ padding: '8px', textAlign: 'right' }}>Thao tác</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {selectedGameReport.playAttemptsHistory.map((att) => {
+                                const statusText =
+                                  att.status === 'COMPLETED' || att.status === 'AUTO_SUBMITTED'
+                                    ? 'Hoàn thành'
+                                    : att.status === 'ABANDONED'
+                                      ? 'Bỏ dở'
+                                      : 'Đang chơi';
+                                return (
+                                  <tr
+                                    key={att.attemptId}
+                                    data-testid={`play-attempt-row-${att.attemptId}`}
+                                    style={{ borderBottom: '1px solid var(--border-subtle)' }}
+                                  >
+                                    <td style={{ padding: '8px', fontWeight: 700 }}>Lần {att.attemptNumber}</td>
+                                    <td style={{ padding: '8px' }}>
+                                      <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                                        {att.playerName}
+                                      </div>
+                                      {(att.employeeCode || att.departmentUnit) && (
+                                        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                                          {[att.employeeCode, att.departmentUnit].filter(Boolean).join(' • ')}
+                                        </div>
+                                      )}
+                                    </td>
+                                    <td style={{ padding: '8px' }}>
+                                      {att.deliveryMode === 'MULTIPLAYER'
+                                        ? `Multiplayer${att.roomCode ? ` (PIN ${att.roomCode})` : ''}`
+                                        : 'Solo'}
+                                    </td>
+                                    <td style={{ padding: '8px', fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                                      <div>{new Date(att.finishedAt || att.startedAt).toLocaleString('vi-VN')}</div>
+                                      <div>Thời lượng: {formatDuration(att.durationMs)}</div>
+                                    </td>
+                                    <td style={{ padding: '8px', fontWeight: 800, color: 'var(--primary)' }}>
+                                      {att.score.toLocaleString('vi-VN')} đ
+                                    </td>
+                                    <td style={{ padding: '8px' }}>
+                                      <span style={{ color: 'var(--accent-emerald)', fontWeight: 700 }}>
+                                        {att.correctAnswers} đúng
+                                      </span>{' '}
+                                      /{' '}
+                                      <span style={{ color: 'var(--accent-rose)', fontWeight: 700 }}>
+                                        {att.wrongAnswers} sai
+                                      </span>{' '}
+                                      ({att.totalQuestions} câu)
+                                    </td>
+                                    <td style={{ padding: '8px' }}>
+                                      <span
+                                        style={{
+                                          padding: '2px 7px',
+                                          borderRadius: '6px',
+                                          fontSize: '0.72rem',
+                                          fontWeight: 700,
+                                          backgroundColor:
+                                            att.status === 'COMPLETED' || att.status === 'AUTO_SUBMITTED'
+                                              ? 'rgba(16, 185, 129, 0.14)'
+                                              : att.status === 'ABANDONED'
+                                                ? 'rgba(239, 68, 68, 0.12)'
+                                                : 'rgba(14, 165, 233, 0.14)',
+                                          color:
+                                            att.status === 'COMPLETED' || att.status === 'AUTO_SUBMITTED'
+                                              ? 'var(--accent-emerald)'
+                                              : att.status === 'ABANDONED'
+                                                ? 'var(--accent-rose)'
+                                                : 'var(--accent-sky)',
+                                        }}
+                                      >
+                                        {statusText}
+                                      </span>
+                                    </td>
+                                    <td style={{ padding: '8px', textAlign: 'right' }}>
+                                      {att.questionBreakdown && att.questionBreakdown.length > 0 && (
+                                        <button
+                                          type="button"
+                                          data-testid={`play-attempt-detail-btn-${att.attemptId}`}
+                                          onClick={() =>
+                                            setPlayAttemptBreakdownModal({
+                                              attemptNumber: att.attemptNumber,
+                                              playerName: att.playerName,
+                                              score: att.score,
+                                              correctAnswers: att.correctAnswers,
+                                              wrongAnswers: att.wrongAnswers,
+                                              totalQuestions: att.totalQuestions,
+                                              durationMs: att.durationMs,
+                                              questionBreakdown: att.questionBreakdown,
+                                            })
+                                          }
+                                          style={{
+                                            padding: '8px 12px',
+                                            minHeight: '44px',
+                                            minWidth: '44px',
+                                            borderRadius: '6px',
+                                            border: '1px solid var(--border-strong)',
+                                            backgroundColor: 'var(--bg-subtle)',
+                                            color: 'var(--text-primary)',
+                                            fontSize: '0.75rem',
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                          }}
+                                        >
+                                          Xem lượt chơi
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* D. Cấp thêm lượt cho PLAY */}
+                    <div
+                      data-testid="reports-play-retake-section"
+                      style={{
+                        backgroundColor: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '10px',
+                        padding: '16px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '10px',
+                      }}
+                    >
+                      <h4 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                        Quản lý giới hạn lượt chơi & Cấp thêm lượt (PLAY)
+                      </h4>
+                      <p
+                        data-testid="play-retake-policy-note"
+                        style={{ margin: 0, fontSize: '0.8rem', color: 'var(--text-secondary)' }}
+                      >
+                        {selectedGameReport.playOverview.attemptLimitPolicyNote}
+                      </p>
+
+                      {selectedGameReport.rosterParticipants.length > 0 && (
+                        <div style={{ overflowX: 'auto', marginTop: '4px' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: '560px' }}>
+                            <thead>
+                              <tr
+                                style={{
+                                  borderBottom: '1px solid var(--border-subtle)',
+                                  color: 'var(--text-secondary)',
+                                  textAlign: 'left',
+                                  fontSize: '0.73rem',
+                                }}
+                              >
+                                <th style={{ padding: '8px' }}>Người chơi định danh</th>
+                                <th style={{ padding: '8px' }}>Lượt đã dùng / Được phép</th>
+                                <th style={{ padding: '8px' }}>Đã cấp thêm</th>
+                                <th style={{ padding: '8px', textAlign: 'right' }}>Thao tác</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {selectedGameReport.rosterParticipants.map((rp) => (
+                                <tr key={rp.participantId} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                                  <td style={{ padding: '8px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                    {rp.fullName}
+                                    {(rp.employeeCode || rp.departmentUnit) && (
+                                      <span style={{ marginLeft: '6px', fontSize: '0.73rem', color: 'var(--text-secondary)', fontWeight: 500 }}>
+                                        ({[rp.employeeCode, rp.departmentUnit].filter(Boolean).join(' • ')})
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '8px', fontWeight: 700 }}>
+                                    {rp.usedAttempts ?? 0} / {rp.allowedAttempts ?? 1} lượt
+                                  </td>
+                                  <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>
+                                    {(rp.retakeGrantedCount ?? 0) > 0 ? `+${rp.retakeGrantedCount} lượt` : '—'}
+                                  </td>
+                                  <td style={{ padding: '8px', textAlign: 'right' }}>
+                                    <button
+                                      type="button"
+                                      data-testid={`play-roster-grant-retake-btn-${rp.participantId}`}
+                                      onClick={() =>
+                                        handleOpenGrantRetakeModal({
+                                          gameId: selectedGameReport.gameId,
+                                          participantId: rp.participantId,
+                                          fullName: rp.fullName,
+                                          departmentUnit: rp.departmentUnit,
+                                          employeeCode: rp.employeeCode,
+                                          usedAttempts: rp.usedAttempts ?? 0,
+                                          allowedAttempts: rp.allowedAttempts ?? 1,
+                                        })
+                                      }
+                                      style={{
+                                        padding: '8px 12px',
+                                        minHeight: '44px',
+                                        minWidth: '44px',
+                                        borderRadius: '6px',
+                                        border: '1px solid var(--primary)',
+                                        backgroundColor: 'var(--primary-subtle)',
+                                        color: 'var(--primary)',
+                                        fontSize: '0.75rem',
+                                        fontWeight: 800,
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      + Cấp thêm lượt
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  /* =========================================================
+                     CHẾ ĐỘ EXAM: DANH SÁCH ĐỢT THI, CHI TIẾT TỪNG ĐỢT, LỊCH SỬ NHIỀU LẦN THI & CẤP THÊM LƯỢT
+                     ========================================================= */
+                  <div
+                    data-testid="reports-exam-detail-view"
+                    style={{ display: 'flex', flexDirection: 'column', gap: '18px', minWidth: 0 }}
+                  >
+                    {/* A. Danh sách các đợt thi (Đợt 1, Đợt 2...) */}
+                    <div
+                      data-testid="reports-exam-batches-list"
+                      style={{
+                        backgroundColor: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '10px',
+                        padding: '16px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '12px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                        <h4 style={{ margin: 0, fontSize: '0.96rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                          Danh sách các đợt thi ({selectedGameReport.examBatches.length} đợt)
+                        </h4>
+                        <span style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
+                          Ngưỡng đạt: <strong>&ge; {selectedGameReport.passThresholdPercent}%</strong> • Chính sách tính điểm:{' '}
+                          <strong>
+                            {selectedGameReport.officialAttemptPolicy === 'HIGHEST_SCORE'
+                              ? 'Lần điểm cao nhất'
+                              : 'Lần nộp gần nhất'}
+                          </strong>
+                        </span>
+                      </div>
+
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
+                          gap: '10px',
+                        }}
+                      >
+                        {selectedGameReport.examBatches.map((batch: ReportsExamBatchItem) => {
+                          const isSelectedBatch = selectedExamBatchId === batch.batchId;
+                          return (
+                            <div
+                              key={batch.batchId}
+                              data-testid={`exam-batch-card-${batch.batchId}`}
+                              style={{
+                                padding: '12px 14px',
+                                borderRadius: '10px',
+                                border: isSelectedBatch
+                                  ? '2px solid var(--primary)'
+                                  : '1px solid var(--border-subtle)',
+                                backgroundColor: isSelectedBatch ? 'var(--primary-subtle)' : 'var(--bg-subtle)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                justifyContent: 'space-between',
+                                gap: '8px',
+                              }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '8px' }}>
+                                <div>
+                                  <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                                    {batch.batchName}
+                                  </div>
+                                  <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                                    Mở: {new Date(batch.openedAt).toLocaleString('vi-VN')}
+                                  </div>
+                                </div>
+                                <span
+                                  style={{
+                                    padding: '2px 7px',
+                                    borderRadius: '6px',
+                                    fontSize: '0.7rem',
+                                    fontWeight: 800,
+                                    backgroundColor:
+                                      batch.status === 'OPEN'
+                                        ? 'rgba(16, 185, 129, 0.15)'
+                                        : 'rgba(239, 68, 68, 0.12)',
+                                    color:
+                                      batch.status === 'OPEN' ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                                  }}
+                                >
+                                  {batch.status === 'OPEN' ? 'Đang mở' : 'Đã đóng'}
+                                </span>
+                              </div>
+
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                                <span>
+                                  Đã thi: <strong>{batch.completedCount}/{batch.totalParticipants}</strong>
+                                </span>
+                                <span>•</span>
+                                <span>
+                                  Tổng lượt: <strong>{batch.totalAttempts}</strong>
+                                </span>
+                                <span>•</span>
+                                <span style={{ color: 'var(--accent-emerald)', fontWeight: 700 }}>
+                                  {batch.passedCount} Đạt
+                                </span>
+                                <span>/</span>
+                                <span style={{ color: 'var(--accent-rose)', fontWeight: 700 }}>
+                                  {batch.failedCount} Chưa đạt
+                                </span>
+                              </div>
+
+                              <button
+                                type="button"
+                                data-testid={`select-exam-batch-${batch.batchId}`}
+                                onClick={() => setSelectedExamBatchId(batch.batchId)}
+                                style={{
+                                  padding: '8px 12px',
+                                  minHeight: '44px',
+                                  minWidth: '44px',
+                                  borderRadius: '6px',
+                                  border: '1px solid var(--primary)',
+                                  backgroundColor: isSelectedBatch ? 'var(--primary)' : 'var(--bg-surface)',
+                                  color: isSelectedBatch ? 'var(--primary-ink, #060913)' : 'var(--primary)',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 800,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                {isSelectedBatch ? 'Đang xem đợt này' : 'Xem chi tiết đợt'}
+                              </button>
+                            </div>
+                          );
+                        })}
+
+                        {selectedGameReport.examBatches.length > 1 && (
+                          <div
+                            data-testid="exam-batch-card-all"
+                            style={{
+                              padding: '12px 14px',
+                              borderRadius: '10px',
+                              border:
+                                selectedExamBatchId === 'ALL'
+                                  ? '2px solid var(--primary)'
+                                  : '1px solid var(--border-subtle)',
+                              backgroundColor:
+                                selectedExamBatchId === 'ALL' ? 'var(--primary-subtle)' : 'var(--bg-subtle)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              justifyContent: 'space-between',
+                              gap: '8px',
+                            }}
+                          >
+                            <div>
+                              <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--text-primary)' }}>
+                                Tổng hợp tất cả các đợt
+                              </div>
+                              <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                                Tổng lượt làm bài: <strong>{selectedGameReport.examOverallBatch.totalAttempts}</strong> • Đạt:{' '}
+                                <strong>{selectedGameReport.examOverallBatch.passedCount}</strong> / Chưa đạt:{' '}
+                                <strong>{selectedGameReport.examOverallBatch.failedCount}</strong>
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              data-testid="select-exam-batch-ALL"
+                              onClick={() => setSelectedExamBatchId('ALL')}
+                              style={{
+                                padding: '8px 12px',
+                                minHeight: '44px',
+                                minWidth: '44px',
+                                borderRadius: '6px',
+                                border: '1px solid var(--primary)',
+                                backgroundColor:
+                                  selectedExamBatchId === 'ALL' ? 'var(--primary)' : 'var(--bg-surface)',
+                                color:
+                                  selectedExamBatchId === 'ALL'
+                                    ? 'var(--primary-ink, #060913)'
+                                    : 'var(--primary)',
+                                fontSize: '0.75rem',
+                                fontWeight: 800,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              {selectedExamBatchId === 'ALL' ? 'Đang xem tổng hợp' : 'Xem tất cả các đợt'}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* B. Chi tiết từng đợt thi & Bảng kết quả thí sinh */}
+                    {(() => {
+                      const activeBatch: ReportsExamBatchItem =
+                        selectedExamBatchId === 'ALL'
+                          ? selectedGameReport.examOverallBatch
+                          : selectedGameReport.examBatches.find((b) => b.batchId === selectedExamBatchId) ||
+                            selectedGameReport.examBatches[selectedGameReport.examBatches.length - 1] ||
+                            selectedGameReport.examOverallBatch;
+
+                      const qSearch = examParticipantSearch.trim().toLowerCase();
+                      const filteredParticipants = activeBatch.participants.filter((p) => {
+                        if (qSearch) {
+                          const hay = `${p.fullName} ${p.employeeCode} ${p.departmentUnit}`.toLowerCase();
+                          if (!hay.includes(qSearch)) return false;
+                        }
+                        if (examParticipantFilter === 'COMPLETED') {
+                          return p.status === 'COMPLETED' || p.status === 'AUTO_SUBMITTED';
+                        }
+                        if (examParticipantFilter === 'PENDING') {
+                          return p.status === 'PENDING';
+                        }
+                        if (examParticipantFilter === 'IN_PROGRESS') {
+                          return p.status === 'IN_PROGRESS';
+                        }
+                        if (examParticipantFilter === 'ABANDONED') {
+                          return p.status === 'ABANDONED';
+                        }
+                        if (examParticipantFilter === 'PASSED') {
+                          return p.isPassed === true;
+                        }
+                        if (examParticipantFilter === 'FAILED') {
+                          return p.isPassed === false;
+                        }
+                        return true;
+                      });
+
+                      return (
+                        <div
+                          data-testid="reports-exam-batch-detail"
+                          style={{
+                            backgroundColor: 'var(--bg-surface)',
+                            border: '1px solid var(--border-subtle)',
+                            borderRadius: '10px',
+                            padding: '16px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '14px',
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'flex-start',
+                              flexWrap: 'wrap',
+                              gap: '10px',
+                            }}
+                          >
+                            <div>
+                              <h4 style={{ margin: 0, fontSize: '0.98rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                                Chi tiết: {activeBatch.batchName}
+                              </h4>
+                              <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
+                                Mở lúc: <strong>{new Date(activeBatch.openedAt).toLocaleString('vi-VN')}</strong>
+                                {activeBatch.closedAt
+                                  ? ` • Kết thúc: ${new Date(activeBatch.closedAt).toLocaleString('vi-VN')}`
+                                  : ''}{' '}
+                                • Trạng thái:{' '}
+                                <strong>{activeBatch.status === 'OPEN' ? 'Đang mở' : 'Đã đóng'}</strong>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* 6 chỉ số tổng quan của đợt thi */}
+                          <div
+                            data-testid="exam-batch-kpis"
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 145px), 1fr))',
+                              gap: '10px',
+                            }}
+                          >
+                            <div style={{ padding: '10px 12px', borderRadius: '8px', backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-subtle)' }}>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 700 }}>Tổng thí sinh</div>
+                              <div data-testid="exam-batch-total-participants" style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)', marginTop: '2px' }}>
+                                {activeBatch.totalParticipants}
+                              </div>
+                            </div>
+                            <div style={{ padding: '10px 12px', borderRadius: '8px', backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-subtle)' }}>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 700 }}>Đã thi / Chưa thi</div>
+                              <div data-testid="exam-batch-completed-pending" style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-sky)', marginTop: '2px' }}>
+                                {activeBatch.completedCount} / {activeBatch.pendingCount}
+                              </div>
+                            </div>
+                            <div style={{ padding: '10px 12px', borderRadius: '8px', backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-subtle)' }}>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 700 }}>Số thí sinh Đạt</div>
+                              <div data-testid="exam-batch-passed-count" style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-emerald)', marginTop: '2px' }}>
+                                {activeBatch.passedCount}
+                              </div>
+                            </div>
+                            <div style={{ padding: '10px 12px', borderRadius: '8px', backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-subtle)' }}>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 700 }}>Số Chưa đạt</div>
+                              <div data-testid="exam-batch-failed-count" style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-rose)', marginTop: '2px' }}>
+                                {activeBatch.failedCount}
+                              </div>
+                            </div>
+                            <div style={{ padding: '10px 12px', borderRadius: '8px', backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-subtle)' }}>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 700 }}>Điểm trung bình</div>
+                              <div data-testid="exam-batch-avg-score" style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--accent-amber)', marginTop: '2px' }}>
+                                {activeBatch.averageScore.toLocaleString('vi-VN')} đ
+                              </div>
+                            </div>
+                            <div style={{ padding: '10px 12px', borderRadius: '8px', backgroundColor: 'var(--bg-subtle)', border: '1px solid var(--border-subtle)' }}>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 700 }}>Điểm cao nhất</div>
+                              <div data-testid="exam-batch-highest-score" style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--primary)', marginTop: '2px' }}>
+                                {activeBatch.highestScore.toLocaleString('vi-VN')} đ
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Bộ lọc thí sinh trong đợt */}
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexWrap: 'wrap',
+                              gap: '8px',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                              {(
+                                [
+                                  { key: 'ALL', label: 'Tất cả' },
+                                  { key: 'COMPLETED', label: 'Hoàn thành' },
+                                  { key: 'PENDING', label: 'Chưa thi' },
+                                  { key: 'IN_PROGRESS', label: 'Đang thi' },
+                                  { key: 'ABANDONED', label: 'Bỏ dở' },
+                                  { key: 'PASSED', label: 'Đạt' },
+                                  { key: 'FAILED', label: 'Chưa đạt' },
+                                ] as const
+                              ).map((f) => {
+                                const active = examParticipantFilter === f.key;
+                                return (
+                                  <button
+                                    key={f.key}
+                                    type="button"
+                                    data-testid={`exam-participant-filter-${f.key.toLowerCase()}`}
+                                    onClick={() => setExamParticipantFilter(f.key)}
+                                    style={{
+                                      padding: '6px 11px',
+                                      minHeight: '44px',
+                                      minWidth: '44px',
+                                      borderRadius: '6px',
+                                      fontSize: '0.75rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                      border: active
+                                        ? '1px solid var(--primary)'
+                                        : '1px solid var(--border-strong)',
+                                      backgroundColor: active ? 'var(--primary)' : 'var(--bg-subtle)',
+                                      color: active ? 'var(--primary-ink, #060913)' : 'var(--text-primary)',
+                                    }}
+                                  >
+                                    {f.label}
+                                  </button>
+                                );
+                              })}
+                            </div>
+
+                            <input
+                              type="search"
+                              data-testid="exam-participant-search-input"
+                              value={examParticipantSearch}
+                              onChange={(e) => setExamParticipantSearch(e.target.value)}
+                              placeholder="Tìm thí sinh theo tên, mã NV, phòng ban..."
+                              style={{
+                                padding: '8px 12px',
+                                minHeight: '44px',
+                                borderRadius: '7px',
+                                border: '1px solid var(--border-strong)',
+                                backgroundColor: 'var(--bg-subtle)',
+                                color: 'var(--text-primary)',
+                                fontSize: '0.78rem',
+                                minWidth: 'min(100%, 220px)',
+                              }}
+                            />
+                          </div>
+
+                          {/* Bảng kết quả thí sinh: | Thí sinh | Lượt | Điểm | Kết quả | Trạng thái | Thao tác | */}
+                          {filteredParticipants.length === 0 ? (
+                            <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.84rem' }}>
+                              Không có thí sinh nào phù hợp với bộ lọc trong đợt thi này.
+                            </div>
+                          ) : (
+                            <div style={{ overflowX: 'auto' }}>
+                              <table
+                                data-testid="reports-exam-participants-table"
+                                style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: '720px' }}
+                              >
+                                <thead>
+                                  <tr
+                                    style={{
+                                      borderBottom: '1px solid var(--border-subtle)',
+                                      color: 'var(--text-secondary)',
+                                      textAlign: 'left',
+                                      fontSize: '0.74rem',
+                                    }}
+                                  >
+                                    <th style={{ padding: '9px 8px' }}>Thí sinh</th>
+                                    <th style={{ padding: '9px 8px' }}>Lượt</th>
+                                    <th style={{ padding: '9px 8px' }}>Điểm</th>
+                                    <th style={{ padding: '9px 8px' }}>Kết quả</th>
+                                    <th style={{ padding: '9px 8px' }}>Trạng thái</th>
+                                    <th style={{ padding: '9px 8px', textAlign: 'right' }}>Thao tác</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {filteredParticipants.map((p, idx) => {
+                                    const rowKey = p.participantId || `${p.fullName}-${idx}`;
+                                    const statusText =
+                                      p.status === 'COMPLETED' || p.status === 'AUTO_SUBMITTED'
+                                        ? 'Hoàn thành'
+                                        : p.status === 'IN_PROGRESS'
+                                          ? 'Đang thi'
+                                          : p.status === 'ABANDONED'
+                                            ? 'Bỏ dở'
+                                            : 'Chưa thi';
+                                    const resultText =
+                                      p.isPassed === true ? 'Đạt' : p.isPassed === false ? 'Chưa đạt' : '—';
+
+                                    return (
+                                      <tr
+                                        key={rowKey}
+                                        data-testid={`exam-participant-row-${p.participantId || idx}`}
+                                        style={{ borderBottom: '1px solid var(--border-subtle)' }}
+                                      >
+                                        <td style={{ padding: '10px 8px' }}>
+                                          <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                                            {p.fullName}
+                                          </div>
+                                          {(p.employeeCode || p.departmentUnit) && (
+                                            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                                              {[p.employeeCode, p.departmentUnit].filter(Boolean).join(' • ')}
+                                            </div>
+                                          )}
+                                        </td>
+
+                                        <td
+                                          data-testid={`exam-participant-attempts-cell-${p.participantId || idx}`}
+                                          style={{ padding: '10px 8px', fontVariantNumeric: 'tabular-nums' }}
+                                        >
+                                          <div style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
+                                            {p.usedAttempts}/{p.allowedAttempts}
+                                          </div>
+                                          {p.retakeGrantedCount > 0 && (
+                                            <div style={{ fontSize: '0.7rem', color: 'var(--primary)', fontWeight: 700 }}>
+                                              +{p.retakeGrantedCount} lượt cấp thêm
+                                            </div>
+                                          )}
+                                        </td>
+
+                                        <td
+                                          data-testid={`exam-participant-score-cell-${p.participantId || idx}`}
+                                          style={{ padding: '10px 8px', fontVariantNumeric: 'tabular-nums' }}
+                                        >
+                                          {p.score !== null ? (
+                                            <div>
+                                              <strong style={{ color: 'var(--primary)', fontSize: '0.88rem' }}>
+                                                {p.score.toLocaleString('vi-VN')} đ
+                                              </strong>
+                                              <div style={{ fontSize: '0.71rem', color: 'var(--text-secondary)' }}>
+                                                {p.correctAnswers}/{p.totalQuestions} câu ({p.accuracyPercent ?? 0}%)
+                                                {p.officialAttemptNumber ? ` • Lần ${p.officialAttemptNumber}` : ''}
+                                              </div>
+                                            </div>
+                                          ) : (
+                                            <span style={{ color: 'var(--text-muted)' }}>—</span>
+                                          )}
+                                        </td>
+
+                                        <td
+                                          data-testid={`exam-participant-result-cell-${p.participantId || idx}`}
+                                          style={{ padding: '10px 8px' }}
+                                        >
+                                          {p.isPassed === true ? (
+                                            <span
+                                              style={{
+                                                padding: '3px 8px',
+                                                borderRadius: '6px',
+                                                fontSize: '0.72rem',
+                                                fontWeight: 800,
+                                                backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                                                color: 'var(--accent-emerald)',
+                                              }}
+                                            >
+                                              {resultText}
+                                            </span>
+                                          ) : p.isPassed === false ? (
+                                            <span
+                                              style={{
+                                                padding: '3px 8px',
+                                                borderRadius: '6px',
+                                                fontSize: '0.72rem',
+                                                fontWeight: 800,
+                                                backgroundColor: 'rgba(239, 68, 68, 0.14)',
+                                                color: 'var(--accent-rose)',
+                                              }}
+                                            >
+                                              {resultText}
+                                            </span>
+                                          ) : (
+                                            <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>—</span>
+                                          )}
+                                        </td>
+
+                                        <td
+                                          data-testid={`exam-participant-status-cell-${p.participantId || idx}`}
+                                          style={{ padding: '10px 8px' }}
+                                        >
+                                          <span
+                                            style={{
+                                              padding: '3px 8px',
+                                              borderRadius: '6px',
+                                              fontSize: '0.72rem',
+                                              fontWeight: 700,
+                                              backgroundColor:
+                                                p.status === 'COMPLETED' || p.status === 'AUTO_SUBMITTED'
+                                                  ? 'rgba(16, 185, 129, 0.12)'
+                                                  : p.status === 'IN_PROGRESS'
+                                                    ? 'rgba(14, 165, 233, 0.14)'
+                                                    : p.status === 'ABANDONED'
+                                                      ? 'rgba(239, 68, 68, 0.12)'
+                                                      : 'var(--bg-subtle)',
+                                              color:
+                                                p.status === 'COMPLETED' || p.status === 'AUTO_SUBMITTED'
+                                                  ? 'var(--accent-emerald)'
+                                                  : p.status === 'IN_PROGRESS'
+                                                    ? 'var(--accent-sky)'
+                                                    : p.status === 'ABANDONED'
+                                                      ? 'var(--accent-rose)'
+                                                      : 'var(--text-secondary)',
+                                              border: '1px solid var(--border-subtle)',
+                                            }}
+                                          >
+                                            {statusText}
+                                          </span>
+                                        </td>
+
+                                        <td style={{ padding: '10px 8px', textAlign: 'right' }}>
+                                          <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                            <button
+                                              type="button"
+                                              data-testid={`view-participant-attempts-btn-${p.participantId || idx}`}
+                                              onClick={() => {
+                                                setParticipantAttemptsModal(p);
+                                                setExpandedAttemptIdInModal(
+                                                  p.attempts.length > 0 ? p.attempts[p.attempts.length - 1].attemptId : null
+                                                );
+                                              }}
+                                              style={{
+                                                padding: '8px 12px',
+                                                minHeight: '44px',
+                                                minWidth: '44px',
+                                                borderRadius: '6px',
+                                                border: '1px solid var(--border-strong)',
+                                                backgroundColor: 'var(--bg-subtle)',
+                                                color: 'var(--text-primary)',
+                                                fontSize: '0.74rem',
+                                                fontWeight: 700,
+                                                cursor: 'pointer',
+                                              }}
+                                            >
+                                              Xem các lần thi ({p.attempts.length})
+                                            </button>
+
+                                            {p.participantId && (
+                                              <button
+                                                type="button"
+                                                data-testid={`grant-retake-btn-${p.participantId}`}
+                                                onClick={() =>
+                                                  handleOpenGrantRetakeModal({
+                                                    gameId: selectedGameReport.gameId,
+                                                    participantId: p.participantId!,
+                                                    fullName: p.fullName,
+                                                    departmentUnit: p.departmentUnit,
+                                                    employeeCode: p.employeeCode,
+                                                    usedAttempts: p.usedAttempts,
+                                                    allowedAttempts: p.allowedAttempts,
+                                                  })
+                                                }
+                                                style={{
+                                                  padding: '8px 12px',
+                                                  minHeight: '44px',
+                                                  minWidth: '44px',
+                                                  borderRadius: '6px',
+                                                  border: '1px solid var(--primary)',
+                                                  backgroundColor: 'var(--primary-subtle)',
+                                                  color: 'var(--primary)',
+                                                  fontSize: '0.74rem',
+                                                  fontWeight: 800,
+                                                  cursor: 'pointer',
+                                                }}
+                                              >
+                                                + Cấp thêm lượt
+                                              </button>
+                                            )}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </>
+            ) : null}
+          </div>
+        )}
+      </section>
+
       {/* Main Content Body */}
       {isLoading ? (
         <div
@@ -721,7 +3076,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                   border: '1px solid var(--primary)',
                   borderRadius: '8px',
                   padding: '0 16px',
-                  height: '38px',
+                  minHeight: '44px',
+                  minWidth: '44px',
                   fontSize: '0.83rem',
                   fontWeight: 800,
                   cursor: 'pointer',
@@ -744,7 +3100,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                   border: '1px solid var(--border-strong)',
                   borderRadius: '8px',
                   padding: '0 16px',
-                  height: '38px',
+                  minHeight: '44px',
+                  minWidth: '44px',
                   fontSize: '0.83rem',
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -803,7 +3160,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                   border: '1px solid var(--border-strong)',
                   borderRadius: '8px',
                   padding: '0 16px',
-                  height: '38px',
+                  minHeight: '44px',
+                  minWidth: '44px',
                   fontSize: '0.82rem',
                   fontWeight: 700,
                   cursor: 'pointer',
@@ -826,7 +3184,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                   border: '1px solid var(--primary)',
                   borderRadius: '8px',
                   padding: '0 16px',
-                  height: '38px',
+                  minHeight: '44px',
+                  minWidth: '44px',
                   fontSize: '0.82rem',
                   fontWeight: 800,
                   cursor: 'pointer',
@@ -1976,6 +4335,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 color: 'var(--accent-rose)',
                 fontWeight: 800,
                 cursor: 'pointer',
+                minHeight: '44px',
+                minWidth: '44px',
+                padding: '6px 10px',
               }}
             >
               Đóng
@@ -2019,7 +4381,9 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
               data-testid="history-retry-btn"
               onClick={() => loadHistoryActivities()}
               style={{
-                padding: '6px 12px',
+                padding: '8px 14px',
+                minHeight: '44px',
+                minWidth: '44px',
                 borderRadius: '6px',
                 border: '1px solid var(--border-strong)',
                 backgroundColor: 'var(--bg-surface)',
@@ -2610,9 +4974,10 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                             <th style={{ padding: '8px' }}>Câu</th>
                             <th style={{ padding: '8px' }}>Nội dung câu hỏi</th>
                             <th style={{ padding: '8px' }}>Câu trả lời đã chọn</th>
-                            {selectedHistoryDetail.answersPublished && (
-                              <th style={{ padding: '8px' }}>Đáp án đúng</th>
-                            )}
+                            {selectedHistoryDetail.sessionMode !== 'PLAY' &&
+                              selectedHistoryDetail.answersPublished && (
+                                <th style={{ padding: '8px' }}>Đáp án đúng</th>
+                              )}
                             <th style={{ padding: '8px' }}>Kết quả</th>
                             <th style={{ padding: '8px' }}>Điểm</th>
                           </tr>
@@ -2623,11 +4988,12 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                               <td style={{ padding: '8px', fontWeight: 700 }}>#{q.questionIndex}</td>
                               <td style={{ padding: '8px', color: 'var(--text-primary)' }}>{q.questionText}</td>
                               <td style={{ padding: '8px' }}>{q.playerAnswer || '(Bỏ trống)'}</td>
-                              {selectedHistoryDetail.answersPublished && (
-                                <td style={{ padding: '8px', color: 'var(--accent-emerald)', fontWeight: 600 }}>
-                                  {q.correctAnswer || '—'}
-                                </td>
-                              )}
+                              {selectedHistoryDetail.sessionMode !== 'PLAY' &&
+                                selectedHistoryDetail.answersPublished && (
+                                  <td style={{ padding: '8px', color: 'var(--accent-emerald)', fontWeight: 600 }}>
+                                    {q.correctAnswer || '—'}
+                                  </td>
+                                )}
                               <td
                                 style={{
                                   padding: '8px',
@@ -2660,6 +5026,683 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 )}
               </>
             ) : null}
+          </div>
+        </div>
+      )}
+
+      {/* Modal 1: Lịch sử nhiều lần thi của một thí sinh (Lần 1, Lần 2, Lần 3...) */}
+      {participantAttemptsModal && (
+        <div
+          data-testid="participant-attempts-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Lịch sử các lần thi của thí sinh"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10000,
+            backgroundColor: 'rgba(6, 9, 19, 0.72)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            boxSizing: 'border-box',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setParticipantAttemptsModal(null);
+            }
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-strong)',
+              borderRadius: '14px',
+              width: '100%',
+              maxWidth: '880px',
+              maxHeight: '88vh',
+              overflowY: 'auto',
+              padding: '22px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              boxShadow: '0 24px 48px rgba(0,0,0,0.45)',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'flex-start',
+                gap: '12px',
+                borderBottom: '1px solid var(--border-subtle)',
+                paddingBottom: '12px',
+                flexWrap: 'wrap',
+              }}
+            >
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                  Lịch sử các lần thi: {participantAttemptsModal.fullName}
+                </h3>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                  {[participantAttemptsModal.employeeCode, participantAttemptsModal.departmentUnit]
+                    .filter(Boolean)
+                    .join(' • ')}{' '}
+                  • Lượt đã dùng:{' '}
+                  <strong>
+                    {participantAttemptsModal.usedAttempts}/{participantAttemptsModal.allowedAttempts}
+                  </strong>
+                  {participantAttemptsModal.retakeGrantedCount > 0
+                    ? ` (Đã cấp thêm +${participantAttemptsModal.retakeGrantedCount} lượt)`
+                    : ''}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {participantAttemptsModal.participantId && selectedGameReport && (
+                  <button
+                    type="button"
+                    data-testid="modal-grant-retake-btn"
+                    onClick={() =>
+                      handleOpenGrantRetakeModal({
+                        gameId: selectedGameReport.gameId,
+                        participantId: participantAttemptsModal.participantId!,
+                        fullName: participantAttemptsModal.fullName,
+                        departmentUnit: participantAttemptsModal.departmentUnit,
+                        employeeCode: participantAttemptsModal.employeeCode,
+                        usedAttempts: participantAttemptsModal.usedAttempts,
+                        allowedAttempts: participantAttemptsModal.allowedAttempts,
+                      })
+                    }
+                    style={{
+                      padding: '8px 14px',
+                      minHeight: '44px',
+                      minWidth: '44px',
+                      borderRadius: '7px',
+                      border: '1px solid var(--primary)',
+                      backgroundColor: 'var(--primary)',
+                      color: 'var(--primary-ink, #060913)',
+                      fontSize: '0.78rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    + Cấp thêm lượt thi
+                  </button>
+                )}
+                <button
+                  type="button"
+                  data-testid="close-participant-attempts-modal"
+                  onClick={() => setParticipantAttemptsModal(null)}
+                  style={{
+                    padding: '8px 14px',
+                    minHeight: '44px',
+                    minWidth: '44px',
+                    borderRadius: '7px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-subtle)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.78rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Đóng
+                </button>
+              </div>
+            </div>
+
+            {participantAttemptsModal.attempts.length === 0 ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+                Thí sinh này chưa thực hiện lần thi nào.
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                <div style={{ overflowX: 'auto' }}>
+                  <table
+                    data-testid="participant-attempts-history-table"
+                    style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: '600px' }}
+                  >
+                    <thead>
+                      <tr
+                        style={{
+                          borderBottom: '1px solid var(--border-subtle)',
+                          color: 'var(--text-secondary)',
+                          textAlign: 'left',
+                          fontSize: '0.73rem',
+                        }}
+                      >
+                        <th style={{ padding: '8px' }}>Lần thi</th>
+                        <th style={{ padding: '8px' }}>Hình thức</th>
+                        <th style={{ padding: '8px' }}>Điểm số</th>
+                        <th style={{ padding: '8px' }}>Câu đúng / Tổng</th>
+                        <th style={{ padding: '8px' }}>Kết quả</th>
+                        <th style={{ padding: '8px' }}>Trạng thái</th>
+                        <th style={{ padding: '8px' }}>Thời gian</th>
+                        <th style={{ padding: '8px', textAlign: 'right' }}>Chi tiết bài làm</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {participantAttemptsModal.attempts.map((att) => {
+                        const isOfficial =
+                          participantAttemptsModal.officialAttemptNumber === att.attemptNumber;
+                        const isExpanded = expandedAttemptIdInModal === att.attemptId;
+                        const statusLabel =
+                          att.status === 'COMPLETED' || att.status === 'AUTO_SUBMITTED'
+                            ? 'Hoàn thành'
+                            : att.status === 'IN_PROGRESS'
+                              ? 'Đang thi'
+                              : 'Bỏ dở';
+                        const resultLabel =
+                          att.isPassed === true ? 'Đạt' : att.isPassed === false ? 'Chưa đạt' : '—';
+
+                        return (
+                          <tr
+                            key={att.attemptId}
+                            data-testid={`participant-attempt-row-${att.attemptNumber}`}
+                            style={{ borderBottom: '1px solid var(--border-subtle)' }}
+                          >
+                            <td style={{ padding: '8px', fontWeight: 800, color: 'var(--text-primary)' }}>
+                              Lần {att.attemptNumber}
+                              {isOfficial && (
+                                <span
+                                  style={{
+                                    marginLeft: '6px',
+                                    padding: '1px 6px',
+                                    borderRadius: '4px',
+                                    fontSize: '0.68rem',
+                                    backgroundColor: 'var(--primary-subtle)',
+                                    color: 'var(--primary)',
+                                  }}
+                                >
+                                  Chính thức
+                                </span>
+                              )}
+                            </td>
+                            <td style={{ padding: '8px' }}>
+                              {att.deliveryMode === 'MULTIPLAYER'
+                                ? `Phòng PIN ${att.roomCode || ''}`
+                                : 'Cá nhân (Solo)'}
+                            </td>
+                            <td style={{ padding: '8px', fontWeight: 800, color: 'var(--primary)' }}>
+                              {att.score.toLocaleString('vi-VN')} đ ({att.accuracyPercent}%)
+                            </td>
+                            <td style={{ padding: '8px' }}>
+                              {att.correctAnswers}/{att.totalQuestions} câu
+                            </td>
+                            <td style={{ padding: '8px', fontWeight: 800 }}>
+                              <span
+                                style={{
+                                  color:
+                                    att.isPassed === true
+                                      ? 'var(--accent-emerald)'
+                                      : att.isPassed === false
+                                        ? 'var(--accent-rose)'
+                                        : 'var(--text-muted)',
+                                }}
+                              >
+                                {resultLabel}
+                              </span>
+                            </td>
+                            <td style={{ padding: '8px' }}>{statusLabel}</td>
+                            <td style={{ padding: '8px', fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                              <div>{new Date(att.finishedAt || att.startedAt).toLocaleString('vi-VN')}</div>
+                              <div>{formatDuration(att.durationMs)}</div>
+                            </td>
+                            <td style={{ padding: '8px', textAlign: 'right' }}>
+                              {att.questionBreakdown && att.questionBreakdown.length > 0 && (
+                                <button
+                                  type="button"
+                                  data-testid={`toggle-attempt-questions-${att.attemptNumber}`}
+                                  onClick={() =>
+                                    setExpandedAttemptIdInModal(isExpanded ? null : att.attemptId)
+                                  }
+                                  style={{
+                                    padding: '6px 11px',
+                                    minHeight: '44px',
+                                    minWidth: '44px',
+                                    borderRadius: '6px',
+                                    border: '1px solid var(--border-strong)',
+                                    backgroundColor: isExpanded ? 'var(--primary-subtle)' : 'var(--bg-subtle)',
+                                    color: isExpanded ? 'var(--primary)' : 'var(--text-primary)',
+                                    fontSize: '0.74rem',
+                                    fontWeight: 700,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  {isExpanded ? 'Ẩn câu trả lời' : 'Xem câu trả lời'}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Chi tiết câu trả lời của lần thi đang chọn */}
+                {(() => {
+                  const activeAtt = participantAttemptsModal.attempts.find(
+                    (a) => a.attemptId === expandedAttemptIdInModal
+                  );
+                  if (!activeAtt || !activeAtt.questionBreakdown || activeAtt.questionBreakdown.length === 0) {
+                    return null;
+                  }
+                  const canShowCorrectAnswer =
+                    selectedGameReport?.sessionMode === 'EXAM' &&
+                    Boolean(selectedGameReport?.answersPublished);
+                  return (
+                    <div
+                      data-testid="expanded-attempt-questions-box"
+                      style={{
+                        padding: '14px',
+                        borderRadius: '10px',
+                        backgroundColor: 'var(--bg-subtle)',
+                        border: '1px solid var(--border-subtle)',
+                      }}
+                    >
+                      <h4 style={{ margin: '0 0 10px 0', fontSize: '0.88rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                        Chi tiết bài làm Lần {activeAtt.attemptNumber} ({activeAtt.score.toLocaleString('vi-VN')} đ)
+                      </h4>
+                      <div style={{ overflowX: 'auto' }}>
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem', minWidth: '520px' }}>
+                          <thead>
+                            <tr
+                              style={{
+                                borderBottom: '1px solid var(--border-subtle)',
+                                color: 'var(--text-secondary)',
+                                textAlign: 'left',
+                              }}
+                            >
+                              <th style={{ padding: '6px' }}>Câu</th>
+                              <th style={{ padding: '6px' }}>Nội dung câu hỏi</th>
+                              <th style={{ padding: '6px' }}>Câu trả lời đã chọn</th>
+                              {canShowCorrectAnswer && <th style={{ padding: '6px' }}>Đáp án đúng</th>}
+                              <th style={{ padding: '6px' }}>Kết quả</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {activeAtt.questionBreakdown.map((q) => (
+                              <tr key={q.questionId} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                                <td style={{ padding: '6px', fontWeight: 700 }}>#{q.questionIndex}</td>
+                                <td style={{ padding: '6px', color: 'var(--text-primary)' }}>{q.questionText}</td>
+                                <td style={{ padding: '6px' }}>{q.playerAnswer || '(Bỏ trống)'}</td>
+                                {canShowCorrectAnswer && (
+                                  <td style={{ padding: '6px', color: 'var(--accent-emerald)', fontWeight: 700 }}>
+                                    {q.correctAnswer || '—'}
+                                  </td>
+                                )}
+                                <td
+                                  style={{
+                                    padding: '6px',
+                                    fontWeight: 700,
+                                    color:
+                                      q.isCorrect === null || q.isCorrect === undefined
+                                        ? 'var(--text-secondary)'
+                                        : q.isCorrect
+                                          ? 'var(--accent-emerald)'
+                                          : 'var(--accent-rose)',
+                                  }}
+                                >
+                                  {q.isCorrect === null || q.isCorrect === undefined
+                                    ? 'Chưa công bố'
+                                    : q.isCorrect
+                                      ? 'Đúng'
+                                      : 'Sai'}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal 2: Chi tiết câu trả lời của lượt chơi PLAY (Tuyệt đối ẩn đáp án đúng & giải thích) */}
+      {playAttemptBreakdownModal && (
+        <div
+          data-testid="play-attempt-breakdown-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Chi tiết lượt chơi"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10000,
+            backgroundColor: 'rgba(6, 9, 19, 0.72)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            boxSizing: 'border-box',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) {
+              setPlayAttemptBreakdownModal(null);
+            }
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-strong)',
+              borderRadius: '14px',
+              width: '100%',
+              maxWidth: '760px',
+              maxHeight: '85vh',
+              overflowY: 'auto',
+              padding: '22px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '14px',
+              boxShadow: '0 24px 48px rgba(0,0,0,0.45)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                  Lượt chơi Lần {playAttemptBreakdownModal.attemptNumber} • {playAttemptBreakdownModal.playerName}
+                </h3>
+                <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '3px' }}>
+                  Điểm: <strong>{playAttemptBreakdownModal.score.toLocaleString('vi-VN')} đ</strong> •{' '}
+                  {playAttemptBreakdownModal.correctAnswers} đúng / {playAttemptBreakdownModal.wrongAnswers} sai •{' '}
+                  Thời gian: {formatDuration(playAttemptBreakdownModal.durationMs)}
+                </div>
+              </div>
+              <button
+                type="button"
+                data-testid="close-play-attempt-breakdown-modal"
+                onClick={() => setPlayAttemptBreakdownModal(null)}
+                style={{
+                  padding: '8px 14px',
+                  minHeight: '44px',
+                  minWidth: '44px',
+                  borderRadius: '7px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-subtle)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Đóng
+              </button>
+            </div>
+
+            <div style={{ overflowX: 'auto' }}>
+              <table
+                data-testid="play-attempt-questions-table"
+                style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.79rem', minWidth: '480px' }}
+              >
+                <thead>
+                  <tr
+                    style={{
+                      borderBottom: '1px solid var(--border-subtle)',
+                      color: 'var(--text-secondary)',
+                      textAlign: 'left',
+                    }}
+                  >
+                    <th style={{ padding: '8px' }}>Câu</th>
+                    <th style={{ padding: '8px' }}>Nội dung câu hỏi</th>
+                    <th style={{ padding: '8px' }}>Lựa chọn của người chơi</th>
+                    <th style={{ padding: '8px' }}>Kết quả</th>
+                    <th style={{ padding: '8px' }}>Điểm</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {playAttemptBreakdownModal.questionBreakdown.map((q) => (
+                    <tr key={q.questionId} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
+                      <td style={{ padding: '8px', fontWeight: 700 }}>#{q.questionIndex}</td>
+                      <td style={{ padding: '8px', color: 'var(--text-primary)' }}>{q.questionText}</td>
+                      <td style={{ padding: '8px' }}>{q.playerAnswer || '(Bỏ trống)'}</td>
+                      <td
+                        style={{
+                          padding: '8px',
+                          fontWeight: 700,
+                          color: q.isCorrect ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                        }}
+                      >
+                        {q.isCorrect ? 'Đúng' : 'Sai'}
+                      </td>
+                      <td style={{ padding: '8px', fontWeight: 700 }}>{q.pointsEarned ?? 0} đ</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 3: Xác nhận Cấp thêm lượt thi / lượt chơi (Grant Retake) */}
+      {grantRetakeModal && (
+        <div
+          data-testid="grant-retake-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Cấp thêm lượt cho người tham gia"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 10001,
+            backgroundColor: 'rgba(6, 9, 19, 0.75)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            boxSizing: 'border-box',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !isGrantingRetake) {
+              setGrantRetakeModal(null);
+            }
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-strong)',
+              borderRadius: '14px',
+              width: '100%',
+              maxWidth: '480px',
+              padding: '22px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              boxShadow: '0 24px 48px rgba(0,0,0,0.45)',
+            }}
+          >
+            <div>
+              <h3 style={{ margin: 0, fontSize: '1.08rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                Cấp thêm lượt tham gia
+              </h3>
+              <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                Tăng số lượt được phép cho đúng người tham gia này. Toàn bộ điểm số và lịch sử các lần trước được giữ nguyên.
+              </p>
+            </div>
+
+            <div
+              style={{
+                padding: '12px 14px',
+                borderRadius: '10px',
+                backgroundColor: 'var(--bg-subtle)',
+                border: '1px solid var(--border-subtle)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+                fontSize: '0.82rem',
+              }}
+            >
+              <div>
+                Người tham gia: <strong style={{ color: 'var(--text-primary)' }}>{grantRetakeModal.fullName}</strong>
+              </div>
+              {(grantRetakeModal.employeeCode || grantRetakeModal.departmentUnit) && (
+                <div style={{ color: 'var(--text-secondary)', fontSize: '0.76rem' }}>
+                  {[grantRetakeModal.employeeCode, grantRetakeModal.departmentUnit].filter(Boolean).join(' • ')}
+                </div>
+              )}
+              <div>
+                Số lượt hiện tại:{' '}
+                <strong data-testid="grant-retake-current-attempts" style={{ color: 'var(--primary)' }}>
+                  {grantRetakeModal.usedAttempts} / {grantRetakeModal.allowedAttempts} lượt
+                </strong>{' '}
+                (Còn lại: {Math.max(0, grantRetakeModal.allowedAttempts - grantRetakeModal.usedAttempts)} lượt)
+              </div>
+              <div>
+                Sau khi cấp thêm:{' '}
+                <strong data-testid="grant-retake-next-attempts" style={{ color: 'var(--accent-emerald)' }}>
+                  {grantRetakeModal.usedAttempts} / {grantRetakeModal.allowedAttempts + (Number(grantRetakeModal.additionalAttempts) || 1)} lượt
+                </strong>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label
+                htmlFor="grant-retake-count-input"
+                style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}
+              >
+                Chọn số lượt muốn cấp thêm (1 - 10):
+              </label>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                {[1, 2, 3].map((num) => {
+                  const active = grantRetakeModal.additionalAttempts === num;
+                  return (
+                    <button
+                      key={num}
+                      type="button"
+                      data-testid={`grant-retake-preset-${num}`}
+                      onClick={() =>
+                        setGrantRetakeModal((prev) =>
+                          prev
+                            ? {
+                                ...prev,
+                                additionalAttempts: num,
+                              }
+                            : null
+                        )
+                      }
+                      style={{
+                        padding: '8px 14px',
+                        minHeight: '44px',
+                        minWidth: '44px',
+                        borderRadius: '7px',
+                        border: active ? '1px solid var(--primary)' : '1px solid var(--border-strong)',
+                        backgroundColor: active ? 'var(--primary)' : 'var(--bg-subtle)',
+                        color: active ? 'var(--primary-ink, #060913)' : 'var(--text-primary)',
+                        fontSize: '0.8rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      +{num} lượt
+                    </button>
+                  );
+                })}
+                <input
+                  id="grant-retake-count-input"
+                  data-testid="grant-retake-count-input"
+                  type="number"
+                  min={1}
+                  max={10}
+                  value={grantRetakeModal.additionalAttempts}
+                  onChange={(e) => {
+                    const parsed = parseInt(e.target.value, 10);
+                    setGrantRetakeModal((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            additionalAttempts: Number.isNaN(parsed) ? 1 : parsed,
+                          }
+                        : null
+                    );
+                  }}
+                  style={{
+                    width: '84px',
+                    padding: '8px 10px',
+                    minHeight: '44px',
+                    borderRadius: '7px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-subtle)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.85rem',
+                    fontWeight: 700,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+            </div>
+
+            {grantRetakeError && (
+              <div
+                data-testid="grant-retake-error"
+                role="alert"
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: '8px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                  border: '1px solid rgba(239, 68, 68, 0.35)',
+                  color: 'var(--accent-rose)',
+                  fontSize: '0.78rem',
+                  fontWeight: 600,
+                }}
+              >
+                {grantRetakeError}
+              </div>
+            )}
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '4px' }}>
+              <button
+                type="button"
+                data-testid="cancel-grant-retake-btn"
+                disabled={isGrantingRetake}
+                onClick={() => setGrantRetakeModal(null)}
+                style={{
+                  padding: '8px 16px',
+                  minHeight: '44px',
+                  minWidth: '44px',
+                  borderRadius: '7px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-subtle)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  cursor: isGrantingRetake ? 'not-allowed' : 'pointer',
+                }}
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                data-testid="confirm-grant-retake-btn"
+                disabled={isGrantingRetake}
+                onClick={handleConfirmGrantRetake}
+                style={{
+                  padding: '8px 16px',
+                  minHeight: '44px',
+                  minWidth: '44px',
+                  borderRadius: '7px',
+                  border: '1px solid var(--primary)',
+                  backgroundColor: 'var(--primary)',
+                  color: 'var(--primary-ink, #060913)',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  cursor: isGrantingRetake ? 'not-allowed' : 'pointer',
+                }}
+              >
+                {isGrantingRetake
+                  ? 'Đang cấp lượt...'
+                  : `Xác nhận cấp +${grantRetakeModal.additionalAttempts} lượt`}
+              </button>
+            </div>
           </div>
         </div>
       )}
