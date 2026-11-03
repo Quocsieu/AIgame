@@ -77,6 +77,17 @@ roomRouter.post('/', roomCreateRateLimiter.middleware, async (req: Request, res:
       );
     }
 
+    if (spec.settings?.sessionMode === 'EXAM') {
+      const rosterCheck = persistenceRepo.listParticipants(spec.gameId, { limit: 1 });
+      if (rosterCheck.total === 0) {
+        throw new AppError(
+          'EXAM_ROSTER_REQUIRED',
+          'Chế độ Thi bắt buộc phải có danh sách thí sinh hợp lệ trước khi mở kỳ thi.',
+          400
+        );
+      }
+    }
+
     if (req.user) {
       quotaService.enforceActiveRoomLimit(req.user.userId);
     }

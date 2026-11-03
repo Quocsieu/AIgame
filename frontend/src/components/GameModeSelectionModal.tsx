@@ -18,6 +18,8 @@ interface GameModeSelectionModalProps {
   onNavigateToHost?: (roomCode: string, hostToken: string) => void;
   onPublishGame?: (gameId: string) => Promise<boolean>;
   isOwner?: boolean;
+  examParticipantCount?: number | null;
+  onRequireRosterSetup?: (spec: GameSpecification) => void;
 }
 
 export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
@@ -30,10 +32,13 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
   onNavigateToHost,
   onPublishGame,
   isOwner = true,
+  examParticipantCount = null,
+  onRequireRosterSetup,
 }) => {
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [isPublishingSolo, setIsPublishingSolo] = useState(false);
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
+  const [rosterBlockedError, setRosterBlockedError] = useState<string | null>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const previousActiveElement = useRef<HTMLElement | null>(null);
 
@@ -42,6 +47,7 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
       setIsCreatingRoom(false);
       setIsPublishingSolo(false);
       setShowPublishConfirm(false);
+      setRosterBlockedError(null);
       previousActiveElement.current = document.activeElement as HTMLElement | null;
       const handleKeyDown = (e: KeyboardEvent) => {
         if (e.key === 'Escape') {
@@ -61,6 +67,11 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
 
   if (!isOpen || !gameSpec) return null;
 
+  const isExamWithEmptyRoster =
+    gameSpec.settings?.sessionMode === 'EXAM' &&
+    typeof examParticipantCount === 'number' &&
+    examParticipantCount === 0;
+
   const handleSelectPlaytest = () => {
     if (!onStartPlaytest) return;
     onClose();
@@ -68,6 +79,10 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
   };
 
   const handleSelectSolo = async () => {
+    if (isExamWithEmptyRoster) {
+      setRosterBlockedError('Bạn cần thêm danh sách thí sinh trước khi mở kỳ thi.');
+      return;
+    }
     if (!gameSpec.isPublic) {
       setShowPublishConfirm(true);
       return;
@@ -77,6 +92,10 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
   };
 
   const handleConfirmPublishAndSolo = async () => {
+    if (isExamWithEmptyRoster) {
+      setRosterBlockedError('Bạn cần thêm danh sách thí sinh trước khi mở kỳ thi.');
+      return;
+    }
     if (!onPublishGame) {
       onClose();
       onStartSoloPresentation(gameSpec);
@@ -99,6 +118,10 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
   };
 
   const handleSelectMultiplayer = async () => {
+    if (isExamWithEmptyRoster) {
+      setRosterBlockedError('Bạn cần thêm danh sách thí sinh trước khi mở kỳ thi.');
+      return;
+    }
     setIsCreatingRoom(true);
     try {
       const room = await onCreateMultiplayerRoom(gameSpec);
@@ -301,6 +324,55 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
                 {isPublishingSolo ? 'Đang xuất bản...' : 'Xác nhận Xuất bản & Chơi Đơn'}
               </button>
             </div>
+          </div>
+        )}
+
+        {/* CẢNH BÁO KHI CHẾ ĐỘ THI CHƯA CÓ DANH SÁCH THÍ SINH */}
+        {(isExamWithEmptyRoster || rosterBlockedError) && (
+          <div
+            role="alert"
+            data-testid="mode-modal-exam-empty-roster-warning"
+            style={{
+              marginBottom: '1rem',
+              padding: '0.9rem 1.05rem',
+              borderRadius: '12px',
+              backgroundColor: 'rgba(239, 68, 68, 0.12)',
+              border: '1.5px solid rgba(239, 68, 68, 0.5)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.55rem',
+            }}
+          >
+            <div style={{ fontSize: '0.86rem', fontWeight: 900, color: 'var(--accent-rose)' }}>
+              ⚠ {rosterBlockedError || 'Bạn cần thêm danh sách thí sinh trước khi mở kỳ thi.'}
+            </div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+              Bộ đề này đang ở chế độ <strong>THI</strong> nhưng danh sách thí sinh đang trống (0 người). Vui lòng bổ sung danh sách thí sinh trong phần Chỉnh sửa game trước khi mở thi Chơi Đơn hoặc Chơi Nhóm. Bạn vẫn có thể bấm <strong>Chơi thử (Playtest)</strong> để kiểm tra đề.
+            </div>
+            {isOwner && onRequireRosterSetup && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <button
+                  type="button"
+                  data-testid="mode-modal-open-roster-editor-btn"
+                  onClick={() => {
+                    onClose();
+                    onRequireRosterSetup(gameSpec);
+                  }}
+                  style={{
+                    padding: '0.45rem 0.9rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--accent-amber)',
+                    backgroundColor: 'rgba(245, 158, 11, 0.16)',
+                    color: 'var(--accent-amber)',
+                    fontWeight: 800,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  + Thêm danh sách thí sinh ngay
+                </button>
+              </div>
+            )}
           </div>
         )}
 

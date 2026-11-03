@@ -1308,7 +1308,7 @@ async function handleUpdateGameSpecification(req: Request, res: Response, next: 
 
     gameStore.save(updatedSpec, Date.now(), ownerUserId, resolvedIsPublic);
 
-    if (Array.isArray(participants)) {
+    if (Array.isArray(participants) && participants.length > 0) {
       persistenceRepo.upsertParticipants(
         gameId,
         participants.map(item => ({
@@ -1348,6 +1348,7 @@ async function handleUpdateGameSpecification(req: Request, res: Response, next: 
 
 gameRouter.patch('/:gameId/questions', handleUpdateGameSpecification);
 gameRouter.patch('/:gameId', handleUpdateGameSpecification);
+gameRouter.put('/:gameId', handleUpdateGameSpecification);
 
 async function handleRetryAdventureAssets(
   req: Request,
@@ -1614,6 +1615,15 @@ gameRouter.get(
       const hasActiveRoom = roomStore.hasActiveRoomForGame(gameId);
 
       const isManager = hasCreatorOrHostManagementAccess(req, gameId, ownerUserId);
+      const requestedMode = String(req.query.mode || '').toLowerCase();
+      if ((requestedMode === 'admin' || requestedMode === 'manage') && !isManager) {
+        authService.assertResourceAccess({
+          resourceType: 'danh sách thí sinh',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      }
       if (!isManager && !isPublic && !hasActiveRoom) {
         authService.assertResourceAccess({
           resourceType: 'danh sách thí sinh',
@@ -2264,6 +2274,17 @@ gameRouter.post(
         });
       }
 
+      if (spec.settings?.sessionMode === 'EXAM') {
+        const rosterCheck = persistenceRepo.listParticipants(gameId, { limit: 1 });
+        if (rosterCheck.total === 0) {
+          throw new AppError(
+            'EXAM_ROSTER_REQUIRED',
+            'Chế độ Thi bắt buộc phải có danh sách thí sinh hợp lệ trước khi mở kỳ thi.',
+            400
+          );
+        }
+      }
+
       const reopenedSpec: GameSpecification = {
         ...spec,
         settings: {
@@ -2622,6 +2643,17 @@ gameRouter.get(
           'Game này chưa được xuất bản nên không thể tạo liên kết và mã QR chơi công khai.',
           403
         );
+      }
+
+      if (spec.settings?.sessionMode === 'EXAM') {
+        const rosterCheck = persistenceRepo.listParticipants(gameId, { limit: 1 });
+        if (rosterCheck.total === 0) {
+          throw new AppError(
+            'EXAM_ROSTER_REQUIRED',
+            'Chế độ Thi bắt buộc phải có danh sách thí sinh hợp lệ trước khi mở mã QR hoặc liên kết kỳ thi.',
+            400
+          );
+        }
       }
 
       const playUrl = buildSoloPlayUrl(req, gameId);

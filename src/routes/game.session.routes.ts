@@ -388,7 +388,7 @@ sessionRouter.post('/', (req: Request, res: Response, next: NextFunction) => {
     }
 
     // V3 Stage 4: In EXAM mode, participant roster is mandatory and participantId must be selected
-    if (sessionMode === 'EXAM' && storedSpec) {
+    if (sessionMode === 'EXAM') {
       const rosterCheck = persistenceRepo.listParticipants(gameId, { limit: 1 });
       if (rosterCheck.total === 0) {
         throw new AppError(

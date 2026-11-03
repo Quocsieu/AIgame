@@ -19,6 +19,7 @@ import {
   SparklesIcon,
   SpinnerIcon,
   TrashIcon,
+  UploadIcon,
   UsersIcon,
   XMarkIcon,
 } from '../components/Icons.js';
@@ -26,19 +27,26 @@ import {
   closeMultiplayerRoom,
   createRoom,
   deleteAllSavedGames,
+  deleteGameParticipantApi,
   deleteSavedGame,
   downloadGameExport,
   duplicateGameApi,
   endPracticeSession,
   fetchCurrentUser,
   fetchGameById,
+  fetchGameParticipantsApi,
   fetchGameQr,
   fetchRoomQr,
   fetchSavedGames,
   fetchWhoAmI,
   generateGameCoverApi,
+  grantParticipantRetakeApi,
+  parseRosterFileApi,
   publishGame,
+  RosterParsePreviewResult,
   saveEditedQuestions,
+  updateGameParticipantApi,
+  upsertGameParticipantsApi,
 } from '../services/api.js';
 import type {
   AuthenticatedUser,
@@ -46,6 +54,7 @@ import type {
   GameQuestion,
   GameSpecification,
   GameType,
+  ParticipantRosterItem,
   PersistedGameSummary,
   QuestionType,
   ScoringMode,
@@ -856,6 +865,32 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const [editQuestions, setEditQuestions] = useState<GameQuestion[]>([]);
   const [isSavingEdits, setIsSavingEdits] = useState(false);
 
+  // Quản lý danh sách thí sinh trong Thư viện -> Chỉnh sửa game (Chế độ THI)
+  const [gameParticipants, setGameParticipants] = useState<ParticipantRosterItem[]>([]);
+  const [isLoadingParticipants, setIsLoadingParticipants] = useState(false);
+  const [libraryRosterPanel, setLibraryRosterPanel] = useState<'NONE' | 'MANUAL' | 'BULK'>('NONE');
+  const [libraryRosterBulkTab, setLibraryRosterBulkTab] = useState<'PASTE' | 'FILE'>('PASTE');
+  const [isRosterListExpanded, setIsRosterListExpanded] = useState(false);
+  const [rosterSearchTerm, setRosterSearchTerm] = useState('');
+  const [singleParticipantName, setSingleParticipantName] = useState('');
+  const [singleParticipantDept, setSingleParticipantDept] = useState('');
+  const [singleParticipantCode, setSingleParticipantCode] = useState('');
+  const [singleParticipantError, setSingleParticipantError] = useState<string | null>(null);
+  const [bulkPasteText, setBulkPasteText] = useState('');
+  const [bulkPasteDiagnostics, setBulkPasteDiagnostics] = useState<RosterParsePreviewResult | null>(null);
+  const [rosterImportPreview, setRosterImportPreview] = useState<RosterParsePreviewResult | null>(null);
+  const [isParsingRosterFile, setIsParsingRosterFile] = useState(false);
+  const [isSavingRosterAction, setIsSavingRosterAction] = useState(false);
+  const [editingParticipantId, setEditingParticipantId] = useState<string | null>(null);
+  const [editingParticipantName, setEditingParticipantName] = useState('');
+  const [editingParticipantDept, setEditingParticipantDept] = useState('');
+  const [rosterActionNotice, setRosterActionNotice] = useState<{
+    type: 'success' | 'warning' | 'error';
+    text: string;
+  } | null>(null);
+  const [detailSaveBanner, setDetailSaveBanner] = useState<string | null>(null);
+  const [modeModalParticipantCount, setModeModalParticipantCount] = useState<number | null>(null);
+
   // Xác nhận xóa bộ câu hỏi
   const [confirmDeleteGame, setConfirmDeleteGame] = useState<PersistedGameSummary | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -1134,15 +1169,60 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     }
   };
 
-  const handleOpenModeModal = async (gameId: string) => {
-    if (activeGameSpec && activeGameSpec.gameId === gameId) {
-      setModeModalSpec(activeGameSpec);
-      setIsModeModalOpen(true);
-      return;
+  const loadGameParticipants = async (gameId: string, manageMode: boolean = isLibraryMode) => {
+    setIsLoadingParticipants(true);
+    try {
+      const res = await fetchGameParticipantsApi(gameId, {
+        mode: manageMode ? 'admin' : 'public',
+      });
+      const list = Array.isArray(res.participants) ? res.participants : [];
+      setGameParticipants(list);
+      return list;
+    } catch {
+      setGameParticipants([]);
+      return [];
+    } finally {
+      setIsLoadingParticipants(false);
     }
+  };
+
+  const resetRosterDraftInputs = () => {
+    setLibraryRosterPanel('NONE');
+    setLibraryRosterBulkTab('PASTE');
+    setIsRosterListExpanded(false);
+    setRosterSearchTerm('');
+    setSingleParticipantName('');
+    setSingleParticipantDept('');
+    setSingleParticipantCode('');
+    setSingleParticipantError(null);
+    setBulkPasteText('');
+    setBulkPasteDiagnostics(null);
+    setRosterImportPreview(null);
+    setEditingParticipantId(null);
+    setEditingParticipantName('');
+    setEditingParticipantDept('');
+    setRosterActionNotice(null);
+  };
+
+  const handleOpenModeModal = async (gameId: string) => {
     setIsDetailLoading(true);
     try {
-      const spec = await fetchGameById(gameId, { mode: isLibraryMode ? 'manage' : 'public' });
+      const spec =
+        activeGameSpec && activeGameSpec.gameId === gameId
+          ? activeGameSpec
+          : await fetchGameById(gameId, { mode: isLibraryMode ? 'manage' : 'public' });
+      let rosterCount: number | null = null;
+      if (spec.settings?.sessionMode === 'EXAM') {
+        if (activeGameSpec && activeGameSpec.gameId === gameId) {
+          rosterCount = gameParticipants.length;
+        } else {
+          const rRes = await fetchGameParticipantsApi(gameId, {
+            mode: isLibraryMode ? 'admin' : 'public',
+          }).catch(() => ({ total: 0, participants: [] }));
+          rosterCount = Array.isArray(rRes.participants) ? rRes.participants.length : rRes.total || 0;
+        }
+      }
+      setModeModalParticipantCount(rosterCount);
       setModeModalSpec(spec);
       setIsModeModalOpen(true);
     } catch (err: any) {
@@ -1209,8 +1289,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
 
   const handleViewOrEditGame = async (gameId: string, startInEditMode: boolean = false) => {
     setIsDetailLoading(true);
+    resetRosterDraftInputs();
+    setDetailSaveBanner(null);
     try {
-      const spec = await fetchGameById(gameId, { mode: isLibraryMode ? 'manage' : 'public' });
+      const [spec] = await Promise.all([
+        fetchGameById(gameId, { mode: isLibraryMode ? 'manage' : 'public' }),
+        loadGameParticipants(gameId, isLibraryMode),
+      ]);
       setActiveGameSpec(spec);
       syncEditorFromSpec(spec);
       setIsEditMode(isLibraryMode && startInEditMode && canManageGame(spec));
@@ -1227,6 +1312,19 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         activeGameSpec?.gameId === gameId
           ? activeGameSpec
           : await fetchGameById(gameId, { mode: 'manage' });
+      if (spec.settings?.sessionMode === 'EXAM') {
+        const list =
+          activeGameSpec?.gameId === gameId
+            ? gameParticipants
+            : await loadGameParticipants(gameId, true);
+        if (list.length === 0) {
+          toast.warning(
+            'Bạn cần thêm danh sách thí sinh trước khi mở kỳ thi.',
+            'Chưa có danh sách thí sinh'
+          );
+          return;
+        }
+      }
       if (onSelectSavedGame) {
         onSelectSavedGame(spec, autoStartSolo);
       }
@@ -1241,7 +1339,12 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     }
   };
 
-  const handleOpenSoloShareModal = async (game: { gameId: string; title: string; isPublic?: boolean }) => {
+  const handleOpenSoloShareModal = async (game: {
+    gameId: string;
+    title: string;
+    isPublic?: boolean;
+    sessionMode?: SessionMode;
+  }) => {
     if (game.isPublic === false) {
       toast.warning(
         'Game này đang ở trạng thái Bản nháp. Vui lòng Xuất bản game trước khi lấy Link / QR chơi đơn.',
@@ -1265,7 +1368,12 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     }
   };
 
-  const handleOpenMultiplayerRoom = async (game: { gameId: string; title: string; isPublic?: boolean }) => {
+  const handleOpenMultiplayerRoom = async (game: {
+    gameId: string;
+    title: string;
+    isPublic?: boolean;
+    sessionMode?: SessionMode;
+  }) => {
     if (game.isPublic === false) {
       toast.warning(
         'Game này đang ở trạng thái Bản nháp. Vui lòng Xuất bản game trước khi mở phòng Multiplayer.',
@@ -1293,6 +1401,276 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       toast.error(err.message || 'Không thể mở phòng Multiplayer.', 'Lỗi mở phòng');
     } finally {
       setIsOpeningRoomGameId(null);
+    }
+  };
+
+  const handleAddSingleParticipantInLibrary = async () => {
+    if (!activeGameSpec || isSavingRosterAction) return;
+    const cleanName = singleParticipantName.trim().replace(/\s+/g, ' ');
+    if (cleanName.length < 2 || /^\d+$/.test(cleanName)) {
+      setSingleParticipantError('Vui lòng nhập họ và tên hợp lệ (tối thiểu 2 ký tự).');
+      return;
+    }
+    setSingleParticipantError(null);
+    setIsSavingRosterAction(true);
+    try {
+      const res = await upsertGameParticipantsApi(activeGameSpec.gameId, {
+        participants: [
+          {
+            fullName: cleanName,
+            departmentUnit: singleParticipantDept.trim() || undefined,
+            employeeCode: singleParticipantCode.trim() || undefined,
+          },
+        ],
+        replaceAll: false,
+        rosterMode: 'PRECONFIGURED',
+      });
+      setGameParticipants(res.participants || []);
+      setSingleParticipantName('');
+      setSingleParticipantDept('');
+      setSingleParticipantCode('');
+      setDetailSaveBanner(null);
+      setRosterActionNotice({
+        type: 'success',
+        text: `Đã thêm thí sinh "${cleanName}" vào danh sách (Tổng: ${res.total} người).`,
+      });
+    } catch (err: any) {
+      setRosterActionNotice({
+        type: 'error',
+        text: err.message || 'Không thể thêm thí sinh vào danh sách.',
+      });
+    } finally {
+      setIsSavingRosterAction(false);
+    }
+  };
+
+  const handleAddBulkPasteParticipantsInLibrary = async () => {
+    if (!activeGameSpec || isSavingRosterAction) return;
+    const raw = bulkPasteText.trim();
+    if (!raw) {
+      setRosterActionNotice({
+        type: 'warning',
+        text: 'Vui lòng nhập hoặc dán ít nhất 1 dòng thí sinh trước khi bấm Thêm.',
+      });
+      return;
+    }
+    setIsSavingRosterAction(true);
+    try {
+      const parsed = await parseRosterFileApi({ rawText: raw, fileName: 'manual.txt' });
+      setBulkPasteDiagnostics(parsed);
+      if (!parsed.participants || parsed.participants.length === 0) {
+        setRosterActionNotice({
+          type: 'error',
+          text:
+            parsed.invalidRows.length > 0
+              ? `Không có dòng hợp lệ. Phát hiện ${parsed.invalidRows.length} dòng lỗi.`
+              : 'Không tìm thấy thí sinh hợp lệ trong nội dung đã dán.',
+        });
+        return;
+      }
+      const existingNormNames = new Set(
+        gameParticipants.map((gp) =>
+          gp.fullName
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .replace(/[đĐ]/g, 'd')
+            .toLowerCase()
+            .trim()
+            .replace(/\s+/g, ' ')
+        )
+      );
+      let existingDupCount = 0;
+      for (const p of parsed.participants) {
+        const norm = p.fullName
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .replace(/[đĐ]/g, 'd')
+          .toLowerCase()
+          .trim()
+          .replace(/\s+/g, ' ');
+        if (existingNormNames.has(norm)) {
+          existingDupCount += 1;
+        }
+      }
+      const totalDuplicateCount = (parsed.duplicateCount || 0) + existingDupCount;
+      const res = await upsertGameParticipantsApi(activeGameSpec.gameId, {
+        participants: parsed.participants.map((p) => ({
+          fullName: p.fullName,
+          departmentUnit: p.departmentUnit || undefined,
+          employeeCode: p.employeeCode || undefined,
+          contactInfo: p.contactInfo || undefined,
+        })),
+        replaceAll: false,
+        rosterMode: 'PRECONFIGURED',
+      });
+      setGameParticipants(res.participants || []);
+      setBulkPasteText('');
+      setDetailSaveBanner(null);
+      const hasWarnings = totalDuplicateCount > 0 || parsed.invalidRows.length > 0;
+      const warnParts: string[] = [];
+      if (totalDuplicateCount > 0) {
+        warnParts.push(`bỏ qua ${totalDuplicateCount} dòng trùng tên`);
+      }
+      if (parsed.invalidRows.length > 0) {
+        warnParts.push(`bỏ qua ${parsed.invalidRows.length} dòng thiếu họ tên`);
+      }
+      const netAdded = Math.max(0, parsed.participants.length - existingDupCount);
+      setRosterActionNotice({
+        type: hasWarnings ? 'warning' : 'success',
+        text: hasWarnings
+          ? `Đã nhập ${netAdded} thí sinh hợp lệ (${warnParts.join(', ')}; Tổng: ${res.total} người).`
+          : `Đã nhập ${parsed.participants.length} thí sinh hợp lệ vào danh sách (Tổng: ${res.total} người).`,
+      });
+    } catch (err: any) {
+      setRosterActionNotice({
+        type: 'error',
+        text: err.message || 'Không thể phân tích và lưu danh sách thí sinh.',
+      });
+    } finally {
+      setIsSavingRosterAction(false);
+    }
+  };
+
+  const handlePreviewRosterFileInLibrary = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setIsParsingRosterFile(true);
+    setRosterActionNotice(null);
+    try {
+      const preview = await parseRosterFileApi(file);
+      setRosterImportPreview(preview);
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể đọc tệp danh sách thí sinh.', 'Lỗi đọc tệp');
+      setRosterActionNotice({
+        type: 'error',
+        text: err.message || 'Không thể đọc tệp danh sách thí sinh.',
+      });
+    } finally {
+      setIsParsingRosterFile(false);
+    }
+  };
+
+  const handleConfirmRosterImportInLibrary = async (mode: 'APPEND' | 'REPLACE') => {
+    if (!activeGameSpec || !rosterImportPreview || isSavingRosterAction) return;
+    if (rosterImportPreview.participants.length === 0) return;
+    setIsSavingRosterAction(true);
+    try {
+      const res = await upsertGameParticipantsApi(activeGameSpec.gameId, {
+        participants: rosterImportPreview.participants.map((p) => ({
+          fullName: p.fullName,
+          departmentUnit: p.departmentUnit || undefined,
+          employeeCode: p.employeeCode || undefined,
+          contactInfo: p.contactInfo || undefined,
+        })),
+        replaceAll: mode === 'REPLACE',
+        rosterMode: 'PRECONFIGURED',
+      });
+      setGameParticipants(res.participants || []);
+      const importedCount = rosterImportPreview.participants.length;
+      setRosterImportPreview(null);
+      setDetailSaveBanner(null);
+      setRosterActionNotice({
+        type: 'success',
+        text: `Đã nhập ${importedCount} thí sinh từ tệp vào danh sách (Tổng: ${res.total} người).`,
+      });
+      toast.success(
+        `Đã lưu ${importedCount} thí sinh vào danh sách (Tổng: ${res.total} người).`,
+        'Import thành công'
+      );
+    } catch (err: any) {
+      setRosterActionNotice({
+        type: 'error',
+        text: err.message || 'Không thể lưu danh sách import.',
+      });
+    } finally {
+      setIsSavingRosterAction(false);
+    }
+  };
+
+  const handleSaveParticipantEditInLibrary = async (participantId: string) => {
+    if (!activeGameSpec || isSavingRosterAction) return;
+    const cleanName = editingParticipantName.trim().replace(/\s+/g, ' ');
+    if (cleanName.length < 2) {
+      setRosterActionNotice({
+        type: 'error',
+        text: 'Họ và tên thí sinh phải có tối thiểu 2 ký tự.',
+      });
+      return;
+    }
+    setIsSavingRosterAction(true);
+    try {
+      const updated = await updateGameParticipantApi(activeGameSpec.gameId, participantId, {
+        fullName: cleanName,
+        departmentUnit: editingParticipantDept.trim(),
+      });
+      setGameParticipants((prev) =>
+        prev.map((item) => (item.participantId === participantId ? updated : item))
+      );
+      setEditingParticipantId(null);
+      setRosterActionNotice({
+        type: 'success',
+        text: `Đã cập nhật thông tin thí sinh "${updated.fullName}".`,
+      });
+    } catch (err: any) {
+      setRosterActionNotice({
+        type: 'error',
+        text: err.message || 'Không thể cập nhật thông tin thí sinh.',
+      });
+    } finally {
+      setIsSavingRosterAction(false);
+    }
+  };
+
+  const handleDeleteParticipantInLibrary = async (participant: ParticipantRosterItem) => {
+    if (!activeGameSpec || isSavingRosterAction) return;
+    setIsSavingRosterAction(true);
+    try {
+      await deleteGameParticipantApi(activeGameSpec.gameId, participant.participantId);
+      setGameParticipants((prev) =>
+        prev.filter((item) => item.participantId !== participant.participantId)
+      );
+      setRosterActionNotice({
+        type: 'success',
+        text: `Đã xóa thí sinh "${participant.fullName}" khỏi danh sách.`,
+      });
+    } catch (err: any) {
+      const msg =
+        err.message ||
+        `Không thể xóa thí sinh "${participant.fullName}" vì đã có lượt làm bài hoặc kết quả thi.`;
+      setRosterActionNotice({
+        type: 'error',
+        text: msg,
+      });
+      toast.error(msg, 'Không thể xóa thí sinh đã thi');
+    } finally {
+      setIsSavingRosterAction(false);
+    }
+  };
+
+  const handleGrantParticipantRetakeInLibrary = async (participant: ParticipantRosterItem) => {
+    if (!activeGameSpec || isSavingRosterAction) return;
+    setIsSavingRosterAction(true);
+    try {
+      const res = await grantParticipantRetakeApi(activeGameSpec.gameId, participant.participantId);
+      if (res.participant) {
+        setGameParticipants((prev) =>
+          prev.map((item) =>
+            item.participantId === participant.participantId ? res.participant : item
+          )
+        );
+      }
+      setRosterActionNotice({
+        type: 'success',
+        text: `Đã cấp thêm 1 lượt thi cho "${participant.fullName}".`,
+      });
+    } catch (err: any) {
+      setRosterActionNotice({
+        type: 'error',
+        text: err.message || 'Không thể cấp quyền thi lại.',
+      });
+    } finally {
+      setIsSavingRosterAction(false);
     }
   };
 
@@ -1535,6 +1913,63 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
     if (!activeGameSpec) return;
     setIsSavingEdits(true);
     try {
+      // Nếu đang ở chế độ THI và người tạo đã gõ/dán/chọn file thí sinh nhưng chưa bấm nút Thêm con, tự động lưu luôn
+      if (editSessionMode === 'EXAM') {
+        const pendingItems: Array<{
+          fullName: string;
+          departmentUnit?: string;
+          employeeCode?: string;
+          contactInfo?: string;
+        }> = [];
+        const cleanSingle = singleParticipantName.trim().replace(/\s+/g, ' ');
+        if (cleanSingle.length >= 2 && !/^\d+$/.test(cleanSingle)) {
+          pendingItems.push({
+            fullName: cleanSingle,
+            departmentUnit: singleParticipantDept.trim() || undefined,
+            employeeCode: singleParticipantCode.trim() || undefined,
+          });
+        }
+        if (bulkPasteText.trim()) {
+          const parsedBulk = await parseRosterFileApi({
+            rawText: bulkPasteText.trim(),
+            fileName: 'manual.txt',
+          }).catch(() => null);
+          if (parsedBulk?.participants?.length) {
+            for (const p of parsedBulk.participants) {
+              pendingItems.push({
+                fullName: p.fullName,
+                departmentUnit: p.departmentUnit || undefined,
+                employeeCode: p.employeeCode || undefined,
+                contactInfo: p.contactInfo || undefined,
+              });
+            }
+          }
+        }
+        if (rosterImportPreview?.participants?.length) {
+          for (const p of rosterImportPreview.participants) {
+            pendingItems.push({
+              fullName: p.fullName,
+              departmentUnit: p.departmentUnit || undefined,
+              employeeCode: p.employeeCode || undefined,
+              contactInfo: p.contactInfo || undefined,
+            });
+          }
+        }
+        if (pendingItems.length > 0) {
+          await upsertGameParticipantsApi(activeGameSpec.gameId, {
+            participants: pendingItems,
+            replaceAll: false,
+            rosterMode: 'PRECONFIGURED',
+          });
+          setSingleParticipantName('');
+          setSingleParticipantDept('');
+          setSingleParticipantCode('');
+          setBulkPasteText('');
+          setBulkPasteDiagnostics(null);
+          setRosterImportPreview(null);
+        }
+      }
+
       const updated = await saveEditedQuestions(activeGameSpec.gameId, {
         title: editTitle.trim() || activeGameSpec.title,
         description: editDescription.trim() || activeGameSpec.description,
@@ -1544,11 +1979,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           scoringMode: editScoringMode,
           sessionMode: editSessionMode,
           ...(editSessionMode === 'EXAM'
-            ? { examAnswerRevealPolicy: editExamAnswerRevealPolicy }
+            ? {
+                examAnswerRevealPolicy: editExamAnswerRevealPolicy,
+                rosterMode: 'PRECONFIGURED',
+              }
             : {}),
         },
         isPublic: editIsPublic,
       });
+
+      const latestList = await loadGameParticipants(activeGameSpec.gameId, true);
+
       setActiveGameSpec(updated);
       syncEditorFromSpec(updated);
       setSavedGames((prev) =>
@@ -1567,7 +2008,14 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         )
       );
       setIsEditMode(false);
-      toast.success('Đã lưu cập nhật bộ câu hỏi thành công.', 'Đã lưu');
+      if (editSessionMode === 'EXAM' && latestList.length === 0) {
+        const emptyMsg = 'Đã lưu chế độ Thi. Bạn cần thêm danh sách thí sinh trước khi mở kỳ thi.';
+        setDetailSaveBanner(emptyMsg);
+        toast.warning(emptyMsg, 'Đã lưu chế độ Thi');
+      } else {
+        setDetailSaveBanner(null);
+        toast.success('Đã lưu cập nhật bộ câu hỏi thành công.', 'Đã lưu');
+      }
       await loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter, discoverTab);
     } catch (err: any) {
       toast.error(err.message || 'Không thể lưu chỉnh sửa câu hỏi.', 'Lỗi lưu');
@@ -1795,6 +2243,46 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           --discover-status-draft-text: #b45309;
           --discover-status-draft-border: #fcd34d;
         }
+        .library-edit-workspace-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr);
+          gap: 20px;
+          align-items: start;
+          width: 100%;
+        }
+        @media (min-width: 960px) {
+          .library-edit-workspace-grid[data-session-mode="EXAM"] {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+          }
+          .library-edit-workspace-grid[data-session-mode="PLAY"] {
+            grid-template-columns: minmax(0, 1fr);
+          }
+          .library-roster-table-scroll {
+            max-height: 280px;
+            overflow-y: auto;
+            overscroll-behavior: contain;
+            scrollbar-gutter: stable;
+          }
+        }
+        @media (max-width: 959px) {
+          .library-edit-workspace-grid {
+            grid-template-columns: minmax(0, 1fr) !important;
+            gap: 16px;
+          }
+          .library-roster-table-scroll {
+            max-height: none !important;
+            overflow-y: visible !important;
+          }
+        }
+        @media (max-width: 640px) {
+          .library-roster-table th.hide-on-mobile,
+          .library-roster-table td.hide-on-mobile {
+            display: none;
+          }
+          .library-roster-mobile-meta {
+            display: block !important;
+          }
+        }
       `}</style>
       {/* 1. KHI ĐANG MỞ XEM CHI TIẾT / CHỈNH SỬA BỘ CÂU HỎI */}
       {activeGameSpec ? (
@@ -1872,25 +2360,219 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               padding: '20px',
             }}
           >
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'flex-start',
-                flexWrap: 'wrap',
-                gap: '16px',
-                marginBottom: '20px',
-                paddingBottom: '16px',
-                borderBottom: '1px solid var(--border-subtle)',
-              }}
-            >
-              <div style={{ flex: '1 1 380px' }}>
-                {isEditMode ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            {isEditMode ? (
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '16px',
+                  marginBottom: '20px',
+                  paddingBottom: '18px',
+                  borderBottom: '1px solid var(--border-subtle)',
+                }}
+              >
+                {/* Thanh thao tác Chỉnh sửa Game gọn gàng trên cùng */}
+                <div
+                  data-testid="library-edit-action-bar"
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                    paddingBottom: '12px',
+                    borderBottom: '1px solid var(--border-subtle)',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    <span
+                      style={{
+                        fontSize: '0.92rem',
+                        fontWeight: 800,
+                        color: 'var(--text-primary)',
+                      }}
+                    >
+                      Thiết lập bộ câu hỏi
+                    </span>
+                    <span
+                      style={{
+                        fontSize: '0.78rem',
+                        color: 'var(--text-secondary)',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      • {editQuestions.length} câu hỏi • Chế độ:{' '}
+                      <strong
+                        style={{
+                          color:
+                            editSessionMode === 'EXAM'
+                              ? 'var(--accent-amber)'
+                              : 'var(--accent-emerald)',
+                        }}
+                      >
+                        {editSessionMode === 'EXAM' ? 'THI (Nghiêm túc)' : 'CHƠI (Luyện tập)'}
+                      </strong>
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                    {isLibraryMode && canManageGame(activeGameSpec) && (
+                      <>
+                        <button
+                          type="button"
+                          data-testid="library-edit-save-btn"
+                          onClick={handleSaveEdits}
+                          disabled={isSavingEdits}
+                          style={{
+                            backgroundColor: 'var(--primary)',
+                            color: 'var(--primary-ink, #ffffff)',
+                            border: 'none',
+                            borderRadius: '8px',
+                            padding: '0 16px',
+                            height: '38px',
+                            fontWeight: 700,
+                            fontSize: '0.84rem',
+                            cursor: isSavingEdits ? 'not-allowed' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          {isSavingEdits ? (
+                            <>
+                              <SpinnerIcon size={15} />
+                              <span>Đang lưu...</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckIcon size={15} />
+                              <span>Lưu Thay Đổi</span>
+                            </>
+                          )}
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="library-edit-add-question-btn"
+                          onClick={handleAddEditQuestion}
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--accent-sky)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '8px',
+                            padding: '0 14px',
+                            height: '38px',
+                            fontWeight: 700,
+                            fontSize: '0.84rem',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                          }}
+                        >
+                          <PlusIcon size={14} />
+                          <span>Thêm câu hỏi</span>
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="library-edit-cancel-btn"
+                          onClick={() => {
+                            syncEditorFromSpec(activeGameSpec);
+                            setIsEditMode(false);
+                          }}
+                          style={{
+                            backgroundColor: 'var(--bg-input)',
+                            color: 'var(--text-secondary)',
+                            border: '1px solid var(--border-strong)',
+                            borderRadius: '8px',
+                            padding: '0 14px',
+                            height: '38px',
+                            fontWeight: 600,
+                            fontSize: '0.84rem',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Hủy sửa
+                        </button>
+                      </>
+                    )}
+                    <button
+                      type="button"
+                      data-testid="library-edit-close-btn"
+                      onClick={() => setActiveGameSpec(null)}
+                      style={{
+                        backgroundColor: 'transparent',
+                        color: 'var(--text-secondary)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '8px',
+                        padding: '0 12px',
+                        height: '38px',
+                        fontWeight: 600,
+                        fontSize: '0.82rem',
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <XMarkIcon size={14} />
+                      <span>Đóng</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Bố cục 2 cột trên Desktop: Cột trái (Cấu hình game) & Cột phải (Danh sách thí sinh khi chọn THI) */}
+                <div
+                  className="library-edit-workspace-grid"
+                  data-testid="library-edit-workspace-grid"
+                  data-session-mode={editSessionMode}
+                >
+                  {/* CỘT TRÁI — CẤU HÌNH GAME */}
+                  <div
+                    data-testid="library-edit-config-column"
+                    style={{
+                      backgroundColor: 'var(--bg-card)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '12px',
+                      padding: '16px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '14px',
+                      minWidth: 0,
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        gap: '8px',
+                        paddingBottom: '8px',
+                        borderBottom: '1px solid var(--border-subtle)',
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: '0.9rem',
+                          fontWeight: 800,
+                          color: 'var(--text-primary)',
+                        }}
+                      >
+                        Cấu hình game
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '0.75rem',
+                          color: 'var(--text-secondary)',
+                        }}
+                      >
+                        Thông tin chung & chế độ vận hành
+                      </span>
+                    </div>
+
                     <div
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
                         gap: '12px',
                       }}
                     >
@@ -1920,7 +2602,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             backgroundColor: 'var(--bg-input)',
                             color: 'var(--text-primary)',
                             fontWeight: 700,
-                            fontSize: '0.92rem',
+                            fontSize: '0.9rem',
                             boxSizing: 'border-box',
                             height: '40px',
                           }}
@@ -1962,7 +2644,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     <div
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+                        gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))',
                         gap: '12px',
                       }}
                     >
@@ -2087,7 +2769,13 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           id="edit-spec-session-mode"
                           data-testid="library-edit-session-mode-select"
                           value={editSessionMode}
-                          onChange={(e) => setEditSessionMode(e.target.value as SessionMode)}
+                          onChange={(e) => {
+                            const nextMode = e.target.value as SessionMode;
+                            setEditSessionMode(nextMode);
+                            if (nextMode === 'EXAM' && activeGameSpec?.gameId) {
+                              loadGameParticipants(activeGameSpec.gameId);
+                            }
+                          }}
                           style={{
                             width: '100%',
                             padding: '8px 12px',
@@ -2112,11 +2800,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                               display: 'block',
                               fontSize: '0.78rem',
                               fontWeight: 700,
-                              color: 'var(--accent-amber)',
+                              color: 'var(--text-secondary)',
                               marginBottom: '6px',
                             }}
                           >
-                            Chế độ hiển thị đáp án (Chế độ Thi):
+                            Chế độ hiển thị đáp án (Chế độ Thi)
                           </label>
                           <select
                             id="edit-spec-exam-reveal-policy"
@@ -2129,7 +2817,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                               width: '100%',
                               padding: '8px 12px',
                               borderRadius: '8px',
-                              border: '1px solid rgba(245, 158, 11, 0.45)',
+                              border: '1px solid var(--border-strong)',
                               backgroundColor: 'var(--bg-input)',
                               color: 'var(--text-primary)',
                               fontWeight: 700,
@@ -2144,50 +2832,1108 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       )}
                     </div>
                   </div>
-                ) : (
-                  <>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                      <span
+
+                  {/* CỘT PHẢI — DANH SÁCH THÍ SINH (CHỈ HIỂN THỊ KHI CHỌN THI) */}
+                  {editSessionMode === 'EXAM' && (
+                    <div
+                      data-testid="library-edit-exam-roster-section"
+                      style={{
+                        backgroundColor: 'var(--bg-card)',
+                        border: '1px solid var(--border-subtle)',
+                        borderRadius: '12px',
+                        padding: '16px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '12px',
+                        minWidth: 0,
+                      }}
+                    >
+                      {/* Header Card: Tiêu đề + Số lượng + 2 nút hành động */}
+                      <div
                         style={{
-                          backgroundColor: 'rgba(56, 189, 248, 0.14)',
-                          color: 'var(--accent-sky)',
-                          padding: '3px 10px',
-                          borderRadius: '6px',
-                          fontSize: '0.76rem',
-                          fontWeight: 700,
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'flex-start',
+                          flexWrap: 'wrap',
+                          gap: '10px',
+                          paddingBottom: '10px',
+                          borderBottom: '1px solid var(--border-subtle)',
                         }}
                       >
-                        {formatGameTypeName(activeGameSpec.gameType)}
-                      </span>
-                      <span
-                        data-testid="detail-game-mode-badge"
-                        data-mode={activeGameSpec.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY'}
-                        style={{
-                          backgroundColor:
-                            activeGameSpec.settings?.sessionMode === 'EXAM'
-                              ? 'rgba(239, 68, 68, 0.16)'
-                              : 'rgba(16, 185, 129, 0.16)',
-                          color:
-                            activeGameSpec.settings?.sessionMode === 'EXAM'
-                              ? 'var(--accent-rose)'
-                              : 'var(--accent-emerald)',
-                          border: `1px solid ${
-                            activeGameSpec.settings?.sessionMode === 'EXAM'
-                              ? 'rgba(239, 68, 68, 0.4)'
-                              : 'rgba(16, 185, 129, 0.4)'
-                          }`,
-                          padding: '3px 10px',
-                          borderRadius: '6px',
-                          fontSize: '0.75rem',
-                          fontWeight: 900,
-                          letterSpacing: '0.03em',
-                        }}
-                      >
-                        {activeGameSpec.settings?.sessionMode === 'EXAM' ? 'THI' : 'CHƠI'}
-                      </span>
-                      {isLibraryMode &&
-                        canManageGame(activeGameSpec) &&
-                        activeGameSpec.settings?.sessionMode === 'EXAM' && (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                            <span
+                              style={{
+                                fontSize: '0.9rem',
+                                fontWeight: 800,
+                                color: 'var(--text-primary)',
+                              }}
+                            >
+                              Danh sách thí sinh
+                            </span>
+                            <span
+                              data-testid="library-edit-roster-count-badge"
+                              style={{
+                                padding: '2px 9px',
+                                borderRadius: '999px',
+                                fontSize: '0.75rem',
+                                fontWeight: 700,
+                                fontVariantNumeric: 'tabular-nums',
+                                backgroundColor:
+                                  gameParticipants.length > 0
+                                    ? 'var(--accent-emerald-subtle)'
+                                    : 'var(--accent-amber-subtle)',
+                                color:
+                                  gameParticipants.length > 0
+                                    ? 'var(--accent-emerald)'
+                                    : 'var(--accent-amber)',
+                                border: '1px solid var(--border-subtle)',
+                              }}
+                            >
+                              {gameParticipants.length} thí sinh hợp lệ
+                            </span>
+                          </div>
+                          <span style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                            Chỉ thí sinh trong danh sách mới được vào thi chính thức
+                          </span>
+                        </div>
+
+                        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            data-testid="library-roster-toggle-manual-btn"
+                            onClick={() =>
+                              setLibraryRosterPanel((prev) => (prev === 'MANUAL' ? 'NONE' : 'MANUAL'))
+                            }
+                            style={{
+                              height: '34px',
+                              padding: '0 12px',
+                              borderRadius: '8px',
+                              border:
+                                libraryRosterPanel === 'MANUAL'
+                                  ? '1px solid var(--primary)'
+                                  : '1px solid var(--border-strong)',
+                              backgroundColor:
+                                libraryRosterPanel === 'MANUAL'
+                                  ? 'var(--primary)'
+                                  : 'var(--bg-input)',
+                              color:
+                                libraryRosterPanel === 'MANUAL'
+                                  ? 'var(--primary-ink, #ffffff)'
+                                  : 'var(--text-primary)',
+                              fontWeight: 700,
+                              fontSize: '0.78rem',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                            }}
+                          >
+                            <PlusIcon size={13} />
+                            <span>Thêm thí sinh</span>
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="library-roster-toggle-bulk-btn"
+                            onClick={() =>
+                              setLibraryRosterPanel((prev) => (prev === 'BULK' ? 'NONE' : 'BULK'))
+                            }
+                            style={{
+                              height: '34px',
+                              padding: '0 12px',
+                              borderRadius: '8px',
+                              border:
+                                libraryRosterPanel === 'BULK'
+                                  ? '1px solid var(--primary)'
+                                  : '1px solid var(--border-strong)',
+                              backgroundColor:
+                                libraryRosterPanel === 'BULK'
+                                  ? 'var(--primary)'
+                                  : 'var(--bg-input)',
+                              color:
+                                libraryRosterPanel === 'BULK'
+                                  ? 'var(--primary-ink, #ffffff)'
+                                  : 'var(--text-primary)',
+                              fontWeight: 700,
+                              fontSize: '0.78rem',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                            }}
+                          >
+                            <UploadIcon size={13} />
+                            <span>Nhập danh sách</span>
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Thông báo ngắn khi danh sách trống */}
+                      {gameParticipants.length === 0 && (
+                        <div
+                          data-testid="library-edit-empty-roster-notice"
+                          style={{
+                            padding: '10px 12px',
+                            borderRadius: '8px',
+                            backgroundColor: 'var(--accent-amber-subtle)',
+                            border: '1px solid var(--border-strong)',
+                            color: 'var(--accent-amber)',
+                            fontSize: '0.79rem',
+                            lineHeight: 1.45,
+                            fontWeight: 600,
+                          }}
+                        >
+                          Chưa có danh sách thí sinh. Bạn vẫn có thể <strong>Lưu thay đổi</strong> ở chế độ Thi, nhưng cần thêm ít nhất 1 thí sinh hợp lệ trước khi mở kỳ thi chính thức.
+                        </div>
+                      )}
+
+                      {/* Thông báo kết quả thao tác */}
+                      {rosterActionNotice && (
+                        <div
+                          data-testid="library-roster-action-notice"
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            backgroundColor:
+                              rosterActionNotice.type === 'error'
+                                ? 'var(--accent-rose-subtle)'
+                                : rosterActionNotice.type === 'warning'
+                                  ? 'var(--accent-amber-subtle)'
+                                  : 'var(--accent-emerald-subtle)',
+                            color:
+                              rosterActionNotice.type === 'error'
+                                ? 'var(--accent-rose)'
+                                : rosterActionNotice.type === 'warning'
+                                  ? 'var(--accent-amber)'
+                                  : 'var(--accent-emerald)',
+                            border: '1px solid var(--border-subtle)',
+                          }}
+                        >
+                          {rosterActionNotice.text}
+                        </div>
+                      )}
+
+                      {/* PANEL 1: THÊM THÍ SINH THỦ CÔNG (CHỈ MỞ KHI NHẤN "THÊM THÍ SINH") */}
+                      {libraryRosterPanel === 'MANUAL' && (
+                        <div
+                          data-testid="library-roster-manual-panel"
+                          style={{
+                            padding: '12px',
+                            borderRadius: '10px',
+                            backgroundColor: 'var(--bg-input)',
+                            border: '1px solid var(--border-subtle)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '10px',
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'grid',
+                              gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))',
+                              gap: '8px',
+                            }}
+                          >
+                            <div>
+                              <label
+                                htmlFor="library-roster-quick-name"
+                                style={{
+                                  display: 'block',
+                                  fontSize: '0.74rem',
+                                  fontWeight: 600,
+                                  color: 'var(--text-secondary)',
+                                  marginBottom: '4px',
+                                }}
+                              >
+                                Họ và tên *
+                              </label>
+                              <input
+                                id="library-roster-quick-name"
+                                data-testid="library-roster-quick-name-input"
+                                type="text"
+                                value={singleParticipantName}
+                                onChange={(e) => setSingleParticipantName(e.target.value)}
+                                placeholder="VD: Nguyễn Văn A"
+                                style={{
+                                  width: '100%',
+                                  height: '38px',
+                                  padding: '6px 10px',
+                                  borderRadius: '8px',
+                                  border: '1px solid var(--border-strong)',
+                                  backgroundColor: 'var(--bg-surface)',
+                                  color: 'var(--text-primary)',
+                                  fontSize: '0.82rem',
+                                  boxSizing: 'border-box',
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <label
+                                htmlFor="library-roster-quick-dept"
+                                style={{
+                                  display: 'block',
+                                  fontSize: '0.74rem',
+                                  fontWeight: 600,
+                                  color: 'var(--text-secondary)',
+                                  marginBottom: '4px',
+                                }}
+                              >
+                                Đơn vị / Phòng ban
+                              </label>
+                              <input
+                                id="library-roster-quick-dept"
+                                data-testid="library-roster-quick-dept-input"
+                                type="text"
+                                value={singleParticipantDept}
+                                onChange={(e) => setSingleParticipantDept(e.target.value)}
+                                placeholder="VD: Phòng Kỹ thuật"
+                                style={{
+                                  width: '100%',
+                                  height: '38px',
+                                  padding: '6px 10px',
+                                  borderRadius: '8px',
+                                  border: '1px solid var(--border-strong)',
+                                  backgroundColor: 'var(--bg-surface)',
+                                  color: 'var(--text-primary)',
+                                  fontSize: '0.82rem',
+                                  boxSizing: 'border-box',
+                                }}
+                              />
+                            </div>
+                            <div>
+                              <label
+                                htmlFor="library-roster-quick-code"
+                                style={{
+                                  display: 'block',
+                                  fontSize: '0.74rem',
+                                  fontWeight: 600,
+                                  color: 'var(--text-secondary)',
+                                  marginBottom: '4px',
+                                }}
+                              >
+                                Mã nhân viên (tuỳ chọn)
+                              </label>
+                              <input
+                                id="library-roster-quick-code"
+                                data-testid="library-roster-quick-code-input"
+                                type="text"
+                                value={singleParticipantCode}
+                                onChange={(e) => setSingleParticipantCode(e.target.value)}
+                                placeholder="VD: NV001"
+                                style={{
+                                  width: '100%',
+                                  height: '38px',
+                                  padding: '6px 10px',
+                                  borderRadius: '8px',
+                                  border: '1px solid var(--border-strong)',
+                                  backgroundColor: 'var(--bg-surface)',
+                                  color: 'var(--text-primary)',
+                                  fontSize: '0.82rem',
+                                  boxSizing: 'border-box',
+                                }}
+                              />
+                            </div>
+                          </div>
+
+                          {singleParticipantError && (
+                            <div
+                              data-testid="library-roster-single-error"
+                              style={{ color: 'var(--accent-rose)', fontSize: '0.75rem', fontWeight: 700 }}
+                            >
+                              {singleParticipantError}
+                            </div>
+                          )}
+
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
+                            <button
+                              type="button"
+                              data-testid="library-roster-cancel-manual-btn"
+                              onClick={() => setLibraryRosterPanel('NONE')}
+                              style={{
+                                height: '34px',
+                                padding: '0 12px',
+                                borderRadius: '7px',
+                                border: '1px solid var(--border-strong)',
+                                backgroundColor: 'var(--bg-surface)',
+                                color: 'var(--text-secondary)',
+                                fontWeight: 600,
+                                fontSize: '0.78rem',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Thu gọn
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="library-roster-add-single-btn"
+                              onClick={handleAddSingleParticipantInLibrary}
+                              disabled={isSavingRosterAction}
+                              style={{
+                                height: '34px',
+                                padding: '0 14px',
+                                borderRadius: '7px',
+                                border: 'none',
+                                backgroundColor: 'var(--primary)',
+                                color: 'var(--primary-ink, #ffffff)',
+                                fontWeight: 700,
+                                fontSize: '0.78rem',
+                                cursor: isSavingRosterAction ? 'not-allowed' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
+                              }}
+                            >
+                              <CheckIcon size={13} />
+                              <span>Xác nhận thêm</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* PANEL 2: NHẬP DANH SÁCH HÀNG LOẠT (CHỈ MỞ KHI NHẤN "NHẬP DANH SÁCH") */}
+                      {libraryRosterPanel === 'BULK' && (
+                        <div
+                          data-testid="library-roster-bulk-panel"
+                          style={{
+                            padding: '12px',
+                            borderRadius: '10px',
+                            backgroundColor: 'var(--bg-input)',
+                            border: '1px solid var(--border-subtle)',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '10px',
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              flexWrap: 'wrap',
+                              gap: '8px',
+                            }}
+                          >
+                            <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                data-testid="library-roster-subtab-paste"
+                                onClick={() => setLibraryRosterBulkTab('PASTE')}
+                                style={{
+                                  height: '32px',
+                                  padding: '0 12px',
+                                  borderRadius: '7px',
+                                  border:
+                                    libraryRosterBulkTab === 'PASTE'
+                                      ? '1px solid var(--primary)'
+                                      : '1px solid var(--border-strong)',
+                                  backgroundColor:
+                                    libraryRosterBulkTab === 'PASTE'
+                                      ? 'var(--primary-subtle)'
+                                      : 'var(--bg-surface)',
+                                  color:
+                                    libraryRosterBulkTab === 'PASTE'
+                                      ? 'var(--primary)'
+                                      : 'var(--text-secondary)',
+                                  fontWeight: 700,
+                                  fontSize: '0.76rem',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Dán nhanh
+                              </button>
+                              <button
+                                type="button"
+                                data-testid="library-roster-subtab-file"
+                                onClick={() => setLibraryRosterBulkTab('FILE')}
+                                style={{
+                                  height: '32px',
+                                  padding: '0 12px',
+                                  borderRadius: '7px',
+                                  border:
+                                    libraryRosterBulkTab === 'FILE'
+                                      ? '1px solid var(--primary)'
+                                      : '1px solid var(--border-strong)',
+                                  backgroundColor:
+                                    libraryRosterBulkTab === 'FILE'
+                                      ? 'var(--primary-subtle)'
+                                      : 'var(--bg-surface)',
+                                  color:
+                                    libraryRosterBulkTab === 'FILE'
+                                      ? 'var(--primary)'
+                                      : 'var(--text-secondary)',
+                                  fontWeight: 700,
+                                  fontSize: '0.76rem',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Excel / CSV
+                              </button>
+                            </div>
+
+                            <button
+                              type="button"
+                              data-testid="library-roster-cancel-bulk-btn"
+                              onClick={() => setLibraryRosterPanel('NONE')}
+                              style={{
+                                height: '30px',
+                                padding: '0 10px',
+                                borderRadius: '6px',
+                                border: '1px solid var(--border-strong)',
+                                backgroundColor: 'var(--bg-surface)',
+                                color: 'var(--text-secondary)',
+                                fontSize: '0.74rem',
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Thu gọn
+                            </button>
+                          </div>
+
+                          {libraryRosterBulkTab === 'PASTE' ? (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <label
+                                htmlFor="library-roster-bulk-textarea"
+                                style={{
+                                  display: 'block',
+                                  fontSize: '0.74rem',
+                                  fontWeight: 600,
+                                  color: 'var(--text-secondary)',
+                                }}
+                              >
+                                Định dạng mỗi dòng: <strong>Họ và tên | Đơn vị | Mã NV</strong>
+                              </label>
+                              <textarea
+                                id="library-roster-bulk-textarea"
+                                data-testid="library-roster-bulk-textarea"
+                                rows={3}
+                                value={bulkPasteText}
+                                onChange={(e) => setBulkPasteText(e.target.value)}
+                                placeholder={'Nguyễn Văn A | Phòng Kinh Doanh | NV01\nTrần Thị B | Phòng Nhân Sự | NV02'}
+                                style={{
+                                  width: '100%',
+                                  padding: '8px 10px',
+                                  borderRadius: '8px',
+                                  border: '1px solid var(--border-strong)',
+                                  backgroundColor: 'var(--bg-surface)',
+                                  color: 'var(--text-primary)',
+                                  fontSize: '0.8rem',
+                                  boxSizing: 'border-box',
+                                  resize: 'vertical',
+                                }}
+                              />
+                              {bulkPasteDiagnostics &&
+                                (bulkPasteDiagnostics.duplicateCount > 0 ||
+                                  bulkPasteDiagnostics.invalidRows.length > 0) && (
+                                  <div
+                                    data-testid="library-roster-paste-diagnostics"
+                                    style={{
+                                      padding: '8px 10px',
+                                      borderRadius: '8px',
+                                      backgroundColor: 'var(--bg-surface)',
+                                      border: '1px solid var(--border-subtle)',
+                                      fontSize: '0.75rem',
+                                      display: 'flex',
+                                      flexDirection: 'column',
+                                      gap: '3px',
+                                    }}
+                                  >
+                                    {bulkPasteDiagnostics.duplicateCount > 0 && (
+                                      <div style={{ color: 'var(--accent-amber)', fontWeight: 600 }}>
+                                        Cảnh báo: {bulkPasteDiagnostics.duplicateCount} thí sinh trùng tên (
+                                        {bulkPasteDiagnostics.duplicateNames.slice(0, 5).join(', ')}).
+                                      </div>
+                                    )}
+                                    {bulkPasteDiagnostics.invalidRows.length > 0 && (
+                                      <div style={{ color: 'var(--accent-rose)', fontWeight: 600 }}>
+                                        Bỏ qua {bulkPasteDiagnostics.invalidRows.length} dòng không hợp lệ (thiếu Họ tên): dòng{' '}
+                                        {bulkPasteDiagnostics.invalidRows.map((r) => r.rowNumber).slice(0, 8).join(', ')}
+                                      </div>
+                                    )}
+                                  </div>
+                                )}
+                              <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                                <button
+                                  type="button"
+                                  data-testid="library-roster-add-bulk-btn"
+                                  onClick={handleAddBulkPasteParticipantsInLibrary}
+                                  disabled={isSavingRosterAction || !bulkPasteText.trim()}
+                                  style={{
+                                    height: '34px',
+                                    padding: '0 14px',
+                                    borderRadius: '7px',
+                                    border: 'none',
+                                    backgroundColor: 'var(--primary)',
+                                    color: 'var(--primary-ink, #ffffff)',
+                                    fontSize: '0.78rem',
+                                    fontWeight: 700,
+                                    cursor:
+                                      isSavingRosterAction || !bulkPasteText.trim()
+                                        ? 'not-allowed'
+                                        : 'pointer',
+                                    opacity: isSavingRosterAction || !bulkPasteText.trim() ? 0.6 : 1,
+                                  }}
+                                >
+                                  + Nạp danh sách dán nhanh
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                              <div style={{ fontSize: '0.74rem', color: 'var(--text-secondary)' }}>
+                                Hỗ trợ tệp <strong>.xlsx, .xls, .csv</strong> (các cột: Họ và tên, Đơn vị / Phòng ban, Mã NV).
+                              </div>
+                              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                                <label
+                                  data-testid="library-roster-upload-label"
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '6px',
+                                    height: '36px',
+                                    padding: '0 14px',
+                                    borderRadius: '8px',
+                                    border: '1px dashed var(--primary)',
+                                    backgroundColor: 'var(--bg-surface)',
+                                    color: 'var(--primary)',
+                                    fontSize: '0.79rem',
+                                    fontWeight: 700,
+                                    cursor: isParsingRosterFile || isSavingRosterAction ? 'not-allowed' : 'pointer',
+                                  }}
+                                >
+                                  <UploadIcon size={14} />
+                                  <span>
+                                    {isParsingRosterFile ? 'Đang phân tích file...' : 'Chọn file Excel / CSV'}
+                                  </span>
+                                  <input
+                                    data-testid="library-roster-file-input"
+                                    type="file"
+                                    accept=".xlsx,.xls,.csv"
+                                    onChange={handlePreviewRosterFileInLibrary}
+                                    disabled={isParsingRosterFile || isSavingRosterAction}
+                                    style={{ display: 'none' }}
+                                  />
+                                </label>
+                              </div>
+
+                              {rosterImportPreview && (
+                                <div
+                                  data-testid="library-roster-import-preview"
+                                  style={{
+                                    padding: '10px 12px',
+                                    borderRadius: '8px',
+                                    backgroundColor: 'var(--bg-surface)',
+                                    border: '1px solid var(--border-strong)',
+                                    fontSize: '0.78rem',
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: '4px',
+                                  }}
+                                >
+                                  <div style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
+                                    Xem trước file import: {rosterImportPreview.validCount}/{rosterImportPreview.totalRows} dòng hợp lệ
+                                  </div>
+                                  {rosterImportPreview.duplicateCount > 0 && (
+                                    <div
+                                      data-testid="library-roster-duplicate-warning"
+                                      style={{ color: 'var(--accent-amber)', fontSize: '0.75rem', fontWeight: 600 }}
+                                    >
+                                      Phát hiện {rosterImportPreview.duplicateCount} thí sinh trùng tên ({rosterImportPreview.duplicateNames.slice(0, 5).join(', ')}) — hệ thống gợi ý kèm Đơn vị để phân biệt.
+                                    </div>
+                                  )}
+                                  {rosterImportPreview.invalidRows.length > 0 && (
+                                    <div
+                                      data-testid="library-roster-invalid-warning"
+                                      style={{ color: 'var(--accent-rose)', fontSize: '0.75rem', fontWeight: 600 }}
+                                    >
+                                      Có {rosterImportPreview.invalidRows.length} dòng lỗi (thiếu Họ tên): dòng{' '}
+                                      {rosterImportPreview.invalidRows.map((r) => r.rowNumber).slice(0, 8).join(', ')}
+                                    </div>
+                                  )}
+                                  <div style={{ display: 'flex', gap: '8px', marginTop: '4px', flexWrap: 'wrap' }}>
+                                    <button
+                                      type="button"
+                                      data-testid="library-roster-confirm-import-btn"
+                                      onClick={() => handleConfirmRosterImportInLibrary('APPEND')}
+                                      disabled={isSavingRosterAction || rosterImportPreview.validCount === 0}
+                                      style={{
+                                        height: '32px',
+                                        padding: '0 12px',
+                                        borderRadius: '6px',
+                                        border: 'none',
+                                        backgroundColor: 'var(--primary)',
+                                        color: 'var(--primary-ink, #ffffff)',
+                                        fontWeight: 700,
+                                        fontSize: '0.76rem',
+                                        cursor:
+                                          isSavingRosterAction || rosterImportPreview.validCount === 0
+                                            ? 'not-allowed'
+                                            : 'pointer',
+                                      }}
+                                    >
+                                      Xác nhận nạp {rosterImportPreview.validCount} thí sinh
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setRosterImportPreview(null)}
+                                      style={{
+                                        height: '32px',
+                                        padding: '0 10px',
+                                        borderRadius: '6px',
+                                        border: '1px solid var(--border-strong)',
+                                        backgroundColor: 'var(--bg-input)',
+                                        color: 'var(--text-secondary)',
+                                        fontSize: '0.75rem',
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      Huỷ xem trước
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* DANH SÁCH TÓM TẮT / QUẢN LÝ THÍ SINH ĐÃ LƯU */}
+                      {(() => {
+                        const normalizedFilter = rosterSearchTerm.trim().toLowerCase();
+                        const filteredRoster = normalizedFilter
+                          ? gameParticipants.filter(
+                              (pt) =>
+                                pt.fullName.toLowerCase().includes(normalizedFilter) ||
+                                (pt.departmentUnit || '').toLowerCase().includes(normalizedFilter) ||
+                                (pt.employeeCode || '').toLowerCase().includes(normalizedFilter)
+                            )
+                          : gameParticipants;
+                        const visibleRoster =
+                          isRosterListExpanded || filteredRoster.length <= 5
+                            ? filteredRoster
+                            : filteredRoster.slice(0, 5);
+
+                        return (
+                          <div
+                            data-testid="library-roster-saved-list"
+                            style={{
+                              borderRadius: '10px',
+                              border: '1px solid var(--border-subtle)',
+                              backgroundColor: 'var(--bg-surface)',
+                              overflow: 'hidden',
+                            }}
+                          >
+                            {gameParticipants.length > 0 && (
+                              <div
+                                style={{
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  padding: '8px 10px',
+                                  borderBottom: '1px solid var(--border-subtle)',
+                                  backgroundColor: 'var(--bg-input)',
+                                  flexWrap: 'wrap',
+                                }}
+                              >
+                                <input
+                                  type="text"
+                                  data-testid="library-roster-search-input"
+                                  value={rosterSearchTerm}
+                                  onChange={(e) => setRosterSearchTerm(e.target.value)}
+                                  placeholder="Tìm theo họ tên, đơn vị..."
+                                  style={{
+                                    flex: '1 1 160px',
+                                    height: '32px',
+                                    padding: '4px 10px',
+                                    borderRadius: '6px',
+                                    border: '1px solid var(--border-strong)',
+                                    backgroundColor: 'var(--bg-surface)',
+                                    color: 'var(--text-primary)',
+                                    fontSize: '0.76rem',
+                                    boxSizing: 'border-box',
+                                  }}
+                                />
+                                {filteredRoster.length > 5 && (
+                                  <button
+                                    type="button"
+                                    data-testid="library-roster-expand-list-btn"
+                                    onClick={() => setIsRosterListExpanded((prev) => !prev)}
+                                    style={{
+                                      height: '30px',
+                                      padding: '0 10px',
+                                      borderRadius: '6px',
+                                      border: '1px solid var(--border-strong)',
+                                      backgroundColor: 'var(--bg-surface)',
+                                      color: 'var(--primary)',
+                                      fontSize: '0.74rem',
+                                      fontWeight: 700,
+                                      cursor: 'pointer',
+                                    }}
+                                  >
+                                    {isRosterListExpanded
+                                      ? 'Thu gọn danh sách'
+                                      : `Xem tất cả (${filteredRoster.length})`}
+                                  </button>
+                                )}
+                              </div>
+                            )}
+
+                            <div className="library-roster-table-scroll">
+                              {isLoadingParticipants ? (
+                                <div style={{ padding: '12px', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                                  Đang tải danh sách thí sinh...
+                                </div>
+                              ) : gameParticipants.length === 0 ? (
+                                <div style={{ padding: '12px', fontSize: '0.79rem', color: 'var(--text-muted)' }}>
+                                  Danh sách đang trống. Nhấn <strong>Thêm thí sinh</strong> hoặc <strong>Nhập danh sách</strong> để bổ sung.
+                                </div>
+                              ) : filteredRoster.length === 0 ? (
+                                <div style={{ padding: '12px', fontSize: '0.79rem', color: 'var(--text-muted)' }}>
+                                  Không tìm thấy thí sinh phù hợp với từ khoá "{rosterSearchTerm}".
+                                </div>
+                              ) : (
+                                <table
+                                  className="library-roster-table"
+                                  style={{
+                                    width: '100%',
+                                    borderCollapse: 'collapse',
+                                    fontSize: '0.78rem',
+                                  }}
+                                >
+                                  <thead>
+                                    <tr
+                                      style={{
+                                        borderBottom: '1px solid var(--border-subtle)',
+                                        textAlign: 'left',
+                                        color: 'var(--text-secondary)',
+                                      }}
+                                    >
+                                      <th style={{ padding: '8px 10px', width: '36px' }}>#</th>
+                                      <th style={{ padding: '8px 10px' }}>Họ và tên</th>
+                                      <th className="hide-on-mobile" style={{ padding: '8px 10px' }}>
+                                        Đơn vị
+                                      </th>
+                                      <th className="hide-on-mobile" style={{ padding: '8px 10px' }}>
+                                        Trạng thái
+                                      </th>
+                                      <th style={{ padding: '8px 10px', textAlign: 'right' }}>Thao tác</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {visibleRoster.map((pt, idx) => {
+                                      const hasAttempted =
+                                        (pt.usedAttempts || 0) > 0 ||
+                                        pt.status === 'COMPLETED' ||
+                                        pt.status === 'IN_PROGRESS';
+                                      const isEditingThis = editingParticipantId === pt.participantId;
+                                      const statusLabel =
+                                        pt.status === 'COMPLETED'
+                                          ? `Đã thi (${pt.usedAttempts}/${pt.allowedAttempts})`
+                                          : pt.status === 'IN_PROGRESS'
+                                            ? `Đang thi (${pt.usedAttempts}/${pt.allowedAttempts})`
+                                            : `Chưa tham gia (${pt.usedAttempts}/${pt.allowedAttempts})`;
+                                      return (
+                                        <tr
+                                          key={pt.participantId}
+                                          data-testid={`library-roster-row-${pt.participantId}`}
+                                          style={{ borderBottom: '1px solid var(--border-subtle)' }}
+                                        >
+                                          <td style={{ padding: '7px 10px', color: 'var(--text-muted)' }}>
+                                            {idx + 1}
+                                          </td>
+                                          <td style={{ padding: '7px 10px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                                            {isEditingThis ? (
+                                              <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                                                <input
+                                                  data-testid={`library-roster-edit-name-${pt.participantId}`}
+                                                  type="text"
+                                                  value={editingParticipantName}
+                                                  onChange={(e) => setEditingParticipantName(e.target.value)}
+                                                  style={{
+                                                    padding: '4px 8px',
+                                                    borderRadius: '6px',
+                                                    border: '1px solid var(--border-strong)',
+                                                    backgroundColor: 'var(--bg-input)',
+                                                    color: 'var(--text-primary)',
+                                                    fontSize: '0.78rem',
+                                                    width: '100%',
+                                                  }}
+                                                />
+                                              </div>
+                                            ) : (
+                                              <div>
+                                                <div>{pt.fullName}</div>
+                                                <div
+                                                  className="library-roster-mobile-meta"
+                                                  style={{
+                                                    display: 'none',
+                                                    fontSize: '0.72rem',
+                                                    fontWeight: 500,
+                                                    color: 'var(--text-secondary)',
+                                                    marginTop: '2px',
+                                                  }}
+                                                >
+                                                  {pt.departmentUnit || '—'} • {statusLabel}
+                                                </div>
+                                              </div>
+                                            )}
+                                          </td>
+                                          <td
+                                            className="hide-on-mobile"
+                                            style={{ padding: '7px 10px', color: 'var(--text-secondary)' }}
+                                          >
+                                            {isEditingThis ? (
+                                              <input
+                                                data-testid={`library-roster-edit-dept-${pt.participantId}`}
+                                                type="text"
+                                                value={editingParticipantDept}
+                                                onChange={(e) => setEditingParticipantDept(e.target.value)}
+                                                style={{
+                                                  padding: '4px 8px',
+                                                  borderRadius: '6px',
+                                                  border: '1px solid var(--border-strong)',
+                                                  backgroundColor: 'var(--bg-input)',
+                                                  color: 'var(--text-primary)',
+                                                  fontSize: '0.78rem',
+                                                  width: '100%',
+                                                }}
+                                              />
+                                            ) : (
+                                              pt.departmentUnit || '—'
+                                            )}
+                                          </td>
+                                          <td className="hide-on-mobile" style={{ padding: '7px 10px' }}>
+                                            <span
+                                              data-testid={`library-roster-status-${pt.participantId}`}
+                                              style={{
+                                                padding: '2px 7px',
+                                                borderRadius: '999px',
+                                                fontSize: '0.71rem',
+                                                fontWeight: 700,
+                                                backgroundColor: hasAttempted
+                                                  ? 'var(--accent-emerald-subtle)'
+                                                  : 'var(--bg-input)',
+                                                color: hasAttempted
+                                                  ? 'var(--accent-emerald)'
+                                                  : 'var(--text-secondary)',
+                                                border: '1px solid var(--border-subtle)',
+                                                whiteSpace: 'nowrap',
+                                              }}
+                                            >
+                                              {statusLabel}
+                                            </span>
+                                          </td>
+                                          <td style={{ padding: '7px 10px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                                            {isEditingThis ? (
+                                              <div style={{ display: 'inline-flex', gap: '4px' }}>
+                                                <button
+                                                  type="button"
+                                                  data-testid={`library-roster-save-edit-${pt.participantId}`}
+                                                  onClick={() => handleSaveParticipantEditInLibrary(pt.participantId)}
+                                                  style={{
+                                                    padding: '4px 8px',
+                                                    borderRadius: '5px',
+                                                    border: 'none',
+                                                    backgroundColor: 'var(--primary)',
+                                                    color: 'var(--primary-ink, #ffffff)',
+                                                    fontSize: '0.72rem',
+                                                    fontWeight: 700,
+                                                    cursor: 'pointer',
+                                                  }}
+                                                >
+                                                  Lưu
+                                                </button>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => setEditingParticipantId(null)}
+                                                  style={{
+                                                    padding: '4px 8px',
+                                                    borderRadius: '5px',
+                                                    border: '1px solid var(--border-strong)',
+                                                    backgroundColor: 'var(--bg-input)',
+                                                    color: 'var(--text-secondary)',
+                                                    fontSize: '0.72rem',
+                                                    cursor: 'pointer',
+                                                  }}
+                                                >
+                                                  Huỷ
+                                                </button>
+                                              </div>
+                                            ) : (
+                                              <div style={{ display: 'inline-flex', gap: '5px', alignItems: 'center' }}>
+                                                <button
+                                                  type="button"
+                                                  data-testid={`library-roster-edit-btn-${pt.participantId}`}
+                                                  onClick={() => {
+                                                    setEditingParticipantId(pt.participantId);
+                                                    setEditingParticipantName(pt.fullName);
+                                                    setEditingParticipantDept(pt.departmentUnit || '');
+                                                  }}
+                                                  style={{
+                                                    padding: '4px 8px',
+                                                    borderRadius: '5px',
+                                                    border: '1px solid var(--border-strong)',
+                                                    backgroundColor: 'var(--bg-input)',
+                                                    color: 'var(--text-primary)',
+                                                    fontSize: '0.72rem',
+                                                    cursor: 'pointer',
+                                                  }}
+                                                >
+                                                  Sửa
+                                                </button>
+                                                {hasAttempted && (
+                                                  <button
+                                                    type="button"
+                                                    data-testid={`library-roster-retake-btn-${pt.participantId}`}
+                                                    onClick={() => handleGrantParticipantRetakeInLibrary(pt)}
+                                                    style={{
+                                                      padding: '4px 8px',
+                                                      borderRadius: '5px',
+                                                      border: '1px solid var(--border-strong)',
+                                                      backgroundColor: 'var(--primary-subtle)',
+                                                      color: 'var(--primary)',
+                                                      fontSize: '0.72rem',
+                                                      fontWeight: 700,
+                                                      cursor: 'pointer',
+                                                    }}
+                                                  >
+                                                    +1 lượt
+                                                  </button>
+                                                )}
+                                                <button
+                                                  type="button"
+                                                  data-testid={`library-roster-delete-btn-${pt.participantId}`}
+                                                  onClick={() => handleDeleteParticipantInLibrary(pt)}
+                                                  title={
+                                                    hasAttempted
+                                                      ? 'Thí sinh đã có lịch sử dự thi — không thể xoá'
+                                                      : 'Xoá thí sinh khỏi danh sách'
+                                                  }
+                                                  style={{
+                                                    padding: '4px 8px',
+                                                    borderRadius: '5px',
+                                                    border: '1px solid var(--border-strong)',
+                                                    backgroundColor: 'var(--accent-rose-subtle)',
+                                                    color: 'var(--accent-rose)',
+                                                    fontSize: '0.72rem',
+                                                    fontWeight: 700,
+                                                    cursor: 'pointer',
+                                                    opacity: hasAttempted ? 0.55 : 1,
+                                                  }}
+                                                >
+                                                  Xoá
+                                                </button>
+                                              </div>
+                                            )}
+                                          </td>
+                                        </tr>
+                                      );
+                                    })}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+
+                            {!isRosterListExpanded && filteredRoster.length > 5 && (
+                              <div
+                                style={{
+                                  padding: '7px 10px',
+                                  borderTop: '1px solid var(--border-subtle)',
+                                  backgroundColor: 'var(--bg-input)',
+                                  fontSize: '0.74rem',
+                                  color: 'var(--text-secondary)',
+                                  display: 'flex',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                }}
+                              >
+                                <span>
+                                  Đang hiển thị 5/{filteredRoster.length} thí sinh
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setIsRosterListExpanded(true)}
+                                  style={{
+                                    border: 'none',
+                                    background: 'transparent',
+                                    color: 'var(--primary)',
+                                    fontWeight: 700,
+                                    fontSize: '0.74rem',
+                                    cursor: 'pointer',
+                                    padding: 0,
+                                  }}
+                                >
+                                  Mở rộng danh sách &rarr;
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'flex-start',
+                  flexWrap: 'wrap',
+                  gap: '16px',
+                  marginBottom: '20px',
+                  paddingBottom: '16px',
+                  borderBottom: '1px solid var(--border-subtle)',
+                }}
+              >
+                <div style={{ flex: '1 1 380px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                    <span
+                      style={{
+                        backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                        color: 'var(--accent-sky)',
+                        padding: '3px 10px',
+                        borderRadius: '6px',
+                        fontSize: '0.76rem',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {formatGameTypeName(activeGameSpec.gameType)}
+                    </span>
+                    <span
+                      data-testid="detail-game-mode-badge"
+                      data-mode={activeGameSpec.settings?.sessionMode === 'EXAM' ? 'EXAM' : 'PLAY'}
+                      style={{
+                        backgroundColor:
+                          activeGameSpec.settings?.sessionMode === 'EXAM'
+                            ? 'rgba(239, 68, 68, 0.16)'
+                            : 'rgba(16, 185, 129, 0.16)',
+                        color:
+                          activeGameSpec.settings?.sessionMode === 'EXAM'
+                            ? 'var(--accent-rose)'
+                            : 'var(--accent-emerald)',
+                        border: `1px solid ${
+                          activeGameSpec.settings?.sessionMode === 'EXAM'
+                            ? 'rgba(239, 68, 68, 0.4)'
+                            : 'rgba(16, 185, 129, 0.4)'
+                        }`,
+                        padding: '3px 10px',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
+                        fontWeight: 900,
+                        letterSpacing: '0.03em',
+                      }}
+                    >
+                      {activeGameSpec.settings?.sessionMode === 'EXAM' ? 'THI' : 'CHƠI'}
+                    </span>
+                    {isLibraryMode &&
+                      canManageGame(activeGameSpec) &&
+                      activeGameSpec.settings?.sessionMode === 'EXAM' && (
+                        <>
                           <span
                             data-testid="detail-exam-reveal-policy-badge"
                             style={{
@@ -2206,314 +3952,197 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                                 ? 'Đáp án: Sau khi nộp bài'
                                 : 'Đáp án: Khi công bố'}
                           </span>
-                        )}
-                      <span
-                        style={{
-                          backgroundColor: activeGameSpec.isPublic
-                            ? 'rgba(16, 185, 129, 0.14)'
-                            : 'rgba(245, 158, 11, 0.15)',
-                          color: activeGameSpec.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
-                          padding: '3px 10px',
-                          borderRadius: '6px',
-                          fontSize: '0.75rem',
-                          fontWeight: 700,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '4px',
-                        }}
-                      >
-                        {activeGameSpec.isPublic ? <CheckIcon size={12} /> : <PencilIcon size={12} />}
-                        <span>{activeGameSpec.isPublic ? 'Đã xuất bản' : 'Bản nháp'}</span>
-                      </span>
-                      <span
-                        style={{
-                          fontSize: '0.82rem',
-                          color: 'var(--text-secondary)',
-                          fontVariantNumeric: 'tabular-nums',
-                        }}
-                      >
-                        • {activeGameSpec.questions.length} câu hỏi • {activeGameSpec.settings.timePerQuestion}s/câu •
-                        Điểm: {formatScoringModeName(activeGameSpec.settings.scoringMode)}
-                      </span>
-                    </div>
-                    <h2
-                      style={{
-                        margin: '10px 0 6px 0',
-                        fontSize: '1.35rem',
-                        fontWeight: 800,
-                        color: 'var(--text-primary)',
-                      }}
-                    >
-                      {activeGameSpec.title}
-                    </h2>
-                    <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-                      {activeGameSpec.description}
-                    </p>
-                  </>
-                )}
-              </div>
-
-              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                {isLibraryMode && isEditMode && canManageGame(activeGameSpec) ? (
-                  <>
-                    <button
-                      type="button"
-                      onClick={handleSaveEdits}
-                      disabled={isSavingEdits}
-                      style={{
-                        backgroundColor: 'var(--accent-emerald)',
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: '8px',
-                        padding: '0 16px',
-                        height: '38px',
-                        fontWeight: 700,
-                        fontSize: '0.84rem',
-                        cursor: isSavingEdits ? 'not-allowed' : 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                      }}
-                    >
-                      {isSavingEdits ? (
-                        <>
-                          <SpinnerIcon size={15} />
-                          <span>Đang lưu...</span>
-                        </>
-                      ) : (
-                        <>
-                          <CheckIcon size={15} />
-                          <span>Lưu Thay Đổi</span>
+                          <span
+                            data-testid="detail-exam-roster-count-badge"
+                            style={{
+                              backgroundColor:
+                                gameParticipants.length > 0
+                                  ? 'rgba(16, 185, 129, 0.14)'
+                                  : 'rgba(239, 68, 68, 0.15)',
+                              color:
+                                gameParticipants.length > 0
+                                  ? 'var(--accent-emerald)'
+                                  : 'var(--accent-rose)',
+                              border: `1px solid ${
+                                gameParticipants.length > 0
+                                  ? 'rgba(16, 185, 129, 0.35)'
+                                  : 'rgba(239, 68, 68, 0.4)'
+                              }`,
+                              padding: '3px 10px',
+                              borderRadius: '6px',
+                              fontSize: '0.73rem',
+                              fontWeight: 800,
+                            }}
+                          >
+                            Thí sinh: {gameParticipants.length}
+                          </span>
                         </>
                       )}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={handleAddEditQuestion}
+                    <span
                       style={{
-                        backgroundColor: 'var(--bg-input)',
-                        color: 'var(--accent-sky)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: '8px',
-                        padding: '0 14px',
-                        height: '38px',
+                        backgroundColor: activeGameSpec.isPublic
+                          ? 'rgba(16, 185, 129, 0.14)'
+                          : 'rgba(245, 158, 11, 0.15)',
+                        color: activeGameSpec.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+                        padding: '3px 10px',
+                        borderRadius: '6px',
+                        fontSize: '0.75rem',
                         fontWeight: 700,
-                        fontSize: '0.84rem',
-                        cursor: 'pointer',
                         display: 'inline-flex',
                         alignItems: 'center',
-                        gap: '6px',
+                        gap: '4px',
                       }}
                     >
-                      <PlusIcon size={14} />
-                      <span>Thêm câu hỏi</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        syncEditorFromSpec(activeGameSpec);
-                        setIsEditMode(false);
-                      }}
+                      {activeGameSpec.isPublic ? <CheckIcon size={12} /> : <PencilIcon size={12} />}
+                      <span>{activeGameSpec.isPublic ? 'Đã xuất bản' : 'Bản nháp'}</span>
+                    </span>
+                    <span
                       style={{
-                        backgroundColor: 'var(--bg-input)',
+                        fontSize: '0.82rem',
                         color: 'var(--text-secondary)',
-                        border: '1px solid var(--border-strong)',
-                        borderRadius: '8px',
-                        padding: '0 14px',
-                        height: '38px',
-                        fontWeight: 600,
-                        fontSize: '0.84rem',
-                        cursor: 'pointer',
+                        fontVariantNumeric: 'tabular-nums',
                       }}
                     >
-                      Hủy sửa
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      type="button"
-                      data-testid="explore-detail-open-game-btn"
-                      onClick={() => handleOpenModeModal(activeGameSpec.gameId)}
-                      style={{
-                        backgroundColor: 'var(--primary)',
-                        color: 'var(--primary-ink, #08090e)',
-                        border: 'none',
-                        borderRadius: '8px',
-                        padding: '0 16px',
-                        height: '38px',
-                        fontWeight: 800,
-                        fontSize: '0.84rem',
-                        cursor: 'pointer',
-                        display: 'inline-flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                      }}
-                    >
-                      <GamepadIcon size={15} />
-                      <span>Mở game</span>
-                    </button>
-                    {isLibraryMode && canManageGame(activeGameSpec) ? (
-                      <>
+                      • {activeGameSpec.questions.length} câu hỏi • {activeGameSpec.settings.timePerQuestion}s/câu •
+                      Điểm: {formatScoringModeName(activeGameSpec.settings.scoringMode)}
+                    </span>
+                  </div>
+                  <h2
+                    style={{
+                      margin: '10px 0 6px 0',
+                      fontSize: '1.35rem',
+                      fontWeight: 800,
+                      color: 'var(--text-primary)',
+                    }}
+                  >
+                    {activeGameSpec.title}
+                  </h2>
+                  <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+                    {activeGameSpec.description}
+                  </p>
+                  {isLibraryMode &&
+                    canManageGame(activeGameSpec) &&
+                    activeGameSpec.settings?.sessionMode === 'EXAM' &&
+                    !isLoadingParticipants &&
+                    gameParticipants.length === 0 && (
+                      <div
+                        data-testid="detail-exam-empty-roster-warning"
+                        style={{
+                          marginTop: '10px',
+                          padding: '10px 14px',
+                          borderRadius: '10px',
+                          backgroundColor: 'var(--accent-amber-subtle)',
+                          border: '1px solid var(--border-strong)',
+                          color: 'var(--accent-amber)',
+                          fontSize: '0.82rem',
+                          fontWeight: 700,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '10px',
+                          flexWrap: 'wrap',
+                        }}
+                      >
+                        <span>
+                          {detailSaveBanner ||
+                            'Đã lưu chế độ Thi. Bạn cần thêm danh sách thí sinh trước khi mở kỳ thi.'}
+                        </span>
                         <button
                           type="button"
-                          data-testid="library-detail-playtest-btn"
-                          onClick={() => handleStartSavedGamePlaytest(activeGameSpec)}
+                          data-testid="detail-exam-add-roster-btn"
+                          onClick={() => handleViewOrEditGame(activeGameSpec.gameId, true)}
                           style={{
-                            backgroundColor: 'rgba(56, 189, 248, 0.14)',
-                            color: 'var(--accent-sky)',
-                            border: '1px solid rgba(56, 189, 248, 0.45)',
-                            borderRadius: '8px',
-                            padding: '0 14px',
-                            height: '38px',
-                            fontWeight: 800,
-                            fontSize: '0.84rem',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                          }}
-                          title="Chơi thử bộ câu hỏi này (không tính lượt thi, không lưu lịch sử, giữ nguyên trạng thái xuất bản)"
-                        >
-                          <GamepadIcon size={14} />
-                          <span>Chơi thử</span>
-                        </button>
-                        <button
-                          type="button"
-                          data-testid="library-detail-edit-game-btn"
-                          onClick={() => {
-                            syncEditorFromSpec(activeGameSpec);
-                            setIsEditMode(true);
-                          }}
-                          style={{
-                            backgroundColor: 'var(--bg-input)',
-                            color: 'var(--accent-amber)',
+                            padding: '5px 12px',
+                            borderRadius: '7px',
                             border: '1px solid var(--border-strong)',
-                            borderRadius: '8px',
-                            padding: '0 14px',
-                            height: '38px',
-                            fontWeight: 700,
-                            fontSize: '0.84rem',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                          }}
-                          title="Chỉnh sửa nội dung câu hỏi và thiết lập của bộ câu hỏi này"
-                        >
-                          <PencilIcon size={14} />
-                          <span>Sửa</span>
-                        </button>
-                        <button
-                          type="button"
-                          data-testid="detail-duplicate-game-btn"
-                          onClick={() =>
-                            handleDuplicateGame({
-                              gameId: activeGameSpec.gameId,
-                              title: activeGameSpec.title,
-                            })
-                          }
-                          disabled={duplicatingGameId === activeGameSpec.gameId}
-                          style={{
-                            backgroundColor: 'var(--bg-input)',
+                            backgroundColor: 'var(--bg-surface)',
                             color: 'var(--text-primary)',
-                            border: '1px solid var(--border-strong)',
-                            borderRadius: '8px',
-                            padding: '0 12px',
-                            height: '38px',
-                            fontWeight: 700,
-                            fontSize: '0.82rem',
-                            cursor: duplicatingGameId === activeGameSpec.gameId ? 'not-allowed' : 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '6px',
-                          }}
-                          title="Nhân bản bộ câu hỏi này sang bản nháp mới"
-                        >
-                          {duplicatingGameId === activeGameSpec.gameId ? (
-                            <SpinnerIcon size={14} />
-                          ) : (
-                            <CopyIcon size={14} />
-                          )}
-                          <span>Sao chép</span>
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleExportGame(activeGameSpec.gameId, 'csv')}
-                          style={{
-                            backgroundColor: 'var(--bg-input)',
-                            color: 'var(--accent-emerald)',
-                            border: '1px solid var(--border-strong)',
-                            borderRadius: '8px',
-                            padding: '0 12px',
-                            height: '38px',
-                            fontWeight: 700,
-                            fontSize: '0.82rem',
+                            fontWeight: 800,
+                            fontSize: '0.78rem',
                             cursor: 'pointer',
                           }}
                         >
-                          Xuất CSV
+                          + Bổ sung danh sách thí sinh
                         </button>
-                        <button
-                          type="button"
-                          onClick={() => handleExportGame(activeGameSpec.gameId, 'json')}
-                          style={{
-                            backgroundColor: 'var(--bg-input)',
-                            color: 'var(--accent-sky)',
-                            border: '1px solid var(--border-strong)',
-                            borderRadius: '8px',
-                            padding: '0 12px',
-                            height: '38px',
-                            fontWeight: 700,
-                            fontSize: '0.82rem',
-                            cursor: 'pointer',
-                          }}
-                        >
-                          Xuất JSON
-                        </button>
-                        <button
-                          type="button"
-                          data-testid="library-detail-delete-game-btn"
-                          onClick={() => {
-                            const matched = savedGames.find((item) => item.gameId === activeGameSpec.gameId);
-                            handleOpenDeleteModal(
-                              matched || {
-                                gameId: activeGameSpec.gameId,
-                                title: activeGameSpec.title,
-                                description: activeGameSpec.description,
-                                gameType: activeGameSpec.gameType,
-                                scoringMode: activeGameSpec.settings.scoringMode,
-                                questionCount: activeGameSpec.questions.length,
-                                timePerQuestion: activeGameSpec.settings.timePerQuestion,
-                                isPublic: Boolean(activeGameSpec.isPublic),
-                                ownerUserId: activeGameSpec.ownerUserId ?? null,
-                                sourceCount: activeGameSpec.sourceSummary?.sourceCount || 1,
-                                generatedAt: activeGameSpec.generatedAt,
-                                createdAt: activeGameSpec.generatedAt,
-                                updatedAt: activeGameSpec.generatedAt,
-                              }
-                            );
-                          }}
-                          style={{
-                            backgroundColor: 'rgba(244, 63, 94, 0.12)',
-                            color: 'var(--accent-rose)',
-                            border: '1px solid rgba(244, 63, 94, 0.35)',
-                            borderRadius: '8px',
-                            padding: '0 12px',
-                            height: '38px',
-                            fontWeight: 700,
-                            fontSize: '0.82rem',
-                            cursor: 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '5px',
-                          }}
-                        >
-                          <TrashIcon size={14} />
-                          <span>Xóa</span>
-                        </button>
-                      </>
-                    ) : (
+                      </div>
+                    )}
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  <button
+                    type="button"
+                    data-testid="explore-detail-open-game-btn"
+                    onClick={() => handleOpenModeModal(activeGameSpec.gameId)}
+                    style={{
+                      backgroundColor: 'var(--primary)',
+                      color: 'var(--primary-ink, #08090e)',
+                      border: 'none',
+                      borderRadius: '8px',
+                      padding: '0 16px',
+                      height: '38px',
+                      fontWeight: 800,
+                      fontSize: '0.84rem',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <GamepadIcon size={15} />
+                    <span>Mở game</span>
+                  </button>
+                  {isLibraryMode && canManageGame(activeGameSpec) ? (
+                    <>
+                      <button
+                        type="button"
+                        data-testid="library-detail-playtest-btn"
+                        onClick={() => handleStartSavedGamePlaytest(activeGameSpec)}
+                        style={{
+                          backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                          color: 'var(--accent-sky)',
+                          border: '1px solid rgba(56, 189, 248, 0.45)',
+                          borderRadius: '8px',
+                          padding: '0 14px',
+                          height: '38px',
+                          fontWeight: 800,
+                          fontSize: '0.84rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                        title="Chơi thử bộ câu hỏi này (không tính lượt thi, không lưu lịch sử, giữ nguyên trạng thái xuất bản)"
+                      >
+                        <GamepadIcon size={14} />
+                        <span>Chơi thử</span>
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="library-detail-edit-game-btn"
+                        onClick={() => {
+                          syncEditorFromSpec(activeGameSpec);
+                          setIsEditMode(true);
+                          loadGameParticipants(activeGameSpec.gameId);
+                        }}
+                        style={{
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--accent-amber)',
+                          border: '1px solid var(--border-strong)',
+                          borderRadius: '8px',
+                          padding: '0 14px',
+                          height: '38px',
+                          fontWeight: 700,
+                          fontSize: '0.84rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                        }}
+                        title="Chỉnh sửa nội dung câu hỏi và thiết lập của bộ câu hỏi này"
+                      >
+                        <PencilIcon size={14} />
+                        <span>Sửa</span>
+                      </button>
                       <button
                         type="button"
                         data-testid="detail-duplicate-game-btn"
@@ -2543,37 +4172,146 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         {duplicatingGameId === activeGameSpec.gameId ? (
                           <SpinnerIcon size={14} />
                         ) : (
-                          <PlusIcon size={14} />
+                          <CopyIcon size={14} />
                         )}
                         <span>Sao chép</span>
                       </button>
-                    )}
-                  </>
-                )}
+                      <button
+                        type="button"
+                        onClick={() => handleExportGame(activeGameSpec.gameId, 'csv')}
+                        style={{
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--accent-emerald)',
+                          border: '1px solid var(--border-strong)',
+                          borderRadius: '8px',
+                          padding: '0 12px',
+                          height: '38px',
+                          fontWeight: 700,
+                          fontSize: '0.82rem',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Xuất CSV
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleExportGame(activeGameSpec.gameId, 'json')}
+                        style={{
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--accent-sky)',
+                          border: '1px solid var(--border-strong)',
+                          borderRadius: '8px',
+                          padding: '0 12px',
+                          height: '38px',
+                          fontWeight: 700,
+                          fontSize: '0.82rem',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        Xuất JSON
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="library-detail-delete-game-btn"
+                        onClick={() => {
+                          const matched = savedGames.find((item) => item.gameId === activeGameSpec.gameId);
+                          handleOpenDeleteModal(
+                            matched || {
+                              gameId: activeGameSpec.gameId,
+                              title: activeGameSpec.title,
+                              description: activeGameSpec.description,
+                              gameType: activeGameSpec.gameType,
+                              scoringMode: activeGameSpec.settings.scoringMode,
+                              questionCount: activeGameSpec.questions.length,
+                              timePerQuestion: activeGameSpec.settings.timePerQuestion,
+                              isPublic: Boolean(activeGameSpec.isPublic),
+                              ownerUserId: activeGameSpec.ownerUserId ?? null,
+                              sourceCount: activeGameSpec.sourceSummary?.sourceCount || 1,
+                              generatedAt: activeGameSpec.generatedAt,
+                              createdAt: activeGameSpec.generatedAt,
+                              updatedAt: activeGameSpec.generatedAt,
+                            }
+                          );
+                        }}
+                        style={{
+                          backgroundColor: 'rgba(244, 63, 94, 0.12)',
+                          color: 'var(--accent-rose)',
+                          border: '1px solid rgba(244, 63, 94, 0.35)',
+                          borderRadius: '8px',
+                          padding: '0 12px',
+                          height: '38px',
+                          fontWeight: 700,
+                          fontSize: '0.82rem',
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                        }}
+                      >
+                        <TrashIcon size={14} />
+                        <span>Xóa</span>
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      data-testid="detail-duplicate-game-btn"
+                      onClick={() =>
+                        handleDuplicateGame({
+                          gameId: activeGameSpec.gameId,
+                          title: activeGameSpec.title,
+                        })
+                      }
+                      disabled={duplicatingGameId === activeGameSpec.gameId}
+                      style={{
+                        backgroundColor: 'var(--bg-input)',
+                        color: 'var(--text-primary)',
+                        border: '1px solid var(--border-strong)',
+                        borderRadius: '8px',
+                        padding: '0 12px',
+                        height: '38px',
+                        fontWeight: 700,
+                        fontSize: '0.82rem',
+                        cursor: duplicatingGameId === activeGameSpec.gameId ? 'not-allowed' : 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '6px',
+                      }}
+                      title="Nhân bản bộ câu hỏi này sang bản nháp mới"
+                    >
+                      {duplicatingGameId === activeGameSpec.gameId ? (
+                        <SpinnerIcon size={14} />
+                      ) : (
+                        <PlusIcon size={14} />
+                      )}
+                      <span>Sao chép</span>
+                    </button>
+                  )}
 
-                <button
-                  type="button"
-                  onClick={() => setActiveGameSpec(null)}
-                  style={{
-                    backgroundColor: 'transparent',
-                    color: 'var(--text-secondary)',
-                    border: '1px solid var(--border-subtle)',
-                    borderRadius: '8px',
-                    padding: '0 12px',
-                    height: '38px',
-                    fontWeight: 600,
-                    fontSize: '0.82rem',
-                    cursor: 'pointer',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}
-                >
-                  <XMarkIcon size={14} />
-                  <span>Đóng</span>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveGameSpec(null)}
+                    style={{
+                      backgroundColor: 'transparent',
+                      color: 'var(--text-secondary)',
+                      border: '1px solid var(--border-subtle)',
+                      borderRadius: '8px',
+                      padding: '0 12px',
+                      height: '38px',
+                      fontWeight: 600,
+                      fontSize: '0.82rem',
+                      cursor: 'pointer',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    <XMarkIcon size={14} />
+                    <span>Đóng</span>
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
 
             {/* Danh sách câu hỏi trong bộ */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -6152,6 +7890,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         }}
         onNavigateToHost={onNavigateToHost}
         isOwner={canManageGame(modeModalSpec)}
+        examParticipantCount={modeModalParticipantCount}
+        onRequireRosterSetup={(spec) => handleViewOrEditGame(spec.gameId, true)}
       />
 
       {/* CHẾ ĐỘ CHƠI THỬ (PLAYTEST OVERLAY TRONG THƯ VIỆN — 100% TÁCH BIỆT DỮ LIỆU THẬT) */}
