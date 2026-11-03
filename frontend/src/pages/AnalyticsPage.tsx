@@ -1250,7 +1250,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
         setIsPlaytestOpen(true);
         return;
       }
-      if (activeGameSpec && activeGameSpec.gameId === gameIdOrSpec) {
+      if (
+        activeGameSpec &&
+        activeGameSpec.gameId === gameIdOrSpec &&
+        activeGameSpec.questions.every((q) => Boolean(q.correctAnswer && q.correctAnswer.trim()))
+      ) {
         setPlaytestSpec(activeGameSpec);
         setIsPlaytestOpen(true);
         return;
@@ -1328,7 +1332,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const handlePlaySavedGame = async (gameId: string, autoStartSolo: boolean = false) => {
     try {
       const spec =
-        activeGameSpec?.gameId === gameId
+        activeGameSpec?.gameId === gameId &&
+        activeGameSpec.questions.every((q) => Boolean(q.correctAnswer && q.correctAnswer.trim()))
           ? activeGameSpec
           : await fetchGameById(gameId, { mode: 'manage' });
       if (spec.settings?.sessionMode === 'EXAM') {
@@ -4180,10 +4185,26 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       <button
                         type="button"
                         data-testid="library-detail-edit-game-btn"
-                        onClick={() => {
-                          syncEditorFromSpec(activeGameSpec);
+                        onClick={async () => {
+                          let specToEdit = activeGameSpec;
+                          if (
+                            specToEdit.questions.some(
+                              (q) => !q.correctAnswer || !q.correctAnswer.trim()
+                            )
+                          ) {
+                            try {
+                              const freshSpec = await fetchGameById(specToEdit.gameId, {
+                                mode: 'manage',
+                              });
+                              setActiveGameSpec(freshSpec);
+                              specToEdit = freshSpec;
+                            } catch {
+                              // fallback to current activeGameSpec
+                            }
+                          }
+                          syncEditorFromSpec(specToEdit);
                           setIsEditMode(true);
-                          loadGameParticipants(activeGameSpec.gameId);
+                          loadGameParticipants(specToEdit.gameId);
                         }}
                         style={{
                           backgroundColor: 'var(--bg-input)',

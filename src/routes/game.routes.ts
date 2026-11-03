@@ -13,6 +13,8 @@ import {
   sanitizeAdventureConfig,
 } from '../contracts/adventure.contract.js';
 import {
+  GameQuestion,
+  GameQuestionSchema,
   GameSpecification,
   GameSpecificationSchema,
   GenerateGameRequestSchema,
@@ -150,6 +152,21 @@ export function verifyAudioMagicBytes(
 }
 
 /**
+ * Helper to check if the request caller is a Guest or Player client.
+ */
+function isGuestOrPlayerCaller(req: Request): boolean {
+  if (req.headers['x-player-token']) return true;
+  if (
+    req.headers['x-guest-token'] ||
+    req.isGuest ||
+    (req.user && req.user.userId && req.user.userId.startsWith('guest_'))
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Helper to check if the request caller is the Game Owner, an ADMIN, or holds a valid Host Token for a room of this game.
  */
 function hasCreatorOrHostManagementAccess(
@@ -173,6 +190,125 @@ function hasCreatorOrHostManagementAccess(
     }
   }
   return false;
+}
+
+/**
+ * Reconciles incoming question edits against authoritative stored questions so that:
+ * 1. Partial settings updates (where `questions` is omitted) preserve existing questions intact.
+ * 2. Questions whose `correctAnswer` was previously redacted (`""`) when loaded by a client
+ *    automatically retain their stored valid `correctAnswer` (and explanation/alternatives/slider/crossword fields)
+ *    provided the stored answer is still valid for the submitted question type and choices.
+ * 3. Genuinely invalid edits (e.g. new question with empty answer, or modified choices that no longer match the answer)
+ *    are never fabricated (`choices[0]` is never guessed) and still fail schema validation as expected.
+ */
+function reconcileRedactedQuestionsWithExisting(
+  rawBody: unknown,
+  existingQuestions: GameQuestion[]
+): unknown {
+  if (!rawBody || typeof rawBody !== 'object' || Array.isArray(rawBody)) {
+    return rawBody;
+  }
+  const bodyObj = rawBody as Record<string, unknown>;
+
+  if (
+    bodyObj.questions === undefined &&
+    (bodyObj.settings !== undefined ||
+      bodyObj.sessionMode !== undefined ||
+      bodyObj.examAnswerRevealPolicy !== undefined ||
+      bodyObj.title !== undefined ||
+      bodyObj.description !== undefined ||
+      bodyObj.isPublic !== undefined ||
+      bodyObj.participants !== undefined)
+  ) {
+    return {
+      ...bodyObj,
+      questions: existingQuestions,
+    };
+  }
+
+  if (!Array.isArray(bodyObj.questions)) {
+    return rawBody;
+  }
+
+  const reconciledQuestions = bodyObj.questions.map((rawQ: unknown, idx: number) => {
+    if (!rawQ || typeof rawQ !== 'object' || Array.isArray(rawQ)) {
+      return rawQ;
+    }
+    const q = rawQ as Record<string, unknown>;
+    const rawCorrect = typeof q.correctAnswer === 'string' ? q.correctAnswer.trim() : null;
+    if (rawCorrect !== '') {
+      return rawQ;
+    }
+
+    const qId = typeof q.id === 'string' ? q.id.trim() : '';
+    const storedById = qId ? existingQuestions.find((eq) => eq.id === qId) : undefined;
+    const storedByIdx =
+      !storedById &&
+      existingQuestions[idx] &&
+      existingQuestions[idx].type === q.type
+        ? existingQuestions[idx]
+        : undefined;
+    const storedQ = storedById || storedByIdx;
+
+    if (!storedQ || typeof storedQ.correctAnswer !== 'string' || !storedQ.correctAnswer.trim()) {
+      return rawQ;
+    }
+
+    const candidate: Record<string, unknown> = {
+      ...q,
+      correctAnswer: storedQ.correctAnswer,
+    };
+
+    if (
+      (typeof q.explanation !== 'string' || q.explanation.trim() === '') &&
+      typeof storedQ.explanation === 'string' &&
+      storedQ.explanation.trim().length > 0
+    ) {
+      candidate.explanation = storedQ.explanation;
+    }
+
+    if (
+      (!Array.isArray(q.acceptedAlternatives) || q.acceptedAlternatives.length === 0) &&
+      Array.isArray(storedQ.acceptedAlternatives) &&
+      storedQ.acceptedAlternatives.length > 0
+    ) {
+      candidate.acceptedAlternatives = storedQ.acceptedAlternatives;
+    }
+
+    if (!q.crosswordAnswer && storedQ.crosswordAnswer) {
+      candidate.crosswordAnswer = storedQ.crosswordAnswer;
+    }
+
+    if (
+      q.type === 'SLIDER' &&
+      q.sliderConfig &&
+      typeof q.sliderConfig === 'object' &&
+      storedQ.sliderConfig
+    ) {
+      const incomingSlider = q.sliderConfig as Record<string, unknown>;
+      if (
+        incomingSlider.correctValue === incomingSlider.min &&
+        storedQ.sliderConfig.correctValue !== storedQ.sliderConfig.min
+      ) {
+        candidate.sliderConfig = {
+          ...incomingSlider,
+          correctValue: storedQ.sliderConfig.correctValue,
+        };
+      }
+    }
+
+    const check = GameQuestionSchema.safeParse(candidate);
+    if (check.success) {
+      return candidate;
+    }
+
+    return rawQ;
+  });
+
+  return {
+    ...bodyObj,
+    questions: reconciledQuestions,
+  };
 }
 
 export interface ParsedParticipantDraft {
@@ -991,7 +1127,9 @@ gameRouter.get(
       const coverMeta = persistenceRepo.getGameCoverMetadata(gameId);
       const coverImageUrl = spec.coverImageUrl ?? coverMeta?.coverImageUrl ?? null;
 
-      const isPublicQuery = String(req.query.mode || '').toLowerCase() === 'public';
+      const queryMode = String(req.query.mode || '').toLowerCase();
+      const isPublicQuery = queryMode === 'public';
+      const isManageQuery = queryMode === 'manage' || queryMode === 'admin';
       if (isPublicQuery && !isPublic) {
         throw new AppError(
           'GAME_NOT_PUBLISHED',
@@ -1000,15 +1138,27 @@ gameRouter.get(
         );
       }
 
-      authService.assertResourceAccess({
-        resourceType: 'bộ câu hỏi',
-        ownerUserId,
-        currentUser: req.user,
-        mode: 'read',
-        isPublic,
-      });
+      if (isManageQuery && !hasCreatorOrHostManagementAccess(req, gameId, ownerUserId)) {
+        rejectGuestOrPlayerWrite(req, 'quản lý bộ câu hỏi');
+        authService.assertResourceAccess({
+          resourceType: 'bộ câu hỏi',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'write',
+        });
+      } else {
+        authService.assertResourceAccess({
+          resourceType: 'bộ câu hỏi',
+          ownerUserId,
+          currentUser: req.user,
+          mode: 'read',
+          isPublic,
+        });
+      }
 
-      const isOwnerOrAdmin = hasCreatorOrHostManagementAccess(req, gameId, ownerUserId);
+      const isOwnerOrAdmin =
+        hasCreatorOrHostManagementAccess(req, gameId, ownerUserId) ||
+        (isManageQuery && !isGuestOrPlayerCaller(req));
       const shouldRedactExamAnswers =
         spec.settings?.sessionMode === 'EXAM' &&
         !spec.settings?.answersPublished &&
@@ -1071,7 +1221,8 @@ async function handleUpdateGameSpecification(req: Request, res: Response, next: 
       mode: 'write',
     });
 
-    const parseResult = UpdateGameQuestionsRequestSchema.safeParse(req.body);
+    const normalizedBody = reconcileRedactedQuestionsWithExisting(req.body, existing.questions);
+    const parseResult = UpdateGameQuestionsRequestSchema.safeParse(normalizedBody);
     if (!parseResult.success) {
       const issues = parseResult.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
       throw new AppError('INVALID_REQUEST', `Question validation failed: ${issues}`, 400);
@@ -1557,7 +1708,10 @@ gameRouter.post(
         isPublic,
       });
 
-      const isManager = hasCreatorOrHostManagementAccess(req, gameId, ownerUserId);
+      const isUnownedLocalGame = !ownerUserId || ownerUserId === 'legacy_local';
+      const isManager =
+        hasCreatorOrHostManagementAccess(req, gameId, ownerUserId) ||
+        (isUnownedLocalGame && !isGuestOrPlayerCaller(req));
       if (
         spec.settings?.sessionMode === 'EXAM' &&
         !spec.settings?.answersPublished &&
@@ -1614,15 +1768,18 @@ gameRouter.get(
       const isPublic = spec.isPublic ?? ownerInfo?.isPublic ?? false;
       const hasActiveRoom = roomStore.hasActiveRoomForGame(gameId);
 
-      const isManager = hasCreatorOrHostManagementAccess(req, gameId, ownerUserId);
       const requestedMode = String(req.query.mode || '').toLowerCase();
-      if ((requestedMode === 'admin' || requestedMode === 'manage') && !isManager) {
+      const isAdminOrManageMode = requestedMode === 'admin' || requestedMode === 'manage';
+      let isManager = hasCreatorOrHostManagementAccess(req, gameId, ownerUserId);
+      if (isAdminOrManageMode && !isManager) {
+        rejectGuestOrPlayerWrite(req, 'quản lý danh sách thí sinh');
         authService.assertResourceAccess({
           resourceType: 'danh sách thí sinh',
           ownerUserId,
           currentUser: req.user,
           mode: 'write',
         });
+        isManager = true;
       }
       if (!isManager && !isPublic && !hasActiveRoom) {
         authService.assertResourceAccess({

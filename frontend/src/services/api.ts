@@ -681,7 +681,7 @@ export async function duplicateGameApi(
 }
 
 export async function publishGame(gameId: string): Promise<GameSpecification> {
-  const current = await fetchGameById(gameId);
+  const current = await fetchGameById(gameId, { mode: 'manage' });
   return saveEditedQuestions(gameId, {
     title: current.title,
     description: current.description,
