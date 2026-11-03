@@ -65,6 +65,35 @@ function isSafeAssetUrl(url: unknown): url is string {
   );
 }
 
+const ADVENTURE_BACKEND_ORIGIN: string = (() => {
+  try {
+    const rawApiUrl = String((import.meta as any).env?.VITE_API_URL || '').trim();
+    if (rawApiUrl.startsWith('http://') || rawApiUrl.startsWith('https://')) {
+      return new URL(rawApiUrl).origin;
+    }
+  } catch {
+    // ignore URL parse error
+  }
+  return '';
+})();
+
+function buildAdventureAssetCandidateUrls(url: string): string[] {
+  if (!url) return [];
+  const trimmed = url.trim();
+  if (!trimmed.startsWith('/adventure-assets/')) {
+    return [trimmed];
+  }
+  if (!ADVENTURE_BACKEND_ORIGIN) {
+    return [trimmed];
+  }
+  const backendUrl = `${ADVENTURE_BACKEND_ORIGIN}${trimmed}`;
+  // Per-game AI assets live on the backend origin; static industry packs exist on both Frontend CDN and Backend
+  if (trimmed.startsWith('/adventure-assets/games/')) {
+    return [backendUrl, trimmed];
+  }
+  return [trimmed, backendUrl];
+}
+
 export function buildDefaultFallbackSlotAsset(
   slotType: 'BACKGROUND' | 'CHARACTER' | 'OBSTACLE',
   industryId: IndustryId,
@@ -864,10 +893,13 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     setAssetLoadStatus('LOADING');
     setAssetLoadError(null);
 
-    const loadRawImage = (url: string): Promise<HTMLImageElement> =>
+    const loadSingleUrlImage = (url: string): Promise<HTMLImageElement> =>
       new Promise((resolve, reject) => {
         const img = new Image();
         img.decoding = 'async';
+        if (url.startsWith('http://') || url.startsWith('https://')) {
+          img.crossOrigin = 'anonymous';
+        }
         img.onload = () => {
           if ((img.naturalWidth || img.width) > 0 && (img.naturalHeight || img.height) > 0) {
             resolve(img);
@@ -880,6 +912,19 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         };
         img.src = url;
       });
+
+    const loadRawImage = async (url: string): Promise<HTMLImageElement> => {
+      const candidates = buildAdventureAssetCandidateUrls(url);
+      let lastError: unknown = new Error('Không thể tải URL ảnh');
+      for (const candidateUrl of candidates) {
+        try {
+          return await loadSingleUrlImage(candidateUrl);
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      throw lastError;
+    };
 
     const loadSlotWithFallback = async (
       slotName: 'BACKGROUND' | 'CHARACTER' | 'OBSTACLE',

@@ -44,8 +44,15 @@ export function createApp(): express.Application {
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PUT,PATCH,DELETE,OPTIONS');
       res.setHeader(
         'Access-Control-Allow-Headers',
-        'Content-Type,Authorization,X-Guest-Token,X-Player-Token,X-Participant-Token,x-participant-token,X-Game-Access-Token,X-Host-Token,x-host-token'
+        'Content-Type,Authorization,X-Guest-Token,X-Player-Token,X-Participant-Token,x-participant-token,X-Game-Access-Token,X-Host-Token,x-host-token,X-Idempotency-Key,x-idempotency-key,X-Creator-Library,x-creator-library'
       );
+    } else if (
+      req.method === 'GET' &&
+      (req.path.startsWith('/adventure-assets/') ||
+        req.path.startsWith('/uploads/') ||
+        req.path.startsWith('/audio/'))
+    ) {
+      res.setHeader('Access-Control-Allow-Origin', '*');
     }
 
     if (req.method === 'OPTIONS') {

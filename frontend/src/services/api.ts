@@ -1147,9 +1147,6 @@ export async function grantParticipantRetakeApi(
   if (resolvedHostToken) {
     extraHeaders['x-host-token'] = resolvedHostToken;
   }
-  if (resolvedRequestId) {
-    extraHeaders['x-idempotency-key'] = resolvedRequestId;
-  }
 
   const payload: Record<string, unknown> = {};
   if (resolvedHostToken) payload.hostToken = resolvedHostToken;
@@ -1160,17 +1157,31 @@ export async function grantParticipantRetakeApi(
     payload.requestId = resolvedRequestId;
   }
 
-  const res = await fetch(
-    `${API_BASE_URL}/games/${encodeURIComponent(gameId)}/participants/${encodeURIComponent(participantId)}/grant-retake`,
-    {
-      method: 'POST',
-      headers: buildAuthHeaders(extraHeaders),
-      body: JSON.stringify(payload),
-    }
-  );
-  const data = await res.json();
-  if (!data.success) {
-    throw new Error(data.error?.message || 'Không thể cấp quyền thi lại cho thí sinh.');
+  let res: Response;
+  try {
+    res = await fetch(
+      `${API_BASE_URL}/games/${encodeURIComponent(gameId)}/participants/${encodeURIComponent(participantId)}/grant-retake`,
+      {
+        method: 'POST',
+        headers: buildAuthHeaders(extraHeaders),
+        body: JSON.stringify(payload),
+      }
+    );
+  } catch (networkErr: any) {
+    throw new Error(
+      networkErr?.message && !String(networkErr.message).includes('Failed to fetch')
+        ? networkErr.message
+        : 'Không thể kết nối tới máy chủ để cấp thêm lượt. Vui lòng kiểm tra kết nối mạng hoặc thử lại.'
+    );
+  }
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    throw new Error(`Không thể cấp quyền thi lại cho thí sinh (HTTP ${res.status}).`);
+  }
+  if (!res.ok || !data?.success) {
+    throw new Error(data?.error?.message || 'Không thể cấp quyền thi lại cho thí sinh.');
   }
   return data.data;
 }
