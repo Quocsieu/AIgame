@@ -554,19 +554,33 @@ describe('V3 AI Token & Cost Tracking + 4-Sheet Excel Export (All 35 Mandatory C
       const sensitiveUsersInDemoRes = await request(app).get('/api/admin/users');
       assert.equal(sensitiveUsersInDemoRes.status, 401, 'Demo Mode must NOT open /api/admin/users');
 
-      // Test 17B: Production Hard Block (NODE_ENV=production blocks Demo Mode even if ADMIN_COST_DEMO_MODE=true)
+      // Test 17B: Public Read Mode on Production (NODE_ENV=production allows sanitized read-only GET /api/admin/ai-costs without login, while keeping all write/management Admin endpoints strictly locked)
       process.env.NODE_ENV = 'production';
-      process.env.ADMIN_COST_DEMO_MODE = 'true';
+      delete process.env.ADMIN_COST_DEMO_MODE;
 
-      const prodBlockedRes = await request(app).get('/api/admin/ai-costs');
+      const prodPublicReadRes = await request(app).get('/api/admin/ai-costs');
       assert.equal(
-        prodBlockedRes.status,
-        401,
-        'Public Production must NEVER allow Demo Mode even if ADMIN_COST_DEMO_MODE=true'
+        prodPublicReadRes.status,
+        200,
+        'Production must allow public read-only GET /api/admin/ai-costs in Demo/Public View mode'
+      );
+      assert.equal(prodPublicReadRes.body.data.persistenceStatus.databasePath, '', 'Public response must not leak server databasePath');
+      assert.ok(
+        prodPublicReadRes.body.data.apiLogs.every((l: any) => l.userId === null && l.errorCode === null),
+        'Public response must strip userId and internal errorCode from logs'
       );
 
-      const prodExportBlockedRes = await request(app).get('/api/admin/ai-costs/export');
-      assert.equal(prodExportBlockedRes.status, 401);
+      // All write/moderation/sensitive Admin endpoints remain strictly protected on Production (401)
+      const prodOverviewBlocked = await request(app).get('/api/admin/overview');
+      assert.equal(prodOverviewBlocked.status, 401);
+      const prodUsersBlocked = await request(app).get('/api/admin/users');
+      assert.equal(prodUsersBlocked.status, 401);
+      const prodGamesBlocked = await request(app).get('/api/admin/games');
+      assert.equal(prodGamesBlocked.status, 401);
+      const prodAiLogsBlocked = await request(app).get('/api/admin/ai-logs');
+      assert.equal(prodAiLogsBlocked.status, 401);
+      const prodDeleteBlocked = await request(app).delete('/api/admin/games/any_game_id');
+      assert.equal(prodDeleteBlocked.status, 401);
 
       // Test 17C: Demo Mode OFF (ADMIN_COST_DEMO_MODE=false) -> reverts to strict Admin RBAC & rejects fake client headers
       process.env.NODE_ENV = 'development';
@@ -1602,6 +1616,24 @@ describe('V3 AI Token & Cost Tracking + 4-Sheet Excel Export (All 35 Mandatory C
       const prevNodeEnvProdCheck = process.env.NODE_ENV;
       process.env.NODE_ENV = 'production';
       try {
+        aiObservabilityService.recordAiCall({
+          generationId: 'gen_prod_public_view',
+          gameId: libGame1Id,
+          gameTitleSnapshot: 'Game Đào Tạo Hội Nhập V2',
+          provider: 'gemini',
+          model: 'gemini-2.5-flash',
+          operation: 'GENERATE_QUESTIONS',
+          taskType: 'QUESTION_GENERATION',
+          gameType: 'MULTIPLE_CHOICE',
+          status: 'SUCCESS',
+          latencyMs: 320,
+          inputTokens: 100_000,
+          outputTokens: 20_000,
+          cachedTokens: 0,
+          thinkingTokens: 0,
+          totalTokens: 120_000,
+        });
+
         await page.goto(`${baseUrl}/`);
         await sleep(900);
 
@@ -1624,20 +1656,33 @@ describe('V3 AI Token & Cost Tracking + 4-Sheet Excel Export (All 35 Mandatory C
           'Nhập mã PIN',
         ]);
 
-        // Click Admin in Sidebar -> opens Chi phí sử dụng AI V2 and does not redirect or show blocked screen
+        // Click Admin in Sidebar -> opens Chi phí sử dụng AI V2 and loads live KPI & 6-column table on Production without login
         await page.eval(`document.querySelector('#nav-item-admin')?.click()`);
-        await sleep(900);
+        await sleep(1000);
 
         const prodAdminPageState = await page.eval(`(() => ({
           url: window.location.href,
           hasCostPanel: Boolean(document.querySelector('[data-testid="admin-ai-cost-panel"]')),
           headerTitle: (document.querySelector('[data-testid="ai-cost-header-title"]')?.textContent || '').trim(),
           hasBlockedScreen: document.body.innerText.includes('Khu Vực Quản Trị Hệ Thống'),
+          kpiTotalCost: (document.querySelector('[data-testid="kpi-total-paid-cost-vnd-value"]')?.textContent || '').trim(),
+          rows: Array.from(document.querySelectorAll('[data-testid="ai-cost-game-row"]')).map((tr) =>
+            Array.from(tr.querySelectorAll('td')).map((td) => (td.textContent || '').trim())
+          ),
         }))()`);
         assert.ok(prodAdminPageState.url.endsWith('/?tab=admin'), 'Must stay on /?tab=admin without redirecting away');
         assert.equal(prodAdminPageState.hasBlockedScreen, false, 'Must not show blocked screen when clicking Admin');
         assert.equal(prodAdminPageState.hasCostPanel, true, 'Must render V2 AI Cost dashboard panel');
         assert.equal(prodAdminPageState.headerTitle, 'Chi phí sử dụng AI');
+        assert.ok(prodAdminPageState.kpiTotalCost.endsWith('₫') && prodAdminPageState.kpiTotalCost !== '0 ₫', 'Production public view must load live KPI data');
+        assert.deepEqual(prodAdminPageState.rows[0], [
+          'Game Đào Tạo Hội Nhập V2',
+          '100.000',
+          '20.000',
+          '765 ₫',
+          '1.275 ₫',
+          '2.040 ₫',
+        ]);
       } finally {
         process.env.NODE_ENV = prevNodeEnvProdCheck;
       }

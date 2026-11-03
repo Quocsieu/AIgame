@@ -14,6 +14,32 @@ import { AppError, createSuccessResponse } from '../utils/errors.js';
 
 export const adminRouter = Router();
 
+function sanitizeAiCostReportForPublicView<T extends ReturnType<typeof aiObservabilityService.getAdminAiCostReport>>(
+  report: T,
+  isAdmin: boolean
+): T {
+  if (isAdmin) {
+    return report;
+  }
+  const sanitizeReq = <R extends { userId: string | null; errorCode: string | null }>(r: R): R => ({
+    ...r,
+    userId: null,
+    errorCode: null,
+  });
+  return {
+    ...report,
+    persistenceStatus: {
+      ...report.persistenceStatus,
+      databasePath: '',
+    },
+    byGame: report.byGame.map((g) => ({
+      ...g,
+      requests: (g.requests || []).map(sanitizeReq),
+    })),
+    apiLogs: (report.apiLogs || []).map(sanitizeReq),
+  };
+}
+
 /**
  * GET /api/admin/ai-costs
  * Comprehensive AI Token & Cost Tracking Report (KPIs, 100/1000/10000 scaling projections, per-game & per-model breakdown)
@@ -30,7 +56,7 @@ adminRouter.get(
       const gameType = typeof req.query.gameType === 'string' ? req.query.gameType.trim() : undefined;
       const taskType = typeof req.query.taskType === 'string' ? req.query.taskType.trim() : undefined;
 
-      const report = aiObservabilityService.getAdminAiCostReport({
+      const rawReport = aiObservabilityService.getAdminAiCostReport({
         preset: (presetRaw as any) || undefined,
         from,
         to,
@@ -38,6 +64,8 @@ adminRouter.get(
         gameType,
         taskType,
       });
+      const isAdmin = req.user?.role === 'ADMIN';
+      const report = sanitizeAiCostReportForPublicView(rawReport, isAdmin);
 
       res.status(200).json(
         createSuccessResponse({
@@ -67,7 +95,7 @@ adminRouter.get(
       const gameType = typeof req.query.gameType === 'string' ? req.query.gameType.trim() : undefined;
       const taskType = typeof req.query.taskType === 'string' ? req.query.taskType.trim() : undefined;
 
-      const report = aiObservabilityService.getAdminAiCostReport({
+      const rawReport = aiObservabilityService.getAdminAiCostReport({
         preset: (presetRaw as any) || undefined,
         from,
         to,
@@ -75,6 +103,8 @@ adminRouter.get(
         gameType,
         taskType,
       });
+      const isAdmin = req.user?.role === 'ADMIN';
+      const report = sanitizeAiCostReportForPublicView(rawReport, isAdmin);
 
       const exported = exportService.exportAdminAiCostReportExcel(report);
       res.setHeader('Content-Type', exported.contentType);

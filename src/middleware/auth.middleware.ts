@@ -215,15 +215,12 @@ export function isPublicProductionEnvironment(): boolean {
 }
 
 /**
- * Returns true when Local/Development Demo Mode for Admin AI Cost Analytics is enabled.
- * - Strictly blocked on public Production environments.
+ * Returns true when Public/Demo Read Mode for Admin AI Cost Analytics is enabled.
+ * - Enabled on both Localhost and Production by default unless ADMIN_COST_DEMO_MODE is explicitly set to 'false' / '0' / 'off' / 'no'.
  * - Never trusts any client-supplied HTTP header.
- * - Enabled in local/development unless ADMIN_COST_DEMO_MODE is explicitly set to 'false' / '0' / 'off'.
+ * - Strictly scoped to read-only AI cost analytics; all other /api/admin routes remain protected by requireAdminMiddleware.
  */
 export function isAdminCostDemoModeEnabled(): boolean {
-  if (isPublicProductionEnvironment()) {
-    return false;
-  }
   const rawFlag = String(process.env.ADMIN_COST_DEMO_MODE ?? 'true')
     .trim()
     .toLowerCase();

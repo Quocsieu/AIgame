@@ -2078,10 +2078,14 @@ export async function fetchAdminAiCostReport(
   if (filters?.gameType && filters.gameType !== 'ALL') query.set('gameType', filters.gameType);
   if (filters?.taskType && filters.taskType !== 'ALL') query.set('taskType', filters.taskType);
   const qs = query.toString();
+  const url = `${API_BASE_URL}/admin/ai-costs${qs ? `?${qs}` : ''}`;
 
-  const res = await fetch(`${API_BASE_URL}/admin/ai-costs${qs ? `?${qs}` : ''}`, {
+  let res = await fetch(url, {
     headers: buildAuthHeaders(),
   });
+  if ((res.status === 401 || res.status === 403) && getSessionAuthToken()) {
+    res = await fetch(url);
+  }
   const data = await res.json();
   if (!data.success) {
     const err = new Error(data.error?.message || 'Không thể tải báo cáo chi phí AI.');
@@ -2103,10 +2107,14 @@ export async function downloadAdminAiCostReportExcel(
   if (filters?.gameType && filters.gameType !== 'ALL') query.set('gameType', filters.gameType);
   if (filters?.taskType && filters.taskType !== 'ALL') query.set('taskType', filters.taskType);
   const qs = query.toString();
+  const endpointUrl = `${API_BASE_URL}/admin/ai-costs/export${qs ? `?${qs}` : ''}`;
 
-  const res = await fetch(`${API_BASE_URL}/admin/ai-costs/export${qs ? `?${qs}` : ''}`, {
+  let res = await fetch(endpointUrl, {
     headers: buildAuthHeaders(),
   });
+  if ((res.status === 401 || res.status === 403) && getSessionAuthToken()) {
+    res = await fetch(endpointUrl);
+  }
   if (!res.ok) {
     let message = 'Không thể xuất báo cáo Excel chi phí AI.';
     try {
