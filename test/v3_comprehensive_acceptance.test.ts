@@ -1222,7 +1222,11 @@ async function runV3ComprehensiveAcceptanceTests() {
           document.querySelector('[data-testid="creator-roster-exam-required-error"]')
         );
 
-        // Nhập thủ công nhiều dòng (có 2 người trùng tên, 1 dòng trống, 1 dòng lỗi "12345")
+        // Nhập danh sách nhiều dòng qua panel "Nhập danh sách" -> "Dán nhanh" (có 2 người trùng tên, 1 dòng trống, 1 dòng lỗi "12345")
+        const tabImport = document.querySelector('[data-testid="roster-tab-import"]');
+        const tabManual = document.querySelector('[data-testid="roster-tab-manual"]');
+        if (tabImport) tabImport.click();
+        await new Promise((r) => setTimeout(r, 60));
         const textarea = document.querySelector('[data-testid="creator-roster-manual-textarea"]');
         textareaSetter.call(
           textarea,
@@ -1232,7 +1236,9 @@ async function runV3ComprehensiveAcceptanceTests() {
         textarea.dispatchEvent(new Event('change', { bubbles: true }));
         await new Promise((r) => setTimeout(r, 80));
 
-        // Thêm 1 người bằng ô nhập nhanh
+        // Thêm 1 người bằng panel "+ Thêm thí sinh"
+        if (tabManual) tabManual.click();
+        await new Promise((r) => setTimeout(r, 60));
         const singleNameInput = document.querySelector('[data-testid="roster-single-name-input"]');
         const singleDeptInput = document.querySelector('[data-testid="roster-single-dept-input"]');
         const addSingleBtn = document.querySelector('[data-testid="roster-add-single-btn"]');
@@ -1247,9 +1253,7 @@ async function runV3ComprehensiveAcceptanceTests() {
         const hasInvalidError = Boolean(document.querySelector('[data-testid="roster-invalid-lines-error"]'));
         const rowsBeforeTabSwitch = document.querySelectorAll('[data-testid^="creator-roster-row-"]').length;
 
-        // Chuyển qua tab Import Excel/CSV rồi quay lại tab Nhập thủ công -> không làm mất dữ liệu đã nhập
-        const tabImport = document.querySelector('[data-testid="roster-tab-import"]');
-        const tabManual = document.querySelector('[data-testid="roster-tab-manual"]');
+        // Chuyển qua tab Nhập danh sách rồi quay lại tab Thêm thí sinh -> không làm mất dữ liệu đã nhập
         tabImport.click();
         await new Promise((r) => setTimeout(r, 60));
         tabManual.click();

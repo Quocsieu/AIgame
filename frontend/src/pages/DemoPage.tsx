@@ -487,10 +487,14 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [isPublishingAnswers, setIsPublishingAnswers] = useState<boolean>(false);
   const [isClosingExam, setIsClosingExam] = useState<boolean>(false);
   const [confirmCloseExamOpen, setConfirmCloseExamOpen] = useState<boolean>(false);
-  const [creatorRosterTab, setCreatorRosterTab] = useState<'MANUAL' | 'IMPORT'>('MANUAL');
+  const [creatorRosterTab, setCreatorRosterTab] = useState<'NONE' | 'MANUAL' | 'IMPORT'>('NONE');
+  const [creatorRosterBulkTab, setCreatorRosterBulkTab] = useState<'PASTE' | 'FILE'>('PASTE');
   const [creatorRosterSingleName, setCreatorRosterSingleName] = useState<string>('');
   const [creatorRosterSingleDept, setCreatorRosterSingleDept] = useState<string>('');
+  const [creatorRosterSingleCode, setCreatorRosterSingleCode] = useState<string>('');
   const [creatorRosterSingleError, setCreatorRosterSingleError] = useState<string | null>(null);
+  const [creatorRosterSearchTerm, setCreatorRosterSearchTerm] = useState<string>('');
+  const [isCreatorRosterExpanded, setIsCreatorRosterExpanded] = useState<boolean>(false);
   const [creatorRosterImportPreview, setCreatorRosterImportPreview] =
     useState<RosterParsePreviewResult | null>(null);
   const [isParsingRosterFile, setIsParsingRosterFile] = useState<boolean>(false);
@@ -498,6 +502,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const [editingRosterRowIdx, setEditingRosterRowIdx] = useState<number | null>(null);
   const [editingRosterRowName, setEditingRosterRowName] = useState<string>('');
   const [editingRosterRowDept, setEditingRosterRowDept] = useState<string>('');
+  const [editingRosterRowCode, setEditingRosterRowCode] = useState<string>('');
   const loadedRosterGameIdRef = useRef<string | null>(null);
 
   const formatParticipantsToPasteText = (items: Array<{
@@ -1050,18 +1055,24 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const handleAddSingleRosterPerson = () => {
     const cleanName = creatorRosterSingleName.replace(/\s+/g, ' ').trim();
     const cleanDept = creatorRosterSingleDept.replace(/\s+/g, ' ').trim();
+    const cleanCode = creatorRosterSingleCode.replace(/\s+/g, ' ').trim();
     if (cleanName.length < 2 || !/\p{L}/u.test(cleanName)) {
       setCreatorRosterSingleError('Vui lòng nhập họ tên hợp lệ (ít nhất 2 ký tự và có chữ cái).');
       return;
     }
     setCreatorRosterSingleError(null);
-    const newLine = cleanDept ? `${cleanName} | ${cleanDept}` : cleanName;
+    const parts = [cleanName, cleanDept, cleanCode];
+    while (parts.length > 1 && !parts[parts.length - 1]) {
+      parts.pop();
+    }
+    const newLine = parts.join(' | ');
     const nextText = btcRosterPasteText.trim()
       ? `${btcRosterPasteText.replace(/\s+$/, '')}\n${newLine}`
       : newLine;
     applyUpdatedRosterPasteText(nextText);
     setCreatorRosterSingleName('');
     setCreatorRosterSingleDept('');
+    setCreatorRosterSingleCode('');
   };
 
   const handleDeleteRosterDraftRow = (targetLineIndex: number) => {
@@ -1076,6 +1087,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
   const handleSaveEditedRosterDraftRow = (targetLineIndex: number) => {
     const cleanName = editingRosterRowName.replace(/\s+/g, ' ').trim();
     const cleanDept = editingRosterRowDept.replace(/\s+/g, ' ').trim();
+    const cleanCode = editingRosterRowCode.replace(/\s+/g, ' ').trim();
     if (cleanName.length < 2 || !/\p{L}/u.test(cleanName)) {
       toast.error('Họ tên phải có ít nhất 2 ký tự và chứa chữ cái hợp lệ.', 'Tên chưa hợp lệ');
       return;
@@ -1088,7 +1100,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
       const nextParts = [
         cleanName,
         cleanDept,
-        existingParts[2] || '',
+        cleanCode || existingParts[2] || '',
         existingParts[3] || '',
       ];
       while (nextParts.length > 1 && !nextParts[nextParts.length - 1]) {
@@ -4682,38 +4694,74 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                   )}
                 </div>
 
-                {/* 6. Danh sách người tham gia (Roster trực tiếp tại cột phải) */}
+                {/* 6. Danh sách thí sinh / người tham gia (Đồng bộ giao diện với Thư viện → Chỉnh sửa game) */}
                 <div
                   data-testid="creator-roster-section"
                   style={{
-                    padding: '0.65rem 0.75rem',
-                    borderRadius: '8px',
-                    backgroundColor: 'var(--bg-surface)',
+                    padding: '12px 14px',
+                    borderRadius: '10px',
+                    backgroundColor: 'var(--bg-card)',
                     border:
                       sessionMode === 'EXAM' && parsedRosterDraft.validItems.length === 0
-                        ? '1.5px solid rgba(239, 68, 68, 0.55)'
+                        ? '1.5px solid var(--accent-rose)'
                         : '1px solid var(--border-subtle)',
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '0.5rem',
+                    gap: '10px',
                   }}
                 >
-                  {/* Header: Tên mục + Phụ đề theo chế độ + Tổng số người hợp lệ */}
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
+                  {/* Header: Tên mục + Phụ đề theo chế độ + Tổng số người hợp lệ + 2 nút thu gọn */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      gap: '8px',
+                      flexWrap: 'wrap',
+                    }}
+                  >
                     <div>
-                      <div style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                        6. Danh sách người tham gia
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <div style={{ fontSize: '0.82rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                          {sessionMode === 'EXAM'
+                            ? '6. Danh sách thí sinh được phép thi'
+                            : '6. Danh sách người tham gia'}
+                        </div>
+                        <span
+                          data-testid="roster-valid-count-badge"
+                          style={{
+                            padding: '2px 8px',
+                            borderRadius: '999px',
+                            fontSize: '0.72rem',
+                            fontWeight: 800,
+                            backgroundColor:
+                              parsedRosterDraft.validItems.length > 0
+                                ? 'var(--accent-emerald-subtle)'
+                                : sessionMode === 'EXAM'
+                                  ? 'var(--accent-rose-subtle)'
+                                  : 'var(--bg-input)',
+                            color:
+                              parsedRosterDraft.validItems.length > 0
+                                ? 'var(--accent-emerald)'
+                                : sessionMode === 'EXAM'
+                                  ? 'var(--accent-rose)'
+                                  : 'var(--text-secondary)',
+                            border: '1px solid var(--border-subtle)',
+                          }}
+                        >
+                          Hợp lệ: {parsedRosterDraft.validItems.length} người
+                        </span>
                       </div>
                       <div
                         data-testid="creator-roster-mode-desc"
                         style={{
-                          fontSize: '0.71rem',
+                          fontSize: '0.72rem',
                           fontWeight: 700,
                           color:
                             sessionMode === 'EXAM'
                               ? 'var(--accent-amber)'
                               : 'var(--text-secondary)',
-                          marginTop: '0.1rem',
+                          marginTop: '2px',
                         }}
                       >
                         {sessionMode === 'EXAM'
@@ -4722,421 +4770,605 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                       </div>
                     </div>
 
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
-                      <span
-                        data-testid="roster-valid-count-badge"
+                    {/* 2 nút chính: + Thêm thí sinh & Nhập danh sách */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        data-testid="roster-tab-manual"
+                        aria-expanded={creatorRosterTab === 'MANUAL'}
+                        onClick={() =>
+                          setCreatorRosterTab((prev) => (prev === 'MANUAL' ? 'NONE' : 'MANUAL'))
+                        }
                         style={{
-                          padding: '0.2rem 0.55rem',
-                          borderRadius: '999px',
-                          fontSize: '0.71rem',
-                          fontWeight: 800,
+                          minHeight: '34px',
+                          padding: '0 10px',
+                          borderRadius: '8px',
+                          border:
+                            creatorRosterTab === 'MANUAL'
+                              ? '1.5px solid var(--primary)'
+                              : '1px solid var(--border-strong)',
                           backgroundColor:
-                            parsedRosterDraft.validItems.length > 0
-                              ? 'rgba(16, 185, 129, 0.14)'
+                            creatorRosterTab === 'MANUAL'
+                              ? 'var(--primary)'
                               : 'var(--bg-input)',
                           color:
-                            parsedRosterDraft.validItems.length > 0
-                              ? 'var(--accent-emerald)'
-                              : 'var(--text-secondary)',
-                          border:
-                            parsedRosterDraft.validItems.length > 0
-                              ? '1px solid rgba(16, 185, 129, 0.4)'
-                              : '1px solid var(--border-subtle)',
+                            creatorRosterTab === 'MANUAL'
+                              ? 'var(--primary-ink)'
+                              : 'var(--text-primary)',
+                          fontSize: '0.76rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
                         }}
                       >
-                        Hợp lệ: {parsedRosterDraft.validItems.length} người
-                      </span>
+                        <PlusIcon size={13} />
+                        <span>Thêm thí sinh</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        data-testid="roster-tab-import"
+                        aria-expanded={creatorRosterTab === 'IMPORT'}
+                        onClick={() =>
+                          setCreatorRosterTab((prev) => (prev === 'IMPORT' ? 'NONE' : 'IMPORT'))
+                        }
+                        style={{
+                          minHeight: '34px',
+                          padding: '0 10px',
+                          borderRadius: '8px',
+                          border:
+                            creatorRosterTab === 'IMPORT'
+                              ? '1.5px solid var(--primary)'
+                              : '1px solid var(--border-strong)',
+                          backgroundColor:
+                            creatorRosterTab === 'IMPORT'
+                              ? 'var(--primary)'
+                              : 'var(--bg-input)',
+                          color:
+                            creatorRosterTab === 'IMPORT'
+                              ? 'var(--primary-ink)'
+                              : 'var(--text-primary)',
+                          fontSize: '0.76rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                        }}
+                      >
+                        <UploadIcon size={13} />
+                        <span>Nhập danh sách</span>
+                      </button>
                     </div>
                   </div>
 
-                  {/* Tabs: Nhập thủ công vs Import Excel / CSV */}
-                  <div style={{ display: 'flex', gap: '0.4rem' }}>
-                    <button
-                      type="button"
-                      data-testid="roster-tab-manual"
-                      onClick={() => setCreatorRosterTab('MANUAL')}
+                  {/* Cảnh báo bắt buộc danh sách khi ở chế độ EXAM */}
+                  {sessionMode === 'EXAM' && parsedRosterDraft.validItems.length === 0 && (
+                    <div
+                      data-testid="creator-roster-exam-required-error"
                       style={{
-                        flex: 1,
-                        padding: '0.34rem 0.55rem',
-                        borderRadius: '6px',
-                        border:
-                          creatorRosterTab === 'MANUAL'
-                            ? '1.5px solid var(--primary)'
-                            : '1px solid var(--border-subtle)',
-                        backgroundColor:
-                          creatorRosterTab === 'MANUAL'
-                            ? 'rgba(56, 189, 248, 0.14)'
-                            : 'var(--bg-input)',
-                        color:
-                          creatorRosterTab === 'MANUAL'
-                            ? 'var(--accent-sky)'
-                            : 'var(--text-secondary)',
-                        fontSize: '0.73rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
+                        padding: '8px 10px',
+                        borderRadius: '8px',
+                        backgroundColor: showExamRosterError
+                          ? 'var(--accent-rose-subtle)'
+                          : 'var(--accent-amber-subtle)',
+                        border: showExamRosterError
+                          ? '1.5px solid var(--accent-rose)'
+                          : '1px solid var(--border-strong)',
+                        color: showExamRosterError ? 'var(--accent-rose)' : 'var(--accent-amber)',
+                        fontSize: '0.74rem',
+                        fontWeight: 700,
+                        lineHeight: 1.4,
                       }}
                     >
-                      ✍ Nhập thủ công
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="roster-tab-import"
-                      onClick={() => setCreatorRosterTab('IMPORT')}
-                      style={{
-                        flex: 1,
-                        padding: '0.34rem 0.55rem',
-                        borderRadius: '6px',
-                        border:
-                          creatorRosterTab === 'IMPORT'
-                            ? '1.5px solid var(--primary)'
-                            : '1px solid var(--border-subtle)',
-                        backgroundColor:
-                          creatorRosterTab === 'IMPORT'
-                            ? 'rgba(56, 189, 248, 0.14)'
-                            : 'var(--bg-input)',
-                        color:
-                          creatorRosterTab === 'IMPORT'
-                            ? 'var(--accent-sky)'
-                            : 'var(--text-secondary)',
-                        fontSize: '0.73rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      📂 Import Excel / CSV
-                    </button>
-                  </div>
+                      Chưa có danh sách thí sinh. Chế độ Thi nghiêm túc cần ít nhất 1 thí sinh hợp lệ trước khi tạo đề hoặc mở kỳ thi chính thức.
+                    </div>
+                  )}
 
-                  {/* Nội dung Tab 1: Nhập thủ công */}
+                  {/* PANEL 1: THÊM THÍ SINH THỦ CÔNG (MỞ KHI NHẤN "+ Thêm thí sinh") */}
                   {creatorRosterTab === 'MANUAL' && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
-                      {/* Nhập từng người nhanh */}
-                      <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
-                        <input
-                          type="text"
-                          data-testid="roster-single-name-input"
-                          placeholder="Họ và tên người tham gia..."
-                          value={creatorRosterSingleName}
-                          onChange={(e) => {
-                            setCreatorRosterSingleName(e.target.value);
-                            if (creatorRosterSingleError) setCreatorRosterSingleError(null);
-                          }}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleAddSingleRosterPerson();
-                            }
-                          }}
+                    <div
+                      data-testid="creator-roster-manual-panel"
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        backgroundColor: 'var(--bg-input)',
+                        border: '1px solid var(--border-subtle)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(135px, 1fr))',
+                          gap: '8px',
+                        }}
+                      >
+                        <div>
+                          <label
+                            htmlFor="creator-roster-single-name"
+                            style={{
+                              display: 'block',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              color: 'var(--text-secondary)',
+                              marginBottom: '3px',
+                            }}
+                          >
+                            Họ và tên *
+                          </label>
+                          <input
+                            id="creator-roster-single-name"
+                            type="text"
+                            data-testid="roster-single-name-input"
+                            placeholder="VD: Nguyễn Văn An"
+                            value={creatorRosterSingleName}
+                            onChange={(e) => {
+                              setCreatorRosterSingleName(e.target.value);
+                              if (creatorRosterSingleError) setCreatorRosterSingleError(null);
+                            }}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                e.preventDefault();
+                                handleAddSingleRosterPerson();
+                              }
+                            }}
+                            style={{
+                              width: '100%',
+                              height: '36px',
+                              backgroundColor: 'var(--bg-surface)',
+                              border: '1px solid var(--border-strong)',
+                              borderRadius: '7px',
+                              padding: '0 10px',
+                              color: 'var(--text-primary)',
+                              fontSize: '0.78rem',
+                              boxSizing: 'border-box',
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label
+                            htmlFor="creator-roster-single-dept"
+                            style={{
+                              display: 'block',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              color: 'var(--text-secondary)',
+                              marginBottom: '3px',
+                            }}
+                          >
+                            Đơn vị / Phòng ban
+                          </label>
+                          <input
+                            id="creator-roster-single-dept"
+                            type="text"
+                            data-testid="roster-single-dept-input"
+                            placeholder="VD: Phòng Kỹ Thuật"
+                            value={creatorRosterSingleDept}
+                            onChange={(e) => setCreatorRosterSingleDept(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                e.preventDefault();
+                                handleAddSingleRosterPerson();
+                              }
+                            }}
+                            style={{
+                              width: '100%',
+                              height: '36px',
+                              backgroundColor: 'var(--bg-surface)',
+                              border: '1px solid var(--border-strong)',
+                              borderRadius: '7px',
+                              padding: '0 10px',
+                              color: 'var(--text-primary)',
+                              fontSize: '0.78rem',
+                              boxSizing: 'border-box',
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label
+                            htmlFor="creator-roster-single-code"
+                            style={{
+                              display: 'block',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              color: 'var(--text-secondary)',
+                              marginBottom: '3px',
+                            }}
+                          >
+                            Mã nhân viên (tùy chọn)
+                          </label>
+                          <input
+                            id="creator-roster-single-code"
+                            type="text"
+                            data-testid="roster-single-code-input"
+                            placeholder="VD: NV001"
+                            value={creatorRosterSingleCode}
+                            onChange={(e) => setCreatorRosterSingleCode(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                                e.preventDefault();
+                                handleAddSingleRosterPerson();
+                              }
+                            }}
+                            style={{
+                              width: '100%',
+                              height: '36px',
+                              backgroundColor: 'var(--bg-surface)',
+                              border: '1px solid var(--border-strong)',
+                              borderRadius: '7px',
+                              padding: '0 10px',
+                              color: 'var(--text-primary)',
+                              fontSize: '0.78rem',
+                              boxSizing: 'border-box',
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      {creatorRosterSingleError && (
+                        <div
+                          data-testid="creator-roster-single-error"
+                          style={{ fontSize: '0.74rem', color: 'var(--accent-rose)', fontWeight: 700 }}
+                        >
+                          {creatorRosterSingleError}
+                        </div>
+                      )}
+
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          data-testid="creator-roster-cancel-manual-btn"
+                          onClick={() => setCreatorRosterTab('NONE')}
                           style={{
-                            flex: '1 1 130px',
-                            backgroundColor: 'var(--bg-input)',
+                            height: '32px',
+                            padding: '0 12px',
+                            borderRadius: '7px',
                             border: '1px solid var(--border-strong)',
-                            borderRadius: '6px',
-                            padding: '0.35rem 0.55rem',
-                            color: 'var(--text-primary)',
+                            backgroundColor: 'var(--bg-surface)',
+                            color: 'var(--text-secondary)',
                             fontSize: '0.75rem',
-                            boxSizing: 'border-box',
+                            fontWeight: 600,
+                            cursor: 'pointer',
                           }}
-                        />
-                        <input
-                          type="text"
-                          data-testid="roster-single-dept-input"
-                          placeholder="Đơn vị / Phòng ban (tùy chọn)"
-                          value={creatorRosterSingleDept}
-                          onChange={(e) => setCreatorRosterSingleDept(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') {
-                              e.preventDefault();
-                              handleAddSingleRosterPerson();
-                            }
-                          }}
-                          style={{
-                            flex: '1 1 110px',
-                            backgroundColor: 'var(--bg-input)',
-                            border: '1px solid var(--border-strong)',
-                            borderRadius: '6px',
-                            padding: '0.35rem 0.55rem',
-                            color: 'var(--text-primary)',
-                            fontSize: '0.75rem',
-                            boxSizing: 'border-box',
-                          }}
-                        />
+                        >
+                          Thu gọn
+                        </button>
                         <button
                           type="button"
                           data-testid="roster-add-single-btn"
                           onClick={handleAddSingleRosterPerson}
                           style={{
-                            padding: '0.35rem 0.65rem',
-                            borderRadius: '6px',
-                            border: '1px solid var(--primary)',
+                            height: '32px',
+                            padding: '0 14px',
+                            borderRadius: '7px',
+                            border: 'none',
                             backgroundColor: 'var(--primary)',
                             color: 'var(--primary-ink)',
-                            fontSize: '0.74rem',
+                            fontSize: '0.76rem',
                             fontWeight: 800,
                             cursor: 'pointer',
-                            whiteSpace: 'nowrap',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
                           }}
                         >
-                          + Thêm
+                          <CheckIcon size={13} />
+                          <span>Xác nhận thêm</span>
                         </button>
-                      </div>
-                      {creatorRosterSingleError && (
-                        <div style={{ fontSize: '0.7rem', color: 'var(--accent-rose)', fontWeight: 700 }}>
-                          {creatorRosterSingleError}
-                        </div>
-                      )}
-
-                      {/* Dán nhiều dòng */}
-                      <div>
-                        <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.2rem' }}>
-                          Hoặc dán danh sách nhiều dòng (mỗi dòng 1 người: Họ tên | Đơn vị | Mã NV):
-                        </label>
-                        <textarea
-                          data-testid="creator-roster-manual-textarea"
-                          rows={3}
-                          placeholder={'Nguyễn Văn An | Phòng Kỹ Thuật | NV001\nTrần Thị Bình | Phòng Kinh Doanh | NV002'}
-                          value={btcRosterPasteText}
-                          onChange={(e) => applyUpdatedRosterPasteText(e.target.value)}
-                          style={{
-                            width: '100%',
-                            backgroundColor: 'var(--bg-input)',
-                            border: '1px solid var(--border-strong)',
-                            borderRadius: '6px',
-                            padding: '0.45rem 0.6rem',
-                            color: 'var(--text-primary)',
-                            fontSize: '0.76rem',
-                            fontFamily: 'inherit',
-                            boxSizing: 'border-box',
-                            resize: 'vertical',
-                          }}
-                        />
                       </div>
                     </div>
                   )}
 
-                  {/* Nội dung Tab 2: Import Excel / CSV */}
+                  {/* PANEL 2: NHẬP DANH SÁCH HÀNG LOẠT (MỞ KHI NHẤN "Nhập danh sách") */}
                   {creatorRosterTab === 'IMPORT' && (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.45rem' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.45rem', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '0.72rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                          Hỗ trợ tệp <strong>.xlsx</strong>, <strong>.csv</strong> (Cột 1: Họ tên, Cột 2: Đơn vị, Cột 3: Mã NV)
-                        </span>
-                        <label
+                    <div
+                      data-testid="creator-roster-bulk-panel"
+                      style={{
+                        padding: '10px 12px',
+                        borderRadius: '8px',
+                        backgroundColor: 'var(--bg-input)',
+                        border: '1px solid var(--border-subtle)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          flexWrap: 'wrap',
+                          gap: '6px',
+                        }}
+                      >
+                        <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap' }}>
+                          <button
+                            type="button"
+                            data-testid="creator-roster-subtab-paste"
+                            onClick={() => setCreatorRosterBulkTab('PASTE')}
+                            style={{
+                              height: '30px',
+                              padding: '0 10px',
+                              borderRadius: '6px',
+                              border:
+                                creatorRosterBulkTab === 'PASTE'
+                                  ? '1px solid var(--primary)'
+                                  : '1px solid var(--border-strong)',
+                              backgroundColor:
+                                creatorRosterBulkTab === 'PASTE'
+                                  ? 'var(--primary-subtle)'
+                                  : 'var(--bg-surface)',
+                              color:
+                                creatorRosterBulkTab === 'PASTE'
+                                  ? 'var(--primary)'
+                                  : 'var(--text-secondary)',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Dán nhanh
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="creator-roster-subtab-file"
+                            onClick={() => setCreatorRosterBulkTab('FILE')}
+                            style={{
+                              height: '30px',
+                              padding: '0 10px',
+                              borderRadius: '6px',
+                              border:
+                                creatorRosterBulkTab === 'FILE'
+                                  ? '1px solid var(--primary)'
+                                  : '1px solid var(--border-strong)',
+                              backgroundColor:
+                                creatorRosterBulkTab === 'FILE'
+                                  ? 'var(--primary-subtle)'
+                                  : 'var(--bg-surface)',
+                              color:
+                                creatorRosterBulkTab === 'FILE'
+                                  ? 'var(--primary)'
+                                  : 'var(--text-secondary)',
+                              fontSize: '0.75rem',
+                              fontWeight: 700,
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Excel / CSV
+                          </button>
+                        </div>
+
+                        <button
+                          type="button"
+                          data-testid="creator-roster-cancel-bulk-btn"
+                          onClick={() => setCreatorRosterTab('NONE')}
                           style={{
-                            padding: '0.38rem 0.7rem',
+                            height: '28px',
+                            padding: '0 10px',
                             borderRadius: '6px',
-                            border: '1px solid var(--accent-sky)',
-                            backgroundColor: 'rgba(56, 189, 248, 0.12)',
-                            color: 'var(--accent-sky)',
-                            fontSize: '0.74rem',
-                            fontWeight: 800,
-                            cursor: isParsingRosterFile ? 'wait' : 'pointer',
-                            display: 'inline-flex',
-                            alignItems: 'center',
-                            gap: '0.3rem',
+                            border: '1px solid var(--border-strong)',
+                            backgroundColor: 'var(--bg-surface)',
+                            color: 'var(--text-secondary)',
+                            fontSize: '0.73rem',
+                            fontWeight: 600,
+                            cursor: 'pointer',
                           }}
                         >
-                          <UploadIcon size={12} />
-                          <span>{isParsingRosterFile ? 'Đang đọc tệp...' : 'Chọn tệp Excel / CSV (.xlsx, .csv)'}</span>
-                          <input
-                            type="file"
-                            data-testid="creator-roster-file-input"
-                            accept=".xlsx,.xls,.csv,.txt"
-                            onChange={handlePreviewCreatorRosterFile}
-                            disabled={isParsingRosterFile}
-                            style={{ display: 'none' }}
-                          />
-                        </label>
+                          Thu gọn
+                        </button>
                       </div>
 
-                      {/* Khung xem trước kết quả parse file trước khi xác nhận nhập */}
-                      {creatorRosterImportPreview && (
-                        <div
-                          data-testid="roster-import-preview-box"
-                          style={{
-                            padding: '0.55rem 0.65rem',
-                            borderRadius: '6px',
-                            backgroundColor: 'var(--bg-input)',
-                            border: '1px solid var(--accent-sky)',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '0.4rem',
-                          }}
-                        >
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.35rem' }}>
-                            <span style={{ fontSize: '0.73rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                              📄 {creatorRosterImportPreview.fileName}
+                      {creatorRosterBulkTab === 'PASTE' ? (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                          <label
+                            htmlFor="creator-roster-manual-textarea"
+                            style={{
+                              display: 'block',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              color: 'var(--text-secondary)',
+                            }}
+                          >
+                            Định dạng mỗi dòng: <strong>Họ tên | Đơn vị | Mã NV</strong>
+                          </label>
+                          <textarea
+                            id="creator-roster-manual-textarea"
+                            data-testid="creator-roster-manual-textarea"
+                            rows={3}
+                            placeholder={'Nguyễn Văn An | Phòng Kỹ Thuật | NV001\nTrần Thị Bình | Phòng Kinh Doanh | NV002'}
+                            value={btcRosterPasteText}
+                            onChange={(e) => applyUpdatedRosterPasteText(e.target.value)}
+                            style={{
+                              width: '100%',
+                              backgroundColor: 'var(--bg-surface)',
+                              border: '1px solid var(--border-strong)',
+                              borderRadius: '7px',
+                              padding: '6px 10px',
+                              color: 'var(--text-primary)',
+                              fontSize: '0.78rem',
+                              fontFamily: 'inherit',
+                              boxSizing: 'border-box',
+                              resize: 'vertical',
+                            }}
+                          />
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: '0.73rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                              Hỗ trợ tệp <strong>.xlsx, .xls, .csv</strong> (Họ tên, Đơn vị, Mã NV)
                             </span>
-                            <span
-                              data-testid="roster-import-preview-count"
+                            <label
+                              data-testid="creator-roster-upload-label"
                               style={{
-                                fontSize: '0.72rem',
-                                fontWeight: 800,
-                                color: 'var(--accent-emerald)',
+                                height: '34px',
+                                padding: '0 12px',
+                                borderRadius: '7px',
+                                border: '1px dashed var(--primary)',
+                                backgroundColor: 'var(--bg-surface)',
+                                color: 'var(--primary)',
+                                fontSize: '0.76rem',
+                                fontWeight: 700,
+                                cursor: isParsingRosterFile ? 'wait' : 'pointer',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '5px',
                               }}
                             >
-                              Xem trước: {creatorRosterImportPreview.participants.length} người hợp lệ
-                            </span>
+                              <UploadIcon size={13} />
+                              <span>{isParsingRosterFile ? 'Đang đọc tệp...' : 'Chọn tệp Excel / CSV'}</span>
+                              <input
+                                type="file"
+                                data-testid="creator-roster-file-input"
+                                accept=".xlsx,.xls,.csv,.txt"
+                                onChange={handlePreviewCreatorRosterFile}
+                                disabled={isParsingRosterFile}
+                                style={{ display: 'none' }}
+                              />
+                            </label>
                           </div>
 
-                          {creatorRosterImportPreview.duplicateCount > 0 && (
+                          {/* Khung xem trước kết quả parse file trước khi xác nhận nhập */}
+                          {creatorRosterImportPreview && (
                             <div
-                              data-testid="roster-import-preview-duplicates"
+                              data-testid="roster-import-preview-box"
                               style={{
-                                fontSize: '0.7rem',
-                                fontWeight: 700,
-                                color: 'var(--accent-amber)',
-                                backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                                padding: '0.28rem 0.45rem',
-                                borderRadius: '4px',
-                              }}
-                            >
-                              ⚠ Phát hiện {creatorRosterImportPreview.duplicateCount} dòng trùng tên (
-                              {creatorRosterImportPreview.duplicateNames.join(', ')}) — giữ nguyên từng người riêng biệt.
-                            </div>
-                          )}
-
-                          {creatorRosterImportPreview.invalidRows.length > 0 && (
-                            <div
-                              data-testid="roster-import-preview-errors"
-                              style={{
-                                fontSize: '0.7rem',
-                                fontWeight: 700,
-                                color: 'var(--accent-rose)',
-                                backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                                padding: '0.28rem 0.45rem',
-                                borderRadius: '4px',
-                              }}
-                            >
-                              ⚠ Có {creatorRosterImportPreview.invalidRows.length} dòng lỗi bị bỏ qua:{' '}
-                              {creatorRosterImportPreview.invalidRows
-                                .slice(0, 3)
-                                .map((r) => `Dòng ${r.rowNumber} ("${r.rawText}"): ${r.reason}`)
-                                .join('; ')}
-                            </div>
-                          )}
-
-                          {creatorRosterImportPreview.participants.length > 0 && (
-                            <div
-                              style={{
-                                maxHeight: '110px',
-                                overflowY: 'auto',
-                                border: '1px solid var(--border-subtle)',
-                                borderRadius: '4px',
-                                padding: '0.3rem 0.45rem',
-                                fontSize: '0.72rem',
+                                padding: '8px 10px',
+                                borderRadius: '7px',
+                                backgroundColor: 'var(--bg-surface)',
+                                border: '1px solid var(--border-strong)',
                                 display: 'flex',
                                 flexDirection: 'column',
-                                gap: '0.2rem',
+                                gap: '6px',
                               }}
                             >
-                              {creatorRosterImportPreview.participants.map((item, pIdx) => (
-                                <div
-                                  key={`${item.fullName}_${pIdx}`}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '6px' }}>
+                                <span style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                                  {creatorRosterImportPreview.fileName}
+                                </span>
+                                <span
+                                  data-testid="roster-import-preview-count"
                                   style={{
-                                    display: 'flex',
-                                    justifyContent: 'space-between',
-                                    alignItems: 'center',
-                                    gap: '0.35rem',
+                                    fontSize: '0.73rem',
+                                    fontWeight: 800,
+                                    color: 'var(--accent-emerald)',
                                   }}
                                 >
-                                  <span>
-                                    <strong>{pIdx + 1}. {item.fullName}</strong>
-                                    {item.departmentUnit ? ` — ${item.departmentUnit}` : ''}
-                                    {item.employeeCode ? ` (${item.employeeCode})` : ''}
-                                  </span>
+                                  Xem trước: {creatorRosterImportPreview.participants.length} người hợp lệ
+                                </span>
+                              </div>
+
+                              {creatorRosterImportPreview.duplicateCount > 0 && (
+                                <div
+                                  data-testid="roster-import-preview-duplicates"
+                                  style={{
+                                    fontSize: '0.72rem',
+                                    fontWeight: 700,
+                                    color: 'var(--accent-amber)',
+                                    backgroundColor: 'var(--accent-amber-subtle)',
+                                    padding: '4px 8px',
+                                    borderRadius: '5px',
+                                  }}
+                                >
+                                  Phát hiện {creatorRosterImportPreview.duplicateCount} dòng trùng tên (
+                                  {creatorRosterImportPreview.duplicateNames.join(', ')}) — giữ nguyên từng người riêng biệt.
+                                </div>
+                              )}
+
+                              {creatorRosterImportPreview.invalidRows.length > 0 && (
+                                <div
+                                  data-testid="roster-import-preview-errors"
+                                  style={{
+                                    fontSize: '0.72rem',
+                                    fontWeight: 700,
+                                    color: 'var(--accent-rose)',
+                                    backgroundColor: 'var(--accent-rose-subtle)',
+                                    padding: '4px 8px',
+                                    borderRadius: '5px',
+                                  }}
+                                >
+                                  Có {creatorRosterImportPreview.invalidRows.length} dòng lỗi bị bỏ qua:{' '}
+                                  {creatorRosterImportPreview.invalidRows
+                                    .slice(0, 3)
+                                    .map((r) => `Dòng ${r.rowNumber} ("${r.rawText}"): ${r.reason}`)
+                                    .join('; ')}
+                                </div>
+                              )}
+
+                              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', flexWrap: 'wrap' }}>
+                                <button
+                                  type="button"
+                                  data-testid="roster-cancel-import-btn"
+                                  onClick={() => setCreatorRosterImportPreview(null)}
+                                  style={{
+                                    height: '30px',
+                                    padding: '0 10px',
+                                    borderRadius: '6px',
+                                    border: '1px solid var(--border-strong)',
+                                    backgroundColor: 'var(--bg-input)',
+                                    color: 'var(--text-secondary)',
+                                    fontSize: '0.73rem',
+                                    fontWeight: 600,
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  Hủy
+                                </button>
+                                {btcRosterPasteText.trim().length > 0 && (
                                   <button
                                     type="button"
-                                    onClick={() => {
-                                      setCreatorRosterImportPreview((prev) => {
-                                        if (!prev) return null;
-                                        const nextList = prev.participants.filter((_, i) => i !== pIdx);
-                                        return {
-                                          ...prev,
-                                          validCount: nextList.length,
-                                          participants: nextList,
-                                        };
-                                      });
-                                    }}
+                                    data-testid="roster-replace-import-btn"
+                                    disabled={creatorRosterImportPreview.participants.length === 0}
+                                    onClick={() => handleConfirmCreatorRosterImport('REPLACE')}
                                     style={{
-                                      border: 'none',
-                                      background: 'transparent',
-                                      color: 'var(--accent-rose)',
-                                      fontSize: '0.68rem',
-                                      fontWeight: 700,
-                                      cursor: 'pointer',
+                                      height: '30px',
+                                      padding: '0 10px',
+                                      borderRadius: '6px',
+                                      border: '1px solid var(--accent-amber)',
+                                      backgroundColor: 'var(--accent-amber-subtle)',
+                                      color: 'var(--accent-amber)',
+                                      fontSize: '0.73rem',
+                                      fontWeight: 800,
+                                      cursor:
+                                        creatorRosterImportPreview.participants.length === 0
+                                          ? 'not-allowed'
+                                          : 'pointer',
                                     }}
                                   >
-                                    Bỏ
+                                    Thay thế danh sách
                                   </button>
-                                </div>
-                              ))}
+                                )}
+                                <button
+                                  type="button"
+                                  data-testid="roster-confirm-import-btn"
+                                  disabled={creatorRosterImportPreview.participants.length === 0}
+                                  onClick={() => handleConfirmCreatorRosterImport('APPEND')}
+                                  style={{
+                                    height: '30px',
+                                    padding: '0 12px',
+                                    borderRadius: '6px',
+                                    border: 'none',
+                                    backgroundColor: 'var(--primary)',
+                                    color: 'var(--primary-ink)',
+                                    fontSize: '0.74rem',
+                                    fontWeight: 800,
+                                    cursor:
+                                      creatorRosterImportPreview.participants.length === 0
+                                        ? 'not-allowed'
+                                        : 'pointer',
+                                  }}
+                                >
+                                  {btcRosterPasteText.trim().length > 0 ? 'Gộp vào danh sách' : 'Xác nhận nhập'} ({creatorRosterImportPreview.participants.length})
+                                </button>
+                              </div>
                             </div>
                           )}
-
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.4rem', flexWrap: 'wrap' }}>
-                            <button
-                              type="button"
-                              data-testid="roster-cancel-import-btn"
-                              onClick={() => setCreatorRosterImportPreview(null)}
-                              style={{
-                                padding: '0.3rem 0.6rem',
-                                borderRadius: '5px',
-                                border: '1px solid var(--border-subtle)',
-                                backgroundColor: 'transparent',
-                                color: 'var(--text-secondary)',
-                                fontSize: '0.72rem',
-                                fontWeight: 700,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Hủy
-                            </button>
-                            {btcRosterPasteText.trim().length > 0 && (
-                              <button
-                                type="button"
-                                data-testid="roster-replace-import-btn"
-                                disabled={creatorRosterImportPreview.participants.length === 0}
-                                onClick={() => handleConfirmCreatorRosterImport('REPLACE')}
-                                style={{
-                                  padding: '0.3rem 0.65rem',
-                                  borderRadius: '5px',
-                                  border: '1px solid var(--accent-amber)',
-                                  backgroundColor: 'rgba(245, 158, 11, 0.14)',
-                                  color: 'var(--accent-amber)',
-                                  fontSize: '0.72rem',
-                                  fontWeight: 800,
-                                  cursor:
-                                    creatorRosterImportPreview.participants.length === 0
-                                      ? 'not-allowed'
-                                      : 'pointer',
-                                }}
-                              >
-                                Thay thế danh sách
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              data-testid="roster-confirm-import-btn"
-                              disabled={creatorRosterImportPreview.participants.length === 0}
-                              onClick={() => handleConfirmCreatorRosterImport('APPEND')}
-                              style={{
-                                padding: '0.3rem 0.7rem',
-                                borderRadius: '5px',
-                                border: 'none',
-                                backgroundColor: 'var(--accent-emerald)',
-                                color: '#022c22',
-                                fontSize: '0.72rem',
-                                fontWeight: 800,
-                                cursor:
-                                  creatorRosterImportPreview.participants.length === 0
-                                    ? 'not-allowed'
-                                    : 'pointer',
-                              }}
-                            >
-                              ✓ {btcRosterPasteText.trim().length > 0 ? 'Gộp vào danh sách' : 'Xác nhận nhập'} ({creatorRosterImportPreview.participants.length})
-                            </button>
-                          </div>
                         </div>
                       )}
                     </div>
@@ -5147,16 +5379,16 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     <div
                       data-testid="roster-duplicate-warning"
                       style={{
-                        padding: '0.32rem 0.5rem',
-                        borderRadius: '6px',
-                        backgroundColor: 'rgba(245, 158, 11, 0.1)',
-                        border: '1px solid rgba(245, 158, 11, 0.35)',
+                        padding: '6px 10px',
+                        borderRadius: '7px',
+                        backgroundColor: 'var(--accent-amber-subtle)',
+                        border: '1px solid var(--border-subtle)',
                         color: 'var(--accent-amber)',
-                        fontSize: '0.71rem',
+                        fontSize: '0.73rem',
                         fontWeight: 700,
                       }}
                     >
-                      ⚠ Có {parsedRosterDraft.duplicateCount} người trùng tên (
+                      Có {parsedRosterDraft.duplicateCount} người trùng tên (
                       {parsedRosterDraft.duplicateNames.join(', ')}) — hệ thống giữ nguyên từng người riêng biệt, không tự gộp.
                     </div>
                   )}
@@ -5166,188 +5398,346 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                     <div
                       data-testid="roster-invalid-lines-error"
                       style={{
-                        padding: '0.32rem 0.5rem',
-                        borderRadius: '6px',
-                        backgroundColor: 'rgba(239, 68, 68, 0.1)',
-                        border: '1px solid rgba(239, 68, 68, 0.35)',
+                        padding: '6px 10px',
+                        borderRadius: '7px',
+                        backgroundColor: 'var(--accent-rose-subtle)',
+                        border: '1px solid var(--border-subtle)',
                         color: 'var(--accent-rose)',
-                        fontSize: '0.71rem',
+                        fontSize: '0.73rem',
                         fontWeight: 700,
                       }}
                     >
-                      ⚠ Phát hiện {parsedRosterDraft.invalidLines.length} dòng không hợp lệ:{' '}
+                      Phát hiện {parsedRosterDraft.invalidLines.length} dòng không hợp lệ:{' '}
                       {parsedRosterDraft.invalidLines
                         .map((l) => `Dòng ${l.lineNumber} ("${l.rawLine}"): ${l.reason}`)
                         .join('; ')}
                     </div>
                   )}
 
-                  {/* Cảnh báo bắt buộc danh sách khi ở chế độ EXAM */}
-                  {sessionMode === 'EXAM' && parsedRosterDraft.validItems.length === 0 && (
-                    <div
-                      data-testid="creator-roster-exam-required-error"
-                      style={{
-                        padding: '0.38rem 0.55rem',
-                        borderRadius: '6px',
-                        backgroundColor: showExamRosterError
-                          ? 'rgba(239, 68, 68, 0.18)'
-                          : 'rgba(245, 158, 11, 0.12)',
-                        border: showExamRosterError
-                          ? '1.5px solid var(--accent-rose)'
-                          : '1px solid rgba(245, 158, 11, 0.4)',
-                        color: showExamRosterError ? 'var(--accent-rose)' : 'var(--accent-amber)',
-                        fontSize: '0.72rem',
-                        fontWeight: 800,
-                      }}
-                    >
-                      ⚠ Chế độ Thi nghiêm túc bắt buộc phải có danh sách thí sinh (ít nhất 1 người hợp lệ) trước khi tạo hoặc lưu đề thi.
-                    </div>
-                  )}
+                  {/* Danh sách tóm tắt đã nhập (tối đa 5 người mặc định + tìm kiếm + Xem tất cả / Thu gọn + sửa/xóa) */}
+                  {(() => {
+                    const normalizedSearch = creatorRosterSearchTerm.trim().toLowerCase();
+                    const allItems = parsedRosterDraft.validItems.map((item, idx) => ({
+                      item,
+                      originalIdx: idx,
+                    }));
+                    const filteredItems = normalizedSearch
+                      ? allItems.filter(
+                          ({ item }) =>
+                            item.fullName.toLowerCase().includes(normalizedSearch) ||
+                            (item.departmentUnit || '').toLowerCase().includes(normalizedSearch) ||
+                            (item.employeeCode || '').toLowerCase().includes(normalizedSearch)
+                        )
+                      : allItems;
+                    const visibleItems =
+                      isCreatorRosterExpanded || filteredItems.length <= 5
+                        ? filteredItems
+                        : filteredItems.slice(0, 5);
 
-                  {/* Danh sách người tham gia hiện tại (hỗ trợ sửa/xóa trực tiếp từng dòng) */}
-                  {parsedRosterDraft.validItems.length > 0 && (
-                    <div
-                      data-testid="creator-roster-list"
-                      style={{
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '0.25rem',
-                        maxHeight: '140px',
-                        overflowY: 'auto',
-                        padding: '0.35rem 0.45rem',
-                        borderRadius: '6px',
-                        backgroundColor: 'var(--bg-input)',
-                        border: '1px solid var(--border-subtle)',
-                      }}
-                    >
-                      {parsedRosterDraft.validItems.map((item, idx) => {
-                        const isEditingRow = editingRosterRowIdx === item.lineIndex;
-                        return (
+                    return (
+                      <div
+                        data-testid="creator-roster-list"
+                        style={{
+                          borderRadius: '8px',
+                          border: '1px solid var(--border-subtle)',
+                          backgroundColor: 'var(--bg-surface)',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        {allItems.length > 0 && (
                           <div
-                            key={`${item.participantId || 'draft'}_${idx}`}
-                            data-testid={`creator-roster-row-${idx}`}
                             style={{
                               display: 'flex',
-                              alignItems: 'center',
                               justifyContent: 'space-between',
-                              gap: '0.35rem',
-                              padding: '0.22rem 0.3rem',
-                              borderBottom:
-                                idx < parsedRosterDraft.validItems.length - 1
-                                  ? '1px solid var(--border-subtle)'
-                                  : 'none',
-                              fontSize: '0.73rem',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '6px 8px',
+                              borderBottom: '1px solid var(--border-subtle)',
+                              backgroundColor: 'var(--bg-input)',
+                              flexWrap: 'wrap',
                             }}
                           >
-                            {isEditingRow ? (
-                              <div style={{ display: 'flex', gap: '0.25rem', flex: 1, alignItems: 'center' }}>
-                                <input
-                                  type="text"
-                                  data-testid={`roster-edit-name-input-${idx}`}
-                                  value={editingRosterRowName}
-                                  onChange={(e) => setEditingRosterRowName(e.target.value)}
-                                  style={{
-                                    flex: 1,
-                                    padding: '0.2rem 0.35rem',
-                                    fontSize: '0.72rem',
-                                    borderRadius: '4px',
-                                    border: '1px solid var(--primary)',
-                                    backgroundColor: 'var(--bg-surface)',
-                                    color: 'var(--text-primary)',
-                                  }}
-                                />
-                                <input
-                                  type="text"
-                                  data-testid={`roster-edit-dept-input-${idx}`}
-                                  value={editingRosterRowDept}
-                                  placeholder="Đơn vị"
-                                  onChange={(e) => setEditingRosterRowDept(e.target.value)}
-                                  style={{
-                                    width: '90px',
-                                    padding: '0.2rem 0.35rem',
-                                    fontSize: '0.72rem',
-                                    borderRadius: '4px',
-                                    border: '1px solid var(--border-strong)',
-                                    backgroundColor: 'var(--bg-surface)',
-                                    color: 'var(--text-primary)',
-                                  }}
-                                />
-                                <button
-                                  type="button"
-                                  data-testid={`roster-save-row-btn-${idx}`}
-                                  onClick={() => handleSaveEditedRosterDraftRow(item.lineIndex)}
-                                  style={{
-                                    border: 'none',
-                                    borderRadius: '4px',
-                                    backgroundColor: 'var(--accent-emerald)',
-                                    color: '#022c22',
-                                    padding: '0.2rem 0.45rem',
-                                    fontSize: '0.68rem',
-                                    fontWeight: 800,
-                                    cursor: 'pointer',
-                                  }}
-                                >
-                                  Lưu
-                                </button>
-                              </div>
-                            ) : (
-                              <>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', minWidth: 0, flex: 1 }}>
-                                  <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>{idx + 1}.</span>
-                                  <span style={{ fontWeight: 800, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                    {item.fullName}
-                                  </span>
-                                  {item.departmentUnit && (
-                                    <span style={{ color: 'var(--text-secondary)', fontSize: '0.69rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                                      • {item.departmentUnit}
-                                    </span>
-                                  )}
-                                </div>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', flexShrink: 0 }}>
-                                  <button
-                                    type="button"
-                                    data-testid={`roster-edit-row-btn-${idx}`}
-                                    onClick={() => {
-                                      setEditingRosterRowIdx(item.lineIndex);
-                                      setEditingRosterRowName(item.fullName);
-                                      setEditingRosterRowDept(item.departmentUnit || '');
-                                    }}
-                                    style={{
-                                      border: 'none',
-                                      background: 'transparent',
-                                      color: 'var(--accent-sky)',
-                                      fontSize: '0.69rem',
-                                      fontWeight: 700,
-                                      cursor: 'pointer',
-                                      padding: '0.1rem 0.25rem',
-                                    }}
-                                  >
-                                    Sửa
-                                  </button>
-                                  <button
-                                    type="button"
-                                    data-testid={`roster-delete-row-btn-${idx}`}
-                                    onClick={() => handleDeleteRosterDraftRow(item.lineIndex)}
-                                    style={{
-                                      border: 'none',
-                                      background: 'transparent',
-                                      color: 'var(--accent-rose)',
-                                      fontSize: '0.69rem',
-                                      fontWeight: 700,
-                                      cursor: 'pointer',
-                                      padding: '0.1rem 0.25rem',
-                                    }}
-                                  >
-                                    Xóa
-                                  </button>
-                                </div>
-                              </>
+                            <input
+                              type="text"
+                              data-testid="creator-roster-search-input"
+                              value={creatorRosterSearchTerm}
+                              onChange={(e) => setCreatorRosterSearchTerm(e.target.value)}
+                              placeholder="Tìm theo họ tên, đơn vị, mã NV..."
+                              style={{
+                                flex: '1 1 140px',
+                                height: '30px',
+                                padding: '0 8px',
+                                borderRadius: '6px',
+                                border: '1px solid var(--border-strong)',
+                                backgroundColor: 'var(--bg-surface)',
+                                color: 'var(--text-primary)',
+                                fontSize: '0.75rem',
+                                boxSizing: 'border-box',
+                              }}
+                            />
+                            {filteredItems.length > 5 && (
+                              <button
+                                type="button"
+                                data-testid="creator-roster-expand-list-btn"
+                                onClick={() => setIsCreatorRosterExpanded((prev) => !prev)}
+                                style={{
+                                  height: '28px',
+                                  padding: '0 8px',
+                                  borderRadius: '6px',
+                                  border: '1px solid var(--border-strong)',
+                                  backgroundColor: 'var(--bg-surface)',
+                                  color: 'var(--primary)',
+                                  fontSize: '0.73rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                {isCreatorRosterExpanded
+                                  ? 'Thu gọn danh sách'
+                                  : `Xem tất cả (${filteredItems.length})`}
+                              </button>
                             )}
                           </div>
-                        );
-                      })}
-                    </div>
-                  )}
+                        )}
+
+                        {allItems.length === 0 ? (
+                          <div
+                            data-testid="creator-roster-empty-state"
+                            style={{
+                              padding: '10px 12px',
+                              fontSize: '0.76rem',
+                              color: 'var(--text-muted)',
+                            }}
+                          >
+                            Danh sách đang trống. Nhấn <strong>Thêm thí sinh</strong> hoặc <strong>Nhập danh sách</strong> để bổ sung.
+                          </div>
+                        ) : filteredItems.length === 0 ? (
+                          <div style={{ padding: '10px 12px', fontSize: '0.76rem', color: 'var(--text-muted)' }}>
+                            Không tìm thấy thí sinh phù hợp với từ khóa "{creatorRosterSearchTerm}".
+                          </div>
+                        ) : (
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              maxHeight: isCreatorRosterExpanded ? '220px' : 'none',
+                              overflowY: isCreatorRosterExpanded ? 'auto' : 'visible',
+                            }}
+                          >
+                            {visibleItems.map(({ item, originalIdx }, vIdx) => {
+                              const isEditingRow = editingRosterRowIdx === item.lineIndex;
+                              return (
+                                <div
+                                  key={`${item.participantId || 'draft'}_${originalIdx}`}
+                                  data-testid={`creator-roster-row-${originalIdx}`}
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: '6px',
+                                    padding: '6px 10px',
+                                    borderBottom:
+                                      vIdx < visibleItems.length - 1
+                                        ? '1px solid var(--border-subtle)'
+                                        : 'none',
+                                    fontSize: '0.76rem',
+                                  }}
+                                >
+                                  {isEditingRow ? (
+                                    <div style={{ display: 'flex', gap: '4px', flex: 1, alignItems: 'center', flexWrap: 'wrap' }}>
+                                      <input
+                                        type="text"
+                                        data-testid={`roster-edit-name-input-${originalIdx}`}
+                                        value={editingRosterRowName}
+                                        onChange={(e) => setEditingRosterRowName(e.target.value)}
+                                        style={{
+                                          flex: '1 1 110px',
+                                          height: '28px',
+                                          padding: '0 6px',
+                                          fontSize: '0.74rem',
+                                          borderRadius: '5px',
+                                          border: '1px solid var(--primary)',
+                                          backgroundColor: 'var(--bg-input)',
+                                          color: 'var(--text-primary)',
+                                        }}
+                                      />
+                                      <input
+                                        type="text"
+                                        data-testid={`roster-edit-dept-input-${originalIdx}`}
+                                        value={editingRosterRowDept}
+                                        placeholder="Đơn vị"
+                                        onChange={(e) => setEditingRosterRowDept(e.target.value)}
+                                        style={{
+                                          width: '90px',
+                                          height: '28px',
+                                          padding: '0 6px',
+                                          fontSize: '0.74rem',
+                                          borderRadius: '5px',
+                                          border: '1px solid var(--border-strong)',
+                                          backgroundColor: 'var(--bg-input)',
+                                          color: 'var(--text-primary)',
+                                        }}
+                                      />
+                                      <button
+                                        type="button"
+                                        data-testid={`roster-save-row-btn-${originalIdx}`}
+                                        onClick={() => handleSaveEditedRosterDraftRow(item.lineIndex)}
+                                        style={{
+                                          height: '28px',
+                                          border: 'none',
+                                          borderRadius: '5px',
+                                          backgroundColor: 'var(--primary)',
+                                          color: 'var(--primary-ink)',
+                                          padding: '0 8px',
+                                          fontSize: '0.72rem',
+                                          fontWeight: 700,
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        Lưu
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingRosterRowIdx(null)}
+                                        style={{
+                                          height: '28px',
+                                          border: '1px solid var(--border-strong)',
+                                          borderRadius: '5px',
+                                          backgroundColor: 'var(--bg-input)',
+                                          color: 'var(--text-secondary)',
+                                          padding: '0 8px',
+                                          fontSize: '0.72rem',
+                                          cursor: 'pointer',
+                                        }}
+                                      >
+                                        Huỷ
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', minWidth: 0, flex: 1 }}>
+                                        <span style={{ color: 'var(--text-muted)', fontWeight: 700, width: '20px', flexShrink: 0 }}>
+                                          {originalIdx + 1}.
+                                        </span>
+                                        <span
+                                          style={{
+                                            fontWeight: 700,
+                                            color: 'var(--text-primary)',
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap',
+                                          }}
+                                        >
+                                          {item.fullName}
+                                        </span>
+                                        {item.departmentUnit && (
+                                          <span
+                                            style={{
+                                              color: 'var(--text-secondary)',
+                                              fontSize: '0.72rem',
+                                              overflow: 'hidden',
+                                              textOverflow: 'ellipsis',
+                                              whiteSpace: 'nowrap',
+                                            }}
+                                          >
+                                            • {item.departmentUnit}
+                                          </span>
+                                        )}
+                                        {item.employeeCode && (
+                                          <span
+                                            style={{
+                                              color: 'var(--text-muted)',
+                                              fontSize: '0.7rem',
+                                              whiteSpace: 'nowrap',
+                                            }}
+                                          >
+                                            ({item.employeeCode})
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexShrink: 0 }}>
+                                        <button
+                                          type="button"
+                                          data-testid={`roster-edit-row-btn-${originalIdx}`}
+                                          onClick={() => {
+                                            setEditingRosterRowIdx(item.lineIndex);
+                                            setEditingRosterRowName(item.fullName);
+                                            setEditingRosterRowDept(item.departmentUnit || '');
+                                            setEditingRosterRowCode(item.employeeCode || '');
+                                          }}
+                                          style={{
+                                            padding: '3px 7px',
+                                            borderRadius: '5px',
+                                            border: '1px solid var(--border-strong)',
+                                            backgroundColor: 'var(--bg-input)',
+                                            color: 'var(--text-primary)',
+                                            fontSize: '0.71rem',
+                                            fontWeight: 600,
+                                            cursor: 'pointer',
+                                          }}
+                                        >
+                                          Sửa
+                                        </button>
+                                        <button
+                                          type="button"
+                                          data-testid={`roster-delete-row-btn-${originalIdx}`}
+                                          onClick={() => handleDeleteRosterDraftRow(item.lineIndex)}
+                                          style={{
+                                            padding: '3px 7px',
+                                            borderRadius: '5px',
+                                            border: '1px solid var(--border-strong)',
+                                            backgroundColor: 'var(--accent-rose-subtle)',
+                                            color: 'var(--accent-rose)',
+                                            fontSize: '0.71rem',
+                                            fontWeight: 700,
+                                            cursor: 'pointer',
+                                          }}
+                                        >
+                                          Xóa
+                                        </button>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+
+                        {!isCreatorRosterExpanded && filteredItems.length > 5 && (
+                          <div
+                            style={{
+                              padding: '6px 10px',
+                              borderTop: '1px solid var(--border-subtle)',
+                              backgroundColor: 'var(--bg-input)',
+                              fontSize: '0.73rem',
+                              color: 'var(--text-secondary)',
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <span>Đang hiển thị 5/{filteredItems.length} thí sinh</span>
+                            <button
+                              type="button"
+                              onClick={() => setIsCreatorRosterExpanded(true)}
+                              style={{
+                                border: 'none',
+                                background: 'transparent',
+                                color: 'var(--primary)',
+                                fontWeight: 700,
+                                fontSize: '0.73rem',
+                                cursor: 'pointer',
+                                padding: 0,
+                              }}
+                            >
+                              Xem tất cả ({filteredItems.length}) &rarr;
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {/* Thanh thao tác nhanh cho danh sách người tham gia */}
                   {(parsedRosterDraft.validItems.length > 0 || generatedSpec) && (
@@ -5361,7 +5751,7 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                             border: 'none',
                             background: 'transparent',
                             color: 'var(--accent-rose)',
-                            fontSize: '0.71rem',
+                            fontSize: '0.72rem',
                             fontWeight: 700,
                             cursor: 'pointer',
                             padding: 0,
@@ -5380,17 +5770,17 @@ export const DemoPage: React.FC<DemoPageProps> = ({
                           onClick={handleSaveBtcRoster}
                           disabled={isSavingRoster}
                           style={{
-                            padding: '0.28rem 0.65rem',
+                            padding: '0.3rem 0.7rem',
                             borderRadius: '6px',
                             border: '1px solid var(--primary)',
-                            backgroundColor: 'rgba(56, 189, 248, 0.14)',
-                            color: 'var(--accent-sky)',
-                            fontSize: '0.72rem',
+                            backgroundColor: 'var(--primary-subtle)',
+                            color: 'var(--primary)',
+                            fontSize: '0.73rem',
                             fontWeight: 800,
                             cursor: isSavingRoster ? 'wait' : 'pointer',
                           }}
                         >
-                          {isSavingRoster ? 'Đang lưu...' : '💾 Lưu danh sách'}
+                          {isSavingRoster ? 'Đang lưu...' : 'Lưu danh sách'}
                         </button>
                       )}
                     </div>

@@ -1151,13 +1151,226 @@ describe('V3 LIBRARY EDIT EXAM ROSTER MANAGEMENT (12 FUNCTIONAL CASES + E2E)', (
         fs.writeFileSync(path.join(ARTIFACT_DIR, vp.file), await page.screenshot());
       }
 
-      // 9. Verify Create Game (?tab=demo) is completely unaffected (Check #13)
+      // 9. Verify Create Game (?tab=demo) synchronized roster UI, collapsible panels, search, expand/collapse >5 rows, Light/Dark theme, and 5 viewports
       await page.setViewport({ width: 1440, height: 900, mobile: false });
       await page.goto(`${baseUrl}/?tab=demo`, { settleMs: 900 });
-      const createPageOk = await page.eval(`
-        (() => Boolean(document.body && document.body.textContent && document.body.textContent.includes('Tạo Game')))()
+      await page.eval(`document.documentElement.setAttribute('data-theme', 'light')`);
+      await sleep(250);
+
+      // Default PLAY mode -> switch to EXAM mode and check default collapsed state
+      const createRosterDefault = await page.eval(`
+        (async () => {
+          const selectSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set;
+          const sessionSelect = document.querySelector('[data-testid="session-mode-select"]');
+          const modeDescBefore = document.querySelector('[data-testid="creator-roster-mode-desc"]')?.textContent?.trim() || '';
+          selectSetter.call(sessionSelect, 'EXAM');
+          sessionSelect.dispatchEvent(new Event('change', { bubbles: true }));
+          await new Promise((r) => setTimeout(r, 120));
+          const rosterCard = document.querySelector('[data-testid="creator-roster-section"]');
+          const cardBg = rosterCard ? window.getComputedStyle(rosterCard).backgroundColor : '';
+          return {
+            modeDescBefore,
+            modeDescExam: document.querySelector('[data-testid="creator-roster-mode-desc"]')?.textContent?.trim() || '',
+            hasRosterCard: Boolean(rosterCard),
+            cardBg,
+            hasManualPanelOpenByDefault: Boolean(document.querySelector('[data-testid="creator-roster-manual-panel"]')),
+            hasBulkPanelOpenByDefault: Boolean(document.querySelector('[data-testid="creator-roster-bulk-panel"]')),
+            hasEmptyNotice: Boolean(document.querySelector('[data-testid="creator-roster-exam-required-error"]')),
+            hasManualToggleBtn: Boolean(document.querySelector('[data-testid="roster-tab-manual"]')),
+            hasBulkToggleBtn: Boolean(document.querySelector('[data-testid="roster-tab-import"]')),
+          };
+        })()
       `);
-      assert.equal(createPageOk, true, 'Create Game page (?tab=demo) must remain intact');
+      assert.equal(createRosterDefault.modeDescBefore, 'Tùy chọn — có thể để trống');
+      assert.equal(createRosterDefault.modeDescExam, 'Bắt buộc — cần có danh sách thí sinh');
+      assert.equal(createRosterDefault.hasRosterCard, true, 'Create Game EXAM mode must show roster card');
+      assert.equal(createRosterDefault.cardBg, 'rgb(255, 255, 255)', 'Create Game roster card must use var(--bg-card) white in Light Theme');
+      assert.equal(createRosterDefault.hasManualPanelOpenByDefault, false, 'Manual form must be collapsed by default on Create Game');
+      assert.equal(createRosterDefault.hasBulkPanelOpenByDefault, false, 'Bulk import panel must be collapsed by default on Create Game');
+      assert.equal(createRosterDefault.hasEmptyNotice, true, 'Empty roster notice must be visible in EXAM mode');
+      assert.equal(createRosterDefault.hasManualToggleBtn, true);
+      assert.equal(createRosterDefault.hasBulkToggleBtn, true);
+
+      // Test manual add + draft preservation on collapse/reopen on Create Game
+      await page.eval(`
+        (() => {
+          const btn = document.querySelector('[data-testid="roster-tab-manual"]');
+          if (btn) btn.click();
+        })()
+      `);
+      await sleep(200);
+      await page.eval(`
+        (() => {
+          const setVal = (sel, val) => {
+            const el = document.querySelector(sel);
+            if (!el) return;
+            const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+            setter.call(el, val);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+          };
+          setVal('[data-testid="roster-single-name-input"]', 'Đặng Quốc Bảo');
+          setVal('[data-testid="roster-single-dept-input"]', 'Phòng Sản Xuất');
+          setVal('[data-testid="roster-single-code-input"]', 'SX01');
+        })()
+      `);
+      await sleep(150);
+
+      fs.writeFileSync(
+        path.join(ARTIFACT_DIR, 'v3_create_game_roster_manual_open_1440x900.png'),
+        await page.screenshot()
+      );
+
+      // Collapse and reopen manual panel -> verify draft is preserved
+      await page.eval(`document.querySelector('[data-testid="creator-roster-cancel-manual-btn"]')?.click()`);
+      await sleep(150);
+      await page.eval(`document.querySelector('[data-testid="roster-tab-manual"]')?.click()`);
+      await sleep(150);
+      const createManualDraftPreserved = await page.eval(`
+        (() => ({
+          name: document.querySelector('[data-testid="roster-single-name-input"]')?.value || '',
+          dept: document.querySelector('[data-testid="roster-single-dept-input"]')?.value || '',
+          code: document.querySelector('[data-testid="roster-single-code-input"]')?.value || '',
+        }))()
+      `);
+      assert.equal(createManualDraftPreserved.name, 'Đặng Quốc Bảo');
+      assert.equal(createManualDraftPreserved.dept, 'Phòng Sản Xuất');
+      assert.equal(createManualDraftPreserved.code, 'SX01');
+
+      // Confirm manual add
+      await page.eval(`document.querySelector('[data-testid="roster-add-single-btn"]')?.click()`);
+      await sleep(200);
+
+      // Open Bulk panel -> Dán nhanh 6 more participants (including 1 duplicate + 1 invalid row) to test >5 summary list, search, and expand/collapse
+      await page.eval(`document.querySelector('[data-testid="roster-tab-import"]')?.click()`);
+      await sleep(200);
+      await page.eval(`
+        (() => {
+          const ta = document.querySelector('[data-testid="creator-roster-manual-textarea"]');
+          if (!ta) return;
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set;
+          setter.call(
+            ta,
+            [
+              'Đặng Quốc Bảo | Phòng Sản Xuất | SX01',
+              'Nguyễn Thị Mai | Phòng Kế Toán | KT01',
+              ' Nguyễn Thị Mai | Phòng Nhân Sự | NS02',
+              'Trần Văn Hùng | Phòng Kỹ Thuật | KT02',
+              'Lê Thị Lan | Phòng Kinh Doanh | KD01',
+              'Phạm Minh Tuấn | Phòng R&D | RD01',
+              'Hoàng Gia Huy | Phòng Pháp Chế | PC01',
+              '12345',
+            ].join('\\n')
+          );
+          ta.dispatchEvent(new Event('input', { bubbles: true }));
+          ta.dispatchEvent(new Event('change', { bubbles: true }));
+        })()
+      `);
+      await sleep(250);
+
+      fs.writeFileSync(
+        path.join(ARTIFACT_DIR, 'v3_create_game_roster_bulk_open_1440x900.png'),
+        await page.screenshot()
+      );
+
+      // Collapse bulk panel to inspect default compact view with 7 valid participants (showing 5 by default)
+      await page.eval(`document.querySelector('[data-testid="creator-roster-cancel-bulk-btn"]')?.click()`);
+      await sleep(200);
+
+      const createSummaryCheck = await page.eval(`
+        (() => {
+          const visibleRows = document.querySelectorAll('[data-testid^="creator-roster-row-"]').length;
+          const badgeText = document.querySelector('[data-testid="roster-valid-count-badge"]')?.textContent?.trim() || '';
+          const expandBtnText = document.querySelector('[data-testid="creator-roster-expand-list-btn"]')?.textContent?.trim() || '';
+          const hasDupWarn = Boolean(document.querySelector('[data-testid="roster-duplicate-warning"]'));
+          const hasInvalidErr = Boolean(document.querySelector('[data-testid="roster-invalid-lines-error"]'));
+          return { visibleRows, badgeText, expandBtnText, hasDupWarn, hasInvalidErr };
+        })()
+      `);
+      assert.equal(createSummaryCheck.badgeText, 'Hợp lệ: 7 người');
+      assert.equal(createSummaryCheck.visibleRows, 5, 'Create Game roster list must show max 5 participants by default');
+      assert.ok(createSummaryCheck.expandBtnText.includes('Xem tất cả (7)'));
+      assert.equal(createSummaryCheck.hasDupWarn, true, 'Duplicate name warning must be shown');
+      assert.equal(createSummaryCheck.hasInvalidErr, true, 'Invalid row warning must be shown');
+
+      // Expand to see all 7, then collapse back to 5
+      await page.eval(`document.querySelector('[data-testid="creator-roster-expand-list-btn"]')?.click()`);
+      await sleep(150);
+      const expandedRowCount = await page.eval(`document.querySelectorAll('[data-testid^="creator-roster-row-"]').length`);
+      assert.equal(expandedRowCount, 7, 'Clicking Xem tất cả must reveal all 7 participants');
+      await page.eval(`document.querySelector('[data-testid="creator-roster-expand-list-btn"]')?.click()`);
+      await sleep(150);
+
+      // Search filter check
+      await page.eval(`
+        (() => {
+          const searchEl = document.querySelector('[data-testid="creator-roster-search-input"]');
+          if (!searchEl) return;
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          setter.call(searchEl, 'Pháp Chế');
+          searchEl.dispatchEvent(new Event('input', { bubbles: true }));
+        })()
+      `);
+      await sleep(150);
+      const searchMatchCount = await page.eval(`document.querySelectorAll('[data-testid^="creator-roster-row-"]').length`);
+      assert.equal(searchMatchCount, 1, 'Searching "Pháp Chế" must filter down to 1 matching participant');
+      await page.eval(`
+        (() => {
+          const searchEl = document.querySelector('[data-testid="creator-roster-search-input"]');
+          if (!searchEl) return;
+          const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+          setter.call(searchEl, '');
+          searchEl.dispatchEvent(new Event('input', { bubbles: true }));
+        })()
+      `);
+      await sleep(150);
+
+      // Capture Light & Dark Theme screenshots of Create Game roster card
+      fs.writeFileSync(
+        path.join(ARTIFACT_DIR, 'v3_create_game_roster_light_1440x900.png'),
+        await page.screenshot()
+      );
+      await page.eval(`document.documentElement.setAttribute('data-theme', 'dark')`);
+      await sleep(250);
+      const createDarkCardBg = await page.eval(`
+        (() => {
+          const card = document.querySelector('[data-testid="creator-roster-section"]');
+          return card ? window.getComputedStyle(card).backgroundColor : '';
+        })()
+      `);
+      assert.equal(createDarkCardBg, 'rgb(21, 27, 46)', 'In Dark Theme, Create Game roster card must use var(--bg-card) #151b2e');
+      fs.writeFileSync(
+        path.join(ARTIFACT_DIR, 'v3_create_game_roster_dark_1440x900.png'),
+        await page.screenshot()
+      );
+      await page.eval(`document.documentElement.setAttribute('data-theme', 'light')`);
+      await sleep(200);
+
+      // Verify Create Game across all 5 viewports (no horizontal overflow, roster preserved)
+      for (const vp of [
+        { width: 1440, height: 900, mobile: false },
+        { width: 1366, height: 768, mobile: false },
+        { width: 768, height: 1024, mobile: true },
+        { width: 390, height: 844, mobile: true, file: 'v3_create_game_roster_390x844.png' },
+        { width: 360, height: 800, mobile: true, file: 'v3_create_game_roster_360x800.png' },
+      ]) {
+        await page.setViewport({ width: vp.width, height: vp.height, mobile: vp.mobile });
+        await sleep(300);
+        const vpCheck = await page.eval(`
+          (() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            innerWidth: window.innerWidth,
+            badgeText: document.querySelector('[data-testid="roster-valid-count-badge"]')?.textContent?.trim() || '',
+          }))()
+        `);
+        assert.ok(
+          vpCheck.scrollWidth <= vpCheck.innerWidth + 2,
+          `Create Game at ${vp.width}x${vp.height} must not overflow horizontally (${vpCheck.scrollWidth} > ${vpCheck.innerWidth})`
+        );
+        assert.equal(vpCheck.badgeText, 'Hợp lệ: 7 người');
+        if (vp.file) {
+          fs.writeFileSync(path.join(ARTIFACT_DIR, vp.file), await page.screenshot());
+        }
+      }
     } finally {
       await browser.close();
     }
