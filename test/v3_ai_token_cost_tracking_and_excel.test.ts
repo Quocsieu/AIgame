@@ -1595,6 +1595,52 @@ describe('V3 AI Token & Cost Tracking + 4-Sheet Excel Export (All 35 Mandatory C
       assert.equal(afterRefresh.hasGame1, false, 'Case 4: Game 1 must not reappear after refresh');
       assert.equal(afterRefresh.hasGame2, false, 'Case 4: Game 2 must not reappear after refresh');
       assert.equal(afterRefresh.btnDisabled, true, 'Case 5: Delete All button remains disabled on empty Library');
+
+      // =========================================================================
+      // HOTFIX VERIFICATION: ADMIN SIDEBAR & PAGE IN PRODUCTION BUILD + NODE_ENV=production
+      // =========================================================================
+      const prevNodeEnvProdCheck = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'production';
+      try {
+        await page.goto(`${baseUrl}/`);
+        await sleep(900);
+
+        const prodSidebarState = await page.eval(`(() => {
+          const aside = document.querySelector('aside.app-layout-left-nav');
+          const buttons = aside ? Array.from(aside.querySelectorAll('#nav-cta-create-game, nav button')) : [];
+          return {
+            items: buttons.map((b) => (b.textContent || '').trim()),
+            hasAdminBtn: Boolean(document.querySelector('#nav-item-admin')),
+          };
+        })()`);
+        assert.equal(prodSidebarState.hasAdminBtn, true, 'Admin item must appear in Sidebar on Production build');
+        assert.deepEqual(prodSidebarState.items, [
+          'Tạo game bằng AI',
+          'Trang Chủ',
+          'Khám phá',
+          'Thư viện',
+          'Thống kê',
+          'Admin',
+          'Nhập mã PIN',
+        ]);
+
+        // Click Admin in Sidebar -> opens Chi phí sử dụng AI V2 and does not redirect or show blocked screen
+        await page.eval(`document.querySelector('#nav-item-admin')?.click()`);
+        await sleep(900);
+
+        const prodAdminPageState = await page.eval(`(() => ({
+          url: window.location.href,
+          hasCostPanel: Boolean(document.querySelector('[data-testid="admin-ai-cost-panel"]')),
+          headerTitle: (document.querySelector('[data-testid="ai-cost-header-title"]')?.textContent || '').trim(),
+          hasBlockedScreen: document.body.innerText.includes('Khu Vực Quản Trị Hệ Thống'),
+        }))()`);
+        assert.ok(prodAdminPageState.url.endsWith('/?tab=admin'), 'Must stay on /?tab=admin without redirecting away');
+        assert.equal(prodAdminPageState.hasBlockedScreen, false, 'Must not show blocked screen when clicking Admin');
+        assert.equal(prodAdminPageState.hasCostPanel, true, 'Must render V2 AI Cost dashboard panel');
+        assert.equal(prodAdminPageState.headerTitle, 'Chi phí sử dụng AI');
+      } finally {
+        process.env.NODE_ENV = prevNodeEnvProdCheck;
+      }
     } finally {
       await browser.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));

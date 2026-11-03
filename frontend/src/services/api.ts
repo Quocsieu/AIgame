@@ -2055,30 +2055,16 @@ export interface AdminAiCostReport {
 }
 
 export function isClientAdminDemoModeEnabled(): boolean {
-  const explicitEnv = String(import.meta.env.VITE_ADMIN_COST_DEMO_MODE || '')
+  const explicitEnv = String(import.meta.env.VITE_ADMIN_COST_DEMO_MODE ?? 'true')
     .trim()
     .toLowerCase();
   if (explicitEnv === 'false' || explicitEnv === '0' || explicitEnv === 'off' || explicitEnv === 'no') {
     return false;
   }
-  if (typeof window !== 'undefined') {
-    if ((window as any).__DISABLE_ADMIN_DEMO_MODE__ === true) {
-      return false;
-    }
-    const host = (window.location.hostname || '').toLowerCase();
-    const isLocalHost =
-      host === 'localhost' ||
-      host === '127.0.0.1' ||
-      host === '[::1]' ||
-      host.endsWith('.local');
-    if (isLocalHost) {
-      return true;
-    }
-  }
-  if (import.meta.env.PROD) {
+  if (typeof window !== 'undefined' && (window as any).__DISABLE_ADMIN_DEMO_MODE__ === true) {
     return false;
   }
-  return Boolean(import.meta.env.DEV || explicitEnv === 'true');
+  return true;
 }
 
 export async function fetchAdminAiCostReport(

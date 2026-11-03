@@ -95,8 +95,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [isExportingCostExcel, setIsExportingCostExcel] = useState(false);
 
   const isUserAdmin = currentUser?.role === 'ADMIN';
-  const isDemoCostAccess =
-    !isUserAdmin && isClientAdminDemoModeEnabled() && !demoAccessDeniedByServer;
+  const isDemoCostAccess = !isUserAdmin && isClientAdminDemoModeEnabled();
   const canAccessAdminPanel = isUserAdmin || isDemoCostAccess;
 
   // Handle ESC key for modal
@@ -1150,9 +1149,64 @@ export const AdminPage: React.FC<AdminPageProps> = ({
       )}
 
       {/* TAB CHI PHÍ SỬ DỤNG AI (REDESIGNED EXECUTIVE DASHBOARD V2) */}
-      {!isLoading && activeTab === 'costs' && costReport && (() => {
+      {!isLoading && activeTab === 'costs' && (() => {
+        const activeReport: AdminAiCostReport = costReport ?? {
+          demoMode: isDemoCostAccess,
+          generatedAt: new Date().toISOString(),
+          filtersApplied: {
+            preset: costPreset,
+            from: null,
+            to: null,
+            model: null,
+            gameType: null,
+            taskType: null,
+          },
+          billingModeConfigured: 'PAID',
+          exchangeRate: {
+            usdToVndRate: 25500,
+            effectiveDate: '2026-01-01',
+            source: 'DEFAULT',
+          },
+          persistenceStatus: {
+            databasePath: '',
+            isEphemeralWarning: false,
+            warningMessage: null,
+          },
+          summary: {
+            totalGameGenerations: 0,
+            eligibleGenerationsForAverage: 0,
+            totalAiRequests: 0,
+            successfulRequests: 0,
+            failedRequests: 0,
+            requestsWithReportedTokens: 0,
+            requestsWithUnknownUsage: 0,
+            requestsWithPriceUnavailable: 0,
+            requestsWithUnknownBilling: 0,
+            inputTokens: 0,
+            outputTokens: 0,
+            cachedTokens: 0,
+            thinkingTokens: 0,
+            totalTokens: 0,
+            actualCostUsd: 0,
+            actualCostVnd: 0,
+            paidEquivalentCostUsd: 0,
+            paidEquivalentCostVnd: 0,
+            avgTokensPerGame: null,
+            avgActualCostPerGameUsd: null,
+            avgActualCostPerGameVnd: null,
+            avgPaidEquivalentCostPerGameUsd: null,
+            avgPaidEquivalentCostPerGameVnd: null,
+            highestCostModel: null,
+          },
+          scalingProjections: [],
+          byModel: [],
+          byGame: [],
+          apiLogs: [],
+          pricingCatalog: [],
+        };
+
         // Chỉ hiển thị những game đã lưu và hiện còn trong Thư viện (liên kết theo gameId ổn định)
-        const libraryGames = [...costReport.byGame]
+        const libraryGames = [...activeReport.byGame]
           .filter(
             (g) =>
               g.isSavedInLibrary === true &&
@@ -1166,32 +1220,32 @@ export const AdminPage: React.FC<AdminPageProps> = ({
         const hasMoreGames = libraryGames.length > visibleGameCount;
 
         const isAllCostUnknown =
-          costReport.summary.totalAiRequests > 0 &&
-          costReport.summary.eligibleGenerationsForAverage === 0 &&
-          (costReport.summary.requestsWithUnknownUsage > 0 ||
-            costReport.summary.requestsWithPriceUnavailable > 0) &&
-          costReport.summary.paidEquivalentCostVnd === 0;
+          activeReport.summary.totalAiRequests > 0 &&
+          activeReport.summary.eligibleGenerationsForAverage === 0 &&
+          (activeReport.summary.requestsWithUnknownUsage > 0 ||
+            activeReport.summary.requestsWithPriceUnavailable > 0) &&
+          activeReport.summary.paidEquivalentCostVnd === 0;
 
         const totalPaidVndDisplay = isAllCostUnknown
           ? 'Chưa xác định'
-          : formatVndCurrency(costReport.summary.paidEquivalentCostVnd);
+          : formatVndCurrency(activeReport.summary.paidEquivalentCostVnd);
 
         const avgCostPerGameVndDisplay =
-          costReport.summary.avgPaidEquivalentCostPerGameVnd !== null
-            ? formatVndCurrency(costReport.summary.avgPaidEquivalentCostPerGameVnd)
+          activeReport.summary.avgPaidEquivalentCostPerGameVnd !== null
+            ? formatVndCurrency(activeReport.summary.avgPaidEquivalentCostPerGameVnd)
             : 'Chưa xác định';
 
         const isAllTokensUnknown =
-          costReport.summary.totalAiRequests > 0 &&
-          costReport.summary.requestsWithReportedTokens === 0;
+          activeReport.summary.totalAiRequests > 0 &&
+          activeReport.summary.requestsWithReportedTokens === 0;
 
         const compactTokensDisplay = isAllTokensUnknown
           ? 'Chưa xác định'
-          : formatCompactTokens(costReport.summary.totalTokens);
+          : formatCompactTokens(activeReport.summary.totalTokens);
 
         const exactTokensTooltip = isAllTokensUnknown
           ? 'Chưa xác định số token từ API'
-          : `${new Intl.NumberFormat('vi-VN').format(costReport.summary.totalTokens)} token`;
+          : `${new Intl.NumberFormat('vi-VN').format(activeReport.summary.totalTokens)} token`;
 
         return (
           <div
@@ -1235,8 +1289,8 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               }
             `}</style>
 
-            {costReport.persistenceStatus.isEphemeralWarning &&
-              costReport.persistenceStatus.warningMessage && (
+            {activeReport.persistenceStatus.isEphemeralWarning &&
+              activeReport.persistenceStatus.warningMessage && (
                 <div
                   style={{
                     padding: '0.85rem 1.1rem',
@@ -1252,7 +1306,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   }}
                 >
                   <AlertTriangleIcon size={18} />
-                  <span>{costReport.persistenceStatus.warningMessage}</span>
+                  <span>{activeReport.persistenceStatus.warningMessage}</span>
                 </div>
               )}
 
@@ -1415,7 +1469,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                     wordBreak: 'break-word',
                   }}
                 >
-                  {new Intl.NumberFormat('vi-VN').format(costReport.summary.totalGameGenerations)}
+                  {new Intl.NumberFormat('vi-VN').format(activeReport.summary.totalGameGenerations)}
                 </div>
               </div>
 
@@ -1663,7 +1717,7 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                       visibleGames.map((g) => {
                         const cols = computeLibraryGameCostColumns(
                           g,
-                          costReport.exchangeRate.usdToVndRate
+                          activeReport.exchangeRate.usdToVndRate
                         );
                         const rowKey = g.gameId ? g.gameId : g.generationKey;
 
