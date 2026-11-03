@@ -1065,11 +1065,11 @@ async function runAllTests() {
       await page.goto(`${baseUrl}/?tab=reports`);
       await sleep(900);
 
-      // 1. Kiểm tra khu vực Lịch sử Chơi / Thi hiển thị trên trang Thống kê (Desktop 1440x900)
+      // 1. Kiểm tra khu vực Danh sách Game trong Thư viện & Quản lý Lượt Chơi / Thi trên trang Thống kê (Desktop 1440x900)
       const historySectionInfo = await page.eval(`(() => {
-        const sec = document.querySelector('[data-testid="play-exam-history-section"]');
-        const table = document.querySelector('[data-testid="play-exam-history-table"]');
-        const rows = document.querySelectorAll('[data-testid^="history-row-"]');
+        const sec = document.querySelector('[data-testid="reports-v2-game-hub"]');
+        const table = document.querySelector('[data-testid="reports-games-table"]');
+        const rows = document.querySelectorAll('[data-testid^="reports-game-row-"]');
         const overflow = document.documentElement.scrollWidth > document.documentElement.clientWidth + 2;
         return {
           hasSection: !!sec,
@@ -1078,48 +1078,48 @@ async function runAllTests() {
           overflow,
         };
       })()`);
-      assert.equal(historySectionInfo.hasSection, true, 'Trang Thống kê phải hiển thị khu vực Lịch sử Chơi / Thi');
-      assert.equal(historySectionInfo.hasTable, true, 'Bảng Lịch sử Chơi / Thi phải hiển thị dữ liệu');
-      assert.ok(historySectionInfo.rowCount >= 5, `Bảng Lịch sử phải hiển thị các phiên đã chơi/thi (thực tế: ${historySectionInfo.rowCount})`);
+      assert.equal(historySectionInfo.hasSection, true, 'Trang Thống kê phải hiển thị khu vực Danh sách Game trong Thư viện & Quản lý Lượt Chơi / Thi');
+      assert.equal(historySectionInfo.hasTable, true, 'Bảng Danh sách Game trong Thư viện phải hiển thị dữ liệu');
+      assert.ok(historySectionInfo.rowCount >= 2, `Bảng Danh sách Game phải hiển thị các game đã tạo (thực tế: ${historySectionInfo.rowCount})`);
       assert.equal(historySectionInfo.overflow, false, 'Trang Thống kê ở Desktop 1440x900 không được tràn ngang');
-      console.log(`  ✓ [E2E Case A - Desktop 1440×900] Trang Thống kê hiển thị bảng Lịch sử Chơi / Thi (${historySectionInfo.rowCount} dòng), không tràn ngang`);
+      console.log(`  ✓ [E2E Case A - Desktop 1440×900] Trang Thống kê hiển thị bảng Danh sách Game (${historySectionInfo.rowCount} game), không tràn ngang`);
 
-      // 2. Bấm "Xem chi tiết" trên dòng đầu tiên để mở Modal chi tiết và kiểm tra nút Xuất CSV / Xuất Excel
+      // 2. Bấm "Xem chi tiết" trên dòng đầu tiên để chuyển sang Màn hình chi tiết game riêng biệt và kiểm tra nút Xuất CSV / Xuất Excel
       await page.eval(`(() => {
-        const btn = document.querySelector('[data-testid^="history-view-detail-"]');
+        const btn = document.querySelector('[data-testid^="reports-game-detail-btn-"]');
         if (btn) btn.click();
       })()`);
       await sleep(700);
 
       const modalInfo = await page.eval(`(() => {
-        const modal = document.querySelector('[data-testid="history-detail-modal"]');
-        const pTable = document.querySelector('[data-testid="modal-participants-table"]');
-        const csvBtn = document.querySelector('[data-testid="modal-export-csv-btn"]');
-        const xlsxBtn = document.querySelector('[data-testid="modal-export-xlsx-btn"]');
+        const detailScreen = document.querySelector('[data-testid="reports-game-detail-screen"]');
+        const gameDetail = document.querySelector('[data-testid="reports-v2-game-detail"]');
+        const csvBtn = document.querySelector('[data-testid="detail-export-csv-btn"]');
+        const xlsxBtn = document.querySelector('[data-testid="detail-export-xlsx-btn"]');
         return {
-          hasModal: !!modal,
-          hasParticipantsTable: !!pTable,
+          hasModal: !!detailScreen,
+          hasParticipantsTable: !!gameDetail,
           hasCsvBtn: !!csvBtn,
           hasXlsxBtn: !!xlsxBtn,
         };
       })()`);
-      assert.equal(modalInfo.hasModal, true, 'Bấm Xem chi tiết phải mở modal chi tiết phiên');
-      assert.equal(modalInfo.hasParticipantsTable, true, 'Modal chi tiết phải hiển thị bảng kết quả người tham gia');
-      assert.equal(modalInfo.hasCsvBtn, true, 'Modal chi tiết phải có nút Xuất CSV');
-      assert.equal(modalInfo.hasXlsxBtn, true, 'Modal chi tiết phải có nút Xuất Excel (.xlsx)');
+      assert.equal(modalInfo.hasModal, true, 'Bấm Xem chi tiết phải mở màn hình chi tiết game riêng biệt');
+      assert.equal(modalInfo.hasParticipantsTable, true, 'Màn hình chi tiết phải hiển thị báo cáo chi tiết của game');
+      assert.equal(modalInfo.hasCsvBtn, true, 'Màn hình chi tiết phải có nút Xuất CSV');
+      assert.equal(modalInfo.hasXlsxBtn, true, 'Màn hình chi tiết phải có nút Xuất Excel (.xlsx)');
 
-      // Bấm thử nút Xuất CSV & Xuất Excel trong modal và đóng modal
+      // Bấm thử nút Xuất CSV và quay lại Thống kê
       await page.eval(`(() => {
-        const csvBtn = document.querySelector('[data-testid="modal-export-csv-btn"]');
+        const csvBtn = document.querySelector('[data-testid="detail-export-csv-btn"]');
         if (csvBtn) csvBtn.click();
       })()`);
       await sleep(400);
       await page.eval(`(() => {
-        const closeBtn = document.querySelector('[data-testid="close-history-detail-modal"]');
+        const closeBtn = document.querySelector('[data-testid="back-to-reports-overview-btn"]');
         if (closeBtn) closeBtn.click();
       })()`);
       await sleep(300);
-      console.log('  ✓ [E2E Case A & B] Mở Modal Xem chi tiết phiên & bấm Xuất CSV / Excel hoạt động mượt mà');
+      console.log('  ✓ [E2E Case A & B] Mở Màn hình Xem chi tiết game & bấm Xuất CSV / Excel + Quay lại Thống kê hoạt động mượt mà');
 
       // 3. Kiểm tra responsive Mobile 390×844 trên trang Thống kê
       await page.setViewport(390, 844, true);

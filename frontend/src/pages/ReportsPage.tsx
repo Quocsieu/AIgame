@@ -15,6 +15,7 @@ import {
 import {
   closeGameExamApi,
   createRoom,
+  downloadGameScoreboardExport,
   downloadPlayExamHistoryExport,
   fetchCreatorReportsGamesApi,
   fetchGameReportsDetailApi,
@@ -125,8 +126,24 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
   const [reportsGamePage, setReportsGamePage] = useState<number>(1);
   const reportsGameLimit = 10;
 
+  const readReportGameIdFromUrl = (): string | null => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const gid = params.get('reportGameId');
+      return gid && gid.trim() ? gid.trim() : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const [activeDetailGameId, setActiveDetailGameId] = useState<string | null>(() =>
+    readReportGameIdFromUrl()
+  );
   const [selectedGameReport, setSelectedGameReport] = useState<GameReportsDetailResult | null>(null);
-  const [selectedGameReportLoading, setSelectedGameReportLoading] = useState<boolean>(false);
+  const [selectedGameReportLoading, setSelectedGameReportLoading] = useState<boolean>(() =>
+    Boolean(readReportGameIdFromUrl())
+  );
   const [selectedGameReportError, setSelectedGameReportError] = useState<string | null>(null);
 
   const [selectedExamBatchId, setSelectedExamBatchId] = useState<string>('LATEST');
@@ -173,6 +190,33 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
     message: string;
   } | null>(null);
 
+  const syncReportGameIdInUrl = useCallback(
+    (gameId: string | null, mode: 'push' | 'replace' = 'push') => {
+      if (typeof window === 'undefined') return;
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('tab', 'reports');
+        if (gameId && gameId.trim()) {
+          url.searchParams.set('reportGameId', gameId.trim());
+        } else {
+          url.searchParams.delete('reportGameId');
+        }
+        const nextHref = `${url.pathname}${url.search}${url.hash}`;
+        const currentHref = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        if (nextHref !== currentHref) {
+          if (mode === 'replace') {
+            window.history.replaceState({}, '', nextHref);
+          } else {
+            window.history.pushState({}, '', nextHref);
+          }
+        }
+      } catch {
+        // ignore URL sync errors
+      }
+    },
+    []
+  );
+
   const loadReportsGamesOverview = useCallback(async () => {
     setReportsGamesLoading(true);
     setReportsGamesError(null);
@@ -196,14 +240,25 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
   }, [loadReportsGamesOverview, currentUser?.userId]);
 
   const handleOpenGameReportsDetail = useCallback(
-    async (gameId: string, preserveBatchSelection: boolean = false) => {
+    async (
+      gameId: string,
+      preserveBatchSelection: boolean = false,
+      skipUrlPush: boolean = false
+    ) => {
+      const normalizedGameId = gameId.trim();
+      setActiveDetailGameId(normalizedGameId);
+      if (!skipUrlPush && !preserveBatchSelection) {
+        syncReportGameIdInUrl(normalizedGameId, 'push');
+      }
       setSelectedGameReportLoading(true);
       setSelectedGameReportError(null);
+      setExportErrorMsg(null);
       if (!preserveBatchSelection) {
         setReportsActionNotice(null);
+        setSelectedGameReport((prev) => (prev?.gameId === normalizedGameId ? prev : null));
       }
       try {
-        const detail = await fetchGameReportsDetailApi(gameId);
+        const detail = await fetchGameReportsDetailApi(normalizedGameId);
         setSelectedGameReport(detail);
         if (!preserveBatchSelection) {
           if (detail.examBatches && detail.examBatches.length > 0) {
@@ -230,13 +285,84 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
           return overallMatch || prev;
         });
       } catch (err: any) {
-        setSelectedGameReportError(err?.message || 'Không thể tải chi tiết báo cáo của game.');
+        setSelectedGameReport(null);
+        setSelectedGameReportError(
+          err?.message || 'Không thể tải chi tiết báo cáo của game (Game không tồn tại hoặc bạn không có quyền truy cập).'
+        );
       } finally {
         setSelectedGameReportLoading(false);
       }
     },
-    [selectedExamBatchId]
+    [selectedExamBatchId, syncReportGameIdInUrl]
   );
+
+  const handleBackToReportsOverview = useCallback(
+    (skipUrlPush: boolean = false) => {
+      setActiveDetailGameId(null);
+      setSelectedGameReport(null);
+      setSelectedGameReportError(null);
+      setSelectedGameReportLoading(false);
+      setReportsActionNotice(null);
+      setExportErrorMsg(null);
+      setParticipantAttemptsModal(null);
+      setPlayAttemptBreakdownModal(null);
+      setGrantRetakeModal(null);
+      if (!skipUrlPush) {
+        syncReportGameIdInUrl(null, 'push');
+      }
+    },
+    [syncReportGameIdInUrl]
+  );
+
+  useEffect(() => {
+    const initialGameId = readReportGameIdFromUrl();
+    if (initialGameId) {
+      handleOpenGameReportsDetail(initialGameId, false, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser?.userId]);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const urlGameId = readReportGameIdFromUrl();
+      if (urlGameId) {
+        handleOpenGameReportsDetail(urlGameId, false, true);
+      } else {
+        handleBackToReportsOverview(true);
+      }
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, [handleOpenGameReportsDetail, handleBackToReportsOverview]);
+
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    const navBtn = document.getElementById('nav-item-reports');
+    if (!navBtn) return;
+    const onNavClick = () => {
+      if (activeDetailGameId) {
+        handleBackToReportsOverview(false);
+      }
+    };
+    navBtn.addEventListener('click', onNavClick);
+    return () => navBtn.removeEventListener('click', onNavClick);
+  }, [activeDetailGameId, handleBackToReportsOverview]);
+
+  const handleExportSelectedGameScoreboard = async (
+    gameId: string,
+    format: 'csv' | 'xlsx'
+  ) => {
+    const key = `game:${gameId}:${format}`;
+    setExportingKey(key);
+    setExportErrorMsg(null);
+    try {
+      await downloadGameScoreboardExport(gameId, format);
+    } catch (err: any) {
+      setExportErrorMsg(err?.message || 'Không thể xuất tệp báo cáo của game.');
+    } finally {
+      setExportingKey(null);
+    }
+  };
 
   const handleOpenGrantRetakeModal = (params: {
     gameId: string;
@@ -657,800 +783,210 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
         boxSizing: 'border-box',
       }}
     >
-      {/* Header */}
-      <header
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '12px',
-          paddingBottom: '16px',
-          borderBottom: '1px solid var(--border-subtle)',
-        }}
-      >
-        <div>
-          <div
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontSize: '0.74rem',
-              fontWeight: 800,
-              textTransform: 'uppercase',
-              letterSpacing: '0.07em',
-              color: 'var(--primary)',
-              marginBottom: '4px',
-            }}
-          >
-            <ChartBarIcon size={14} />
-            <span>Thống kê hoạt động</span>
-          </div>
-          <h1
-            style={{
-              margin: 0,
-              fontSize: 'clamp(1.35rem, 2.2vw, 1.72rem)',
-              fontWeight: 800,
-              color: 'var(--text-primary)',
-              letterSpacing: '-0.02em',
-            }}
-          >
-            Thống kê hiệu quả chơi game
-          </h1>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-          <button
-            type="button"
-            onClick={() => loadAllStatistics(activityRange, true)}
-            disabled={isLoading}
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--border-strong)',
-              borderRadius: '8px',
-              padding: '0 14px',
-              minHeight: '44px',
-              fontSize: '0.82rem',
-              fontWeight: 700,
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            <RefreshIcon size={14} />
-            <span>Làm mới</span>
-          </button>
-
-          {onNavigateToLibrary && (
-            <button
-              type="button"
-              onClick={() => onNavigateToLibrary({ tab: 'MINE', nonce: Date.now() })}
-              style={{
-                backgroundColor: 'var(--bg-surface)',
-                color: 'var(--text-primary)',
-                border: '1px solid var(--border-strong)',
-                borderRadius: '8px',
-                padding: '0 14px',
-                minHeight: '44px',
-                fontSize: '0.82rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
-              <BookOpenIcon size={14} />
-              <span>Thư viện của tôi</span>
-            </button>
-          )}
-
-          {onNavigateToCreate && (
-            <button
-              type="button"
-              onClick={onNavigateToCreate}
-              style={{
-                backgroundColor: 'var(--primary)',
-                color: 'var(--primary-ink, #060913)',
-                border: '1px solid var(--primary)',
-                borderRadius: '8px',
-                padding: '0 16px',
-                minHeight: '44px',
-                fontSize: '0.83rem',
-                fontWeight: 800,
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
-              <SparklesIcon size={14} />
-              <span>Tạo game bằng AI</span>
-            </button>
-          )}
-        </div>
-      </header>
-
-      {/* Error Banner */}
-      {errorMessage && (
-        <div
-          role="alert"
+      {activeDetailGameId ? (
+        /* =========================================================================
+           MÀN HÌNH CHI TIẾT BÁO CÁO GAME RIÊNG BIỆT TRONG REPORTS (PLAY / EXAM)
+           ========================================================================= */
+        <section
+          data-testid="reports-game-detail-screen"
+          aria-label="Màn hình chi tiết báo cáo game"
           style={{
-            padding: '14px 18px',
-            borderRadius: '10px',
-            backgroundColor: 'rgba(239, 68, 68, 0.1)',
-            border: '1px solid rgba(239, 68, 68, 0.35)',
-            color: 'var(--accent-rose)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '12px',
-            flexWrap: 'wrap',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.86rem', fontWeight: 600 }}>
-            <AlertTriangleIcon size={16} />
-            <span>{errorMessage}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => loadAllStatistics(activityRange)}
-            style={{
-              backgroundColor: 'var(--bg-surface)',
-              color: 'var(--text-primary)',
-              border: '1px solid var(--border-strong)',
-              borderRadius: '6px',
-              padding: '8px 14px',
-              minHeight: '44px',
-              minWidth: '44px',
-              fontSize: '0.78rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            Thử lại
-          </button>
-        </div>
-      )}
-
-      {/* A. 4 KPI Summary Cards: Tổng game, Tổng lượt chơi, Lượt chơi hoàn thành, Điểm trung bình */}
-      <section
-        aria-label="Các chỉ số tổng quan"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))',
-          gap: '14px',
-          minWidth: 0,
-        }}
-      >
-        {/* 1. Tổng game */}
-        <div
-          data-testid="kpi-total-games"
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '10px',
-            padding: '16px 18px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '6px',
+            gap: '18px',
+            minWidth: 0,
+            maxWidth: '100%',
+            boxSizing: 'border-box',
           }}
         >
-          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-            Tổng game
-          </span>
-          <strong
-            style={{
-              fontSize: '1.68rem',
-              fontWeight: 800,
-              color: 'var(--text-primary)',
-              fontVariantNumeric: 'tabular-nums',
-            }}
-          >
-            {isLoading ? '—' : totalGames.toLocaleString('vi-VN')}
-          </strong>
-        </div>
-
-        {/* 2. Tổng lượt chơi */}
-        <div
-          data-testid="kpi-total-plays"
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '10px',
-            padding: '16px 18px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '6px',
-          }}
-        >
-          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-            Tổng lượt chơi
-          </span>
-          <strong
-            style={{
-              fontSize: '1.68rem',
-              fontWeight: 800,
-              color: 'var(--accent-sky)',
-              fontVariantNumeric: 'tabular-nums',
-            }}
-          >
-            {isLoading ? '—' : totalPlays.toLocaleString('vi-VN')}
-          </strong>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-            {totalSolo} phiên đơn • {totalRooms} phòng trực tiếp
-            {inProgressPlays > 0 ? ` • ${inProgressPlays} đang chơi` : ''}
-            {abandonedPlays > 0 ? ` • ${abandonedPlays} bỏ dở` : ''}
-          </span>
-        </div>
-
-        {/* 3. Lượt chơi hoàn thành */}
-        <div
-          data-testid="kpi-completed-plays"
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '10px',
-            padding: '16px 18px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '6px',
-          }}
-        >
-          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-            Lượt chơi hoàn thành
-          </span>
-          <strong
-            style={{
-              fontSize: '1.68rem',
-              fontWeight: 800,
-              color: 'var(--accent-emerald)',
-              fontVariantNumeric: 'tabular-nums',
-            }}
-          >
-            {isLoading ? '—' : completedPlays.toLocaleString('vi-VN')}
-          </strong>
-          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-            {completedSolo} chơi đơn hoàn thành • {completedRooms} phòng hoàn thành
-            {multiplayerPlayers > 0 ? ` (${multiplayerPlayers} người tham gia)` : ''}
-          </span>
-        </div>
-
-        {/* 4. Điểm trung bình */}
-        <div
-          data-testid="kpi-average-score"
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '10px',
-            padding: '16px 18px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '6px',
-          }}
-        >
-          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-            Điểm trung bình
-          </span>
-          <strong
-            style={{
-              fontSize: averageScore !== null ? '1.68rem' : '1.18rem',
-              fontWeight: 800,
-              color: averageScore !== null ? 'var(--accent-amber)' : 'var(--text-muted)',
-              fontVariantNumeric: 'tabular-nums',
-              lineHeight: averageScore !== null ? 1.15 : 1.55,
-            }}
-          >
-            {isLoading
-              ? '—'
-              : averageScore !== null
-                ? `${averageScore.toLocaleString('vi-VN')} đ`
-                : 'Chưa có dữ liệu'}
-          </strong>
-          {averageScore !== null &&
-            overview?.overallAccuracyPercent !== null &&
-            overview?.overallAccuracyPercent !== undefined && (
-              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                Tỷ lệ đúng: {Math.round(overview.overallAccuracyPercent)}% • Chuỗi cao nhất: {overview?.bestStreak ?? 0}
-              </span>
-            )}
-        </div>
-      </section>
-
-      {/* REPORTS 2.0: TRUNG TÂM LỊCH SỬ CHƠI / THI, BẢNG XẾP HẠNG, ĐỢT THI & QUẢN LÝ LƯỢT THEO TỪNG GAME */}
-      <section
-        data-testid="reports-v2-game-hub"
-        aria-label="Trung tâm Thống kê Game, Bảng xếp hạng, Đợt thi và Quản lý Lượt"
-        style={{
-          backgroundColor: 'var(--bg-surface)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: '12px',
-          padding: 'clamp(14px, 3vw, 20px)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '16px',
-          minWidth: 0,
-          maxWidth: '100%',
-          boxSizing: 'border-box',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            flexWrap: 'wrap',
-            gap: '12px',
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            <h2
-              style={{
-                margin: 0,
-                fontSize: '1.08rem',
-                fontWeight: 800,
-                color: 'var(--text-primary)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-                flexWrap: 'wrap',
-              }}
-            >
-              <TrophyIcon size={18} />
-              <span>Danh sách Game trong Thư viện & Quản lý Lượt Chơi / Thi</span>
-            </h2>
-            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              Tự động đẩy game vừa có hoạt động chơi/thi mới nhất lên đầu. Bấm <strong>Xem chi tiết</strong> để theo dõi Bảng xếp hạng PLAY, kết quả từng Đợt thi EXAM, cấp thêm lượt hoặc mở lại đợt thi.
-            </p>
-          </div>
-
-          <div
-            data-testid="reports-games-sort-badge"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '8px',
-              flexWrap: 'wrap',
-              fontSize: '0.75rem',
-              fontWeight: 700,
-              color: 'var(--text-secondary)',
-              backgroundColor: 'var(--bg-subtle)',
-              padding: '6px 12px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-subtle)',
-            }}
-          >
-            <span>
-              Thư viện: <strong style={{ color: 'var(--text-primary)' }}>{reportsGamesData?.summary.totalGames ?? 0}</strong> game
-            </span>
-            <span>•</span>
-            <span>
-              Chơi: <strong style={{ color: 'var(--accent-emerald)' }}>{reportsGamesData?.summary.playGamesCount ?? 0}</strong>
-            </span>
-            <span>•</span>
-            <span>
-              Thi: <strong style={{ color: 'var(--accent-amber)' }}>{reportsGamesData?.summary.examGamesCount ?? 0}</strong>
-            </span>
-            <span>•</span>
-            <span style={{ color: 'var(--primary)' }}>Sắp xếp: Hoạt động mới nhất lên đầu</span>
-          </div>
-        </div>
-
-        {/* Bộ lọc chế độ & Tìm kiếm game trong Thư viện */}
-        <div
-          data-testid="reports-games-filter-bar"
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '10px',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '12px',
-            backgroundColor: 'var(--bg-subtle)',
-            borderRadius: '10px',
-            border: '1px solid var(--border-subtle)',
-          }}
-        >
-          <div style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
-            <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginRight: '2px' }}>
-              Loại chế độ:
-            </span>
-            {(
-              [
-                { key: 'ALL', label: 'Tất cả game' },
-                { key: 'PLAY', label: 'Chế độ Chơi (PLAY)' },
-                { key: 'EXAM', label: 'Chế độ Thi (EXAM)' },
-              ] as const
-            ).map((opt) => {
-              const active = reportsGameModeFilter === opt.key;
-              return (
-                <button
-                  key={opt.key}
-                  type="button"
-                  data-testid={`reports-game-filter-${opt.key.toLowerCase()}`}
-                  onClick={() => {
-                    setReportsGameModeFilter(opt.key);
-                    setReportsGamePage(1);
-                  }}
-                  style={{
-                    padding: '8px 12px',
-                    minHeight: '44px',
-                    minWidth: '44px',
-                    borderRadius: '6px',
-                    fontSize: '0.76rem',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                    border: active ? '1px solid var(--primary)' : '1px solid var(--border-strong)',
-                    backgroundColor: active ? 'var(--primary)' : 'var(--bg-surface)',
-                    color: active ? 'var(--primary-ink, #060913)' : 'var(--text-primary)',
-                  }}
-                >
-                  {opt.label}
-                </button>
-              );
-            })}
-          </div>
-
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: '8px',
-              alignItems: 'center',
-              flex: '1 1 220px',
-              minWidth: 0,
-              maxWidth: '100%',
-              justifyContent: 'flex-end',
-            }}
-          >
-            <input
-              type="search"
-              data-testid="reports-game-search-input"
-              value={reportsGameSearch}
-              onChange={(e) => {
-                setReportsGameSearch(e.target.value);
-                setReportsGamePage(1);
-              }}
-              placeholder="Tìm theo tên game trong Thư viện..."
-              style={{
-                padding: '8px 12px',
-                minHeight: '44px',
-                borderRadius: '7px',
-                border: '1px solid var(--border-strong)',
-                backgroundColor: 'var(--bg-surface)',
-                color: 'var(--text-primary)',
-                fontSize: '0.8rem',
-                minWidth: 'min(100%, 180px)',
-                flex: '1 1 180px',
-                maxWidth: '100%',
-                boxSizing: 'border-box',
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Danh sách Game trong Thư viện được sắp theo lastActivityAt DESC NULLS LAST */}
-        {reportsGamesLoading ? (
-          <div
-            data-testid="reports-games-loading"
-            style={{
-              padding: '24px',
-              textAlign: 'center',
-              color: 'var(--text-secondary)',
-              fontSize: '0.85rem',
-              fontWeight: 600,
-            }}
-          >
-            Đang tải danh sách game trong Thư viện...
-          </div>
-        ) : reportsGamesError ? (
-          <div
-            data-testid="reports-games-error"
-            role="alert"
-            style={{
-              padding: '16px',
-              borderRadius: '10px',
-              backgroundColor: 'rgba(239, 68, 68, 0.08)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              color: 'var(--accent-rose)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: '10px',
-            }}
-          >
-            <span style={{ fontSize: '0.84rem', fontWeight: 600 }}>{reportsGamesError}</span>
-            <button
-              type="button"
-              onClick={() => loadReportsGamesOverview()}
-              style={{
-                padding: '8px 14px',
-                minHeight: '44px',
-                minWidth: '44px',
-                borderRadius: '6px',
-                border: '1px solid var(--border-strong)',
-                backgroundColor: 'var(--bg-surface)',
-                color: 'var(--text-primary)',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              Thử lại
-            </button>
-          </div>
-        ) : !reportsGamesData || reportsGamesData.games.length === 0 ? (
-          <div
-            data-testid="reports-games-empty"
-            style={{
-              padding: '28px 16px',
-              textAlign: 'center',
-              color: 'var(--text-muted)',
-              borderRadius: '10px',
-              border: '1px dashed var(--border-subtle)',
-              fontSize: '0.85rem',
-            }}
-          >
-            Chưa có game nào trong Thư viện phù hợp với bộ lọc hiện tại.
-          </div>
-        ) : (
-          <div style={{ overflowX: 'auto', width: '100%' }}>
-            <table
-              data-testid="reports-games-table"
-              style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                fontSize: '0.82rem',
-                minWidth: '760px',
-              }}
-            >
-              <thead>
-                <tr
-                  style={{
-                    borderBottom: '1px solid var(--border-subtle)',
-                    color: 'var(--text-secondary)',
-                    textAlign: 'left',
-                    fontSize: '0.74rem',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                  }}
-                >
-                  <th style={{ padding: '10px 8px' }}>Tên game</th>
-                  <th style={{ padding: '10px 8px' }}>Loại chế độ</th>
-                  <th style={{ padding: '10px 8px' }}>Người chơi / Thí sinh</th>
-                  <th style={{ padding: '10px 8px' }}>Tổng lượt chơi / thi</th>
-                  <th style={{ padding: '10px 8px' }}>Hoạt động gần nhất</th>
-                  <th style={{ padding: '10px 8px' }}>Trạng thái phiên / đợt</th>
-                  <th style={{ padding: '10px 8px', textAlign: 'right' }}>Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {reportsGamesData.games.map((g: ReportsGameOverviewItem) => {
-                  const isExam = g.sessionMode === 'EXAM';
-                  const isSelected = selectedGameReport?.gameId === g.gameId;
-                  const activeRoomCodes = (g.activeStatus?.activeRooms || []).map((r) => r.roomCode);
-                  const activeSoloCount = g.activeStatus?.activeSessionCount || 0;
-                  const hasLiveActivity = activeRoomCodes.length > 0 || activeSoloCount > 0;
-                  return (
-                    <tr
-                      key={g.gameId}
-                      data-testid={`reports-game-row-${g.gameId}`}
-                      style={{
-                        borderBottom: '1px solid var(--border-subtle)',
-                        backgroundColor: isSelected ? 'var(--primary-subtle)' : 'transparent',
-                      }}
-                    >
-                      <td style={{ padding: '12px 8px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                        <div>{g.title}</div>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500, marginTop: '2px' }}>
-                          {g.questionCount} câu hỏi • {g.rosterMode === 'PRECONFIGURED' ? 'Danh sách định danh' : 'Nhập tên tự do'}
-                        </div>
-                      </td>
-                      <td style={{ padding: '12px 8px' }}>
-                        <span
-                          data-testid={`reports-game-mode-badge-${g.gameId}`}
-                          style={{
-                            padding: '3px 8px',
-                            borderRadius: '999px',
-                            fontSize: '0.71rem',
-                            fontWeight: 800,
-                            backgroundColor: isExam ? 'rgba(245, 158, 11, 0.16)' : 'rgba(16, 185, 129, 0.15)',
-                            color: isExam ? 'var(--accent-amber)' : 'var(--accent-emerald)',
-                          }}
-                        >
-                          {isExam ? 'THI (EXAM)' : 'CHƠI (PLAY)'}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px 8px', fontVariantNumeric: 'tabular-nums' }}>
-                        <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
-                          {g.participantCount} {isExam ? 'thí sinh' : 'người chơi'}
-                        </div>
-                        {g.rosterCount > 0 && (
-                          <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-                            Danh sách: {g.rosterCount} người
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: '12px 8px', fontVariantNumeric: 'tabular-nums' }}>
-                        <div style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
-                          {g.totalAttempts} lượt
-                        </div>
-                        <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
-                          {g.completedAttempts} hoàn thành
-                          {isExam && g.completedAttempts > 0
-                            ? ` • ${g.passedCount} Đạt / ${g.failedCount} Chưa đạt`
-                            : g.highestScore > 0
-                              ? ` • Cao nhất: ${g.highestScore.toLocaleString('vi-VN')} đ`
-                              : ''}
-                        </div>
-                      </td>
-                      <td
-                        data-testid={`reports-game-last-activity-${g.gameId}`}
-                        style={{ padding: '12px 8px', fontSize: '0.76rem', fontVariantNumeric: 'tabular-nums' }}
-                      >
-                        {g.lastActivityAt ? (
-                          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
-                            {new Date(g.lastActivityAt).toLocaleString('vi-VN')}
-                          </span>
-                        ) : (
-                          <span
-                            data-testid={`reports-game-no-activity-${g.gameId}`}
-                            style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}
-                          >
-                            Chưa có lịch sử chơi/thi
-                          </span>
-                        )}
-                      </td>
-                      <td style={{ padding: '12px 8px' }}>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
-                          {isExam ? (
-                            <span
-                              style={{
-                                padding: '2px 8px',
-                                borderRadius: '6px',
-                                fontSize: '0.71rem',
-                                fontWeight: 700,
-                                backgroundColor:
-                                  g.examStatus === 'CLOSED'
-                                    ? 'rgba(239, 68, 68, 0.12)'
-                                    : 'rgba(16, 185, 129, 0.14)',
-                                color:
-                                  g.examStatus === 'CLOSED' ? 'var(--accent-rose)' : 'var(--accent-emerald)',
-                              }}
-                            >
-                              {g.examStatus === 'CLOSED' ? 'Đợt thi đã đóng' : 'Đợt thi đang mở'}
-                            </span>
-                          ) : (
-                            <span
-                              style={{
-                                padding: '2px 8px',
-                                borderRadius: '6px',
-                                fontSize: '0.71rem',
-                                fontWeight: 700,
-                                backgroundColor: hasLiveActivity
-                                  ? 'rgba(14, 165, 233, 0.14)'
-                                  : 'var(--bg-subtle)',
-                                color: hasLiveActivity ? 'var(--accent-sky)' : 'var(--text-secondary)',
-                                border: '1px solid var(--border-subtle)',
-                              }}
-                            >
-                              {hasLiveActivity ? 'Đang có phiên chơi' : 'Sẵn sàng'}
-                            </span>
-                          )}
-                          {activeRoomCodes.length > 0 && (
-                            <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--primary)' }}>
-                              PIN: {activeRoomCodes.join(', ')}
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td style={{ padding: '12px 8px', textAlign: 'right' }}>
-                        <button
-                          type="button"
-                          data-testid={`reports-game-detail-btn-${g.gameId}`}
-                          onClick={() => handleOpenGameReportsDetail(g.gameId, false)}
-                          style={{
-                            padding: '8px 14px',
-                            minHeight: '44px',
-                            minWidth: '44px',
-                            borderRadius: '7px',
-                            border: '1px solid var(--primary)',
-                            backgroundColor: isSelected ? 'var(--primary)' : 'var(--primary-subtle)',
-                            color: isSelected ? 'var(--primary-ink, #060913)' : 'var(--primary)',
-                            fontSize: '0.76rem',
-                            fontWeight: 800,
-                            cursor: 'pointer',
-                          }}
-                        >
-                          {isSelected ? 'Đang xem chi tiết' : 'Xem chi tiết'}
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Phân trang danh sách game trong Thư viện */}
-        {reportsGamesData && reportsGamesData.total > reportsGameLimit && (
-          <div
-            data-testid="reports-games-pagination"
+          {/* Thanh điều hướng quay lại Thống kê & Xuất báo cáo */}
+          <header
+            data-testid="reports-game-detail-topbar"
             style={{
               display: 'flex',
               justifyContent: 'space-between',
               alignItems: 'center',
               flexWrap: 'wrap',
-              gap: '8px',
-              paddingTop: '6px',
-              fontSize: '0.78rem',
-              color: 'var(--text-secondary)',
+              gap: '12px',
+              paddingBottom: '14px',
+              borderBottom: '1px solid var(--border-subtle)',
             }}
           >
-            <span>
-              Trang {reportsGamePage} / {Math.max(1, Math.ceil(reportsGamesData.total / reportsGameLimit))}
-            </span>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', minWidth: 0 }}>
               <button
                 type="button"
-                disabled={reportsGamePage <= 1}
-                onClick={() => setReportsGamePage((p) => Math.max(1, p - 1))}
+                data-testid="back-to-reports-overview-btn"
+                onClick={() => handleBackToReportsOverview(false)}
                 style={{
-                  padding: '8px 14px',
+                  padding: '8px 16px',
                   minHeight: '44px',
                   minWidth: '44px',
-                  borderRadius: '6px',
+                  borderRadius: '8px',
                   border: '1px solid var(--border-strong)',
                   backgroundColor: 'var(--bg-surface)',
                   color: 'var(--text-primary)',
-                  fontWeight: 700,
-                  cursor: reportsGamePage <= 1 ? 'not-allowed' : 'pointer',
-                  opacity: reportsGamePage <= 1 ? 0.5 : 1,
+                  fontSize: '0.84rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
                 }}
               >
-                Trang trước
+                <span>← Quay lại Thống kê</span>
               </button>
+
+              <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', fontWeight: 600 }}>
+                <span>Thống kê hoạt động</span>
+                <span style={{ margin: '0 6px' }}>/</span>
+                <strong style={{ color: 'var(--text-primary)' }}>
+                  {selectedGameReport?.title || `Chi tiết game (${activeDetailGameId})`}
+                </strong>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {selectedGameReport && (
+                <>
+                  <button
+                    type="button"
+                    data-testid="detail-export-csv-btn"
+                    disabled={exportingKey === `game:${activeDetailGameId}:csv`}
+                    onClick={() => handleExportSelectedGameScoreboard(activeDetailGameId, 'csv')}
+                    style={{
+                      padding: '8px 14px',
+                      minHeight: '44px',
+                      minWidth: '44px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-strong)',
+                      backgroundColor: 'var(--bg-surface)',
+                      color: 'var(--text-primary)',
+                      fontSize: '0.78rem',
+                      fontWeight: 700,
+                      cursor:
+                        exportingKey === `game:${activeDetailGameId}:csv` ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {exportingKey === `game:${activeDetailGameId}:csv` ? 'Đang xuất...' : 'Xuất CSV'}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="detail-export-xlsx-btn"
+                    disabled={exportingKey === `game:${activeDetailGameId}:xlsx`}
+                    onClick={() => handleExportSelectedGameScoreboard(activeDetailGameId, 'xlsx')}
+                    style={{
+                      padding: '8px 14px',
+                      minHeight: '44px',
+                      minWidth: '44px',
+                      borderRadius: '8px',
+                      border: '1px solid var(--primary)',
+                      backgroundColor: 'var(--primary-subtle)',
+                      color: 'var(--primary)',
+                      fontSize: '0.78rem',
+                      fontWeight: 800,
+                      cursor:
+                        exportingKey === `game:${activeDetailGameId}:xlsx` ? 'not-allowed' : 'pointer',
+                    }}
+                  >
+                    {exportingKey === `game:${activeDetailGameId}:xlsx`
+                      ? 'Đang xuất...'
+                      : 'Xuất Excel (.xlsx)'}
+                  </button>
+                </>
+              )}
+
               <button
                 type="button"
-                disabled={reportsGamePage >= Math.ceil(reportsGamesData.total / reportsGameLimit)}
-                onClick={() => setReportsGamePage((p) => p + 1)}
+                data-testid="refresh-selected-game-report-btn"
+                onClick={() => handleOpenGameReportsDetail(activeDetailGameId, true, true)}
+                disabled={selectedGameReportLoading}
                 style={{
                   padding: '8px 14px',
                   minHeight: '44px',
                   minWidth: '44px',
-                  borderRadius: '6px',
+                  borderRadius: '8px',
                   border: '1px solid var(--border-strong)',
                   backgroundColor: 'var(--bg-surface)',
                   color: 'var(--text-primary)',
+                  fontSize: '0.78rem',
                   fontWeight: 700,
-                  cursor:
-                    reportsGamePage >= Math.ceil(reportsGamesData.total / reportsGameLimit)
-                      ? 'not-allowed'
-                      : 'pointer',
-                  opacity:
-                    reportsGamePage >= Math.ceil(reportsGamesData.total / reportsGameLimit) ? 0.5 : 1,
+                  cursor: selectedGameReportLoading ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
                 }}
               >
-                Trang sau
+                <RefreshIcon size={14} />
+                <span>Làm mới chi tiết</span>
+              </button>
+
+              <button
+                type="button"
+                data-testid="close-selected-game-report-btn"
+                onClick={() => handleBackToReportsOverview(false)}
+                style={{
+                  padding: '8px 14px',
+                  minHeight: '44px',
+                  minWidth: '44px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Danh sách game
               </button>
             </div>
-          </div>
-        )}
+          </header>
 
-        {/* PANEL CHI TIẾT BÁO CÁO GAME ĐANG CHỌN (PLAY / EXAM) */}
-        {(selectedGameReportLoading || selectedGameReportError || selectedGameReport) && (
+          {exportErrorMsg && (
+            <div
+              data-testid="detail-export-error"
+              role="alert"
+              style={{
+                padding: '12px 16px',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                color: 'var(--accent-rose)',
+                fontSize: '0.82rem',
+                fontWeight: 600,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '8px',
+              }}
+            >
+              <span>{exportErrorMsg}</span>
+              <button
+                type="button"
+                onClick={() => setExportErrorMsg(null)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--accent-rose)',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  minHeight: '44px',
+                  minWidth: '44px',
+                  padding: '6px 10px',
+                }}
+              >
+                Đóng
+              </button>
+            </div>
+          )}
+
           <div
             data-testid="reports-v2-game-detail"
             style={{
-              marginTop: '8px',
               padding: 'clamp(14px, 2.5vw, 20px)',
               borderRadius: '12px',
-              border: '1px solid var(--primary)',
-              backgroundColor: 'var(--bg-subtle)',
+              border: '1px solid var(--border-subtle)',
+              backgroundColor: 'var(--bg-surface)',
               display: 'flex',
               flexDirection: 'column',
               gap: '18px',
@@ -1460,26 +996,56 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
             }}
           >
             {selectedGameReportLoading && !selectedGameReport ? (
-              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-secondary)', fontWeight: 600 }}>
+              <div
+                data-testid="reports-game-detail-loading"
+                style={{ padding: '32px 24px', textAlign: 'center', color: 'var(--text-secondary)', fontWeight: 600 }}
+              >
                 Đang tải chi tiết báo cáo của game...
               </div>
             ) : selectedGameReportError ? (
               <div
+                data-testid="reports-game-detail-error"
                 role="alert"
                 style={{
-                  padding: '14px',
-                  borderRadius: '8px',
-                  backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                  padding: '24px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.08)',
                   border: '1px solid rgba(239, 68, 68, 0.35)',
                   color: 'var(--accent-rose)',
-                  fontWeight: 600,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'flex-start',
+                  gap: '12px',
                 }}
               >
-                {selectedGameReportError}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontWeight: 800, fontSize: '0.94rem' }}>
+                  <AlertTriangleIcon size={18} />
+                  <span>Không thể mở báo cáo chi tiết của game này</span>
+                </div>
+                <div style={{ fontSize: '0.84rem', fontWeight: 600 }}>{selectedGameReportError}</div>
+                <button
+                  type="button"
+                  data-testid="error-back-to-reports-btn"
+                  onClick={() => handleBackToReportsOverview(false)}
+                  style={{
+                    padding: '8px 16px',
+                    minHeight: '44px',
+                    minWidth: '44px',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-surface)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.82rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ← Quay lại Thống kê
+                </button>
               </div>
             ) : selectedGameReport ? (
               <>
-                {/* Header chi tiết game + Thanh điều khiển Link / PIN / Mở lại đợt thi */}
+                {/* Header chi tiết game */}
                 <div
                   style={{
                     display: 'flex',
@@ -1509,60 +1075,19 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                               : 'var(--accent-emerald)',
                         }}
                       >
-                        {selectedGameReport.sessionMode === 'EXAM' ? 'BÁO CÁO CHẾ ĐỘ THI (EXAM)' : 'BÁO CÁO CHẾ ĐỘ CHƠI (PLAY)'}
+                        {selectedGameReport.sessionMode === 'EXAM'
+                          ? 'BÁO CÁO CHẾ ĐỘ THI (EXAM)'
+                          : 'BÁO CÁO CHẾ ĐỘ CHƠI (PLAY)'}
                       </span>
-                      <h3 style={{ margin: 0, fontSize: '1.12rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+                      <h2 style={{ margin: 0, fontSize: '1.2rem', fontWeight: 800, color: 'var(--text-primary)' }}>
                         {selectedGameReport.title}
-                      </h3>
+                      </h2>
                     </div>
                     <div style={{ fontSize: '0.78rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                      Mã game: <code>{selectedGameReport.gameId}</code> • Số câu hỏi: <strong>{selectedGameReport.questionCount}</strong> • Điểm tối đa: <strong>{selectedGameReport.maxPossibleScore} đ</strong>
+                      Mã game: <code>{selectedGameReport.gameId}</code> • Số câu hỏi:{' '}
+                      <strong>{selectedGameReport.questionCount}</strong> • Điểm tối đa:{' '}
+                      <strong>{selectedGameReport.maxPossibleScore} đ</strong>
                     </div>
-                  </div>
-
-                  <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-                    <button
-                      type="button"
-                      data-testid="refresh-selected-game-report-btn"
-                      onClick={() => handleOpenGameReportsDetail(selectedGameReport.gameId, true)}
-                      style={{
-                        padding: '8px 14px',
-                        minHeight: '44px',
-                        minWidth: '44px',
-                        borderRadius: '7px',
-                        border: '1px solid var(--border-strong)',
-                        backgroundColor: 'var(--bg-surface)',
-                        color: 'var(--text-primary)',
-                        fontSize: '0.78rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Làm mới chi tiết
-                    </button>
-                    <button
-                      type="button"
-                      data-testid="close-selected-game-report-btn"
-                      onClick={() => {
-                        setSelectedGameReport(null);
-                        setSelectedGameReportError(null);
-                        setReportsActionNotice(null);
-                      }}
-                      style={{
-                        padding: '8px 14px',
-                        minHeight: '44px',
-                        minWidth: '44px',
-                        borderRadius: '7px',
-                        border: '1px solid var(--border-strong)',
-                        backgroundColor: 'var(--bg-surface)',
-                        color: 'var(--text-primary)',
-                        fontSize: '0.78rem',
-                        fontWeight: 700,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Thu gọn
-                    </button>
                   </div>
                 </div>
 
@@ -1645,7 +1170,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                           fontWeight: 700,
                         }}
                       >
-                        {typeof window !== 'undefined'
+                        {typeof window !== 'undefined' &&
+                        !selectedGameReport.soloPlayUrl.startsWith('http')
                           ? `${window.location.origin}${selectedGameReport.soloPlayUrl}`
                           : selectedGameReport.soloPlayUrl}
                       </code>
@@ -1656,7 +1182,8 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                       onClick={() =>
                         handleCopyText(
                           'solo-link',
-                          typeof window !== 'undefined'
+                          typeof window !== 'undefined' &&
+                            !selectedGameReport.soloPlayUrl.startsWith('http')
                             ? `${window.location.origin}${selectedGameReport.soloPlayUrl}`
                             : selectedGameReport.soloPlayUrl
                         )
@@ -3014,25 +2541,338 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
               </>
             ) : null}
           </div>
-        )}
-      </section>
+        </section>
+      ) : (
+        <>
+          {/* 1. Header Reports */}
+          <header
+            data-testid="reports-overview-header"
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '12px',
+              paddingBottom: '16px',
+              borderBottom: '1px solid var(--border-subtle)',
+            }}
+          >
+            <div>
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  fontSize: '0.74rem',
+                  fontWeight: 800,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.07em',
+                  color: 'var(--primary)',
+                  marginBottom: '4px',
+                }}
+              >
+                <ChartBarIcon size={14} />
+                <span>Thống kê hoạt động</span>
+              </div>
+              <h1
+                style={{
+                  margin: 0,
+                  fontSize: 'clamp(1.35rem, 2.2vw, 1.72rem)',
+                  fontWeight: 800,
+                  color: 'var(--text-primary)',
+                  letterSpacing: '-0.02em',
+                }}
+              >
+                Thống kê hiệu quả chơi game
+              </h1>
+            </div>
 
-      {/* Main Content Body */}
-      {isLoading ? (
-        <div
-          style={{
-            backgroundColor: 'var(--bg-surface)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: '10px',
-            padding: '36px 24px',
-            textAlign: 'center',
-            color: 'var(--text-secondary)',
-            fontSize: '0.88rem',
-          }}
-        >
-          Đang tải dữ liệu thống kê...
-        </div>
-      ) : totalGames === 0 && totalPlays === 0 ? (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={() => loadAllStatistics(activityRange, true)}
+                disabled={isLoading}
+                style={{
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '8px',
+                  padding: '0 14px',
+                  minHeight: '44px',
+                  fontSize: '0.82rem',
+                  fontWeight: 700,
+                  cursor: isLoading ? 'not-allowed' : 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <RefreshIcon size={14} />
+                <span>Làm mới</span>
+              </button>
+
+              {onNavigateToLibrary && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateToLibrary({ tab: 'MINE', nonce: Date.now() })}
+                  style={{
+                    backgroundColor: 'var(--bg-surface)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-strong)',
+                    borderRadius: '8px',
+                    padding: '0 14px',
+                    minHeight: '44px',
+                    fontSize: '0.82rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  <BookOpenIcon size={14} />
+                  <span>Thư viện của tôi</span>
+                </button>
+              )}
+
+              {onNavigateToCreate && (
+                <button
+                  type="button"
+                  onClick={onNavigateToCreate}
+                  style={{
+                    backgroundColor: 'var(--primary)',
+                    color: 'var(--primary-ink, #060913)',
+                    border: '1px solid var(--primary)',
+                    borderRadius: '8px',
+                    padding: '0 16px',
+                    minHeight: '44px',
+                    fontSize: '0.83rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  <SparklesIcon size={14} />
+                  <span>Tạo game bằng AI</span>
+                </button>
+              )}
+            </div>
+          </header>
+
+          {/* Error Banner */}
+          {errorMessage && (
+            <div
+              role="alert"
+              style={{
+                padding: '14px 18px',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(239, 68, 68, 0.1)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                color: 'var(--accent-rose)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '12px',
+                flexWrap: 'wrap',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.86rem', fontWeight: 600 }}>
+                <AlertTriangleIcon size={16} />
+                <span>{errorMessage}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => loadAllStatistics(activityRange)}
+                style={{
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  border: '1px solid var(--border-strong)',
+                  borderRadius: '6px',
+                  padding: '8px 14px',
+                  minHeight: '44px',
+                  minWidth: '44px',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Thử lại
+              </button>
+            </div>
+          )}
+
+          {/* 2. KPI tổng quan: Tổng game, Tổng lượt chơi, Lượt chơi hoàn thành, Điểm trung bình */}
+          <section
+            data-testid="reports-overview-kpis"
+            aria-label="Các chỉ số tổng quan"
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))',
+              gap: '14px',
+              minWidth: 0,
+            }}
+          >
+            {/* 1. Tổng game */}
+            <div
+              data-testid="kpi-total-games"
+              style={{
+                backgroundColor: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '10px',
+                padding: '16px 18px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+              }}
+            >
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                Tổng game
+              </span>
+              <strong
+                style={{
+                  fontSize: '1.68rem',
+                  fontWeight: 800,
+                  color: 'var(--text-primary)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {isLoading ? '—' : totalGames.toLocaleString('vi-VN')}
+              </strong>
+            </div>
+
+            {/* 2. Tổng lượt chơi */}
+            <div
+              data-testid="kpi-total-plays"
+              style={{
+                backgroundColor: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '10px',
+                padding: '16px 18px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+              }}
+            >
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                Tổng lượt chơi
+              </span>
+              <strong
+                style={{
+                  fontSize: '1.68rem',
+                  fontWeight: 800,
+                  color: 'var(--accent-sky)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {isLoading ? '—' : totalPlays.toLocaleString('vi-VN')}
+              </strong>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                {totalSolo} phiên đơn • {totalRooms} phòng trực tiếp
+                {inProgressPlays > 0 ? ` • ${inProgressPlays} đang chơi` : ''}
+                {abandonedPlays > 0 ? ` • ${abandonedPlays} bỏ dở` : ''}
+              </span>
+            </div>
+
+            {/* 3. Lượt chơi hoàn thành */}
+            <div
+              data-testid="kpi-completed-plays"
+              style={{
+                backgroundColor: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '10px',
+                padding: '16px 18px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+              }}
+            >
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                Lượt chơi hoàn thành
+              </span>
+              <strong
+                style={{
+                  fontSize: '1.68rem',
+                  fontWeight: 800,
+                  color: 'var(--accent-emerald)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {isLoading ? '—' : completedPlays.toLocaleString('vi-VN')}
+              </strong>
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                {completedSolo} chơi đơn hoàn thành • {completedRooms} phòng hoàn thành
+                {multiplayerPlayers > 0 ? ` (${multiplayerPlayers} người tham gia)` : ''}
+              </span>
+            </div>
+
+            {/* 4. Điểm trung bình */}
+            <div
+              data-testid="kpi-average-score"
+              style={{
+                backgroundColor: 'var(--bg-surface)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: '10px',
+                padding: '16px 18px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '6px',
+              }}
+            >
+              <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                Điểm trung bình
+              </span>
+              <strong
+                style={{
+                  fontSize: averageScore !== null ? '1.68rem' : '1.18rem',
+                  fontWeight: 800,
+                  color: averageScore !== null ? 'var(--accent-amber)' : 'var(--text-muted)',
+                  fontVariantNumeric: 'tabular-nums',
+                  lineHeight: averageScore !== null ? 1.15 : 1.55,
+                }}
+              >
+                {isLoading
+                  ? '—'
+                  : averageScore !== null
+                    ? `${averageScore.toLocaleString('vi-VN')} đ`
+                    : 'Chưa có dữ liệu'}
+              </strong>
+              {averageScore !== null &&
+                overview?.overallAccuracyPercent !== null &&
+                overview?.overallAccuracyPercent !== undefined && (
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+                    Tỷ lệ đúng: {Math.round(overview.overallAccuracyPercent)}% • Chuỗi cao nhất: {overview?.bestStreak ?? 0}
+                  </span>
+                )}
+            </div>
+          </section>
+
+          {/* 3. Các biểu đồ thống kê hiện có */}
+          <div
+            data-testid="reports-overview-charts"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px',
+              minWidth: 0,
+            }}
+          >
+            {isLoading ? (
+              <div
+                style={{
+                  backgroundColor: 'var(--bg-surface)',
+                  border: '1px solid var(--border-subtle)',
+                  borderRadius: '10px',
+                  padding: '36px 24px',
+                  textAlign: 'center',
+                  color: 'var(--text-secondary)',
+                  fontSize: '0.88rem',
+                }}
+              >
+                Đang tải dữ liệu thống kê...
+              </div>
+            ) : totalGames === 0 && totalPlays === 0 ? (
         /* Trạng thái 1: Chưa tạo game và chưa có lượt chơi */
         <section
           data-testid="statistics-empty-no-games"
@@ -3831,906 +3671,25 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
               </div>
             )}
           </section>
-
-          {/* Lịch sử phiên chơi đơn & phòng chơi trực tiếp gần đây */}
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 310px), 1fr))',
-              gap: '20px',
-              alignItems: 'start',
-              minWidth: 0,
-            }}
-          >
-            {/* Lịch sử phiên chơi đơn gần đây */}
-            <section
-              style={{
-                backgroundColor: 'var(--bg-surface)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '10px',
-                overflow: 'hidden',
-                minWidth: 0,
-                maxWidth: '100%',
-              }}
-            >
-              <div
-                style={{
-                  padding: '14px 18px',
-                  borderBottom: '1px solid var(--border-subtle)',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <h2 style={{ margin: 0, fontSize: '0.94rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                  Phiên chơi đơn gần đây
-                </h2>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                  {sessions.length} phiên
-                </span>
-              </div>
-
-              {sessions.length === 0 ? (
-                <div style={{ padding: '24px 18px', fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-                  Chưa có phiên chơi đơn nào.
-                </div>
-              ) : (
-                <div>
-                  {sessions.slice(0, 8).map((sess, idx) => {
-                    const acc =
-                      sess.totalQuestions > 0
-                        ? Math.round((sess.correctAnswers / sess.totalQuestions) * 100)
-                        : 0;
-                    const isFinished = sess.state === 'FINISHED';
-                    const isAbandoned = sess.state === 'ABANDONED';
-                    return (
-                      <div
-                        key={sess.sessionId}
-                        style={{
-                          padding: '12px 18px',
-                          borderBottom:
-                            idx < Math.min(sessions.length, 8) - 1
-                              ? '1px solid var(--border-subtle)'
-                              : 'none',
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          gap: '12px',
-                        }}
-                      >
-                        <div style={{ minWidth: 0, flex: 1 }}>
-                          <div
-                            style={{
-                              fontWeight: 700,
-                              fontSize: '0.86rem',
-                              color: 'var(--text-primary)',
-                              whiteSpace: 'nowrap',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                            }}
-                            title={sess.gameTitle}
-                          >
-                            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {sess.gameTitle}
-                            </span>
-                            <span
-                              style={{
-                                flexShrink: 0,
-                                fontSize: '0.67rem',
-                                fontWeight: 700,
-                                padding: '1px 6px',
-                                borderRadius: '4px',
-                                backgroundColor: isFinished
-                                  ? 'rgba(16, 185, 129, 0.14)'
-                                  : isAbandoned
-                                    ? 'rgba(239, 68, 68, 0.12)'
-                                    : 'rgba(14, 165, 233, 0.14)',
-                                color: isFinished
-                                  ? 'var(--accent-emerald)'
-                                  : isAbandoned
-                                    ? 'var(--accent-rose)'
-                                    : 'var(--accent-sky)',
-                              }}
-                            >
-                              {isFinished ? 'Hoàn thành' : isAbandoned ? 'Bỏ dở' : 'Đang chơi'}
-                            </span>
-                          </div>
-                          <div
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '8px',
-                              fontSize: '0.74rem',
-                              color: 'var(--text-secondary)',
-                              marginTop: '3px',
-                              fontVariantNumeric: 'tabular-nums',
-                            }}
-                          >
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                              <CheckIcon size={11} />
-                              {sess.correctAnswers}/{sess.totalQuestions} câu ({acc}%)
-                            </span>
-                            <span>•</span>
-                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                              <ClockIcon size={11} />
-                              {formatDuration(sess.durationMs)}
-                            </span>
-                            {sess.maxStreak > 1 && (
-                              <>
-                                <span>•</span>
-                                <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px', color: 'var(--accent-amber)' }}>
-                                  <FlameIcon size={11} />
-                                  Chuỗi {sess.maxStreak}
-                                </span>
-                              </>
-                            )}
-                          </div>
-                        </div>
-
-                        <div style={{ textAlign: 'right', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
-                          <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--primary)' }}>
-                            {sess.totalScore.toLocaleString('vi-VN')} đ
-                          </div>
-                          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                            {new Date(sess.finishedAt || sess.createdAt).toLocaleDateString('vi-VN')}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </section>
-
-            {/* Lịch sử phòng chơi trực tiếp */}
-            <section
-              data-testid="reports-multiplayer-rooms"
-              style={{
-                backgroundColor: 'var(--bg-surface)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: '10px',
-                overflow: 'hidden',
-                minWidth: 0,
-                maxWidth: '100%',
-              }}
-            >
-              <div
-                style={{
-                  padding: '14px 18px',
-                  borderBottom: '1px solid var(--border-subtle)',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <h2 style={{ margin: 0, fontSize: '0.94rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                  Phòng chơi trực tiếp gần đây
-                </h2>
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontVariantNumeric: 'tabular-nums' }}>
-                  {analytics?.recentMultiplayerRooms?.length ?? 0} phòng
-                </span>
-              </div>
-
-              {(analytics?.recentMultiplayerRooms?.length ?? 0) === 0 ? (
-                <div style={{ padding: '24px 18px', fontSize: '0.84rem', color: 'var(--text-secondary)' }}>
-                  Chưa có phòng chơi trực tiếp nào hoàn thành.
-                </div>
-              ) : (
-                <div>
-                  {(analytics?.recentMultiplayerRooms || []).slice(0, 8).map((room, idx, arr) => (
-                    <div
-                      key={room.roomId}
-                      style={{
-                        padding: '12px 18px',
-                        borderBottom: idx < arr.length - 1 ? '1px solid var(--border-subtle)' : 'none',
-                        display: 'flex',
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        gap: '12px',
-                        flexWrap: 'wrap',
-                      }}
-                    >
-                      <div style={{ minWidth: 0, flex: 1 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          <span
-                            style={{
-                              fontSize: '0.7rem',
-                              fontWeight: 800,
-                              padding: '2px 7px',
-                              borderRadius: '5px',
-                              backgroundColor: 'var(--primary-subtle)',
-                              color: 'var(--primary)',
-                              fontVariantNumeric: 'tabular-nums',
-                            }}
-                          >
-                            PIN: {room.roomCode}
-                          </span>
-                          <strong style={{ fontSize: '0.86rem', color: 'var(--text-primary)' }}>
-                            {room.gameTitle}
-                          </strong>
-                        </div>
-                        <div
-                          style={{
-                            display: 'flex',
-                            alignItems: 'center',
-                            gap: '8px',
-                            fontSize: '0.74rem',
-                            color: 'var(--text-secondary)',
-                            marginTop: '4px',
-                            flexWrap: 'wrap',
-                            fontVariantNumeric: 'tabular-nums',
-                          }}
-                        >
-                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '3px' }}>
-                            <UsersIcon size={11} />
-                            {room.playerCount} người chơi
-                          </span>
-                          <span>•</span>
-                          <span>{room.totalQuestions} câu hỏi</span>
-                          {room.averageScore !== null && room.averageScore !== undefined && (
-                            <>
-                              <span>•</span>
-                              <span>TB: {room.averageScore.toLocaleString('vi-VN')} đ</span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                      <div style={{ textAlign: 'right', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
-                        <div style={{ fontWeight: 800, fontSize: '0.88rem', color: 'var(--accent-amber)' }}>
-                          Cao nhất: {room.topScore.toLocaleString('vi-VN')} đ
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                          {new Date(room.finishedAt || room.createdAt).toLocaleDateString('vi-VN')}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          </div>
         </>
       )}
-
-      {/* E. Lịch sử Chơi / Thi (V3 Unified Play & Exam History + Detail + CSV/Excel Export) */}
-      <section
-        data-testid="play-exam-history-section"
-        aria-label="Lịch sử Chơi và Thi"
-        style={{
-          backgroundColor: 'var(--bg-surface)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: '12px',
-          padding: 'clamp(14px, 3vw, 20px)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '16px',
-          minWidth: 0,
-          maxWidth: '100%',
-          boxSizing: 'border-box',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-start',
-            flexWrap: 'wrap',
-            gap: '12px',
-          }}
-        >
-          <div>
-            <h2
-              style={{
-                margin: 0,
-                fontSize: '1.08rem',
-                fontWeight: 800,
-                color: 'var(--text-primary)',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '8px',
-              }}
-            >
-              <ClockIcon size={18} />
-              <span>Lịch sử Chơi / Thi</span>
-            </h2>
-            <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
-              Lưu trữ đầy đủ kết quả các phiên Chơi cá nhân, Thi cá nhân, Chơi nhóm và Thi nhóm. Hỗ trợ xem lại chi tiết và xuất báo cáo Excel / CSV.
-            </p>
-          </div>
-          <div
-            style={{
-              fontSize: '0.78rem',
-              fontWeight: 700,
-              color: 'var(--text-secondary)',
-              backgroundColor: 'var(--bg-subtle)',
-              padding: '6px 12px',
-              borderRadius: '8px',
-              border: '1px solid var(--border-subtle)',
-            }}
-          >
-            Tổng cộng: <strong style={{ color: 'var(--text-primary)' }}>{historyData?.total ?? 0}</strong> phiên
-          </div>
-        </div>
-
-        {/* Bộ lọc & Tìm kiếm */}
-        <div
-          data-testid="history-filters-bar"
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '10px',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: '12px',
-            backgroundColor: 'var(--bg-subtle)',
-            borderRadius: '10px',
-            border: '1px solid var(--border-subtle)',
-          }}
-        >
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', minWidth: 0, maxWidth: '100%' }}>
-            {/* Filter Chế độ: Tất cả / Chơi / Thi */}
-            <div style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginRight: '4px' }}>
-                Chế độ:
-              </span>
-              {(
-                [
-                  { key: 'ALL', label: 'Tất cả' },
-                  { key: 'PLAY', label: 'Chơi' },
-                  { key: 'EXAM', label: 'Thi' },
-                ] as const
-              ).map((opt) => {
-                const active = historyModeFilter === opt.key;
-                return (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    data-testid={`history-filter-mode-${opt.key.toLowerCase()}`}
-                    onClick={() => {
-                      setHistoryModeFilter(opt.key);
-                      setHistoryPage(1);
-                    }}
-                    style={{
-                      padding: '8px 12px',
-                      minHeight: '44px',
-                      minWidth: '44px',
-                      borderRadius: '6px',
-                      fontSize: '0.76rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      border: active ? '1px solid var(--primary)' : '1px solid var(--border-strong)',
-                      backgroundColor: active ? 'var(--primary)' : 'var(--bg-surface)',
-                      color: active ? 'var(--primary-ink, #060913)' : 'var(--text-primary)',
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Filter Hình thức: Tất cả / Cá nhân / Nhóm */}
-            <div style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: '4px' }}>
-              <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginRight: '4px' }}>
-                Hình thức:
-              </span>
-              {(
-                [
-                  { key: 'ALL', label: 'Tất cả' },
-                  { key: 'SOLO', label: 'Cá nhân' },
-                  { key: 'MULTIPLAYER', label: 'Nhóm' },
-                ] as const
-              ).map((opt) => {
-                const active = historyDeliveryFilter === opt.key;
-                return (
-                  <button
-                    key={opt.key}
-                    type="button"
-                    data-testid={`history-filter-delivery-${opt.key.toLowerCase()}`}
-                    onClick={() => {
-                      setHistoryDeliveryFilter(opt.key);
-                      setHistoryPage(1);
-                    }}
-                    style={{
-                      padding: '8px 12px',
-                      minHeight: '44px',
-                      minWidth: '44px',
-                      borderRadius: '6px',
-                      fontSize: '0.76rem',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      border: active ? '1px solid var(--primary)' : '1px solid var(--border-strong)',
-                      backgroundColor: active ? 'var(--primary)' : 'var(--bg-surface)',
-                      color: active ? 'var(--primary-ink, #060913)' : 'var(--text-primary)',
-                    }}
-                  >
-                    {opt.label}
-                  </button>
-                );
-              })}
-            </div>
           </div>
 
-          {/* Search & Sort */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', alignItems: 'center', flex: '1 1 240px', minWidth: 0, maxWidth: '100%', justifyContent: 'flex-end' }}>
-            <input
-              type="search"
-              data-testid="history-search-input"
-              value={historySearch}
-              onChange={(e) => {
-                setHistorySearch(e.target.value);
-                setHistoryPage(1);
-              }}
-              placeholder="Tìm theo tên game hoặc mã phiên..."
-              style={{
-                padding: '8px 12px',
-                minHeight: '44px',
-                borderRadius: '7px',
-                border: '1px solid var(--border-strong)',
-                backgroundColor: 'var(--bg-surface)',
-                color: 'var(--text-primary)',
-                fontSize: '0.8rem',
-                minWidth: 'min(100%, 180px)',
-                flex: '1 1 180px',
-                maxWidth: '100%',
-                boxSizing: 'border-box',
-              }}
-            />
-            <select
-              data-testid="history-sort-select"
-              aria-label="Sắp xếp lịch sử"
-              value={historySortOrder}
-              onChange={(e) => {
-                setHistorySortOrder(e.target.value as 'NEWEST' | 'OLDEST');
-                setHistoryPage(1);
-              }}
-              style={{
-                padding: '8px 10px',
-                minHeight: '44px',
-                borderRadius: '7px',
-                border: '1px solid var(--border-strong)',
-                backgroundColor: 'var(--bg-surface)',
-                color: 'var(--text-primary)',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-                boxSizing: 'border-box',
-              }}
-            >
-              <option value="NEWEST">Mới nhất</option>
-              <option value="OLDEST">Cũ nhất</option>
-            </select>
-          </div>
-        </div>
-
-        {/* Thông báo lỗi xuất file nếu có */}
-        {exportErrorMsg && (
-          <div
-            data-testid="history-export-error"
-            role="alert"
-            style={{
-              padding: '10px 14px',
-              borderRadius: '8px',
-              backgroundColor: 'rgba(239, 68, 68, 0.1)',
-              border: '1px solid rgba(239, 68, 68, 0.35)',
-              color: 'var(--accent-rose)',
-              fontSize: '0.8rem',
-              fontWeight: 600,
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              gap: '8px',
-            }}
-          >
-            <span>{exportErrorMsg}</span>
-            <button
-              type="button"
-              onClick={() => setExportErrorMsg(null)}
-              style={{
-                background: 'transparent',
-                border: 'none',
-                color: 'var(--accent-rose)',
-                fontWeight: 800,
-                cursor: 'pointer',
-                minHeight: '44px',
-                minWidth: '44px',
-                padding: '6px 10px',
-              }}
-            >
-              Đóng
-            </button>
-          </div>
-        )}
-
-        {/* Loading / Error / Empty / Data Table */}
-        {historyLoading ? (
-          <div
-            data-testid="history-loading-state"
-            style={{
-              padding: '28px',
-              textAlign: 'center',
-              color: 'var(--text-secondary)',
-              fontSize: '0.86rem',
-              fontWeight: 600,
-            }}
-          >
-            Đang tải danh sách lịch sử Chơi / Thi...
-          </div>
-        ) : historyError ? (
-          <div
-            data-testid="history-error-state"
-            style={{
-              padding: '20px',
-              borderRadius: '10px',
-              backgroundColor: 'rgba(239, 68, 68, 0.08)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              color: 'var(--accent-rose)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              flexWrap: 'wrap',
-              gap: '12px',
-            }}
-          >
-            <span style={{ fontSize: '0.84rem', fontWeight: 600 }}>{historyError}</span>
-            <button
-              type="button"
-              data-testid="history-retry-btn"
-              onClick={() => loadHistoryActivities()}
-              style={{
-                padding: '8px 14px',
-                minHeight: '44px',
-                minWidth: '44px',
-                borderRadius: '6px',
-                border: '1px solid var(--border-strong)',
-                backgroundColor: 'var(--bg-surface)',
-                color: 'var(--text-primary)',
-                fontSize: '0.78rem',
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              Thử lại
-            </button>
-          </div>
-        ) : !historyData || historyData.items.length === 0 ? (
-          <div
-            data-testid="history-empty-state"
-            style={{
-              padding: '32px 16px',
-              textAlign: 'center',
-              color: 'var(--text-muted)',
-              borderRadius: '10px',
-              border: '1px dashed var(--border-subtle)',
-              fontSize: '0.85rem',
-            }}
-          >
-            Chưa có phiên Chơi hoặc Thi nào phù hợp với bộ lọc hiện tại.
-          </div>
-        ) : (
-          <div style={{ overflowX: 'auto', width: '100%' }}>
-            <table
-              data-testid="play-exam-history-table"
-              style={{
-                width: '100%',
-                borderCollapse: 'collapse',
-                fontSize: '0.82rem',
-                minWidth: '760px',
-              }}
-            >
-              <thead>
-                <tr
-                  style={{
-                    borderBottom: '1px solid var(--border-subtle)',
-                    color: 'var(--text-secondary)',
-                    textAlign: 'left',
-                    fontSize: '0.74rem',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.04em',
-                  }}
-                >
-                  <th style={{ padding: '10px 8px' }}>Tên game</th>
-                  <th style={{ padding: '10px 8px' }}>Chế độ / Hình thức</th>
-                  <th style={{ padding: '10px 8px' }}>Mã phiên</th>
-                  <th style={{ padding: '10px 8px' }}>Người tham gia</th>
-                  <th style={{ padding: '10px 8px' }}>Thời gian</th>
-                  <th style={{ padding: '10px 8px' }}>Kết quả / Điểm</th>
-                  <th style={{ padding: '10px 8px' }}>Trạng thái</th>
-                  <th style={{ padding: '10px 8px', textAlign: 'right' }}>Thao tác</th>
-                </tr>
-              </thead>
-              <tbody>
-                {historyData.items.map((item) => {
-                  const isExam = item.sessionMode === 'EXAM';
-                  const isMulti = item.deliveryMode === 'MULTIPLAYER';
-                  const isExportingCsv = exportingKey === `${item.historyId}:csv`;
-                  const isExportingXlsx = exportingKey === `${item.historyId}:xlsx`;
-                  const displayCode =
-                    item.roomCode ||
-                    (item.sessionId ? item.sessionId.slice(0, 8).toUpperCase() : item.historyId);
-                  const statusLabel =
-                    item.submittedReason === 'EXAM_CLOSED_BY_HOST' || item.status === 'AUTO_SUBMITTED'
-                      ? 'BTC kết thúc (Tự động nộp)'
-                      : 'Hoàn tất';
-                  return (
-                    <tr
-                      key={item.historyId}
-                      data-testid={`history-row-${item.historyId}`}
-                      style={{
-                        borderBottom: '1px solid var(--border-subtle)',
-                      }}
-                    >
-                      <td style={{ padding: '12px 8px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                        <div>{item.gameTitle}</div>
-                        {item.playerName && !isMulti && (
-                          <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500 }}>
-                            Người chơi: {item.playerName}
-                            {item.departmentUnit ? ` (${item.departmentUnit})` : ''}
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: '12px 8px' }}>
-                        <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
-                          <span
-                            style={{
-                              padding: '2px 7px',
-                              borderRadius: '999px',
-                              fontSize: '0.7rem',
-                              fontWeight: 800,
-                              backgroundColor: isExam ? 'rgba(245, 158, 11, 0.16)' : 'rgba(16, 185, 129, 0.15)',
-                              color: isExam ? 'var(--accent-amber)' : 'var(--accent-emerald)',
-                            }}
-                          >
-                            {isExam ? 'Thi' : 'Chơi'}
-                          </span>
-                          <span
-                            style={{
-                              padding: '2px 7px',
-                              borderRadius: '999px',
-                              fontSize: '0.7rem',
-                              fontWeight: 700,
-                              backgroundColor: 'var(--bg-subtle)',
-                              color: 'var(--text-secondary)',
-                              border: '1px solid var(--border-subtle)',
-                            }}
-                          >
-                            {isMulti ? 'Nhóm' : 'Cá nhân'}
-                          </span>
-                        </div>
-                      </td>
-                      <td
-                        style={{
-                          padding: '12px 8px',
-                          fontFamily: 'monospace',
-                          fontWeight: 700,
-                          color: 'var(--primary)',
-                        }}
-                      >
-                        {displayCode}
-                      </td>
-                      <td style={{ padding: '12px 8px', fontVariantNumeric: 'tabular-nums' }}>
-                        <span style={{ fontWeight: 700 }}>{item.participantCount}</span> người
-                      </td>
-                      <td style={{ padding: '12px 8px', fontSize: '0.75rem', color: 'var(--text-secondary)', fontVariantNumeric: 'tabular-nums' }}>
-                        <div>
-                          BĐ:{' '}
-                          {item.startedAt
-                            ? new Date(item.startedAt).toLocaleString('vi-VN')
-                            : new Date(item.createdAt).toLocaleString('vi-VN')}
-                        </div>
-                        <div>
-                          KT:{' '}
-                          {item.finishedAt
-                            ? new Date(item.finishedAt).toLocaleString('vi-VN')
-                            : new Date(item.createdAt).toLocaleString('vi-VN')}
-                        </div>
-                      </td>
-                      <td style={{ padding: '12px 8px', fontVariantNumeric: 'tabular-nums' }}>
-                        <div style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
-                          Cao nhất: {item.highestScore.toLocaleString('vi-VN')} đ
-                        </div>
-                        <div style={{ fontSize: '0.73rem', color: 'var(--text-secondary)' }}>
-                          {isMulti
-                            ? `TB: ${item.averageScore.toLocaleString('vi-VN')} đ`
-                            : item.passedCount > 0
-                              ? 'Đạt'
-                              : item.failedCount > 0
-                                ? 'Chưa đạt'
-                                : `Độ chính xác: ${item.averageAccuracy}%`}
-                          {(item.passedCount > 0 || item.failedCount > 0) && isMulti
-                            ? ` (${item.passedCount} Đạt / ${item.failedCount} Chưa đạt)`
-                            : ''}
-                        </div>
-                      </td>
-                      <td style={{ padding: '12px 8px' }}>
-                        <span
-                          style={{
-                            padding: '3px 8px',
-                            borderRadius: '6px',
-                            fontSize: '0.72rem',
-                            fontWeight: 700,
-                            backgroundColor: 'var(--bg-subtle)',
-                            color: 'var(--text-primary)',
-                            border: '1px solid var(--border-subtle)',
-                          }}
-                        >
-                          {statusLabel}
-                        </span>
-                      </td>
-                      <td style={{ padding: '12px 8px', textAlign: 'right' }}>
-                        <div style={{ display: 'inline-flex', gap: '6px', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                          <button
-                            type="button"
-                            data-testid={`history-view-detail-${item.historyId}`}
-                            onClick={() => handleOpenHistoryDetail(item.historyId)}
-                            style={{
-                              padding: '8px 12px',
-                              minHeight: '44px',
-                              minWidth: '44px',
-                              borderRadius: '6px',
-                              border: '1px solid var(--primary)',
-                              backgroundColor: 'var(--primary-subtle)',
-                              color: 'var(--primary)',
-                              fontSize: '0.75rem',
-                              fontWeight: 800,
-                              cursor: 'pointer',
-                            }}
-                          >
-                            Xem chi tiết
-                          </button>
-                          <button
-                            type="button"
-                            data-testid={`history-export-csv-${item.historyId}`}
-                            disabled={isExportingCsv}
-                            onClick={() => handleExportHistory(item.historyId, 'csv')}
-                            style={{
-                              padding: '8px 11px',
-                              minHeight: '44px',
-                              minWidth: '44px',
-                              borderRadius: '6px',
-                              border: '1px solid var(--border-strong)',
-                              backgroundColor: 'var(--bg-surface)',
-                              color: 'var(--text-primary)',
-                              fontSize: '0.74rem',
-                              fontWeight: 700,
-                              cursor: isExportingCsv ? 'not-allowed' : 'pointer',
-                            }}
-                          >
-                            {isExportingCsv ? 'Đang xuất...' : 'Xuất CSV'}
-                          </button>
-                          <button
-                            type="button"
-                            data-testid={`history-export-xlsx-${item.historyId}`}
-                            disabled={isExportingXlsx}
-                            onClick={() => handleExportHistory(item.historyId, 'xlsx')}
-                            style={{
-                              padding: '8px 11px',
-                              minHeight: '44px',
-                              minWidth: '44px',
-                              borderRadius: '6px',
-                              border: '1px solid var(--border-strong)',
-                              backgroundColor: 'var(--bg-surface)',
-                              color: 'var(--text-primary)',
-                              fontSize: '0.74rem',
-                              fontWeight: 700,
-                              cursor: isExportingXlsx ? 'not-allowed' : 'pointer',
-                            }}
-                          >
-                            {isExportingXlsx ? 'Đang xuất...' : 'Xuất Excel'}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {/* Phân trang */}
-        {historyData && historyData.total > historyLimit && (
-          <div
-            data-testid="history-pagination"
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              paddingTop: '8px',
-              fontSize: '0.78rem',
-              color: 'var(--text-secondary)',
-            }}
-          >
-            <span>
-              Trang {historyPage} / {Math.max(1, Math.ceil(historyData.total / historyLimit))}
-            </span>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <button
-                type="button"
-                disabled={historyPage <= 1}
-                onClick={() => setHistoryPage((p) => Math.max(1, p - 1))}
-                style={{
-                  padding: '8px 14px',
-                  minHeight: '44px',
-                  minWidth: '44px',
-                  borderRadius: '6px',
-                  border: '1px solid var(--border-strong)',
-                  backgroundColor: 'var(--bg-surface)',
-                  color: 'var(--text-primary)',
-                  fontWeight: 700,
-                  cursor: historyPage <= 1 ? 'not-allowed' : 'pointer',
-                  opacity: historyPage <= 1 ? 0.5 : 1,
-                }}
-              >
-                Trang trước
-              </button>
-              <button
-                type="button"
-                disabled={historyPage >= Math.ceil(historyData.total / historyLimit)}
-                onClick={() => setHistoryPage((p) => p + 1)}
-                style={{
-                  padding: '8px 14px',
-                  minHeight: '44px',
-                  minWidth: '44px',
-                  borderRadius: '6px',
-                  border: '1px solid var(--border-strong)',
-                  backgroundColor: 'var(--bg-surface)',
-                  color: 'var(--text-primary)',
-                  fontWeight: 700,
-                  cursor: historyPage >= Math.ceil(historyData.total / historyLimit) ? 'not-allowed' : 'pointer',
-                  opacity: historyPage >= Math.ceil(historyData.total / historyLimit) ? 0.5 : 1,
-                }}
-              >
-                Trang sau
-              </button>
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* Modal Xem chi tiết phiên Chơi / Thi */}
-      {(detailLoading || detailError || selectedHistoryDetail) && (
-        <div
-          data-testid="history-detail-modal"
-          role="dialog"
-          aria-modal="true"
-          aria-label="Chi tiết phiên Chơi / Thi"
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 9999,
-            backgroundColor: 'rgba(6, 9, 19, 0.72)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px',
-            boxSizing: 'border-box',
-          }}
-          onClick={(e) => {
-            if (e.target === e.currentTarget) {
-              setSelectedHistoryDetail(null);
-              setDetailError(null);
-              setDetailLoading(false);
-            }
-          }}
-        >
-          <div
+          {/* 4. Danh sách Game trong Thư viện & Quản lý Lượt Chơi / Thi */}
+          <section
+            data-testid="reports-v2-game-hub"
+            aria-label="Trung tâm Thống kê Game, Bảng xếp hạng, Đợt thi và Quản lý Lượt"
             style={{
               backgroundColor: 'var(--bg-surface)',
-              border: '1px solid var(--border-strong)',
-              borderRadius: '14px',
-              width: '100%',
-              maxWidth: '980px',
-              maxHeight: '88vh',
-              overflowY: 'auto',
-              padding: '22px',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: '12px',
+              padding: 'clamp(14px, 3vw, 20px)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '18px',
-              boxShadow: '0 24px 48px rgba(0,0,0,0.45)',
+              gap: '16px',
+              minWidth: 0,
+              maxWidth: '100%',
+              boxSizing: 'border-box',
             }}
           >
             <div
@@ -4738,103 +3697,196 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                 display: 'flex',
                 justifyContent: 'space-between',
                 alignItems: 'flex-start',
+                flexWrap: 'wrap',
                 gap: '12px',
-                borderBottom: '1px solid var(--border-subtle)',
-                paddingBottom: '14px',
               }}
             >
-              <div>
-                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                  {selectedHistoryDetail
-                    ? `Chi tiết phiên: ${selectedHistoryDetail.gameTitle}`
-                    : 'Chi tiết phiên Chơi / Thi'}
-                </h3>
-                {selectedHistoryDetail && (
-                  <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                    Mã phiên:{' '}
-                    <strong>
-                      {selectedHistoryDetail.roomCode ||
-                        (selectedHistoryDetail.sessionId
-                          ? selectedHistoryDetail.sessionId.slice(0, 8).toUpperCase()
-                          : selectedHistoryDetail.historyId)}
-                    </strong>{' '}
-                    • Chế độ: <strong>{selectedHistoryDetail.sessionMode === 'EXAM' ? 'Thi' : 'Chơi'}</strong> • Hình thức:{' '}
-                    <strong>
-                      {selectedHistoryDetail.deliveryMode === 'MULTIPLAYER' ? 'Nhóm' : 'Cá nhân'}
-                    </strong>{' '}
-                    • Trạng thái:{' '}
-                    <strong>
-                      {selectedHistoryDetail.submittedReason === 'EXAM_CLOSED_BY_HOST' ||
-                      selectedHistoryDetail.status === 'AUTO_SUBMITTED'
-                        ? 'BTC kết thúc (Tự động nộp)'
-                        : 'Hoàn tất'}
-                    </strong>
-                  </div>
-                )}
+              <div style={{ minWidth: 0 }}>
+                <h2
+                  style={{
+                    margin: 0,
+                    fontSize: '1.08rem',
+                    fontWeight: 800,
+                    color: 'var(--text-primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <TrophyIcon size={18} />
+                  <span>Danh sách Game trong Thư viện & Quản lý Lượt Chơi / Thi</span>
+                </h2>
+                <p style={{ margin: '4px 0 0 0', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                  Tự động đẩy game vừa có hoạt động chơi/thi mới nhất lên đầu. Bấm vào game hoặc bấm <strong>Xem chi tiết</strong> để mở màn hình báo cáo riêng cho từng game.
+                </p>
               </div>
 
-              <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-                {selectedHistoryDetail && (
-                  <>
+              <div
+                data-testid="reports-games-sort-badge"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  flexWrap: 'wrap',
+                  fontSize: '0.75rem',
+                  fontWeight: 700,
+                  color: 'var(--text-secondary)',
+                  backgroundColor: 'var(--bg-subtle)',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-subtle)',
+                }}
+              >
+                <span>
+                  Thư viện: <strong style={{ color: 'var(--text-primary)' }}>{reportsGamesData?.summary.totalGames ?? 0}</strong> game
+                </span>
+                <span>•</span>
+                <span>
+                  Chơi: <strong style={{ color: 'var(--accent-emerald)' }}>{reportsGamesData?.summary.playGamesCount ?? 0}</strong>
+                </span>
+                <span>•</span>
+                <span>
+                  Thi: <strong style={{ color: 'var(--accent-amber)' }}>{reportsGamesData?.summary.examGamesCount ?? 0}</strong>
+                </span>
+                <span>•</span>
+                <span style={{ color: 'var(--primary)' }}>Sắp xếp: Hoạt động mới nhất lên đầu</span>
+              </div>
+            </div>
+
+            {/* Bộ lọc chế độ & Tìm kiếm game trong Thư viện */}
+            <div
+              data-testid="reports-games-filter-bar"
+              style={{
+                display: 'flex',
+                flexWrap: 'wrap',
+                gap: '10px',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px',
+                backgroundColor: 'var(--bg-subtle)',
+                borderRadius: '10px',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <div style={{ display: 'inline-flex', flexWrap: 'wrap', alignItems: 'center', gap: '6px' }}>
+                <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-secondary)', marginRight: '2px' }}>
+                  Loại chế độ:
+                </span>
+                {(
+                  [
+                    { key: 'ALL', label: 'Tất cả game' },
+                    { key: 'PLAY', label: 'Chế độ Chơi (PLAY)' },
+                    { key: 'EXAM', label: 'Chế độ Thi (EXAM)' },
+                  ] as const
+                ).map((opt) => {
+                  const active = reportsGameModeFilter === opt.key;
+                  return (
                     <button
+                      key={opt.key}
                       type="button"
-                      data-testid="modal-export-csv-btn"
-                      disabled={exportingKey === `${selectedHistoryDetail.historyId}:csv`}
-                      onClick={() => handleExportHistory(selectedHistoryDetail.historyId, 'csv')}
+                      data-testid={`reports-game-filter-${opt.key.toLowerCase()}`}
+                      onClick={() => {
+                        setReportsGameModeFilter(opt.key);
+                        setReportsGamePage(1);
+                      }}
                       style={{
-                        padding: '8px 14px',
+                        padding: '8px 12px',
                         minHeight: '44px',
                         minWidth: '44px',
-                        borderRadius: '7px',
-                        border: '1px solid var(--border-strong)',
-                        backgroundColor: 'var(--bg-subtle)',
-                        color: 'var(--text-primary)',
-                        fontSize: '0.78rem',
+                        borderRadius: '6px',
+                        fontSize: '0.76rem',
                         fontWeight: 700,
                         cursor: 'pointer',
+                        border: active ? '1px solid var(--primary)' : '1px solid var(--border-strong)',
+                        backgroundColor: active ? 'var(--primary)' : 'var(--bg-surface)',
+                        color: active ? 'var(--primary-ink, #060913)' : 'var(--text-primary)',
                       }}
                     >
-                      {exportingKey === `${selectedHistoryDetail.historyId}:csv`
-                        ? 'Đang xuất...'
-                        : 'Xuất CSV'}
+                      {opt.label}
                     </button>
-                    <button
-                      type="button"
-                      data-testid="modal-export-xlsx-btn"
-                      disabled={exportingKey === `${selectedHistoryDetail.historyId}:xlsx`}
-                      onClick={() => handleExportHistory(selectedHistoryDetail.historyId, 'xlsx')}
-                      style={{
-                        padding: '8px 14px',
-                        minHeight: '44px',
-                        minWidth: '44px',
-                        borderRadius: '7px',
-                        border: '1px solid var(--primary)',
-                        backgroundColor: 'var(--primary)',
-                        color: 'var(--primary-ink, #060913)',
-                        fontSize: '0.78rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {exportingKey === `${selectedHistoryDetail.historyId}:xlsx`
-                        ? 'Đang xuất...'
-                        : 'Xuất Excel (.xlsx)'}
-                    </button>
-                  </>
-                )}
+                  );
+                })}
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  flexWrap: 'wrap',
+                  gap: '8px',
+                  alignItems: 'center',
+                  flex: '1 1 220px',
+                  minWidth: 0,
+                  maxWidth: '100%',
+                  justifyContent: 'flex-end',
+                }}
+              >
+                <input
+                  type="search"
+                  data-testid="reports-game-search-input"
+                  value={reportsGameSearch}
+                  onChange={(e) => {
+                    setReportsGameSearch(e.target.value);
+                    setReportsGamePage(1);
+                  }}
+                  placeholder="Tìm theo tên game trong Thư viện..."
+                  style={{
+                    padding: '8px 12px',
+                    minHeight: '44px',
+                    borderRadius: '7px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-surface)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.8rem',
+                    minWidth: 'min(100%, 180px)',
+                    flex: '1 1 180px',
+                    maxWidth: '100%',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+            </div>
+
+            {/* Danh sách Game trong Thư viện được sắp theo lastActivityAt DESC NULLS LAST */}
+            {reportsGamesLoading ? (
+              <div
+                data-testid="reports-games-loading"
+                style={{
+                  padding: '24px',
+                  textAlign: 'center',
+                  color: 'var(--text-secondary)',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                }}
+              >
+                Đang tải danh sách game trong Thư viện...
+              </div>
+            ) : reportsGamesError ? (
+              <div
+                data-testid="reports-games-error"
+                role="alert"
+                style={{
+                  padding: '16px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                  border: '1px solid rgba(239, 68, 68, 0.3)',
+                  color: 'var(--accent-rose)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  flexWrap: 'wrap',
+                  gap: '10px',
+                }}
+              >
+                <span style={{ fontSize: '0.84rem', fontWeight: 600 }}>{reportsGamesError}</span>
                 <button
                   type="button"
-                  data-testid="close-history-detail-modal"
-                  onClick={() => {
-                    setSelectedHistoryDetail(null);
-                    setDetailError(null);
-                    setDetailLoading(false);
-                  }}
+                  onClick={() => loadReportsGamesOverview()}
                   style={{
                     padding: '8px 14px',
                     minHeight: '44px',
                     minWidth: '44px',
-                    borderRadius: '7px',
+                    borderRadius: '6px',
                     border: '1px solid var(--border-strong)',
                     backgroundColor: 'var(--bg-surface)',
                     color: 'var(--text-primary)',
@@ -4843,191 +3895,272 @@ export const ReportsPage: React.FC<ReportsPageProps> = ({
                     cursor: 'pointer',
                   }}
                 >
-                  Đóng
+                  Thử lại
                 </button>
               </div>
-            </div>
-
-            {detailLoading ? (
-              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-                Đang tải chi tiết phiên...
+            ) : !reportsGamesData || reportsGamesData.games.length === 0 ? (
+              <div
+                data-testid="reports-games-empty"
+                style={{
+                  padding: '28px 16px',
+                  textAlign: 'center',
+                  color: 'var(--text-muted)',
+                  borderRadius: '10px',
+                  border: '1px dashed var(--border-subtle)',
+                  fontSize: '0.85rem',
+                }}
+              >
+                Chưa có game nào trong Thư viện phù hợp với bộ lọc hiện tại.
               </div>
-            ) : detailError ? (
-              <div style={{ padding: '16px', color: 'var(--accent-rose)', fontWeight: 600 }}>{detailError}</div>
-            ) : selectedHistoryDetail ? (
-              <>
-                {/* Bảng kết quả người chơi / thí sinh */}
-                <div>
-                  <h4 style={{ margin: '0 0 10px 0', fontSize: '0.92rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                    Danh sách kết quả người tham gia ({selectedHistoryDetail.participants.length})
-                  </h4>
-                  <div style={{ overflowX: 'auto' }}>
-                    <table
-                      data-testid="modal-participants-table"
-                      style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: '640px' }}
+            ) : (
+              <div style={{ overflowX: 'auto', width: '100%' }}>
+                <table
+                  data-testid="reports-games-table"
+                  style={{
+                    width: '100%',
+                    borderCollapse: 'collapse',
+                    fontSize: '0.82rem',
+                    minWidth: '760px',
+                  }}
+                >
+                  <thead>
+                    <tr
+                      style={{
+                        borderBottom: '1px solid var(--border-subtle)',
+                        color: 'var(--text-secondary)',
+                        textAlign: 'left',
+                        fontSize: '0.74rem',
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.04em',
+                      }}
                     >
-                      <thead>
+                      <th style={{ padding: '10px 8px' }}>Tên game</th>
+                      <th style={{ padding: '10px 8px' }}>Loại chế độ</th>
+                      <th style={{ padding: '10px 8px' }}>Người chơi / Thí sinh</th>
+                      <th style={{ padding: '10px 8px' }}>Tổng lượt chơi / thi</th>
+                      <th style={{ padding: '10px 8px' }}>Hoạt động gần nhất</th>
+                      <th style={{ padding: '10px 8px' }}>Trạng thái phiên / đợt</th>
+                      <th style={{ padding: '10px 8px', textAlign: 'right' }}>Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {reportsGamesData.games.map((g: ReportsGameOverviewItem) => {
+                      const isExam = g.sessionMode === 'EXAM';
+                      const activeRoomCodes = (g.activeStatus?.activeRooms || []).map((r) => r.roomCode);
+                      const activeSoloCount = g.activeStatus?.activeSessionCount || 0;
+                      const hasLiveActivity = activeRoomCodes.length > 0 || activeSoloCount > 0;
+                      return (
                         <tr
+                          key={g.gameId}
+                          data-testid={`reports-game-row-${g.gameId}`}
+                          onClick={() => handleOpenGameReportsDetail(g.gameId, false)}
                           style={{
                             borderBottom: '1px solid var(--border-subtle)',
-                            color: 'var(--text-secondary)',
-                            textAlign: 'left',
-                            fontSize: '0.73rem',
+                            cursor: 'pointer',
                           }}
                         >
-                          <th style={{ padding: '8px' }}>Hạng</th>
-                          <th style={{ padding: '8px' }}>Họ và tên</th>
-                          <th style={{ padding: '8px' }}>Đơn vị / Phòng ban</th>
-                          <th style={{ padding: '8px' }}>Điểm số</th>
-                          <th style={{ padding: '8px' }}>Số câu đúng</th>
-                          <th style={{ padding: '8px' }}>Độ chính xác</th>
-                          <th style={{ padding: '8px' }}>Thời gian</th>
-                          <th style={{ padding: '8px' }}>Trạng thái nộp</th>
-                          <th style={{ padding: '8px' }}>Kết quả</th>
-                          <th style={{ padding: '8px' }}>Số lượt</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {selectedHistoryDetail.participants.map((p, idx) => {
-                          const submissionLabel =
-                            p.submittedReason === 'EXAM_CLOSED_BY_HOST' || p.status === 'AUTO_SUBMITTED'
-                              ? 'BTC kết thúc'
-                              : p.submittedReason === 'TIMER_EXPIRED'
-                                ? 'Hết giờ'
-                                : p.status === 'COMPLETED'
-                                  ? 'Nộp thủ công'
-                                  : 'Chưa nộp';
-                          const resultLabel =
-                            p.isPassed === true
-                              ? 'Đạt'
-                              : p.isPassed === false
-                                ? 'Chưa đạt'
-                                : p.status === 'COMPLETED' || p.status === 'AUTO_SUBMITTED'
-                                  ? 'Hoàn thành'
-                                  : 'Chưa nộp';
-                          return (
-                            <tr
-                              key={`${p.rank ?? idx}-${p.fullName}`}
-                              style={{ borderBottom: '1px solid var(--border-subtle)' }}
+                          <td style={{ padding: '12px 8px', fontWeight: 700, color: 'var(--text-primary)' }}>
+                            <div>{g.title}</div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)', fontWeight: 500, marginTop: '2px' }}>
+                              {g.questionCount} câu hỏi • {g.rosterMode === 'PRECONFIGURED' ? 'Danh sách định danh' : 'Nhập tên tự do'}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px 8px' }}>
+                            <span
+                              data-testid={`reports-game-mode-badge-${g.gameId}`}
+                              style={{
+                                padding: '3px 8px',
+                                borderRadius: '999px',
+                                fontSize: '0.71rem',
+                                fontWeight: 800,
+                                backgroundColor: isExam ? 'rgba(245, 158, 11, 0.16)' : 'rgba(16, 185, 129, 0.15)',
+                                color: isExam ? 'var(--accent-amber)' : 'var(--accent-emerald)',
+                              }}
                             >
-                              <td style={{ padding: '8px', fontWeight: 800 }}>#{p.rank ?? idx + 1}</td>
-                              <td style={{ padding: '8px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                                {p.fullName}
-                              </td>
-                              <td style={{ padding: '8px', color: 'var(--text-secondary)' }}>
-                                {p.departmentUnit || '—'}
-                              </td>
-                              <td style={{ padding: '8px', fontWeight: 800, color: 'var(--primary)' }}>
-                                {p.score.toLocaleString('vi-VN')} đ
-                              </td>
-                              <td style={{ padding: '8px' }}>
-                                {p.correctAnswers} / {p.totalQuestions}
-                              </td>
-                              <td style={{ padding: '8px' }}>{p.accuracyPercent}%</td>
-                              <td style={{ padding: '8px' }}>{formatDuration(p.durationMs)}</td>
-                              <td style={{ padding: '8px' }}>{submissionLabel}</td>
-                              <td style={{ padding: '8px', fontWeight: 700 }}>{resultLabel}</td>
-                              <td style={{ padding: '8px' }}>
-                                {p.usedAttempts} / {p.allowedAttempts}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Chi tiết từng câu hỏi (nếu có) */}
-                {selectedHistoryDetail.questionBreakdown && selectedHistoryDetail.questionBreakdown.length > 0 && (
-                  <div>
-                    <h4 style={{ margin: '0 0 10px 0', fontSize: '0.92rem', fontWeight: 800, color: 'var(--text-primary)' }}>
-                      Chi tiết câu trả lời ({selectedHistoryDetail.questionBreakdown.length} câu)
-                      {selectedHistoryDetail.sessionMode === 'EXAM' &&
-                        !selectedHistoryDetail.answersPublished && (
-                          <span
-                            style={{
-                              marginLeft: '10px',
-                              fontSize: '0.74rem',
-                              fontWeight: 600,
-                              color: 'var(--accent-amber)',
-                            }}
+                              {isExam ? 'THI (EXAM)' : 'CHƠI (PLAY)'}
+                            </span>
+                          </td>
+                          <td style={{ padding: '12px 8px', fontVariantNumeric: 'tabular-nums' }}>
+                            <div style={{ fontWeight: 700, color: 'var(--text-primary)' }}>
+                              {g.participantCount} {isExam ? 'thí sinh' : 'người chơi'}
+                            </div>
+                            {g.rosterCount > 0 && (
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                                Danh sách: {g.rosterCount} người
+                              </div>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px 8px', fontVariantNumeric: 'tabular-nums' }}>
+                            <div style={{ fontWeight: 800, color: 'var(--text-primary)' }}>
+                              {g.totalAttempts} lượt
+                            </div>
+                            <div style={{ fontSize: '0.72rem', color: 'var(--text-secondary)' }}>
+                              {g.completedAttempts} hoàn thành
+                              {isExam && g.completedAttempts > 0
+                                ? ` • ${g.passedCount} Đạt / ${g.failedCount} Chưa đạt`
+                                : g.highestScore > 0
+                                  ? ` • Cao nhất: ${g.highestScore.toLocaleString('vi-VN')} đ`
+                                  : ''}
+                            </div>
+                          </td>
+                          <td
+                            data-testid={`reports-game-last-activity-${g.gameId}`}
+                            style={{ padding: '12px 8px', fontSize: '0.76rem', fontVariantNumeric: 'tabular-nums' }}
                           >
-                            (Đáp án chuẩn đang được bảo mật theo quy chế Thi)
-                          </span>
-                        )}
-                    </h4>
-                    <div style={{ overflowX: 'auto' }}>
-                      <table
-                        data-testid="modal-questions-table"
-                        style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.79rem', minWidth: '580px' }}
-                      >
-                        <thead>
-                          <tr
-                            style={{
-                              borderBottom: '1px solid var(--border-subtle)',
-                              color: 'var(--text-secondary)',
-                              textAlign: 'left',
-                              fontSize: '0.73rem',
-                            }}
-                          >
-                            <th style={{ padding: '8px' }}>Câu</th>
-                            <th style={{ padding: '8px' }}>Nội dung câu hỏi</th>
-                            <th style={{ padding: '8px' }}>Câu trả lời đã chọn</th>
-                            {selectedHistoryDetail.sessionMode !== 'PLAY' &&
-                              selectedHistoryDetail.answersPublished && (
-                                <th style={{ padding: '8px' }}>Đáp án đúng</th>
-                              )}
-                            <th style={{ padding: '8px' }}>Kết quả</th>
-                            <th style={{ padding: '8px' }}>Điểm</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {selectedHistoryDetail.questionBreakdown.map((q) => (
-                            <tr key={q.questionId} style={{ borderBottom: '1px solid var(--border-subtle)' }}>
-                              <td style={{ padding: '8px', fontWeight: 700 }}>#{q.questionIndex}</td>
-                              <td style={{ padding: '8px', color: 'var(--text-primary)' }}>{q.questionText}</td>
-                              <td style={{ padding: '8px' }}>{q.playerAnswer || '(Bỏ trống)'}</td>
-                              {selectedHistoryDetail.sessionMode !== 'PLAY' &&
-                                selectedHistoryDetail.answersPublished && (
-                                  <td style={{ padding: '8px', color: 'var(--accent-emerald)', fontWeight: 600 }}>
-                                    {q.correctAnswer || '—'}
-                                  </td>
-                                )}
-                              <td
-                                style={{
-                                  padding: '8px',
-                                  fontWeight: 700,
-                                  color:
-                                    q.isCorrect === null || q.isCorrect === undefined
-                                      ? 'var(--text-secondary)'
-                                      : q.isCorrect
-                                        ? 'var(--accent-emerald)'
-                                        : 'var(--accent-rose)',
-                                }}
+                            {g.lastActivityAt ? (
+                              <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>
+                                {new Date(g.lastActivityAt).toLocaleString('vi-VN')}
+                              </span>
+                            ) : (
+                              <span
+                                data-testid={`reports-game-no-activity-${g.gameId}`}
+                                style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}
                               >
-                                {q.isCorrect === null || q.isCorrect === undefined
-                                  ? 'Chưa công bố'
-                                  : q.isCorrect
-                                    ? 'Đúng'
-                                    : 'Sai'}
-                              </td>
-                              <td style={{ padding: '8px', fontWeight: 700 }}>
-                                {q.pointsEarned === null || q.pointsEarned === undefined
-                                  ? '—'
-                                  : `${q.pointsEarned} đ`}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                )}
-              </>
-            ) : null}
-          </div>
-        </div>
+                                Chưa có lịch sử chơi/thi
+                              </span>
+                            )}
+                          </td>
+                          <td style={{ padding: '12px 8px' }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+                              {isExam ? (
+                                <span
+                                  style={{
+                                    padding: '2px 8px',
+                                    borderRadius: '6px',
+                                    fontSize: '0.71rem',
+                                    fontWeight: 700,
+                                    backgroundColor:
+                                      g.examStatus === 'CLOSED'
+                                        ? 'rgba(239, 68, 68, 0.12)'
+                                        : 'rgba(16, 185, 129, 0.14)',
+                                    color:
+                                      g.examStatus === 'CLOSED' ? 'var(--accent-rose)' : 'var(--accent-emerald)',
+                                  }}
+                                >
+                                  {g.examStatus === 'CLOSED' ? 'Đợt thi đã đóng' : 'Đợt thi đang mở'}
+                                </span>
+                              ) : (
+                                <span
+                                  style={{
+                                    padding: '2px 8px',
+                                    borderRadius: '6px',
+                                    fontSize: '0.71rem',
+                                    fontWeight: 700,
+                                    backgroundColor: hasLiveActivity
+                                      ? 'rgba(14, 165, 233, 0.14)'
+                                      : 'var(--bg-subtle)',
+                                    color: hasLiveActivity ? 'var(--accent-sky)' : 'var(--text-secondary)',
+                                    border: '1px solid var(--border-subtle)',
+                                  }}
+                                >
+                                  {hasLiveActivity ? 'Đang có phiên chơi' : 'Sẵn sàng'}
+                                </span>
+                              )}
+                              {activeRoomCodes.length > 0 && (
+                                <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--primary)' }}>
+                                  PIN: {activeRoomCodes.join(', ')}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td style={{ padding: '12px 8px', textAlign: 'right' }}>
+                            <button
+                              type="button"
+                              data-testid={`reports-game-detail-btn-${g.gameId}`}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenGameReportsDetail(g.gameId, false);
+                              }}
+                              style={{
+                                padding: '8px 14px',
+                                minHeight: '44px',
+                                minWidth: '44px',
+                                borderRadius: '7px',
+                                border: '1px solid var(--primary)',
+                                backgroundColor: 'var(--primary-subtle)',
+                                color: 'var(--primary)',
+                                fontSize: '0.76rem',
+                                fontWeight: 800,
+                                cursor: 'pointer',
+                              }}
+                            >
+                              Xem chi tiết
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Phân trang danh sách game trong Thư viện */}
+            {reportsGamesData && reportsGamesData.total > reportsGameLimit && (
+              <div
+                data-testid="reports-games-pagination"
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  flexWrap: 'wrap',
+                  gap: '8px',
+                  paddingTop: '6px',
+                  fontSize: '0.78rem',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                <span>
+                  Trang {reportsGamePage} / {Math.max(1, Math.ceil(reportsGamesData.total / reportsGameLimit))}
+                </span>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    disabled={reportsGamePage <= 1}
+                    onClick={() => setReportsGamePage((p) => Math.max(1, p - 1))}
+                    style={{
+                      padding: '8px 14px',
+                      minHeight: '44px',
+                      minWidth: '44px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-strong)',
+                      backgroundColor: 'var(--bg-surface)',
+                      color: 'var(--text-primary)',
+                      fontWeight: 700,
+                      cursor: reportsGamePage <= 1 ? 'not-allowed' : 'pointer',
+                      opacity: reportsGamePage <= 1 ? 0.5 : 1,
+                    }}
+                  >
+                    Trang trước
+                  </button>
+                  <button
+                    type="button"
+                    disabled={reportsGamePage >= Math.ceil(reportsGamesData.total / reportsGameLimit)}
+                    onClick={() => setReportsGamePage((p) => p + 1)}
+                    style={{
+                      padding: '8px 14px',
+                      minHeight: '44px',
+                      minWidth: '44px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-strong)',
+                      backgroundColor: 'var(--bg-surface)',
+                      color: 'var(--text-primary)',
+                      fontWeight: 700,
+                      cursor:
+                        reportsGamePage >= Math.ceil(reportsGamesData.total / reportsGameLimit)
+                          ? 'not-allowed'
+                          : 'pointer',
+                      opacity:
+                        reportsGamePage >= Math.ceil(reportsGamesData.total / reportsGameLimit) ? 0.5 : 1,
+                    }}
+                  >
+                    Trang sau
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        </>
       )}
 
       {/* Modal 1: Lịch sử nhiều lần thi của một thí sinh (Lần 1, Lần 2, Lần 3...) */}

@@ -1059,42 +1059,152 @@ describe('V3 Reports 2.0 — History, Leaderboard, Exam Batches, Retake Granting
   });
 
   // =========================================================================
-  // 13. KIỂM THỬ TRÌNH DUYỆT THẬT (CHROMIUM E2E, 5 VIEWPORTS, LIGHT/DARK, 8 SCREENSHOTS)
+  // 13. KIỂM THỬ TRÌNH DUYỆT THẬT (CHROMIUM E2E, 20 CASES, 5 VIEWPORTS, LIGHT/DARK, SCREENSHOTS)
   // =========================================================================
-  it('Section 13: Real Chromium E2E journey across 5 viewports and Light/Dark themes with 0 console/page/5xx errors and 8 visual proof screenshots', async () => {
+  it('Section 13: Real Chromium E2E journey verifying Reports UI Cleanup, Separate Game Detail Screen, Back/Refresh/History navigation, 5 viewports, Light/Dark themes, and visual proof screenshots', async () => {
     browser = await Browser.launch(1440, 900);
     const page = await browser.newPage(1440, 900);
 
     await page.goto(`${baseUrl}/?tab=reports`);
 
+    await page.waitForSelector('[data-testid="reports-overview-header"]');
+    await page.waitForSelector('[data-testid="reports-overview-kpis"]');
+    await page.waitForSelector('[data-testid="reports-overview-charts"]');
     await page.waitForSelector('[data-testid="reports-v2-game-hub"]');
     await page.waitForSelector('[data-testid="reports-games-table"]');
 
-    // 1. Screenshot: v3_reports_overview_latest_activity_1440x900.png
+    // Verify Cases 1, 2, 3, 4: Old 3 sections removed & exact DOM order (Header -> KPI -> Charts -> Game List)
+    const overviewAudit = await page.eval<{
+      hasRecentSoloHeading: boolean;
+      hasMultiplayerRoomsSection: boolean;
+      hasOldFlatHistorySection: boolean;
+      hasSeparateDetailScreenInOverview: boolean;
+      sectionOrderValid: boolean;
+    }>(`(() => {
+      const headings = Array.from(document.querySelectorAll('h2')).map(h => (h.textContent || '').trim());
+      const hasRecentSoloHeading = headings.includes('Phiên chơi đơn gần đây');
+      const hasMultiplayerRoomsSection = Boolean(document.querySelector('[data-testid="reports-multiplayer-rooms"]')) || headings.includes('Phòng chơi trực tiếp gần đây');
+      const hasOldFlatHistorySection = Boolean(document.querySelector('[data-testid="play-exam-history-section"]')) || headings.includes('Lịch sử Chơi / Thi');
+      const hasSeparateDetailScreenInOverview = Boolean(document.querySelector('[data-testid="reports-game-detail-screen"]'));
+
+      const headerEl = document.querySelector('[data-testid="reports-overview-header"]');
+      const kpiEl = document.querySelector('[data-testid="reports-overview-kpis"]');
+      const chartsEl = document.querySelector('[data-testid="reports-overview-charts"]');
+      const hubEl = document.querySelector('[data-testid="reports-v2-game-hub"]');
+
+      const pos = (a, b) => Boolean(a && b && (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING));
+      const sectionOrderValid = pos(headerEl, kpiEl) && pos(kpiEl, chartsEl) && pos(chartsEl, hubEl);
+
+      return {
+        hasRecentSoloHeading,
+        hasMultiplayerRoomsSection,
+        hasOldFlatHistorySection,
+        hasSeparateDetailScreenInOverview,
+        sectionOrderValid,
+      };
+    })()`);
+
+    assert.equal(overviewAudit.hasRecentSoloHeading, false, 'Case 1: Phiên chơi đơn gần đây must be removed');
+    assert.equal(overviewAudit.hasMultiplayerRoomsSection, false, 'Case 2: Phòng chơi trực tiếp gần đây must be removed');
+    assert.equal(overviewAudit.hasOldFlatHistorySection, false, 'Case 3: Lịch sử Chơi / Thi flat section must be removed');
+    assert.equal(overviewAudit.hasSeparateDetailScreenInOverview, false, 'Detail screen must not render in overview');
+    assert.equal(overviewAudit.sectionOrderValid, true, 'Case 4: Section order must be Header -> KPI -> Charts -> Game List');
+
+    // Screenshot 1: v3_reports_cleaned_overview_1440x900.png
+    await page.scrollToSelector('[data-testid="reports-overview-header"]');
+    await sleep(200);
+    await page.screenshot(path.join(ARTIFACT_DIR, 'v3_reports_cleaned_overview_1440x900.png'));
+
+    // Screenshot 2: v3_reports_game_list_section_1440x900.png (and v3_reports_overview_latest_activity_1440x900.png)
     await page.scrollToSelector('[data-testid="reports-v2-game-hub"]');
+    await sleep(200);
+    await page.screenshot(path.join(ARTIFACT_DIR, 'v3_reports_game_list_section_1440x900.png'));
     await page.screenshot(
       path.join(ARTIFACT_DIR, 'v3_reports_overview_latest_activity_1440x900.png')
     );
 
-    // Click Xem chi tiết on PLAY game (playGameOldId)
+    // Cases 5 & 7: Click Xem chi tiết on PLAY game (playGameOldId) -> opens Separate Game Detail Screen & hides Overview/Game List
     await page.clickSelector(`[data-testid="reports-game-detail-btn-${playGameOldId}"]`);
+    await page.waitForSelector('[data-testid="reports-game-detail-screen"]');
     await page.waitForSelector('[data-testid="reports-play-detail-view"]');
     await page.waitForSelector('[data-testid="reports-play-leaderboard-table"]');
 
-    // 2. Screenshot: v3_reports_play_leaderboard_1440x900.png
+    const playDetailIsolation = await page.eval<{
+      hasGameHub: boolean;
+      hasOverviewKpis: boolean;
+      hasOverviewCharts: boolean;
+      hasBackBtn: boolean;
+      urlSearch: string;
+    }>(`(() => ({
+      hasGameHub: Boolean(document.querySelector('[data-testid="reports-v2-game-hub"]')),
+      hasOverviewKpis: Boolean(document.querySelector('[data-testid="reports-overview-kpis"]')),
+      hasOverviewCharts: Boolean(document.querySelector('[data-testid="reports-overview-charts"]')),
+      hasBackBtn: Boolean(document.querySelector('[data-testid="back-to-reports-overview-btn"]')),
+      urlSearch: window.location.search,
+    }))()`);
+
+    assert.equal(playDetailIsolation.hasGameHub, false, 'Case 7: Game list must be hidden when viewing game detail screen');
+    assert.equal(playDetailIsolation.hasOverviewKpis, false, 'Overview KPIs must be hidden when viewing game detail screen');
+    assert.equal(playDetailIsolation.hasOverviewCharts, false, 'Overview charts must be hidden when viewing game detail screen');
+    assert.equal(playDetailIsolation.hasBackBtn, true, 'Back button (← Quay lại Thống kê) must be visible');
+    assert.ok(
+      playDetailIsolation.urlSearch.includes(`reportGameId=${playGameOldId}`),
+      `URL should contain reportGameId=${playGameOldId}, got ${playDetailIsolation.urlSearch}`
+    );
+
+    // Screenshot 3: v3_reports_play_detail_screen_1440x900.png (+ leaderboard & attempt history)
+    await page.scrollToSelector('[data-testid="reports-game-detail-topbar"]');
+    await sleep(200);
+    await page.screenshot(path.join(ARTIFACT_DIR, 'v3_reports_play_detail_screen_1440x900.png'));
+
     await page.scrollToSelector('[data-testid="reports-play-leaderboard"]');
     await page.screenshot(path.join(ARTIFACT_DIR, 'v3_reports_play_leaderboard_1440x900.png'));
 
-    // 3. Screenshot: v3_reports_play_attempt_history_1440x900.png
     await page.scrollToSelector('[data-testid="reports-play-attempts-history"]');
     await page.screenshot(path.join(ARTIFACT_DIR, 'v3_reports_play_attempt_history_1440x900.png'));
 
-    // Click Xem chi tiết on EXAM game (examGameId)
+    // Case 9: Refresh while on Game Detail Screen -> stays on Game Detail Screen!
+    await page.goto(`${baseUrl}/?tab=reports&reportGameId=${playGameOldId}`);
+    await page.waitForSelector('[data-testid="reports-game-detail-screen"]');
+    await page.waitForSelector('[data-testid="reports-play-detail-view"]');
+
+    // Case 8: Click ← Quay lại Thống kê -> returns to Reports Overview
+    await page.clickSelector('[data-testid="back-to-reports-overview-btn"]');
+    await page.waitForSelector('[data-testid="reports-v2-game-hub"]');
+    const afterBackClick = await page.eval<{
+      hasDetailScreen: boolean;
+      urlSearch: string;
+    }>(`(() => ({
+      hasDetailScreen: Boolean(document.querySelector('[data-testid="reports-game-detail-screen"]')),
+      urlSearch: window.location.search,
+    }))()`);
+    assert.equal(afterBackClick.hasDetailScreen, false, 'Case 8: Detail screen must close after clicking ← Quay lại Thống kê');
+    assert.ok(!afterBackClick.urlSearch.includes('reportGameId='), 'URL must clear reportGameId after returning to overview');
+
+    // Case 10: Browser Back / Forward (window.history.back() / window.history.forward())
+    await page.eval(`window.history.back()`);
+    await page.waitForSelector('[data-testid="reports-game-detail-screen"]');
+    await page.waitForSelector('[data-testid="reports-play-detail-view"]');
+
+    await page.eval(`window.history.forward()`);
+    await page.waitForSelector('[data-testid="reports-v2-game-hub"]');
+
+    // Cases 6, 7, 16-18: Click Xem chi tiết on EXAM game (examGameId) -> opens Separate Game Detail Screen
     await page.clickSelector(`[data-testid="reports-game-detail-btn-${examGameId}"]`);
+    await page.waitForSelector('[data-testid="reports-game-detail-screen"]');
     await page.waitForSelector('[data-testid="reports-exam-detail-view"]');
     await page.waitForSelector('[data-testid="reports-exam-batches-list"]');
 
-    // 4. Screenshot: v3_reports_exam_batches_1440x900.png
+    const examDetailIsolation = await page.eval<boolean>(
+      `!document.querySelector('[data-testid="reports-v2-game-hub"]')`
+    );
+    assert.equal(examDetailIsolation, true, 'Case 6 & 7: Game list must be hidden on EXAM detail screen');
+
+    // Screenshot 4: v3_reports_exam_detail_screen_1440x900.png & v3_reports_exam_batches_1440x900.png
+    await page.scrollToSelector('[data-testid="reports-game-detail-topbar"]');
+    await sleep(200);
+    await page.screenshot(path.join(ARTIFACT_DIR, 'v3_reports_exam_detail_screen_1440x900.png'));
+
     await page.scrollToSelector('[data-testid="reports-exam-batches-list"]');
     await page.screenshot(path.join(ARTIFACT_DIR, 'v3_reports_exam_batches_1440x900.png'));
 
@@ -1106,7 +1216,7 @@ describe('V3 Reports 2.0 — History, Leaderboard, Exam Batches, Retake Granting
       await page.clickSelector('[data-testid="select-exam-batch-ALL"]');
     }
 
-    // 5. Screenshot: v3_reports_exam_batch_detail_1440x900.png
+    // Screenshot 5: v3_reports_exam_batch_detail_1440x900.png
     await page.scrollToSelector('[data-testid="reports-exam-batch-detail"]');
     await page.screenshot(path.join(ARTIFACT_DIR, 'v3_reports_exam_batch_detail_1440x900.png'));
 
@@ -1114,7 +1224,7 @@ describe('V3 Reports 2.0 — History, Leaderboard, Exam Batches, Retake Granting
     await page.clickSelector(`[data-testid="grant-retake-btn-${participant1Id}"]`);
     await page.waitForSelector('[data-testid="grant-retake-modal"]');
 
-    // 6. Screenshot: v3_reports_grant_retake_modal_1440x900.png
+    // Screenshot 6: v3_reports_grant_retake_modal_1440x900.png
     await sleep(250);
     await page.screenshot(path.join(ARTIFACT_DIR, 'v3_reports_grant_retake_modal_1440x900.png'));
 
@@ -1126,7 +1236,7 @@ describe('V3 Reports 2.0 — History, Leaderboard, Exam Batches, Retake Granting
     await page.clickSelector(`[data-testid="view-participant-attempts-btn-${participant1Id}"]`);
     await page.waitForSelector('[data-testid="participant-attempts-modal"]');
 
-    // 7. Screenshot: v3_reports_after_retake_attempts_history_1440x900.png
+    // Screenshot 7: v3_reports_after_retake_attempts_history_1440x900.png
     await sleep(250);
     await page.screenshot(
       path.join(ARTIFACT_DIR, 'v3_reports_after_retake_attempts_history_1440x900.png')
@@ -1135,7 +1245,7 @@ describe('V3 Reports 2.0 — History, Leaderboard, Exam Batches, Retake Granting
     // Close modal
     await page.clickSelector('[data-testid="close-participant-attempts-modal"]');
 
-    // Check Light & Dark themes + all 5 mandatory viewports (1440x900, 1366x768, 768x1024, 390x844, 360x800)
+    // Check Light & Dark themes + all 5 mandatory viewports (1440x900, 1366x768, 768x1024, 390x844, 360x800) on Detail Screen
     const viewports = [
       { width: 1440, height: 900, mobile: false },
       { width: 1366, height: 768, mobile: false },
@@ -1170,11 +1280,20 @@ describe('V3 Reports 2.0 — History, Leaderboard, Exam Batches, Retake Granting
         );
 
         if (theme === 'dark' && vp.width === 390 && vp.height === 844) {
-          // 8. Screenshot: v3_reports_mobile_390x844.png
+          // Screenshot 8: v3_reports_detail_mobile_390x844.png & v3_reports_mobile_390x844.png
+          await page.screenshot(path.join(ARTIFACT_DIR, 'v3_reports_detail_mobile_390x844.png'));
           await page.screenshot(path.join(ARTIFACT_DIR, 'v3_reports_mobile_390x844.png'));
         }
       }
     }
+
+    // Reset viewport to 1440x900 dark and test Case 11: Non-existent / deleted gameId in URL
+    await page.setViewport(1440, 900, false);
+    await page.eval(`document.documentElement.setAttribute('data-theme', 'dark')`);
+    await page.goto(`${baseUrl}/?tab=reports&reportGameId=deleted-or-missing-game-999`);
+    await page.waitForSelector('[data-testid="reports-game-detail-error"]');
+    await page.clickSelector('[data-testid="error-back-to-reports-btn"]');
+    await page.waitForSelector('[data-testid="reports-v2-game-hub"]');
 
     assert.deepEqual(
       page.consoleErrors,
