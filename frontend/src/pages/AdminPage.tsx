@@ -338,17 +338,29 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     let hasAdditionalAiCost = false;
 
     for (const r of g.requests || []) {
-      if (r.pricingStatus === 'PRICE_UNAVAILABLE' || r.pricingStatus === 'USAGE_UNAVAILABLE') {
-        missingPriceOrUsage = true;
-      }
       const rate =
         r.exchangeRateUsdVnd && Number.isFinite(r.exchangeRateUsdVnd) && r.exchangeRateUsdVnd > 0
           ? r.exchangeRateUsdVnd
           : defaultExchangeRate;
 
+      const isFailedNoUsage =
+        r.status === 'FAILED' && r.inputTokens === null && r.outputTokens === null;
+
+      if (!isFailedNoUsage && (r.pricingStatus === 'PRICE_UNAVAILABLE' || r.pricingStatus === 'USAGE_UNAVAILABLE')) {
+        missingPriceOrUsage = true;
+      }
+
       if (r.inputTokens !== null && r.outputTokens !== null) {
         hasAnyTokenReq = true;
         if (
+          r.inputCostVnd !== undefined &&
+          r.inputCostVnd !== null &&
+          r.outputCostVnd !== undefined &&
+          r.outputCostVnd !== null
+        ) {
+          sumInputCostVndExact += r.inputCostVnd;
+          sumOutputCostVndExact += r.outputCostVnd;
+        } else if (
           r.inputPricePer1MUsd === null ||
           r.inputPricePer1MUsd === undefined ||
           r.outputPricePer1MUsd === null ||
@@ -362,6 +374,10 @@ export const AdminPage: React.FC<AdminPageProps> = ({
             r.cachedTokens !== null && r.cachedTokens !== undefined && Number.isFinite(r.cachedTokens)
               ? Math.max(0, Math.round(r.cachedTokens))
               : 0;
+          const rawThinking =
+            r.thinkingTokens !== null && r.thinkingTokens !== undefined && Number.isFinite(r.thinkingTokens)
+              ? Math.max(0, Math.round(r.thinkingTokens))
+              : 0;
           const effectiveCached = Math.min(rawIn, rawCached);
           const nonCachedInput = Math.max(0, rawIn - effectiveCached);
           const cachedPricePer1M =
@@ -372,29 +388,24 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           const reqInUsd =
             (nonCachedInput / 1_000_000) * r.inputPricePer1MUsd +
             (effectiveCached / 1_000_000) * cachedPricePer1M;
-          const reqOutUsd = (rawOut / 1_000_000) * r.outputPricePer1MUsd;
+          const billableOut = rawOut + rawThinking;
+          const reqOutUsd = (billableOut / 1_000_000) * r.outputPricePer1MUsd;
 
           sumInputCostVndExact += reqInUsd * rate;
           sumOutputCostVndExact += reqOutUsd * rate;
+        }
 
-          const rawThinking =
-            r.thinkingTokens !== null && r.thinkingTokens !== undefined && Number.isFinite(r.thinkingTokens)
-              ? Math.max(0, Math.round(r.thinkingTokens))
-              : 0;
-          if (rawThinking > 0) {
-            hasAdditionalAiCost = true;
-          }
-          if (
-            (r.taskType === 'COVER_IMAGE_GENERATION' ||
-              r.taskType === 'ADVENTURE_SPRITE_GENERATION' ||
-              String(r.model || '').toLowerCase().includes('image')) &&
-            r.status === 'SUCCESS' &&
-            rawOut === 0 &&
-            r.imagePriceUsd &&
-            r.imagePriceUsd > 0
-          ) {
-            hasAdditionalAiCost = true;
-          }
+        const rawOutCheck = Math.max(0, Math.round(r.outputTokens));
+        if (
+          (r.taskType === 'COVER_IMAGE_GENERATION' ||
+            r.taskType === 'ADVENTURE_SPRITE_GENERATION' ||
+            String(r.model || '').toLowerCase().includes('image')) &&
+          r.status === 'SUCCESS' &&
+          rawOutCheck === 0 &&
+          r.imagePriceUsd &&
+          r.imagePriceUsd > 0
+        ) {
+          hasAdditionalAiCost = true;
         }
       } else if (
         r.pricingStatus === 'OK' &&
@@ -406,9 +417,17 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
 
     const inputCostVnd =
-      !missingPriceOrUsage && hasAnyTokenReq ? Math.round(sumInputCostVndExact) : null;
+      !missingPriceOrUsage && g.inputCostVnd !== undefined && g.inputCostVnd !== null && Number.isFinite(g.inputCostVnd)
+        ? Math.round(g.inputCostVnd)
+        : !missingPriceOrUsage && hasAnyTokenReq
+          ? Math.round(sumInputCostVndExact)
+          : null;
     const outputCostVnd =
-      !missingPriceOrUsage && hasAnyTokenReq ? Math.round(sumOutputCostVndExact) : null;
+      !missingPriceOrUsage && g.outputCostVnd !== undefined && g.outputCostVnd !== null && Number.isFinite(g.outputCostVnd)
+        ? Math.round(g.outputCostVnd)
+        : !missingPriceOrUsage && hasAnyTokenReq
+          ? Math.round(sumOutputCostVndExact)
+          : null;
     const totalCostVnd =
       !missingPriceOrUsage &&
       g.paidEquivalentCostVnd !== null &&

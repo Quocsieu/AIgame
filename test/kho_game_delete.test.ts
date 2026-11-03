@@ -249,10 +249,10 @@ describe('KHO GAME DELETE — Dedicated Business Authorization & Security Suite'
   });
 
   // =========================================================================
-  // BATCH TESTS: DELETE ALL GAMES (DELETE /api/games)
+  // BATCH TESTS: DELETE ALL GAMES (DELETE /api/games) — ALL 12 MANDATORY CASES
   // =========================================================================
 
-  it('6. Player, Guest, and unauthenticated callers calling DELETE /api/games are strictly rejected', async () => {
+  it('6. (Cases 8 & 9) Guest token and Player token callers (header, query, body) calling DELETE /api/games are strictly rejected with 403 ACCESS_DENIED', async () => {
     const playerDelRes = await request(app)
       .delete('/api/games')
       .set('X-Player-Token', 'pt_rogue_player_bulk_token');
@@ -260,28 +260,35 @@ describe('KHO GAME DELETE — Dedicated Business Authorization & Security Suite'
     assert.equal(playerDelRes.body.success, false);
     assert.equal(playerDelRes.body.error.code, 'ACCESS_DENIED');
 
+    const playerQueryDelRes = await request(app)
+      .delete('/api/games?playerToken=pt_rogue_query_token');
+    assert.equal(playerQueryDelRes.status, 403);
+    assert.equal(playerQueryDelRes.body.success, false);
+    assert.equal(playerQueryDelRes.body.error.code, 'ACCESS_DENIED');
+
+    const playerBodyDelRes = await request(app)
+      .delete('/api/games')
+      .send({ playerToken: 'pt_rogue_body_token' });
+    assert.equal(playerBodyDelRes.status, 403);
+    assert.equal(playerBodyDelRes.body.success, false);
+    assert.equal(playerBodyDelRes.body.error.code, 'ACCESS_DENIED');
+
     const guestDelRes = await request(app)
       .delete('/api/games')
       .set('X-Guest-Token', guestToken);
     assert.equal(guestDelRes.status, 403);
     assert.equal(guestDelRes.body.success, false);
     assert.equal(guestDelRes.body.error.code, 'ACCESS_DENIED');
-
-    const unauthDelRes = await request(app).delete('/api/games');
-    assert.equal(unauthDelRes.status, 401);
-    assert.equal(unauthDelRes.body.success, false);
-    assert.equal(unauthDelRes.body.error.code, 'UNAUTHORIZED');
   });
 
-  it('7. Regular user calling DELETE /api/games ONLY deletes their own games and NEVER deletes other users games; ADMIN can delete across warehouse', async () => {
+  it('7. (Cases 3, 4, 10, 11, 12) Unauthenticated Creator and Authenticated User calling DELETE /api/games only delete games in their own scope (works in both Development & Production mode without demo flags)', async () => {
     resetAllRateLimiters();
-    // Clear any previous games as ADMIN
     await request(app)
       .delete('/api/games')
       .set('Authorization', `Bearer ${adminToken}`);
     resetAllRateLimiters();
 
-    // Create 6 games: 2 owned by User A, 2 owned by User B, 2 unowned (null)
+    // Create 6 games: 2 owned by User A, 2 owned by User B, 2 unowned (Creator without login)
     const userAGameIds = [`bulk_a1_${Date.now()}`, `bulk_a2_${Date.now()}`];
     const userBGameIds = [`bulk_b1_${Date.now()}`, `bulk_b2_${Date.now()}`];
     const anonGameIds = [`bulk_anon1_${Date.now()}`, `bulk_anon2_${Date.now()}`];
@@ -298,7 +305,7 @@ describe('KHO GAME DELETE — Dedicated Business Authorization & Security Suite'
       gameStore.save(spec, Date.now(), null, true);
     }
 
-    // Regular User A calls DELETE /api/games -> must ONLY delete User A's 2 games
+    // Case 10 & 11: Regular User A calls DELETE /api/games -> must ONLY delete User A's 2 games
     const userABulkRes = await request(app)
       .delete('/api/games')
       .set('Authorization', `Bearer ${userAToken}`);
@@ -306,7 +313,6 @@ describe('KHO GAME DELETE — Dedicated Business Authorization & Security Suite'
     assert.equal(userABulkRes.body.success, true);
     assert.equal(userABulkRes.body.data.deletedCount, 2);
 
-    // Verify User A's games are deleted, while User B's games and anonymous games are still intact!
     for (const id of userAGameIds) {
       assert.equal(gameStore.get(id), undefined, `User A game ${id} should be deleted`);
     }
@@ -314,44 +320,76 @@ describe('KHO GAME DELETE — Dedicated Business Authorization & Security Suite'
       assert.ok(gameStore.get(id), `User B game ${id} MUST NOT be deleted by User A`);
     }
     for (const id of anonGameIds) {
-      assert.ok(gameStore.get(id), `Anonymous game ${id} MUST NOT be bulk-deleted by regular User A`);
+      assert.ok(gameStore.get(id), `Anonymous Creator game ${id} MUST NOT be bulk-deleted by User A`);
     }
 
     resetAllRateLimiters();
 
-    // Now ADMIN calls DELETE /api/games -> deletes remaining 4 games across warehouse
+    // Case 3, 4, 11, 12: Unauthenticated Creator calls DELETE /api/games in Production mode (no login, no demo flag)
+    const prevNodeEnv = process.env.NODE_ENV;
+    const prevDemoMode = process.env.ADMIN_DEMO_MODE;
+    process.env.NODE_ENV = 'production';
+    delete process.env.ADMIN_DEMO_MODE;
+    try {
+      const unauthCreatorBulkRes = await request(app).delete('/api/games');
+      assert.equal(unauthCreatorBulkRes.status, 200);
+      assert.equal(unauthCreatorBulkRes.body.success, true);
+      assert.equal(unauthCreatorBulkRes.body.data.deletedCount, 2);
+      assert.equal(unauthCreatorBulkRes.body.data.skippedActiveCount, 0);
+
+      // Verify anonymous Creator games are permanently removed from store & DB (Case 4: Refresh won't bring them back)
+      for (const id of anonGameIds) {
+        assert.equal(gameStore.get(id), undefined, `Unowned Creator game ${id} must be deleted`);
+      }
+      const listAfterUnauthDelete = await request(app).get('/api/games?scope=mine');
+      assert.equal(listAfterUnauthDelete.status, 200);
+      assert.equal(listAfterUnauthDelete.body.data.total, 0);
+
+      // Verify User B's games were NEVER touched by the unauthenticated Creator (Case 11)
+      for (const id of userBGameIds) {
+        assert.ok(gameStore.get(id), `User B game ${id} MUST NOT be deleted by unauthenticated Creator`);
+      }
+    } finally {
+      process.env.NODE_ENV = prevNodeEnv;
+      if (prevDemoMode !== undefined) process.env.ADMIN_DEMO_MODE = prevDemoMode;
+    }
+
+    resetAllRateLimiters();
+
+    // Now ADMIN calls DELETE /api/games -> deletes remaining 2 games of User B
     const adminBulkRes = await request(app)
       .delete('/api/games')
       .set('Authorization', `Bearer ${adminToken}`);
     assert.equal(adminBulkRes.status, 200);
     assert.equal(adminBulkRes.body.success, true);
-    assert.equal(adminBulkRes.body.data.deletedCount, 4);
+    assert.equal(adminBulkRes.body.data.deletedCount, 2);
 
-    for (const id of [...userBGameIds, ...anonGameIds]) {
+    for (const id of userBGameIds) {
       assert.equal(gameStore.get(id), undefined, `Game ${id} should be deleted by ADMIN`);
     }
   });
 
-  it('8. DELETE /api/games safely protects games locked by active room or session and reports skipped list', async () => {
-    // Create an idle game
-    const idleGameId = `bulk_idle_${Date.now()}`;
-    const idleSpec = createTestSpec(idleGameId, userAId);
-    gameStore.save(idleSpec, Date.now(), userAId, true);
+  it('8. (Cases 6 & 7) Unauthenticated Creator calling DELETE /api/games safely skips games locked by active solo session or active multiplayer room and deletes idle games', async () => {
+    resetAllRateLimiters();
+    // Create 3 unowned Creator games: 1 idle, 1 active room, 1 active solo session
+    const idleGameId = `bulk_unauth_idle_${Date.now()}`;
+    const idleSpec = createTestSpec(idleGameId, '');
+    idleSpec.ownerUserId = null;
+    gameStore.save(idleSpec, Date.now(), null, true);
 
-    // Create a game with an active room
-    const roomGameId = `bulk_active_room_${Date.now()}`;
-    const roomSpec = createTestSpec(roomGameId, userBId);
-    gameStore.save(roomSpec, Date.now(), userBId, true);
+    const roomGameId = `bulk_unauth_room_${Date.now()}`;
+    const roomSpec = createTestSpec(roomGameId, '');
+    roomSpec.ownerUserId = null;
+    gameStore.save(roomSpec, Date.now(), null, true);
     const roomRes = await request(app)
       .post('/api/rooms')
-      .set('Authorization', `Bearer ${userBToken}`)
       .send({ gameId: roomGameId });
     assert.equal(roomRes.status, 200);
 
-    // Create a game with an active solo session
-    const sessionGameId = `bulk_active_sess_${Date.now()}`;
-    const sessionSpec = createTestSpec(sessionGameId, userAId);
-    gameStore.save(sessionSpec, Date.now(), userAId, true);
+    const sessionGameId = `bulk_unauth_sess_${Date.now()}`;
+    const sessionSpec = createTestSpec(sessionGameId, '');
+    sessionSpec.ownerUserId = null;
+    gameStore.save(sessionSpec, Date.now(), null, true);
     const sessRes = await request(app)
       .post('/api/games/sessions')
       .send({ gameId: sessionGameId });
@@ -359,36 +397,35 @@ describe('KHO GAME DELETE — Dedicated Business Authorization & Security Suite'
     const sId = sessRes.body.data.sessionId;
     await request(app).post(`/api/games/sessions/${sId}/start`);
 
-    // Execute DELETE /api/games as ADMIN to target all 3 games
-    const delRes = await request(app)
-      .delete('/api/games')
-      .set('Authorization', `Bearer ${adminToken}`);
-
+    // Unauthenticated Creator calls DELETE /api/games
+    const delRes = await request(app).delete('/api/games');
     assert.equal(delRes.status, 200);
     assert.equal(delRes.body.success, true);
-    // Idle game should be deleted
-    assert.ok(delRes.body.data.deletedCount >= 1);
-    // 2 active games should be skipped safely
+    assert.equal(delRes.body.data.deletedCount, 1);
     assert.equal(delRes.body.data.skippedActiveCount, 2);
-    assert.ok(Array.isArray(delRes.body.data.skippedGames));
     assert.equal(delRes.body.data.skippedGames.length, 2);
 
-    // Verify idle game is deleted, but active games still exist
     assert.equal(gameStore.get(idleGameId), undefined);
     assert.ok(gameStore.get(roomGameId) !== undefined);
     assert.ok(gameStore.get(sessionGameId) !== undefined);
 
-    // Clean up active rooms and sessions
     roomStore.clear();
     sessionStore.clear();
+
+    // Cleanup remaining 2 games after sessions/rooms cleared
+    resetAllRateLimiters();
+    const cleanupRes = await request(app).delete('/api/games');
+    assert.equal(cleanupRes.status, 200);
+    assert.equal(cleanupRes.body.data.deletedCount, 2);
   });
 
-  it('9. Calling DELETE /api/games as ADMIN when warehouse is empty succeeds without phantom errors', async () => {
-    const res = await request(app)
-      .delete('/api/games')
-      .set('Authorization', `Bearer ${adminToken}`);
-    assert.equal(res.status, 200);
-    assert.equal(res.body.success, true);
+  it('9. (Case 5) Calling DELETE /api/games without login or as ADMIN when library is empty succeeds safely with deletedCount = 0', async () => {
+    resetAllRateLimiters();
+    const resUnauthEmpty = await request(app).delete('/api/games');
+    assert.equal(resUnauthEmpty.status, 200);
+    assert.equal(resUnauthEmpty.body.success, true);
+    assert.equal(resUnauthEmpty.body.data.deletedCount, 0);
+    assert.equal(resUnauthEmpty.body.data.skippedActiveCount, 0);
 
     resetAllRateLimiters();
 

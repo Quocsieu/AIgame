@@ -153,10 +153,13 @@ export const AI_MODEL_PRICING_CATALOG: AiModelPricingRule[] = [
     aliases: [
       'gemini-2.5-flash-image',
       'gemini-2.5-flash-image-preview',
+      'gemini-3.1-flash-image',
+      'gemini-3.1-flash-image-preview',
       'gemini-2.0-flash-preview-image-generation',
       'gemini-2.0-flash-exp-image-generation',
       'imagen-3.0-generate-002',
       'models/gemini-2.5-flash-image',
+      'models/gemini-3.1-flash-image',
       'models/gemini-2.0-flash-preview-image-generation',
     ],
     displayName: 'Gemini 2.5 Flash Image / Image Generation',
@@ -278,6 +281,10 @@ export interface CalculateAiCallCostResult {
   cachedPricePer1MUsd: number | null;
   imagePriceUsd: number | null;
   exchangeRateUsdVnd: number;
+  inputCostUsd: number | null;
+  outputCostUsd: number | null;
+  inputCostVnd: number | null;
+  outputCostVnd: number | null;
   actualCostUsd: number | null;
   actualCostVnd: number | null;
   paidEquivalentCostUsd: number | null;
@@ -358,6 +365,10 @@ export function calculateAiCallCost(input: CalculateAiCallCostInput): CalculateA
       cachedPricePer1MUsd: null,
       imagePriceUsd: null,
       exchangeRateUsdVnd: exchange.usdToVndRate,
+      inputCostUsd: null,
+      outputCostUsd: null,
+      inputCostVnd: null,
+      outputCostVnd: null,
       actualCostUsd: null,
       actualCostVnd: null,
       paidEquivalentCostUsd: null,
@@ -392,6 +403,10 @@ export function calculateAiCallCost(input: CalculateAiCallCostInput): CalculateA
         cachedPricePer1MUsd: rule.cachedInputPricePer1MUsd,
         imagePriceUsd: rule.imagePriceUsd,
         exchangeRateUsdVnd: exchange.usdToVndRate,
+        inputCostUsd: null,
+        outputCostUsd: null,
+        inputCostVnd: null,
+        outputCostVnd: null,
         actualCostUsd: actualUsd,
         actualCostVnd: actualVnd,
         paidEquivalentCostUsd: paidUsd,
@@ -416,6 +431,10 @@ export function calculateAiCallCost(input: CalculateAiCallCostInput): CalculateA
       cachedPricePer1MUsd: rule.cachedInputPricePer1MUsd,
       imagePriceUsd: rule.imagePriceUsd,
       exchangeRateUsdVnd: exchange.usdToVndRate,
+      inputCostUsd: null,
+      outputCostUsd: null,
+      inputCostVnd: null,
+      outputCostVnd: null,
       actualCostUsd: null,
       actualCostVnd: null,
       paidEquivalentCostUsd: null,
@@ -463,15 +482,24 @@ export function calculateAiCallCost(input: CalculateAiCallCostInput): CalculateA
   // 3. Compute Paid-Tier Equivalent Cost in USD
   const inputCostUsd = (nonCachedInput / 1_000_000) * rule.inputPricePer1MUsd;
   const cachedCostUsd = (effectiveCached / 1_000_000) * rule.cachedInputPricePer1MUsd;
+  const tokenInputCostUsd = Number((inputCostUsd + cachedCostUsd).toFixed(8));
+  const tokenOutputCostUsd = Number(((billableOutput / 1_000_000) * rule.outputPricePer1MUsd).toFixed(8));
   let outputCostUsd = (billableOutput / 1_000_000) * rule.outputPricePer1MUsd;
 
   // If this is a successful image generation task where outputTokens === 0, apply per-image fee
-  if (isImageTask && isSuccess && billableOutput === 0 && rule.imagePriceUsd !== null && rule.imagePriceUsd > 0) {
-    outputCostUsd = rule.imagePriceUsd;
+  const hasFlatImageFee =
+    isImageTask && isSuccess && billableOutput === 0 && rule.imagePriceUsd !== null && rule.imagePriceUsd > 0;
+  if (hasFlatImageFee) {
+    outputCostUsd = rule.imagePriceUsd!;
   }
 
+  const tokenInputCostVnd = Math.round(tokenInputCostUsd * exchange.usdToVndRate);
+  const tokenOutputCostVnd = Math.round(tokenOutputCostUsd * exchange.usdToVndRate);
+
   const paidEquivalentCostUsd = Number((inputCostUsd + cachedCostUsd + outputCostUsd).toFixed(8));
-  const paidEquivalentCostVnd = Math.round(paidEquivalentCostUsd * exchange.usdToVndRate);
+  const paidEquivalentCostVnd = hasFlatImageFee
+    ? Math.round(paidEquivalentCostUsd * exchange.usdToVndRate)
+    : tokenInputCostVnd + tokenOutputCostVnd;
 
   let actualCostUsd: number | null = null;
   let actualCostVnd: number | null = null;
@@ -508,6 +536,10 @@ export function calculateAiCallCost(input: CalculateAiCallCostInput): CalculateA
     cachedPricePer1MUsd: rule.cachedInputPricePer1MUsd,
     imagePriceUsd: rule.imagePriceUsd,
     exchangeRateUsdVnd: exchange.usdToVndRate,
+    inputCostUsd: tokenInputCostUsd,
+    outputCostUsd: tokenOutputCostUsd,
+    inputCostVnd: tokenInputCostVnd,
+    outputCostVnd: tokenOutputCostVnd,
     actualCostUsd,
     actualCostVnd,
     paidEquivalentCostUsd,

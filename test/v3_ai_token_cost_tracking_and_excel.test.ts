@@ -993,6 +993,88 @@ describe('V3 AI Token & Cost Tracking + 4-Sheet Excel Export (All 35 Mandatory C
       totalTokens: null,
     });
 
+    // 3b) Create a Library game that mirrors real Production/Local SQLite data:
+    //     1 SUCCESS GENERATE_QUESTIONS call on gemini-2.5-flash + 1 FAILED GENERATE_COVER_IMAGE call on gemini-3.1-flash-image (null tokens).
+    //     Must display exact Tiền Input, Tiền Output, Tổng cộng and NEVER be poisoned into "Chưa xác định"!
+    const realPatternGameRes = await request(app)
+      .post('/api/games/generate')
+      .set('Authorization', `Bearer ${creatorToken}`)
+      .send({
+        sourceId: sampleSourceId,
+        title: 'Game Thực Tế Có Ảnh Bìa Lỗi',
+        gameType: 'ADVENTURE',
+        sessionMode: 'PLAY',
+        questionCount: 2,
+      });
+    assert.equal(realPatternGameRes.status, 200);
+    const realPatternGameId = realPatternGameRes.body.data.gameId;
+    getDatabase().prepare('DELETE FROM ai_usage_logs WHERE game_id = ?').run(realPatternGameId);
+    aiObservabilityService.recordAiCall({
+      generationId: 'gen_real_q',
+      gameId: realPatternGameId,
+      gameTitleSnapshot: 'Game Thực Tế Có Ảnh Bìa Lỗi',
+      provider: 'gemini',
+      model: 'gemini-2.5-flash',
+      operation: 'GENERATE_QUESTIONS',
+      taskType: 'QUESTION_GENERATION',
+      gameType: 'ADVENTURE',
+      status: 'SUCCESS',
+      latencyMs: 420,
+      inputTokens: 200_000, // 200k * $0.30/1M * 25500 = 1.530 ₫
+      outputTokens: 60_000, // 60k * $2.50/1M * 25500 = 3.825 ₫
+      cachedTokens: 0,
+      thinkingTokens: 0,
+      totalTokens: 260_000,
+    });
+    aiObservabilityService.recordAiCall({
+      generationId: 'gen_real_img_fail',
+      gameId: realPatternGameId,
+      gameTitleSnapshot: 'Game Thực Tế Có Ảnh Bìa Lỗi',
+      provider: 'gemini',
+      model: 'gemini-3.1-flash-image',
+      operation: 'GENERATE_COVER_IMAGE',
+      taskType: 'COVER_IMAGE_GENERATION',
+      gameType: 'ADVENTURE',
+      status: 'FAILED',
+      errorCode: 'GEMINI_IMAGE_ERROR',
+      latencyMs: 180,
+      inputTokens: null,
+      outputTokens: null,
+      totalTokens: null,
+    });
+
+    // 3c) Create a Library game with true 0 tokens (0 ₫ vs Chưa xác định - Section 12 Case 10):
+    const zeroTokenGameRes = await request(app)
+      .post('/api/games/generate')
+      .set('Authorization', `Bearer ${creatorToken}`)
+      .send({
+        sourceId: sampleSourceId,
+        title: 'Game Không Tốn Token',
+        gameType: 'QUICK_BUTTON',
+        sessionMode: 'PLAY',
+        questionCount: 2,
+      });
+    assert.equal(zeroTokenGameRes.status, 200);
+    const zeroTokenGameId = zeroTokenGameRes.body.data.gameId;
+    getDatabase().prepare('DELETE FROM ai_usage_logs WHERE game_id = ?').run(zeroTokenGameId);
+    aiObservabilityService.recordAiCall({
+      generationId: 'gen_zero_tok',
+      gameId: zeroTokenGameId,
+      gameTitleSnapshot: 'Game Không Tốn Token',
+      provider: 'gemini',
+      model: 'gemini-2.5-flash',
+      operation: 'GENERATE_QUESTIONS',
+      taskType: 'QUESTION_GENERATION',
+      gameType: 'QUICK_BUTTON',
+      status: 'SUCCESS',
+      latencyMs: 100,
+      inputTokens: 0,
+      outputTokens: 0,
+      cachedTokens: 0,
+      thinkingTokens: 0,
+      totalTokens: 0,
+    });
+
     // 4) Record an orphan AI task (no gameId -> "Tác vụ AI lẻ (...)") to verify LIB-02:
     aiObservabilityService.recordAiCall({
       generationId: null,
@@ -1237,6 +1319,39 @@ describe('V3 AI Token & Cost Tracking + 4-Sheet Excel Export (All 35 Mandatory C
         'COST-08: Missing usage/pricing must show Chưa xác định instead of 0 ₫'
       );
 
+      // Section 12 Case 2: Game with 1 SUCCESS question generation + 1 FAILED cover image call (gemini-3.1-flash-image, null tokens)
+      // must display exact Tiền Input (1.530 ₫), Tiền Output (3.825 ₫), Tổng cộng (5.355 ₫) and NEVER "Chưa xác định"
+      const realPatternRow = desktopState.gameRows.find((r: any) => r.gameId === realPatternGameId);
+      assert.ok(realPatternRow, 'Must find Game Thực Tế Có Ảnh Bìa Lỗi row');
+      assert.deepEqual(
+        realPatternRow.cells,
+        [
+          'Game Thực Tế Có Ảnh Bìa Lỗi',
+          '200.000',
+          '60.000',
+          '1.530 ₫',
+          '3.825 ₫',
+          '5.355 ₫',
+        ],
+        'Failed auxiliary image request with null tokens must not poison Tiền Input / Tiền Output into Chưa xác định'
+      );
+
+      // Section 12 Case 10: Game with true 0 tokens must display "0 ₫" and NOT "Chưa xác định"
+      const zeroTokenRow = desktopState.gameRows.find((r: any) => r.gameId === zeroTokenGameId);
+      assert.ok(zeroTokenRow, 'Must find Game Không Tốn Token row');
+      assert.deepEqual(
+        zeroTokenRow.cells,
+        [
+          'Game Không Tốn Token',
+          '0',
+          '0',
+          '0 ₫',
+          '0 ₫',
+          '0 ₫',
+        ],
+        'True zero-token game must display 0 ₫ instead of Chưa xác định'
+      );
+
       const artifactDir = 'C:\\Users\\QUOC SIEU\\.gemini\\antigravity\\brain\\83ff8c51-8136-444f-904b-1284fcdde2fb';
       if (fs.existsSync(artifactDir)) {
         const desktopBuf = await page.screenshot({ fullPage: false });
@@ -1335,6 +1450,151 @@ describe('V3 AI Token & Cost Tracking + 4-Sheet Excel Export (All 35 Mandatory C
         'Chưa có game nào trong Thư viện có dữ liệu chi phí AI ở khoảng thời gian này.',
         'LIB-06: Empty state must display exact message when no Library games exist in the selected period'
       );
+
+      // =========================================================================
+      // BROWSER E2E VERIFICATION FOR TASK A: DELETE ALL GAMES WITHOUT LOGIN
+      // (Section 11 Cases 1, 2, 3, 4, 5, 11)
+      // =========================================================================
+      resetAllRateLimiters();
+      const unauthIngestRes = await request(app)
+        .post('/api/content/ingest')
+        .attach(
+          'files',
+          Buffer.from(
+            'Tài liệu đào tạo không đăng nhập: Quy tắc an toàn lao động và phòng cháy chữa cháy tại nơi làm việc.',
+            'utf-8'
+          ),
+          'unauth_doc.txt'
+        );
+      assert.equal(unauthIngestRes.status, 200);
+      const unauthSourceId = unauthIngestRes.body.data.sources[0].sourceId;
+
+      // Create 2 unauthenticated Creator games (no Authorization header)
+      const unauthGame1Res = await request(app).post('/api/games/generate').send({
+        sourceId: unauthSourceId,
+        title: 'Game Không Đăng Nhập 1',
+        gameType: 'MULTIPLE_CHOICE',
+        sessionMode: 'PLAY',
+        questionCount: 2,
+      });
+      assert.equal(unauthGame1Res.status, 200);
+      const unauthGame1Id = unauthGame1Res.body.data.gameId;
+
+      const unauthGame2Res = await request(app).post('/api/games/generate').send({
+        sourceId: unauthSourceId,
+        title: 'Game Không Đăng Nhập 2',
+        gameType: 'QUICK_BUTTON',
+        sessionMode: 'PLAY',
+        questionCount: 2,
+      });
+      assert.equal(unauthGame2Res.status, 200);
+      const unauthGame2Id = unauthGame2Res.body.data.gameId;
+
+      // Navigate to Thư viện (/?tab=library) without any login/auth token
+      await page.goto(`${baseUrl}/?tab=library`);
+      await sleep(1200);
+
+      const libBeforeDelete = await page.eval(`(() => {
+        const btn = document.querySelector('[data-testid="library-delete-all-btn"]');
+        const bodyText = document.body.innerText;
+        return {
+          hasBtn: Boolean(btn),
+          disabled: btn ? btn.hasAttribute('disabled') : true,
+          hasGame1: bodyText.includes('Game Không Đăng Nhập 1'),
+          hasGame2: bodyText.includes('Game Không Đăng Nhập 2'),
+        };
+      })()`);
+      assert.equal(libBeforeDelete.hasBtn, true, 'Delete All button must exist in Library without login');
+      assert.equal(libBeforeDelete.disabled, false, 'Delete All button must be enabled when unowned games exist');
+      assert.equal(libBeforeDelete.hasGame1, true);
+      assert.equal(libBeforeDelete.hasGame2, true);
+
+      // Case 1: Click "Xóa tất cả" -> Confirmation modal opens
+      await page.eval(`document.querySelector('[data-testid="library-delete-all-btn"]')?.click()`);
+      await sleep(400);
+
+      const modalState = await page.eval(`(() => {
+        const modal = document.querySelector('[data-testid="delete-all-confirm-modal"]');
+        const countEl = document.querySelector('[data-testid="delete-all-game-count"]');
+        const cancelBtn = document.querySelector('[data-testid="cancel-delete-all-btn"]');
+        const confirmBtn = document.querySelector('[data-testid="confirm-delete-all-btn"]');
+        return {
+          isOpen: Boolean(modal),
+          modalText: modal ? modal.innerText : '',
+          countText: countEl ? (countEl.textContent || '').trim() : '',
+          cancelText: cancelBtn ? (cancelBtn.textContent || '').trim() : '',
+          confirmText: confirmBtn ? (confirmBtn.textContent || '').trim() : '',
+        };
+      })()`);
+      assert.equal(modalState.isOpen, true, 'Case 1: Confirmation modal must appear on click');
+      assert.equal(modalState.countText, '2 bộ câu hỏi', 'Modal must show exact game count in current Library scope');
+      assert.ok(modalState.modalText.includes('không thể hoàn tác'), 'Modal must warn that deletion cannot be undone');
+      assert.equal(modalState.cancelText, 'Hủy');
+      assert.equal(modalState.confirmText, 'Xác nhận xóa tất cả');
+
+      if (fs.existsSync(artifactDir)) {
+        const modalBuf = await page.screenshot({ fullPage: false });
+        fs.writeFileSync(
+          path.join(artifactDir, 'v3_library_delete_all_modal_no_login.png'),
+          modalBuf
+        );
+      }
+
+      // Case 2: Click "Hủy" -> Modal closes and NO games are deleted
+      await page.eval(`document.querySelector('[data-testid="cancel-delete-all-btn"]')?.click()`);
+      await sleep(400);
+      const afterCancel = await page.eval(`(() => ({
+        isOpen: Boolean(document.querySelector('[data-testid="delete-all-confirm-modal"]')),
+        hasGame1: document.body.innerText.includes('Game Không Đăng Nhập 1'),
+        hasGame2: document.body.innerText.includes('Game Không Đăng Nhập 2'),
+      }))()`);
+      assert.equal(afterCancel.isOpen, false, 'Case 2: Modal must close after clicking Hủy');
+      assert.equal(afterCancel.hasGame1, true, 'Case 2: Games must remain intact after cancel');
+      assert.equal(afterCancel.hasGame2, true);
+
+      // Case 3: Click "Xóa tất cả" -> Click "Xác nhận xóa tất cả" -> Games deleted immediately without F5
+      await page.eval(`document.querySelector('[data-testid="library-delete-all-btn"]')?.click()`);
+      await sleep(300);
+      await page.eval(`document.querySelector('[data-testid="confirm-delete-all-btn"]')?.click()`);
+      await sleep(1000);
+
+      const afterConfirm = await page.eval(`(() => {
+        const btn = document.querySelector('[data-testid="library-delete-all-btn"]');
+        const bodyText = document.body.innerText;
+        return {
+          isOpen: Boolean(document.querySelector('[data-testid="delete-all-confirm-modal"]')),
+          btnDisabled: btn ? btn.hasAttribute('disabled') : false,
+          hasGame1: bodyText.includes('Game Không Đăng Nhập 1'),
+          hasGame2: bodyText.includes('Game Không Đăng Nhập 2'),
+          hasUnauthorizedError: bodyText.includes('Vui lòng đăng nhập') || bodyText.includes('UNAUTHORIZED'),
+        };
+      })()`);
+      assert.equal(afterConfirm.isOpen, false);
+      assert.equal(afterConfirm.hasUnauthorizedError, false, 'Case 3: Must NOT require login to delete all');
+      assert.equal(afterConfirm.hasGame1, false, 'Case 3: Game 1 must be removed immediately from UI');
+      assert.equal(afterConfirm.hasGame2, false, 'Case 3: Game 2 must be removed immediately from UI');
+      assert.equal(afterConfirm.btnDisabled, true, 'Case 5: Delete All button must be disabled when Library is empty');
+      assert.equal(gameStore.get(unauthGame1Id), undefined);
+      assert.equal(gameStore.get(unauthGame2Id), undefined);
+
+      // Case 11: Verify authenticated User's games (libGame1Id, dupGameAId, dupGameBId) were NEVER deleted by the unauthenticated Creator!
+      assert.ok(gameStore.get(libGame1Id), 'Case 11: Authenticated user game must remain untouched');
+
+      // Case 4: Refresh page -> Deleted games do NOT reappear
+      await page.goto(`${baseUrl}/?tab=library`);
+      await sleep(1000);
+      const afterRefresh = await page.eval(`(() => {
+        const btn = document.querySelector('[data-testid="library-delete-all-btn"]');
+        const bodyText = document.body.innerText;
+        return {
+          btnDisabled: btn ? btn.hasAttribute('disabled') : false,
+          hasGame1: bodyText.includes('Game Không Đăng Nhập 1'),
+          hasGame2: bodyText.includes('Game Không Đăng Nhập 2'),
+        };
+      })()`);
+      assert.equal(afterRefresh.hasGame1, false, 'Case 4: Game 1 must not reappear after refresh');
+      assert.equal(afterRefresh.hasGame2, false, 'Case 4: Game 2 must not reappear after refresh');
+      assert.equal(afterRefresh.btnDisabled, true, 'Case 5: Delete All button remains disabled on empty Library');
     } finally {
       await browser.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));

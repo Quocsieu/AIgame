@@ -181,6 +181,10 @@ export interface AdminAiCostApiLogItem {
   cachedPricePer1MUsd: number | null;
   imagePriceUsd: number | null;
   exchangeRateUsdVnd: number;
+  inputCostUsd: number | null;
+  outputCostUsd: number | null;
+  inputCostVnd: number | null;
+  outputCostVnd: number | null;
   actualCostUsd: number | null;
   actualCostVnd: number | null;
   paidEquivalentCostUsd: number | null;
@@ -204,6 +208,10 @@ export interface AdminAiCostGameItem {
   cachedTokens: number | null;
   thinkingTokens: number | null;
   totalTokens: number | null;
+  inputCostUsd: number | null;
+  outputCostUsd: number | null;
+  inputCostVnd: number | null;
+  outputCostVnd: number | null;
   actualCostUsd: number | null;
   actualCostVnd: number | null;
   paidEquivalentCostUsd: number | null;
@@ -829,49 +837,115 @@ export class AiObservabilityService {
       const rawThinking = row.thinking_tokens !== null && row.thinking_tokens !== undefined ? Number(row.thinking_tokens) : null;
       const rawTotal = row.total_tokens !== null && row.total_tokens !== undefined ? Number(row.total_tokens) : null;
 
-      // For legacy rows recorded before Migration 9, compute cost dynamically from catalog
-      const hasM9Pricing = row.pricing_status !== null && row.pricing_status !== undefined;
-      const fallbackCalc = !hasM9Pricing
-        ? calculateAiCallCost({
-            provider,
-            model,
-            status,
-            taskType,
-            inputTokens: rawIn,
-            outputTokens: rawOut,
-            cachedTokens: rawCached,
-            thinkingTokens: rawThinking,
-            totalTokens: rawTotal,
-            billingMode: row.billing_mode ? String(row.billing_mode) : configuredBillingMode,
-          })
-        : null;
+      // Compute dynamic catalog calculation for legacy rows or rows whose model alias was added to the catalog
+      const hasM9Pricing =
+        row.pricing_status !== null &&
+        row.pricing_status !== undefined &&
+        String(row.pricing_status) !== 'PRICE_UNAVAILABLE';
+      const fallbackCalc = calculateAiCallCost({
+        provider,
+        model,
+        status,
+        taskType,
+        inputTokens: rawIn,
+        outputTokens: rawOut,
+        cachedTokens: rawCached,
+        thinkingTokens: rawThinking,
+        totalTokens: rawTotal,
+        billingMode: row.billing_mode ? String(row.billing_mode) : configuredBillingMode,
+      });
 
       const billingMode: AiBillingMode = row.billing_mode
         ? (String(row.billing_mode) as AiBillingMode)
-        : fallbackCalc?.billingMode || configuredBillingMode;
-      const pricingVersion = row.pricing_version
-        ? String(row.pricing_version)
-        : fallbackCalc?.pricingVersion || 'LEGACY';
-      const pricingStatus: AiPricingStatus = row.pricing_status
-        ? (String(row.pricing_status) as AiPricingStatus)
-        : fallbackCalc?.pricingStatus || 'OK';
+        : fallbackCalc.billingMode || configuredBillingMode;
+      const pricingVersion =
+        hasM9Pricing && row.pricing_version
+          ? String(row.pricing_version)
+          : fallbackCalc.pricingVersion || 'LEGACY';
+      const pricingStatus: AiPricingStatus =
+        hasM9Pricing && row.pricing_status
+          ? (String(row.pricing_status) as AiPricingStatus)
+          : fallbackCalc.pricingStatus || 'OK';
+
+      const resolvedInputPricePer1MUsd =
+        row.input_price_per_1m_usd !== null && row.input_price_per_1m_usd !== undefined
+          ? Number(row.input_price_per_1m_usd)
+          : fallbackCalc.inputPricePer1MUsd ?? null;
+      const resolvedOutputPricePer1MUsd =
+        row.output_price_per_1m_usd !== null && row.output_price_per_1m_usd !== undefined
+          ? Number(row.output_price_per_1m_usd)
+          : fallbackCalc.outputPricePer1MUsd ?? null;
+      const resolvedCachedPricePer1MUsd =
+        row.cached_price_per_1m_usd !== null && row.cached_price_per_1m_usd !== undefined
+          ? Number(row.cached_price_per_1m_usd)
+          : fallbackCalc.cachedPricePer1MUsd ?? null;
+      const resolvedImagePriceUsd =
+        row.image_price_usd !== null && row.image_price_usd !== undefined
+          ? Number(row.image_price_usd)
+          : fallbackCalc.imagePriceUsd ?? null;
+      const resolvedExchangeRateUsdVnd =
+        row.exchange_rate_usd_vnd !== null && row.exchange_rate_usd_vnd !== undefined
+          ? Number(row.exchange_rate_usd_vnd)
+          : exchange.usdToVndRate;
+
+      let reqInputCostUsd: number | null = fallbackCalc.inputCostUsd;
+      let reqOutputCostUsd: number | null = fallbackCalc.outputCostUsd;
+      let reqInputCostVnd: number | null = fallbackCalc.inputCostVnd;
+      let reqOutputCostVnd: number | null = fallbackCalc.outputCostVnd;
+
+      if (
+        rawIn !== null &&
+        rawOut !== null &&
+        resolvedInputPricePer1MUsd !== null &&
+        resolvedOutputPricePer1MUsd !== null &&
+        pricingStatus !== 'PRICE_UNAVAILABLE'
+      ) {
+        const safeIn = Math.max(0, Math.round(rawIn));
+        const safeOut = Math.max(0, Math.round(rawOut));
+        const safeCached =
+          rawCached !== null && Number.isFinite(rawCached) ? Math.max(0, Math.round(rawCached)) : 0;
+        const safeThinking =
+          rawThinking !== null && Number.isFinite(rawThinking)
+            ? Math.max(0, Math.round(rawThinking))
+            : 0;
+        const effectiveCached = Math.min(safeIn, safeCached);
+        const nonCachedInput = Math.max(0, safeIn - effectiveCached);
+        const cachedRate =
+          resolvedCachedPricePer1MUsd !== null
+            ? resolvedCachedPricePer1MUsd
+            : resolvedInputPricePer1MUsd * 0.25;
+        const thinkingAlreadyInOutput =
+          safeThinking > 0 &&
+          rawTotal !== null &&
+          Number.isFinite(rawTotal) &&
+          Math.round(rawTotal) <= safeIn + safeOut;
+        const billableOutput = thinkingAlreadyInOutput ? safeOut : safeOut + safeThinking;
+
+        reqInputCostUsd = Number(
+          (
+            (nonCachedInput / 1_000_000) * resolvedInputPricePer1MUsd +
+            (effectiveCached / 1_000_000) * cachedRate
+          ).toFixed(8)
+        );
+        reqOutputCostUsd = Number(
+          ((billableOutput / 1_000_000) * resolvedOutputPricePer1MUsd).toFixed(8)
+        );
+        reqInputCostVnd = Math.round(reqInputCostUsd * resolvedExchangeRateUsdVnd);
+        reqOutputCostVnd = Math.round(reqOutputCostUsd * resolvedExchangeRateUsdVnd);
+      }
 
       const actualCostUsd =
         row.cost_usd !== null && row.cost_usd !== undefined
           ? Number(row.cost_usd)
-          : fallbackCalc
-            ? fallbackCalc.actualCostUsd
-            : null;
+          : fallbackCalc.actualCostUsd;
       const actualCostVnd =
         row.cost_vnd !== null && row.cost_vnd !== undefined
           ? Number(row.cost_vnd)
-          : fallbackCalc
-            ? fallbackCalc.actualCostVnd
-            : null;
+          : fallbackCalc.actualCostVnd;
       const paidEquivalentCostUsd =
         row.paid_equivalent_cost_usd !== null && row.paid_equivalent_cost_usd !== undefined
           ? Number(row.paid_equivalent_cost_usd)
-          : fallbackCalc
+          : fallbackCalc.paidEquivalentCostUsd !== null
             ? fallbackCalc.paidEquivalentCostUsd
             : row.estimated_cost_usd !== null && row.estimated_cost_usd !== undefined
               ? Number(row.estimated_cost_usd)
@@ -879,10 +953,10 @@ export class AiObservabilityService {
       const paidEquivalentCostVnd =
         row.paid_equivalent_cost_vnd !== null && row.paid_equivalent_cost_vnd !== undefined
           ? Number(row.paid_equivalent_cost_vnd)
-          : fallbackCalc
+          : fallbackCalc.paidEquivalentCostVnd !== null
             ? fallbackCalc.paidEquivalentCostVnd
             : paidEquivalentCostUsd !== null
-              ? Math.round(paidEquivalentCostUsd * exchange.usdToVndRate)
+              ? Math.round(paidEquivalentCostUsd * resolvedExchangeRateUsdVnd)
               : null;
 
       const gameTitle = row.joined_game_title
@@ -913,35 +987,24 @@ export class AiObservabilityService {
         outputTokens: rawOut,
         cachedTokens: rawCached,
         thinkingTokens: rawThinking,
-        totalTokens: fallbackCalc ? fallbackCalc.totalTokens : rawTotal,
+        totalTokens: fallbackCalc.totalTokens ?? rawTotal,
         billingMode,
         pricingVersion,
         pricingStatus,
-        inputPricePer1MUsd:
-          row.input_price_per_1m_usd !== null && row.input_price_per_1m_usd !== undefined
-            ? Number(row.input_price_per_1m_usd)
-            : fallbackCalc?.inputPricePer1MUsd ?? null,
-        outputPricePer1MUsd:
-          row.output_price_per_1m_usd !== null && row.output_price_per_1m_usd !== undefined
-            ? Number(row.output_price_per_1m_usd)
-            : fallbackCalc?.outputPricePer1MUsd ?? null,
-        cachedPricePer1MUsd:
-          row.cached_price_per_1m_usd !== null && row.cached_price_per_1m_usd !== undefined
-            ? Number(row.cached_price_per_1m_usd)
-            : fallbackCalc?.cachedPricePer1MUsd ?? null,
-        imagePriceUsd:
-          row.image_price_usd !== null && row.image_price_usd !== undefined
-            ? Number(row.image_price_usd)
-            : fallbackCalc?.imagePriceUsd ?? null,
-        exchangeRateUsdVnd:
-          row.exchange_rate_usd_vnd !== null && row.exchange_rate_usd_vnd !== undefined
-            ? Number(row.exchange_rate_usd_vnd)
-            : exchange.usdToVndRate,
+        inputPricePer1MUsd: resolvedInputPricePer1MUsd,
+        outputPricePer1MUsd: resolvedOutputPricePer1MUsd,
+        cachedPricePer1MUsd: resolvedCachedPricePer1MUsd,
+        imagePriceUsd: resolvedImagePriceUsd,
+        exchangeRateUsdVnd: resolvedExchangeRateUsdVnd,
+        inputCostUsd: reqInputCostUsd,
+        outputCostUsd: reqOutputCostUsd,
+        inputCostVnd: reqInputCostVnd,
+        outputCostVnd: reqOutputCostVnd,
         actualCostUsd,
         actualCostVnd,
         paidEquivalentCostUsd,
         paidEquivalentCostVnd,
-        dataNote: row.data_note ? String(row.data_note) : fallbackCalc?.dataNote ?? null,
+        dataNote: row.data_note ? String(row.data_note) : fallbackCalc.dataNote ?? null,
       };
     });
 
@@ -1020,6 +1083,12 @@ export class AiObservabilityService {
       let sumThinking = 0;
       let sumTotal = 0;
       let hasAnyTokens = false;
+      let hasTokenCost = false;
+      let sumInputCostUsd = 0;
+      let sumOutputCostUsd = 0;
+      let sumInputCostVndExact = 0;
+      let sumOutputCostVndExact = 0;
+      let sumOtherCostVndExact = 0;
       let hasUnknownUsage = false;
       let hasPriceUnavailable = false;
       let sumActualUsd = 0;
@@ -1033,19 +1102,54 @@ export class AiObservabilityService {
         if (r.status === 'SUCCESS') successCount++;
         else failedCount++;
 
+        const rate =
+          r.exchangeRateUsdVnd && Number.isFinite(r.exchangeRateUsdVnd) && r.exchangeRateUsdVnd > 0
+            ? r.exchangeRateUsdVnd
+            : exchange.usdToVndRate;
+
         if (r.inputTokens !== null && r.outputTokens !== null) {
           hasAnyTokens = true;
           sumIn += r.inputTokens;
           sumOut += r.outputTokens;
           sumCached += r.cachedTokens || 0;
           sumThinking += r.thinkingTokens || 0;
-          sumTotal += r.totalTokens !== null ? r.totalTokens : r.inputTokens + r.outputTokens + (r.thinkingTokens || 0);
-        } else if (r.pricingStatus === 'USAGE_UNAVAILABLE') {
-          hasUnknownUsage = true;
-        }
+          sumTotal +=
+            r.totalTokens !== null
+              ? r.totalTokens
+              : r.inputTokens + r.outputTokens + (r.thinkingTokens || 0);
 
-        if (r.pricingStatus === 'PRICE_UNAVAILABLE') {
-          hasPriceUnavailable = true;
+          if (r.pricingStatus === 'PRICE_UNAVAILABLE') {
+            hasPriceUnavailable = true;
+          } else if (r.inputCostUsd !== null && r.outputCostUsd !== null) {
+            hasTokenCost = true;
+            sumInputCostUsd += r.inputCostUsd;
+            sumOutputCostUsd += r.outputCostUsd;
+            sumInputCostVndExact += r.inputCostUsd * rate;
+            sumOutputCostVndExact += r.outputCostUsd * rate;
+
+            if (r.paidEquivalentCostUsd !== null) {
+              const extraUsd = Math.max(
+                0,
+                Number((r.paidEquivalentCostUsd - (r.inputCostUsd + r.outputCostUsd)).toFixed(8))
+              );
+              if (extraUsd > 0) {
+                sumOtherCostVndExact += extraUsd * rate;
+              }
+            }
+          } else {
+            hasPriceUnavailable = true;
+          }
+        } else {
+          // Request has no token counts (e.g., flat-rate image call, missing usageMetadata on success, or failed call)
+          if (r.pricingStatus === 'OK' && r.paidEquivalentCostUsd !== null) {
+            sumOtherCostVndExact += r.paidEquivalentCostUsd * rate;
+          } else if (r.status === 'SUCCESS') {
+            if (r.pricingStatus === 'PRICE_UNAVAILABLE') {
+              hasPriceUnavailable = true;
+            } else if (r.pricingStatus === 'USAGE_UNAVAILABLE') {
+              hasUnknownUsage = true;
+            }
+          }
         }
 
         if (r.actualCostUsd !== null && r.actualCostVnd !== null) {
@@ -1060,6 +1164,16 @@ export class AiObservabilityService {
         }
       }
 
+      // If every request in the group lacked usage or price and no tokens/costs were recorded
+      if (!hasAnyTokens && !hasPaidCost) {
+        if (grp.requests.some((r) => r.pricingStatus === 'PRICE_UNAVAILABLE')) {
+          hasPriceUnavailable = true;
+        }
+        if (grp.requests.some((r) => r.pricingStatus === 'USAGE_UNAVAILABLE')) {
+          hasUnknownUsage = true;
+        }
+      }
+
       let status: AdminAiCostGameItem['status'] = 'SUCCESS';
       if (failedCount === reqCount) {
         status = 'FAILED';
@@ -1070,6 +1184,43 @@ export class AiObservabilityService {
       } else if (failedCount > 0) {
         status = 'PARTIAL_FAILURE';
       }
+
+      const gameInputCostUsd =
+        hasTokenCost && !hasPriceUnavailable && !hasUnknownUsage
+          ? Number(sumInputCostUsd.toFixed(8))
+          : null;
+      const gameOutputCostUsd =
+        hasTokenCost && !hasPriceUnavailable && !hasUnknownUsage
+          ? Number(sumOutputCostUsd.toFixed(8))
+          : null;
+      const gameInputCostVnd =
+        gameInputCostUsd !== null ? Math.round(sumInputCostVndExact) : null;
+      const gameOutputCostVnd =
+        gameOutputCostUsd !== null ? Math.round(sumOutputCostVndExact) : null;
+
+      const gamePaidCostUsd =
+        hasPaidCost && !hasPriceUnavailable && !hasUnknownUsage
+          ? Number(sumPaidUsd.toFixed(8))
+          : null;
+      const gamePaidCostVnd =
+        gamePaidCostUsd !== null
+          ? gameInputCostVnd !== null && gameOutputCostVnd !== null
+            ? gameInputCostVnd + gameOutputCostVnd + Math.round(sumOtherCostVndExact)
+            : Math.round(sumPaidVnd)
+          : null;
+
+      const gameActualCostUsd =
+        hasActualCost && !hasPriceUnavailable && !hasUnknownUsage
+          ? Number(sumActualUsd.toFixed(8))
+          : null;
+      const gameActualCostVnd =
+        gameActualCostUsd !== null
+          ? configuredBillingMode === 'FREE' && gameActualCostUsd === 0
+            ? 0
+            : gamePaidCostVnd !== null && gameActualCostUsd === gamePaidCostUsd
+              ? gamePaidCostVnd
+              : Math.round(sumActualVnd)
+          : null;
 
       return {
         generationKey: grp.generationKey,
@@ -1087,10 +1238,14 @@ export class AiObservabilityService {
         cachedTokens: hasAnyTokens ? sumCached : null,
         thinkingTokens: hasAnyTokens ? sumThinking : null,
         totalTokens: hasAnyTokens ? sumTotal : null,
-        actualCostUsd: hasActualCost && !hasPriceUnavailable ? Number(sumActualUsd.toFixed(8)) : null,
-        actualCostVnd: hasActualCost && !hasPriceUnavailable ? Math.round(sumActualVnd) : null,
-        paidEquivalentCostUsd: hasPaidCost && !hasPriceUnavailable ? Number(sumPaidUsd.toFixed(8)) : null,
-        paidEquivalentCostVnd: hasPaidCost && !hasPriceUnavailable ? Math.round(sumPaidVnd) : null,
+        inputCostUsd: gameInputCostUsd,
+        outputCostUsd: gameOutputCostUsd,
+        inputCostVnd: gameInputCostVnd,
+        outputCostVnd: gameOutputCostVnd,
+        actualCostUsd: gameActualCostUsd,
+        actualCostVnd: gameActualCostVnd,
+        paidEquivalentCostUsd: gamePaidCostUsd,
+        paidEquivalentCostVnd: gamePaidCostVnd,
         status,
         hasUnknownUsage,
         hasPriceUnavailable,

@@ -5293,8 +5293,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                 {isLibraryMode && (
                   <button
                     type="button"
+                    data-testid="library-delete-all-btn"
                     onClick={() => setIsConfirmDeleteAllOpen(true)}
-                    disabled={isLoading || totalCount === 0}
+                    disabled={isLoading || (summaryStats.totalAllCount === 0 && totalCount === 0)}
                     title="Xóa toàn bộ game trong kho"
                     style={{
                       backgroundColor: 'transparent',
@@ -5305,8 +5306,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       height: '38px',
                       fontWeight: 600,
                       fontSize: '0.8rem',
-                      cursor: isLoading || totalCount === 0 ? 'not-allowed' : 'pointer',
-                      opacity: isLoading || totalCount === 0 ? 0.45 : 1,
+                      cursor: isLoading || (summaryStats.totalAllCount === 0 && totalCount === 0) ? 'not-allowed' : 'pointer',
+                      opacity: isLoading || (summaryStats.totalAllCount === 0 && totalCount === 0) ? 0.45 : 1,
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: '6px',
@@ -7997,6 +7998,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           role="dialog"
           aria-modal="true"
           aria-labelledby="delete-all-confirm-title"
+          data-testid="delete-all-confirm-modal"
           style={{
             position: 'fixed',
             inset: 0,
@@ -8026,11 +8028,16 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
               Xác Nhận Xóa Tất Cả Game
             </h3>
             <p style={{ margin: '0 0 14px 0', fontSize: '0.88rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              Bạn đang yêu cầu xóa vĩnh viễn toàn bộ <strong style={{ color: 'var(--text-primary)' }}>{totalCount} bộ câu hỏi</strong> trong kho game. Các game đang có phòng hoặc phiên chơi hoạt động sẽ được giữ lại an toàn.
+              Bạn đang yêu cầu xóa vĩnh viễn toàn bộ{' '}
+              <strong style={{ color: 'var(--text-primary)' }} data-testid="delete-all-game-count">
+                {summaryStats.totalAllCount || totalCount} bộ câu hỏi
+              </strong>{' '}
+              trong phạm vi Thư viện hiện tại của bạn. Thao tác này <strong>không thể hoàn tác</strong>. Các game đang có phòng thi hoặc phiên chơi hoạt động sẽ được giữ lại an toàn.
             </p>
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
               <button
                 type="button"
+                data-testid="cancel-delete-all-btn"
                 disabled={isDeletingAll}
                 onClick={() => setIsConfirmDeleteAllOpen(false)}
                 style={{
@@ -8045,10 +8052,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   cursor: 'pointer',
                 }}
               >
-                Hủy bỏ
+                Hủy
               </button>
               <button
                 type="button"
+                data-testid="confirm-delete-all-btn"
                 disabled={isDeletingAll}
                 onClick={handleDeleteAllGames}
                 style={{

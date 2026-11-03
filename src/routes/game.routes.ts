@@ -3152,9 +3152,10 @@ gameRouter.get(
 
 /**
  * DELETE /api/games
- * Safely deletes saved game specifications scoped strictly by authorization:
+ * Safely deletes saved game specifications scoped strictly by ownership/management scope:
  * - Rejects Player and Guest tokens (403 ACCESS_DENIED).
- * - Requires an authenticated user session (401 UNAUTZZZ).
+ * - Works without requiring user login or Admin session for Creator's unowned Library games
+ *   (ownerUserId === null / 'legacy_local'), matching single-game delete and Library scope.
  * - Regular authenticated users (USER) can only delete games they own (ownerUserId === req.user.userId).
  * - Administrators (ADMIN) can delete across the repository per admin policy.
  * - Skips and reports any game currently locked by an active practice session or multiplayer room.
@@ -3166,18 +3167,22 @@ gameRouter.delete(
     try {
       rejectGuestOrPlayerWrite(req, 'xóa hàng loạt bộ câu hỏi');
 
-      if (!req.user || !req.user.userId) {
-        throw new AppError(
-          'UNAUTHORIZED',
-          'Yêu cầu đăng nhập để thực hiện thao tác xóa hàng loạt bộ câu hỏi.',
-          401
+      const isAdmin = req.user?.role === 'ADMIN';
+      const currentUserId = req.user?.userId ?? null;
+
+      const isWithinCallerDeleteScope = (ownerUserId: string | null): boolean => {
+        if (isAdmin) return true;
+        if (currentUserId && currentUserId !== 'legacy_local') {
+          return ownerUserId !== null && ownerUserId === currentUserId;
+        }
+        return (
+          ownerUserId === null ||
+          ownerUserId === 'legacy_local' ||
+          ownerUserId.startsWith('guest_')
         );
-      }
+      };
 
-      const isAdmin = req.user.role === 'ADMIN';
-      const currentUserId = req.user.userId;
-
-      // Collect game IDs strictly scoped to the caller's permission (owner-only for USER, all for ADMIN)
+      // Collect game IDs strictly scoped to the caller's permission
       const dbGameIds = persistenceRepo.getGameIdsForUser({
         userId: currentUserId,
         isAdmin,
@@ -3187,7 +3192,7 @@ gameRouter.delete(
         const spec = gameStore.get(id);
         const ownerInfo = persistenceRepo.getGameOwnerInfo(id);
         const ownerUserId = spec?.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
-        return ownerUserId !== null && ownerUserId === currentUserId;
+        return isWithinCallerDeleteScope(ownerUserId);
       });
       const targetGameIds = Array.from(new Set([...dbGameIds, ...memGameIds]));
 
@@ -3200,8 +3205,8 @@ gameRouter.delete(
         const ownerInfo = persistenceRepo.getGameOwnerInfo(gameId);
         const ownerUserId = spec?.ownerUserId ?? ownerInfo?.ownerUserId ?? null;
 
-        // Defense-in-depth: regular users can never delete another user's game or unowned system games in bulk
-        if (!isAdmin && ownerUserId !== currentUserId) {
+        // Defense-in-depth: never delete games outside the caller's ownership scope
+        if (!isWithinCallerDeleteScope(ownerUserId)) {
           continue;
         }
 

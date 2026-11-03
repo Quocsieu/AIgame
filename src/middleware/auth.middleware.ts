@@ -280,7 +280,14 @@ export function requireAdminCostAnalyticsMiddleware(
  * can access game management and creation features.
  */
 export function rejectGuestOrPlayerWrite(req: Request, action: string = 'quản lý game'): void {
-  if (req.headers['x-player-token']) {
+  const queryPlayerToken =
+    typeof req.query?.playerToken === 'string' ? req.query.playerToken.trim() : '';
+  const bodyPlayerToken =
+    req.body && typeof req.body === 'object' && typeof req.body.playerToken === 'string'
+      ? req.body.playerToken.trim()
+      : '';
+
+  if (req.headers['x-player-token'] || queryPlayerToken || bodyPlayerToken) {
     throw new AppError(
       'ACCESS_DENIED',
       `Người chơi trong phòng không có quyền ${action}.`,

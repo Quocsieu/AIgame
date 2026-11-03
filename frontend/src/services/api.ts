@@ -537,10 +537,17 @@ export async function deleteAllSavedGames(): Promise<{
   totalTargeted: number;
   skippedGames?: Array<{ gameId: string; title?: string; reason: string }>;
 }> {
-  const res = await fetch(`${API_BASE_URL}/games`, {
+  let res = await fetch(`${API_BASE_URL}/games`, {
     method: 'DELETE',
     headers: buildAuthHeaders(),
   });
+  if (res.status === 401 && getSessionAuthToken()) {
+    setSessionAuthToken(null);
+    res = await fetch(`${API_BASE_URL}/games`, {
+      method: 'DELETE',
+      headers: buildAuthHeaders(),
+    });
+  }
   const data = await res.json();
   if (!data.success) {
     throw new Error(data.error?.message || 'Không thể xóa toàn bộ danh sách bộ câu hỏi.');
@@ -1901,6 +1908,10 @@ export interface AdminAiCostApiLogItem {
   cachedPricePer1MUsd: number | null;
   imagePriceUsd: number | null;
   exchangeRateUsdVnd: number;
+  inputCostUsd?: number | null;
+  outputCostUsd?: number | null;
+  inputCostVnd?: number | null;
+  outputCostVnd?: number | null;
   actualCostUsd: number | null;
   actualCostVnd: number | null;
   paidEquivalentCostUsd: number | null;
@@ -1924,6 +1935,10 @@ export interface AdminAiCostGameItem {
   cachedTokens: number | null;
   thinkingTokens: number | null;
   totalTokens: number | null;
+  inputCostUsd?: number | null;
+  outputCostUsd?: number | null;
+  inputCostVnd?: number | null;
+  outputCostVnd?: number | null;
   actualCostUsd: number | null;
   actualCostVnd: number | null;
   paidEquivalentCostUsd: number | null;
