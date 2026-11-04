@@ -240,12 +240,23 @@ describe('DAY 2 - AI Question Generation Test Suite', () => {
     });
     assert.equal(resPZ.status, 200);
 
-    // E. Legacy CROSSWORD is rejected on new creation
+    // E. CROSSWORD is supported on new creation
+    mockProvider.mockResponse = [
+      {
+        id: 'q_cw',
+        type: 'CROSSWORD',
+        question: 'Thuật ngữ viết tắt của xác thực hai yếu tố?',
+        crosswordClue: 'Thuật ngữ viết tắt của xác thực hai yếu tố?',
+        crosswordAnswer: 'MFA',
+        correctAnswer: 'MFA',
+      },
+    ];
     const resCW = await request(app).post('/api/games/generate').send({
       sourceId: 'src_test_day2_1',
       gameType: 'CROSSWORD',
+      questionCount: 1,
     });
-    assert.equal(resCW.status, 400);
+    assert.equal(resCW.status, 200);
   });
 
   // 5. Malformed AI output

@@ -689,6 +689,8 @@ export class AiQuestionService {
                 '- Mỗi câu hỏi PHẢI khai báo trường "type" là một trong 4 giá trị cụ thể: "MULTIPLE_CHOICE", "QUICK_BUTTON", "FILL_IN_THE_BLANK", hoặc "CROSSWORD" (TUYỆT ĐỐI KHÔNG ghi type là "MIXED" trong từng câu hỏi).',
                 '- Đối với QUICK_BUTTON: choices PHẢI là ["Đúng", "Sai"], correctAnswer PHẢI là "Đúng" hoặc "Sai".',
                 '- Đối với MULTIPLE_CHOICE: choices PHẢI có đúng 4 phương án, correctAnswer PHẢI khớp với một trong các phương án.',
+                '- Đối với FILL_IN_THE_BLANK: TUYỆT ĐỐI KHÔNG trả về trường "choices"; phải có "correctAnswer" ngắn gọn và "acceptedAlternatives" chứa các biến thể hợp lệ.',
+                '- Đối với CROSSWORD: TUYỆT ĐỐI KHÔNG trả về trường "choices"; phải có "crosswordClue" gợi ý tiếng Việt và "crosswordAnswer" / "correctAnswer" là 1 từ khóa viết hoa không dấu, không khoảng trắng, chỉ gồm A-Z và 0-9.',
                 '',
               ].join('\n')
             : isAdventure
@@ -811,10 +813,74 @@ export class AiQuestionService {
     }
   }
 ]`
-            : `[
+            : isMixed || isAdventure
+              ? `[
   {
     "id": "q_1",
-    "type": "${isMixed || isAdventure ? 'MULTIPLE_CHOICE' : gameType}",
+    "type": "MULTIPLE_CHOICE",
+    "question": "Nội dung câu hỏi trắc nghiệm bằng tiếng Việt?",
+    "choices": ["A. Lựa chọn 1", "B. Lựa chọn 2", "C. Lựa chọn 3", "D. Lựa chọn 4"],
+    "correctAnswer": "A. Lựa chọn 1",
+    "explanation": "Giải thích ngắn gọn căn cứ vào nội dung nguồn bằng tiếng Việt",
+    "difficulty": "${difficulty}",
+    "sourceReference": {
+      "sourceId": "source_id_here",
+      "sourceType": "WEBSITE" | "DOCX" | "XLSX" | "PDF" | "TXT" | "MARKDOWN" | "CSV",
+      "sourceLocation": "location_here",
+      "section": "Section name if applicable"
+    }
+  },
+  {
+    "id": "q_2",
+    "type": "QUICK_BUTTON",
+    "question": "Câu nhận định Đúng/Sai dựa trên nội dung nguồn?",
+    "choices": ["Đúng", "Sai"],
+    "correctAnswer": "Đúng",
+    "explanation": "Giải thích ngắn gọn căn cứ vào nội dung nguồn bằng tiếng Việt",
+    "difficulty": "${difficulty}",
+    "sourceReference": {
+      "sourceId": "source_id_here",
+      "sourceType": "WEBSITE" | "DOCX" | "XLSX" | "PDF" | "TXT" | "MARKDOWN" | "CSV",
+      "sourceLocation": "location_here",
+      "section": "Section name if applicable"
+    }
+  },
+  {
+    "id": "q_3",
+    "type": "FILL_IN_THE_BLANK",
+    "question": "Câu hỏi điền từ vào chỗ trống ___ dựa trên nội dung nguồn?",
+    "correctAnswer": "Đáp án chuẩn",
+    "acceptedAlternatives": ["Biến thể hợp lệ"],
+    "explanation": "Giải thích ngắn gọn căn cứ vào nội dung nguồn bằng tiếng Việt",
+    "difficulty": "${difficulty}",
+    "sourceReference": {
+      "sourceId": "source_id_here",
+      "sourceType": "WEBSITE" | "DOCX" | "XLSX" | "PDF" | "TXT" | "MARKDOWN" | "CSV",
+      "sourceLocation": "location_here",
+      "section": "Section name if applicable"
+    }
+  },
+  {
+    "id": "q_4",
+    "type": "CROSSWORD",
+    "question": "Gợi ý tiếng Việt cho từ khóa ô chữ dựa trên tài liệu nguồn?",
+    "crosswordClue": "Gợi ý tiếng Việt cho từ khóa ô chữ dựa trên tài liệu nguồn?",
+    "crosswordAnswer": "TUKHOA",
+    "correctAnswer": "TUKHOA",
+    "explanation": "Giải thích ngắn gọn từ khóa căn cứ vào nội dung nguồn bằng tiếng Việt",
+    "difficulty": "${difficulty}",
+    "sourceReference": {
+      "sourceId": "source_id_here",
+      "sourceType": "WEBSITE" | "DOCX" | "XLSX" | "PDF" | "TXT" | "MARKDOWN" | "CSV",
+      "sourceLocation": "location_here",
+      "section": "Section name if applicable"
+    }
+  }
+]`
+              : `[
+  {
+    "id": "q_1",
+    "type": "${gameType}",
     "question": "Nội dung câu hỏi bằng tiếng Việt?",
     "choices": ["A. Lựa chọn 1", "B. Lựa chọn 2", "C. Lựa chọn 3", "D. Lựa chọn 4"], // required for QUIZ / MULTIPLE_CHOICE (4 choices) or ["Đúng", "Sai"] for TRUE_FALSE / QUICK_BUTTON
     "correctAnswer": "A. Lựa chọn 1", // must match one choice for QUIZ / MULTIPLE_CHOICE
@@ -1418,7 +1484,52 @@ export class AiQuestionService {
                   : normalizedCorrectAnswer) || '';
 
             if (rawCrosswordWord) {
-              normalizedCorrectAnswer = normalizeCrosswordWord(rawCrosswordWord);
+              const sanitizedSegments = String(rawCrosswordWord)
+                .split(/[|;,/]+/)
+                .map((part: string) =>
+                  normalizeCrosswordWord(part).replace(/[^A-Z0-9]/g, '')
+                )
+                .filter(Boolean);
+              normalizedCorrectAnswer =
+                sanitizedSegments.length > 0
+                  ? sanitizedSegments.join(' | ')
+                  : normalizeCrosswordWord(rawCrosswordWord);
+            }
+          } else if (
+            (itemQuestionType === 'MULTIPLE_CHOICE' || itemQuestionType === 'QUIZ') &&
+            Array.isArray(normalizedChoices) &&
+            normalizedChoices.length > 0 &&
+            normalizedCorrectAnswer
+          ) {
+            if (!normalizedChoices.includes(normalizedCorrectAnswer)) {
+              const normAns = normalizedCorrectAnswer.trim().toLowerCase();
+              const letterMatch = normAns.match(/^([a-d])[\.\)\:\-]?\s*$/i);
+              if (letterMatch) {
+                const letter = letterMatch[1].toUpperCase();
+                const letterIndex = letter.charCodeAt(0) - 65;
+                const byPrefix = normalizedChoices.find(c =>
+                  new RegExp(`^${letter}[\\.\\)\\:\\-]\\s+`, 'i').test(c.trim())
+                );
+                if (byPrefix) {
+                  normalizedCorrectAnswer = byPrefix;
+                } else if (letterIndex >= 0 && letterIndex < normalizedChoices.length) {
+                  normalizedCorrectAnswer = normalizedChoices[letterIndex];
+                }
+              } else {
+                const stripPrefix = (s: string) =>
+                  s
+                    .trim()
+                    .replace(/^[A-Da-d][\.\)\:\-]\s+/, '')
+                    .trim()
+                    .toLowerCase();
+                const strippedTarget = stripPrefix(normalizedCorrectAnswer);
+                const matchingChoice = normalizedChoices.find(
+                  c => c.trim().toLowerCase() === normAns || stripPrefix(c) === strippedTarget
+                );
+                if (matchingChoice) {
+                  normalizedCorrectAnswer = matchingChoice;
+                }
+              }
             }
           }
         }

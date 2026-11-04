@@ -2507,6 +2507,9 @@ export const DemoPage: React.FC<DemoPageProps> = ({
         settings: {
           timePerQuestion,
           ...(syncedAdvCfg ? { adventureConfig: syncedAdvCfg } : {}),
+          ...(specToSave.gameType === 'MIXED'
+            ? { mixedDistribution: specToSave.settings?.mixedDistribution || mixedDistribution }
+            : {}),
           scoringMode,
           sessionMode,
           ...(sessionMode === 'EXAM' ? { examAnswerRevealPolicy } : {}),

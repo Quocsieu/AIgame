@@ -61,20 +61,22 @@ export type GameType = z.infer<typeof GameTypeEnum>;
 
 /**
  * Danh sách loại game được phép tạo mới qua POST /api/games/generate:
- * - 5 dạng cơ sở chuẩn hóa: QUIZ (MULTIPLE_CHOICE), TRUE_FALSE (QUICK_BUTTON),
- *   TYPE_ANSWER (FILL_IN_THE_BLANK), PUZZLE, SLIDER
+ * - Các dạng cơ sở chuẩn hóa: QUIZ (MULTIPLE_CHOICE), TRUE_FALSE (QUICK_BUTTON),
+ *   TYPE_ANSWER (FILL_IN_THE_BLANK), CROSSWORD, PUZZLE, SLIDER
+ * - Dạng hỗn hợp phân bổ tỷ lệ: MIXED
  * - Dạng giả lập đi cảnh tương tác: ADVENTURE
- * (CROSSWORD và MIXED vẫn được giữ trong GameTypeEnum / QuestionTypeEnum để tương thích ngược cho các game đã lưu)
  */
 export const CreatableGameTypeEnum = z.enum([
   'QUIZ',
   'TRUE_FALSE',
   'TYPE_ANSWER',
+  'CROSSWORD',
   'PUZZLE',
   'SLIDER',
   'MULTIPLE_CHOICE',
   'QUICK_BUTTON',
   'FILL_IN_THE_BLANK',
+  'MIXED',
   'ADVENTURE',
 ]);
 export type CreatableGameType = z.infer<typeof CreatableGameTypeEnum>;
@@ -154,6 +156,11 @@ export function normalizeTrueFalsePolarity(text: string): 'TRUE' | 'FALSE' | nul
   const norm = normalizeChoiceCompare(text);
   if (TRUE_POLARITY_TOKENS.has(norm)) return 'TRUE';
   if (FALSE_POLARITY_TOKENS.has(norm)) return 'FALSE';
+  const stripped = normalizeChoiceCompare(
+    text.replace(/^[A-Da-d][\.\)\:\-]\s*/, '').replace(/[.!]+$/, '')
+  );
+  if (TRUE_POLARITY_TOKENS.has(stripped)) return 'TRUE';
+  if (FALSE_POLARITY_TOKENS.has(stripped)) return 'FALSE';
   return null;
 }
 

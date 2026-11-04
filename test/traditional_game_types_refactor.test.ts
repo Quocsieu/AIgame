@@ -483,10 +483,10 @@ describe('TRADITIONAL GAME TYPES REFACTOR — 5 Canonical Formats (Quiz, True/Fa
     assert.equal(badAiRes.body.error.code, 'AI_QUESTION_VALIDATION_FAILED');
   });
 
-  it('9. Rejects removed legacy formats (CROSSWORD, MIXED) and out-of-scope formats (PIN_ANSWER) on POST /api/games/generate with 400', async () => {
+  it('9. Rejects out-of-scope formats (PIN_ANSWER, UNKNOWN_TYPE) on POST /api/games/generate with 400 while allowing CROSSWORD and MIXED', async () => {
     resetAllRateLimiters();
 
-    for (const disallowedType of ['CROSSWORD', 'MIXED', 'PIN_ANSWER', 'UNKNOWN_TYPE']) {
+    for (const disallowedType of ['PIN_ANSWER', 'UNKNOWN_TYPE']) {
       const res = await request(app).post('/api/games/generate').send({
         sourceId,
         gameType: disallowedType,
