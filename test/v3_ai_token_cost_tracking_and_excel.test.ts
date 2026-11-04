@@ -21,6 +21,8 @@ import { roomStore } from '../src/multiplayer/room.store.js';
 import { setAdventureAssetImageProvider } from '../src/services/adventure-asset-pack.service.js';
 import { AiProviderUsageMetadata, aiObservabilityService } from '../src/services/ai.observability.service.js';
 import { AiModelProvider, aiQuestionService } from '../src/services/ai.question.service.js';
+import { exportService } from '../src/services/export.service.js';
+import { runExportAiCostCli } from '../src/scripts/export-ai-cost-report.js';
 import { sourceStore } from '../src/storage/source.store.js';
 import { closeDatabase, getDatabase, initDatabase } from '../src/storage/sqlite.db.js';
 
@@ -851,6 +853,294 @@ describe('V3 AI Token & Cost Tracking + 4-Sheet Excel Export (All 35 Mandatory C
     assert.ok(createAdvRes.body.data.settings.adventureConfig.assets.background.url);
   });
 
+  it('Per-Game-Creation Token & Cost Tracking + CSV/XLSX Export with Filters (All 6 Mock usageMetadata Cases)', async () => {
+    getDatabase().prepare('DELETE FROM ai_usage_logs').run();
+    resetAllRateLimiters();
+
+    // Case 1: Successful game creation (5 questions requested, 5 generated) -> records exact tokens, Input Cost, Output Cost, Total Cost VND, Status = SUCCESS
+    const fiveValidQuestions = Array.from({ length: 5 }, (_, idx) => ({
+      id: `q_five_${idx + 1}`,
+      type: 'MULTIPLE_CHOICE',
+      question: `Câu hỏi kiểm thử số ${idx + 1}: Quy định đội mũ bảo hiểm khi đi xe mô tô là gì?`,
+      choices: [
+        'A. Bắt buộc đội mũ đạt chuẩn và cài quai đúng quy cách',
+        'B. Chỉ cần đội khi đi cao tốc',
+        'C. Không bắt buộc với người ngồi sau',
+        'D. Chỉ đội vào ban đêm',
+      ],
+      correctAnswer: 'A. Bắt buộc đội mũ đạt chuẩn và cài quai đúng quy cách',
+      explanation: 'Theo quy định an toàn giao thông.',
+      difficulty: 'MEDIUM',
+    }));
+    mockProvider.responsesQueue = [fiveValidQuestions];
+    mockProvider.usageQueue = [
+      {
+        provider: 'gemini',
+        model: 'gemini-2.5-flash',
+        inputTokens: 100_000, // $0.03
+        outputTokens: 20_000, // $0.05
+        cachedTokens: 0,
+        thinkingTokens: 0,
+        totalTokens: 120_000,
+        usageReportedByProvider: true,
+      },
+    ];
+    const success5Res = await request(app)
+      .post('/api/games/generate')
+      .set('Authorization', `Bearer ${creatorToken}`)
+      .send({
+        sourceId: sampleSourceId,
+        title: 'Game 5 Câu Thành Công',
+        gameType: 'MULTIPLE_CHOICE',
+        questionCount: 5,
+      });
+    assert.equal(success5Res.status, 200);
+    const success5GameId = success5Res.body.data.gameId;
+
+    // Case 2: Failed game creation after Gemini responds (Gemini returned usageMetadata, then response failed schema validation) -> still logs tokens & cost with Status = FAILED
+    mockProvider.responsesQueue = [
+      [
+        {
+          id: 'q_invalid_only',
+          type: 'MULTIPLE_CHOICE',
+          question: 'Câu hỏi lỗi thiếu lựa chọn?',
+          choices: ['A. Chỉ có 1 đáp án'],
+          correctAnswer: 'A. Chỉ có 1 đáp án',
+        },
+      ],
+    ];
+    mockProvider.usageQueue = [
+      {
+        provider: 'gemini',
+        model: 'gemini-2.5-flash',
+        inputTokens: 50_000, // $0.015
+        outputTokens: 10_000, // $0.025
+        cachedTokens: 0,
+        thinkingTokens: 0,
+        totalTokens: 60_000,
+        usageReportedByProvider: true,
+      },
+    ];
+    const failedAfterGeminiRes = await request(app)
+      .post('/api/games/generate')
+      .set('Authorization', `Bearer ${creatorToken}`)
+      .send({
+        sourceId: sampleSourceId,
+        title: 'Game Thất Bại Sau Khi Gemini Trả Phản Hồi',
+        gameType: 'MULTIPLE_CHOICE',
+        questionCount: 5,
+      });
+    assert.equal(failedAfterGeminiRes.status, 422);
+
+    // Case 3 & Case 4: Game creation with cachedTokens AND thinkingTokens (10 questions requested, only 5 returned -> PARTIAL status)
+    // Non-cached input: (100,000 - 40,000) * $0.30 / 1M = $0.018
+    // Cached input: 40,000 * $0.075 / 1M = $0.003 -> Input Cost USD = $0.021
+    // Output + Thinking: (10,000 + 6,000) * $2.50 / 1M = $0.040 -> Output Cost USD = $0.040
+    // Total Cost VND = ($0.021 + $0.040) * 25,500 = $0.061 * 25,500 = 1,555.5 -> 1,556 VNĐ
+    mockProvider.responsesQueue = [fiveValidQuestions];
+    mockProvider.usageQueue = [
+      {
+        provider: 'gemini',
+        model: 'gemini-2.5-flash',
+        inputTokens: 100_000,
+        outputTokens: 10_000,
+        cachedTokens: 40_000,
+        thinkingTokens: 6_000,
+        totalTokens: 116_000,
+        usageReportedByProvider: true,
+      },
+    ];
+    const partial10Res = await request(app)
+      .post('/api/games/generate')
+      .set('Authorization', `Bearer ${creatorToken}`)
+      .send({
+        sourceId: sampleSourceId,
+        title: 'Game 10 Câu Có Cache Và Thinking (Partial 5/10)',
+        gameType: 'MULTIPLE_CHOICE',
+        questionCount: 10,
+      });
+    assert.equal(partial10Res.status, 200);
+    const partial10GameId = partial10Res.body.data.gameId;
+
+    // Also verify Case 4 when caller pre-summed thinkingTokens inside outputTokens (totalTokens <= inputTokens + outputTokens): must NOT double count thinkingTokens
+    const preSummedThinkingCalc = calculateAiCallCost({
+      provider: 'gemini',
+      model: 'gemini-2.5-flash',
+      status: 'SUCCESS',
+      inputTokens: 100_000,
+      outputTokens: 16_000, // already includes 6,000 thinking
+      cachedTokens: 40_000,
+      thinkingTokens: 6_000,
+      totalTokens: 116_000, // 100,000 + 16,000 = 116,000 <= rawIn + rawOut
+      billingMode: 'PAID',
+    });
+    assert.equal(preSummedThinkingCalc.billableOutputTokens, 16_000, 'Must not double-count thinkingTokens when already included in outputTokens');
+    assert.equal(preSummedThinkingCalc.outputCostUsd, 0.04);
+
+    // Case 5: Multi-request game creation (MIXED primary + supplemental retry) -> aggregates all requests for that game creation
+    mockProvider.responsesQueue = [
+      [
+        {
+          id: 'q_mix_p1',
+          type: 'MULTIPLE_CHOICE',
+          question: 'Chu kỳ thay dầu nhớt động cơ xe máy là bao nhiêu km?',
+          choices: ['A. 500 km', 'B. 1.500 - 2.000 km', 'C. 5.000 km', 'D. 10.000 km'],
+          correctAnswer: 'B. 1.500 - 2.000 km',
+          explanation: 'Theo tài liệu.',
+          difficulty: 'MEDIUM',
+        },
+      ],
+      [
+        {
+          id: 'q_mix_s1',
+          type: 'QUICK_BUTTON',
+          question: 'Người điều khiển xe mô tô bắt buộc phải đội mũ bảo hiểm đạt chuẩn.',
+          choices: ['Đúng', 'Sai'],
+          correctAnswer: 'Đúng',
+          explanation: 'Theo tài liệu.',
+          difficulty: 'EASY',
+        },
+      ],
+    ];
+    mockProvider.usageQueue = [
+      {
+        provider: 'gemini',
+        model: 'gemini-2.5-flash',
+        inputTokens: 30_000,
+        outputTokens: 5_000,
+        cachedTokens: 10_000,
+        thinkingTokens: 1_000,
+        totalTokens: 36_000,
+        usageReportedByProvider: true,
+      },
+      {
+        provider: 'gemini',
+        model: 'gemini-2.5-flash',
+        inputTokens: 20_000,
+        outputTokens: 4_000,
+        cachedTokens: 5_000,
+        thinkingTokens: 1_000,
+        totalTokens: 25_000,
+        usageReportedByProvider: true,
+      },
+    ];
+    const multiReqMixRes = await request(app)
+      .post('/api/games/generate')
+      .set('Authorization', `Bearer ${creatorToken}`)
+      .send({
+        sourceId: sampleSourceId,
+        title: 'Game MIXED Đa Request',
+        gameType: 'MIXED',
+        questionCount: 2,
+        mixedDistribution: {
+          MULTIPLE_CHOICE: 50,
+          QUICK_BUTTON: 50,
+          FILL_IN_THE_BLANK: 0,
+          CROSSWORD: 0,
+        },
+      });
+    assert.equal(multiReqMixRes.status, 200);
+    const multiReqGameId = multiReqMixRes.body.data.gameId;
+
+    // Verify all 5 cases in getAdminAiCostReport()
+    const fullReport = aiObservabilityService.getAdminAiCostReport();
+    assert.equal(fullReport.byGame.length, 4);
+
+    const g1 = fullReport.byGame.find((g) => g.gameId === success5GameId)!;
+    assert.ok(g1);
+    assert.equal(g1.gameType, 'MULTIPLE_CHOICE');
+    assert.equal(g1.requestedQuestions, 5);
+    assert.equal(g1.generatedQuestions, 5);
+    assert.equal(g1.inputTokens, 100_000);
+    assert.equal(g1.outputTokens, 20_000);
+    assert.equal(g1.inputCostUsd, 0.03);
+    assert.equal(g1.outputCostUsd, 0.05);
+    assert.equal(g1.paidEquivalentCostVnd, 2040);
+    assert.equal(g1.status, 'SUCCESS');
+
+    const gFail = fullReport.byGame.find((g) => g.status === 'FAILED')!;
+    assert.ok(gFail, 'Failed game creation after Gemini responds must still be recorded');
+    assert.equal(gFail.requestedQuestions, 5);
+    assert.equal(gFail.generatedQuestions, 0);
+    assert.equal(gFail.inputTokens, 50_000);
+    assert.equal(gFail.outputTokens, 10_000);
+    assert.equal(gFail.inputCostUsd, 0.015);
+    assert.equal(gFail.outputCostUsd, 0.025);
+    assert.equal(gFail.paidEquivalentCostVnd, 1020);
+
+    const gPartial = fullReport.byGame.find((g) => g.gameId === partial10GameId)!;
+    assert.ok(gPartial);
+    assert.equal(gPartial.requestedQuestions, 10);
+    assert.equal(gPartial.generatedQuestions, 5);
+    assert.equal(gPartial.cachedTokens, 40_000);
+    assert.equal(gPartial.thinkingTokens, 6_000);
+    assert.equal(gPartial.totalTokens, 116_000);
+    assert.equal(gPartial.inputCostUsd, 0.021);
+    assert.equal(gPartial.outputCostUsd, 0.04);
+    assert.equal(gPartial.paidEquivalentCostVnd, 1556);
+    assert.equal(gPartial.status, 'PARTIAL');
+
+    const gMulti = fullReport.byGame.find((g) => g.gameId === multiReqGameId)!;
+    assert.ok(gMulti);
+    assert.equal(gMulti.requestCount, 2);
+    assert.equal(gMulti.requestedQuestions, 2);
+    assert.equal(gMulti.generatedQuestions, 2);
+    assert.equal(gMulti.inputTokens, 50_000);
+    assert.equal(gMulti.outputTokens, 9_000);
+    assert.equal(gMulti.cachedTokens, 15_000);
+    assert.equal(gMulti.thinkingTokens, 2_000);
+    assert.equal(gMulti.totalTokens, 61_000);
+    assert.equal(gMulti.status, 'SUCCESS');
+
+    // Case 6: Filter by gameType, questionCount (5 vs 10), status (SUCCESS / PARTIAL / FAILED) & Export CSV + XLSX with Total Row
+    const filter5Questions = aiObservabilityService.getAdminAiCostReport({ questionCount: 5 });
+    assert.equal(filter5Questions.byGame.length, 2, 'Must filter to the 2 runs with requestedQuestions = 5');
+
+    const filter10Questions = aiObservabilityService.getAdminAiCostReport({ questionCount: 10 });
+    assert.equal(filter10Questions.byGame.length, 1);
+    assert.equal(filter10Questions.byGame[0].gameId, partial10GameId);
+
+    const filterPartialStatus = aiObservabilityService.getAdminAiCostReport({ status: 'PARTIAL' });
+    assert.equal(filterPartialStatus.byGame.length, 1);
+    assert.equal(filterPartialStatus.byGame[0].gameId, partial10GameId);
+
+    const filterFailedStatus = aiObservabilityService.getAdminAiCostReport({ status: 'FAILED' });
+    assert.equal(filterFailedStatus.byGame.length, 1);
+    assert.equal(filterFailedStatus.byGame[0].status, 'FAILED');
+
+    // Export CSV and XLSX via exportService.exportGameCreationCostReport & CLI helper
+    const csvExport = exportService.exportGameCreationCostReport(fullReport, 'csv');
+    assert.equal(typeof csvExport.body, 'string');
+    assert.ok((csvExport.body as string).includes('Thời gian,Game Type,Requested Questions,Generated Questions,Model,Input Tokens,Output Tokens,Thinking Tokens,Cached Tokens,Total Tokens,Input Cost (USD),Output Cost (USD),Total Cost (VNĐ),Status'));
+    assert.ok((csvExport.body as string).includes('TỔNG CỘNG'));
+
+    const xlsxExport = exportService.exportGameCreationCostReport(fullReport, 'xlsx');
+    const wbCreation = XLSX.read(xlsxExport.body as Buffer, { type: 'buffer' });
+    const rowsCreation = XLSX.utils.sheet_to_json<any[]>(wbCreation.Sheets['CHI PHÍ TẠO GAME'], { header: 1 });
+    assert.equal(rowsCreation.length, 1 + 4 + 1); // header + 4 game creations + 1 total row
+    const totalRowCreation = rowsCreation[rowsCreation.length - 1];
+    assert.equal(totalRowCreation[0], 'TỔNG CỘNG');
+    assert.equal(totalRowCreation[5], 300_000); // Total Input Tokens: 100k + 50k + 100k + 50k
+    assert.equal(totalRowCreation[6], 49_000);  // Total Output Tokens: 20k + 10k + 10k + 9k
+    assert.equal(totalRowCreation[7], 8_000);   // Total Thinking Tokens: 0 + 0 + 6k + 2k
+    assert.equal(totalRowCreation[9], 357_000); // Total Tokens: 120k + 60k + 116k + 61k
+
+    // Test CLI script runner (`runExportAiCostCli`)
+    const tmpExportDir = path.join(os.tmpdir(), `ai_cost_cli_export_${Date.now()}`);
+    const cliResult = runExportAiCostCli({
+      dbPath: tempDbPath,
+      format: 'both',
+      outDir: tmpExportDir,
+    });
+    assert.equal(cliResult.totalGenerations, 4);
+    assert.equal(cliResult.totalTokens, 357_000);
+    assert.equal(cliResult.filesWritten.length, 2);
+    for (const f of cliResult.filesWritten) {
+      assert.ok(fs.existsSync(f));
+      fs.unlinkSync(f);
+    }
+  });
+
   it('Browser E2E V2 (Full-width Admin layout, 4 KPIs, 3 time filters, NO Tech Accordion, NO Model AI column, 6-column Library games table, duplicate titles not merged, orphan/unsaved/deleted games excluded, responsive 360/390/768/1024/1440/1920)', async () => {
     process.env.NODE_ENV = 'development';
     process.env.ADMIN_COST_DEMO_MODE = 'true';
@@ -1128,7 +1418,7 @@ describe('V3 AI Token & Cost Tracking + 4-Sheet Excel Export (All 35 Mandatory C
       }))()`);
       assert.ok(homeLayoutCheck.scrollWidth <= homeLayoutCheck.innerWidth + 1);
 
-      // 2. Verify Sidebar order: Tạo game bằng AI, Trang Chủ, Khám phá, Thư viện, Thống kê, Admin, Nhập mã PIN
+      // 2. Verify Sidebar order: Tạo game bằng AI, Trang Chủ, Khám phá, Thư viện, Thống kê, Nhập mã PIN (Admin removed)
       const sidebarItems = await page.eval(`(() => {
         window.__SPA_MARKER__ = 'NO_RELOAD_MARKER_123';
         const aside = document.querySelector('aside.app-layout-left-nav');
@@ -1148,322 +1438,60 @@ describe('V3 AI Token & Cost Tracking + 4-Sheet Excel Export (All 35 Mandatory C
           'Khám phá',
           'Thư viện',
           'Thống kê',
-          'Admin',
           'Nhập mã PIN',
         ],
-        'Sidebar must include Admin right below Thống kê and above Nhập mã PIN'
+        'Sidebar must NOT include Admin after Task 1 removal'
       );
 
-      // 3. UI-01: Click Admin in Sidebar -> client-side navigation to /?tab=admin without page reload
+      // 3. Direct access to /?tab=admin and /admin must safely redirect to default Home page (/)
+      await page.goto(`${baseUrl}/?tab=admin`);
+      await sleep(900);
+      const redirectFromQuery = await page.eval(`(() => ({
+        pathname: window.location.pathname,
+        search: window.location.search,
+        hasAdminContainer: Boolean(document.querySelector('[data-testid="admin-page-container"]')),
+        hasAdminNavBtn: Boolean(document.querySelector('#nav-item-admin')),
+        scrollWidth: document.documentElement.scrollWidth,
+        innerWidth: window.innerWidth,
+      }))()`);
+      assert.equal(redirectFromQuery.pathname, '/');
+      assert.equal(redirectFromQuery.search, '', 'Direct access to /?tab=admin must clean URL to /');
+      assert.equal(redirectFromQuery.hasAdminContainer, false, 'AdminPage must not render');
+      assert.equal(redirectFromQuery.hasAdminNavBtn, false, 'Admin nav item must not exist');
+      assert.ok(redirectFromQuery.scrollWidth <= redirectFromQuery.innerWidth + 1);
+
+      // Test SPA path /admin (simulating Vercel SPA rewrite to index.html)
       await page.eval(`(() => {
-        const btn = document.querySelector('#nav-item-admin');
-        if (btn) btn.click();
+        window.history.pushState({}, '', '/admin');
+        window.dispatchEvent(new PopStateEvent('popstate'));
       })()`);
-      await sleep(1200);
+      await sleep(500);
+      const redirectFromPath = await page.eval(`(() => ({
+        pathname: window.location.pathname,
+        search: window.location.search,
+        hasAdminContainer: Boolean(document.querySelector('[data-testid="admin-page-container"]')),
+      }))()`);
+      assert.equal(redirectFromPath.pathname, '/');
+      assert.equal(redirectFromPath.search, '');
+      assert.equal(redirectFromPath.hasAdminContainer, false);
 
-      const desktopState = await page.eval(`(() => {
-        const bodyText = document.body.innerText;
-        const activeTabEl = document.querySelector('[role="tab"][aria-selected="true"]');
-        const adminNavBtn = document.querySelector('#nav-item-admin');
-        const sidebarEl = document.querySelector('aside.app-layout-left-nav');
-        const mainEl = document.querySelector('main.app-main-content-with-nav');
-        const adminContainerEl = document.querySelector('[data-testid="admin-page-container"]');
-
-        const sidebarRect = sidebarEl ? sidebarEl.getBoundingClientRect() : null;
-        const mainRect = mainEl ? mainEl.getBoundingClientRect() : null;
-        const adminRect = adminContainerEl ? adminContainerEl.getBoundingClientRect() : null;
-        const adminComputed = adminContainerEl ? window.getComputedStyle(adminContainerEl) : null;
-
-        const headerTitle = (document.querySelector('[data-testid="ai-cost-header-title"]')?.textContent || '').trim();
-        const headerSubtitle = (document.querySelector('[data-testid="ai-cost-header-subtitle"]')?.textContent || '').trim();
-        const filterButtons = Array.from(document.querySelectorAll('[data-testid="ai-cost-time-filter-group"] button')).map((b) => ({
-          text: (b.textContent || '').trim(),
-          pressed: b.getAttribute('aria-pressed'),
-        }));
-        const exportBtnText = (document.querySelector('[data-testid="admin-export-ai-cost-excel-btn"]')?.textContent || '').trim();
-        const kpiCards = Array.from(document.querySelectorAll('[data-testid="ai-cost-kpi-grid"] > div')).map((c) => (c.textContent || '').trim());
-
-        const tableHeading = (document.querySelector('[data-testid="ai-cost-per-game-heading"]')?.textContent || '').trim();
-        const tableDescription = (document.querySelector('[data-testid="ai-cost-per-game-description"]')?.textContent || '').trim();
-        const tableHeaders = Array.from(document.querySelectorAll('[data-testid="ai-cost-per-game-table"] thead th')).map((th) => (th.textContent || '').trim());
-        const gameRows = Array.from(document.querySelectorAll('[data-testid="ai-cost-game-row"]')).map((tr) => ({
-          gameId: tr.getAttribute('data-game-id') || '',
-          cells: Array.from(tr.querySelectorAll('td')).map((td) => (td.textContent || '').trim()),
-        }));
-
-        const accordionEl = document.querySelector('[data-testid="ai-cost-tech-accordion"]');
-        const accordionToggle = document.querySelector('[data-testid="ai-cost-tech-accordion-toggle"]');
-        const accordionContent = document.querySelector('[data-testid="ai-cost-tech-accordion-content"]');
-
+      // Check Mobile viewport (390x844) bottom navigation has no Admin item and no overflow
+      await page.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+      await sleep(400);
+      const mobileNavCheck = await page.eval(`(() => {
+        const nav = document.querySelector('nav.mobile-bottom-nav');
+        const items = nav ? Array.from(nav.querySelectorAll('button')).map((b) => (b.textContent || '').trim()) : [];
         return {
-          url: window.location.href,
-          spaMarker: window.__SPA_MARKER__,
+          items,
           scrollWidth: document.documentElement.scrollWidth,
           innerWidth: window.innerWidth,
-          sidebarRight: sidebarRect ? sidebarRect.right : 0,
-          mainWidth: mainRect ? mainRect.width : 0,
-          adminLeft: adminRect ? adminRect.left : 0,
-          adminWidth: adminRect ? adminRect.width : 0,
-          adminMaxWidth: adminComputed ? adminComputed.maxWidth : '',
-          hasBlockedScreen: bodyText.includes('Khu Vực Quản Trị Hệ Thống'),
-          hasDemoBadge: bodyText.includes('Chế độ Demo Local'),
-          activeTabText: (activeTabEl?.textContent || '').trim(),
-          adminNavFontWeight: adminNavBtn ? window.getComputedStyle(adminNavBtn).fontWeight : '',
-          headerTitle,
-          headerSubtitle,
-          filterButtons,
-          exportBtnText,
-          kpiCount: kpiCards.length,
-          kpiCards,
-          tableHeading,
-          tableDescription,
-          tableHeaders,
-          gameRows,
-          hasTechAccordion: Boolean(accordionEl || accordionToggle || accordionContent),
-          hasTechHeadingText: bodyText.includes('Thông tin kỹ thuật (token, giá model, chi tiết API)'),
         };
       })()`);
-
-      assert.equal(desktopState.spaMarker, 'NO_RELOAD_MARKER_123', 'Must navigate client-side without full page reload');
-      assert.ok(desktopState.url.endsWith('/?tab=admin'), 'URL must update to /?tab=admin');
-      assert.equal(desktopState.hasBlockedScreen, false);
-      assert.equal(desktopState.hasDemoBadge, true);
-      assert.equal(desktopState.activeTabText, 'Chi phí sử dụng AI');
-      assert.equal(desktopState.adminNavFontWeight, '800');
-
-      // LAYOUT-01, LAYOUT-02, LAYOUT-03, LAYOUT-04: Full width right of Sidebar, no 1100px cap, no overlap, no horizontal scroll
-      assert.equal(desktopState.adminMaxWidth, 'none', 'LAYOUT-02: Admin container must not have max-width: 1100px');
-      assert.ok(
-        desktopState.adminWidth >= desktopState.mainWidth - 2 && desktopState.adminWidth > 1180,
-        `LAYOUT-01: Admin container must fill full width right of Sidebar (adminWidth=${desktopState.adminWidth}, mainWidth=${desktopState.mainWidth})`
-      );
-      assert.ok(
-        desktopState.adminLeft >= desktopState.sidebarRight - 1,
-        `LAYOUT-03: Admin container must not overlap Sidebar (adminLeft=${desktopState.adminLeft}, sidebarRight=${desktopState.sidebarRight})`
-      );
-      assert.ok(
-        desktopState.scrollWidth <= desktopState.innerWidth + 1,
-        `LAYOUT-04: Must not cause horizontal page scroll (scrollWidth=${desktopState.scrollWidth}, innerWidth=${desktopState.innerWidth})`
-      );
-
-      // UI-02, UI-03, UI-04: 4 KPIs, 3 time filters, Export Excel button
-      assert.equal(desktopState.headerTitle, 'Chi phí sử dụng AI');
-      assert.equal(desktopState.headerSubtitle, 'Theo dõi chi phí tạo game');
-      assert.deepEqual(desktopState.filterButtons, [
-        { text: '7 ngày', pressed: 'false' },
-        { text: 'Tháng này', pressed: 'true' },
-        { text: 'Tất cả', pressed: 'false' },
-      ]);
-      assert.equal(desktopState.exportBtnText, 'Xuất Excel');
-      assert.equal(desktopState.kpiCount, 4);
-      assert.ok(desktopState.kpiCards[0].includes('Game đã tạo'));
-      assert.ok(desktopState.kpiCards[1].includes('Tổng chi phí AI quy đổi'));
-      assert.ok(desktopState.kpiCards[1].includes('₫'));
-      assert.ok(desktopState.kpiCards[2].includes('Trung bình / game'));
-      assert.ok(desktopState.kpiCards[2].includes('₫'));
-      assert.ok(desktopState.kpiCards[3].includes('Token đã dùng'));
-
-      // UI-05: Section "Thông tin kỹ thuật" is completely deleted
-      assert.equal(desktopState.hasTechAccordion, false, 'UI-05: Tech accordion DOM elements must be completely removed');
-      assert.equal(desktopState.hasTechHeadingText, false, 'UI-05: Tech accordion text must not appear on screen');
-
-      // UI-06 & COST-01: Table has strictly 6 columns and NO "Model AI" column
-      assert.equal(desktopState.tableHeading, 'Chi phí các game trong Thư viện');
-      assert.equal(desktopState.tableDescription, 'Chi tiết token và chi phí AI của từng game đã lưu.');
-      assert.deepEqual(
-        desktopState.tableHeaders,
-        ['Tên game', 'Token Input', 'Token Output', 'Tiền Input', 'Tiền Output', 'Tổng cộng'],
-        'COST-01 & UI-06: Table must have strictly 6 columns without Model AI'
-      );
-      assert.ok(!desktopState.tableHeaders.includes('Model AI'));
-
-      // LIB-01, LIB-02, LIB-03, LIB-04: Only saved Library games appear in the table
-      const rowTitles = desktopState.gameRows.map((r: any) => r.cells[0]);
-      assert.ok(rowTitles.includes('Game Đào Tạo Hội Nhập V2'), 'LIB-01: Saved Library game must appear');
-      assert.ok(!rowTitles.some((t: string) => t.includes('Tác vụ AI lẻ')), 'LIB-02: Orphan AI tasks must NOT appear');
-      assert.ok(!rowTitles.includes('Game Đào Tạo Chuẩn A'), 'LIB-03: Unsaved game must NOT appear');
-      assert.ok(!rowTitles.includes('Game Đi Cảnh Nhiều Request AI'), 'LIB-04: Deleted game must NOT appear');
-
-      // LIB-05: Duplicate-titled games in Library must NOT be merged into 1 row
-      const dupRows = desktopState.gameRows.filter((r: any) => r.cells[0] === 'Game Trùng Tên Thư Viện');
-      assert.equal(dupRows.length, 2, 'LIB-05: Two saved games with the same title must render as 2 separate rows');
-      assert.notEqual(dupRows[0].gameId, dupRows[1].gameId, 'LIB-05: Each row must link to its distinct gameId');
-
-      // COST-02..COST-07 & COST-09: Verify exact token & VND cost columns for multi-request Library game ("Game Đào Tạo Hội Nhập V2")
-      const lib1Row = desktopState.gameRows.find((r: any) => r.gameId === libGame1Id);
-      assert.ok(lib1Row, 'Must find Game Đào Tạo Hội Nhập V2 row by gameId');
-      assert.deepEqual(
-        lib1Row.cells,
-        [
-          'Game Đào Tạo Hội Nhập V2',
-          '1.000.000', // Token Input (600k + 400k)
-          '350.588',   // Token Output (200k + 150,588)
-          '7.650 ₫',   // Tiền Input
-          '22.350 ₫',  // Tiền Output
-          '30.000 ₫',  // Tổng cộng
-        ],
-        'COST-02..COST-07: Multi-request Library game must aggregate Input/Output tokens and VND costs accurately'
-      );
-
-      // Verify duplicate Game A (120.000 in -> 918 ₫, 35.000 out -> 2.231 ₫, Tổng cộng -> 3.149 ₫)
-      const dupRowA = desktopState.gameRows.find((r: any) => r.gameId === dupGameAId);
-      assert.ok(dupRowA);
-      assert.deepEqual(dupRowA.cells, [
-        'Game Trùng Tên Thư Viện',
-        '120.000',
-        '35.000',
-        '918 ₫',
-        '2.231 ₫',
-        '3.149 ₫',
-      ]);
-
-      // COST-08: Verify Library game with missing token usage shows "Chưa xác định" and never fake 0 ₫
-      const unknownRow = desktopState.gameRows.find((r: any) => r.gameId === unknownUsageGameId);
-      assert.ok(unknownRow);
-      assert.deepEqual(
-        unknownRow.cells,
-        [
-          'Game Thiếu Dữ Liệu Token',
-          'Chưa xác định',
-          'Chưa xác định',
-          'Chưa xác định',
-          'Chưa xác định',
-          'Chưa xác định',
-        ],
-        'COST-08: Missing usage/pricing must show Chưa xác định instead of 0 ₫'
-      );
-
-      // Section 12 Case 2: Game with 1 SUCCESS question generation + 1 FAILED cover image call (gemini-3.1-flash-image, null tokens)
-      // must display exact Tiền Input (1.530 ₫), Tiền Output (3.825 ₫), Tổng cộng (5.355 ₫) and NEVER "Chưa xác định"
-      const realPatternRow = desktopState.gameRows.find((r: any) => r.gameId === realPatternGameId);
-      assert.ok(realPatternRow, 'Must find Game Thực Tế Có Ảnh Bìa Lỗi row');
-      assert.deepEqual(
-        realPatternRow.cells,
-        [
-          'Game Thực Tế Có Ảnh Bìa Lỗi',
-          '200.000',
-          '60.000',
-          '1.530 ₫',
-          '3.825 ₫',
-          '5.355 ₫',
-        ],
-        'Failed auxiliary image request with null tokens must not poison Tiền Input / Tiền Output into Chưa xác định'
-      );
-
-      // Section 12 Case 10: Game with true 0 tokens must display "0 ₫" and NOT "Chưa xác định"
-      const zeroTokenRow = desktopState.gameRows.find((r: any) => r.gameId === zeroTokenGameId);
-      assert.ok(zeroTokenRow, 'Must find Game Không Tốn Token row');
-      assert.deepEqual(
-        zeroTokenRow.cells,
-        [
-          'Game Không Tốn Token',
-          '0',
-          '0',
-          '0 ₫',
-          '0 ₫',
-          '0 ₫',
-        ],
-        'True zero-token game must display 0 ₫ instead of Chưa xác định'
-      );
+      assert.ok(!mobileNavCheck.items.includes('Admin'), 'Mobile bottom nav must not include Admin');
+      assert.ok(mobileNavCheck.scrollWidth <= mobileNavCheck.innerWidth + 1);
+      await page.setViewport({ width: 1440, height: 900, isMobile: false, hasTouch: false });
 
       const artifactDir = 'C:\\Users\\QUOC SIEU\\.gemini\\antigravity\\brain\\83ff8c51-8136-444f-904b-1284fcdde2fb';
-      if (fs.existsSync(artifactDir)) {
-        const desktopBuf = await page.screenshot({ fullPage: false });
-        fs.writeFileSync(
-          path.join(artifactDir, 'v3_redesigned_ai_cost_v2_desktop_1440x900.png'),
-          desktopBuf
-        );
-      }
-
-      // UI-03: Test switching filters (7 ngày -> Tất cả -> Tháng này)
-      await page.eval(`(() => {
-        const btn7d = document.querySelector('[data-testid="cost-preset-last_7_days"]');
-        if (btn7d) btn7d.click();
-      })()`);
-      await sleep(600);
-      const filter7dPressed = await page.eval(`document.querySelector('[data-testid="cost-preset-last_7_days"]')?.getAttribute('aria-pressed')`);
-      assert.equal(filter7dPressed, 'true');
-
-      await page.eval(`(() => {
-        const btnAll = document.querySelector('[data-testid="cost-preset-all"]');
-        if (btnAll) btnAll.click();
-      })()`);
-      await sleep(600);
-      const filterAllPressed = await page.eval(`document.querySelector('[data-testid="cost-preset-all"]')?.getAttribute('aria-pressed')`);
-      assert.equal(filterAllPressed, 'true');
-
-      // LAYOUT-06: Test all 6 mandatory viewports (1920px, 1440px, 1024px, 768px, 390px, 360px)
-      for (const vp of [
-        { width: 1920, height: 1080, isMobile: false },
-        { width: 1440, height: 900, isMobile: false },
-        { width: 1024, height: 768, isMobile: false },
-        { width: 768, height: 1024, isMobile: true },
-        { width: 390, height: 844, isMobile: true },
-        { width: 360, height: 800, isMobile: true },
-      ]) {
-        await page.setViewport({ width: vp.width, height: vp.height, isMobile: vp.isMobile, hasTouch: vp.isMobile });
-        await sleep(350);
-        const vpCheck = await page.eval(`(() => {
-          const adminEl = document.querySelector('[data-testid="admin-page-container"]');
-          const mainEl = document.querySelector('main.app-main-content-with-nav');
-          const adminRect = adminEl ? adminEl.getBoundingClientRect() : null;
-          const mainRect = mainEl ? mainEl.getBoundingClientRect() : null;
-          return {
-            scrollWidth: document.documentElement.scrollWidth,
-            innerWidth: window.innerWidth,
-            adminWidth: adminRect ? adminRect.width : 0,
-            mainWidth: mainRect ? mainRect.width : 0,
-            hasKpiGrid: Boolean(document.querySelector('[data-testid="ai-cost-kpi-grid"]')),
-            hasTable: Boolean(document.querySelector('[data-testid="ai-cost-per-game-table"]')),
-            hasExportBtn: Boolean(document.querySelector('[data-testid="admin-export-ai-cost-excel-btn"]')),
-            hasTechAccordion: Boolean(document.querySelector('[data-testid="ai-cost-tech-accordion"]')),
-          };
-        })()`);
-        assert.ok(
-          vpCheck.scrollWidth <= vpCheck.innerWidth + 1,
-          `Viewport ${vp.width}x${vp.height} must not overflow horizontally (scrollWidth=${vpCheck.scrollWidth}, innerWidth=${vpCheck.innerWidth})`
-        );
-        assert.ok(
-          vpCheck.adminWidth >= vpCheck.mainWidth - 2,
-          `Viewport ${vp.width}x${vp.height} Admin container must fill main content width (adminWidth=${vpCheck.adminWidth}, mainWidth=${vpCheck.mainWidth})`
-        );
-        assert.equal(vpCheck.hasKpiGrid, true);
-        assert.equal(vpCheck.hasTable, true);
-        assert.equal(vpCheck.hasExportBtn, true);
-        assert.equal(vpCheck.hasTechAccordion, false);
-
-        if (vp.width === 1920 && fs.existsSync(artifactDir)) {
-          const wideBuf = await page.screenshot({ fullPage: false });
-          fs.writeFileSync(
-            path.join(artifactDir, 'v3_redesigned_ai_cost_v2_desktop_1920x1080.png'),
-            wideBuf
-          );
-        }
-        if (vp.width === 390 && fs.existsSync(artifactDir)) {
-          const mobileBuf = await page.screenshot({ fullPage: false });
-          fs.writeFileSync(
-            path.join(artifactDir, 'v3_redesigned_ai_cost_v2_mobile_390x844.png'),
-            mobileBuf
-          );
-        }
-      }
-
-      // LIB-06: Verify Empty State when no Library games have AI cost data in the period
-      getDatabase().prepare('DELETE FROM ai_usage_logs WHERE game_id IS NOT NULL').run();
-      await page.setViewport({ width: 1440, height: 900, isMobile: false, hasTouch: false });
-      await page.eval(`(() => {
-        const btnThisMonth = document.querySelector('[data-testid="cost-preset-this_month"]');
-        if (btnThisMonth) btnThisMonth.click();
-      })()`);
-      await sleep(700);
-      const emptyStateText = await page.eval(
-        `(document.querySelector('[data-testid="ai-cost-per-game-empty"]')?.textContent || '').trim()`
-      );
-      assert.equal(
-        emptyStateText,
-        'Chưa có game nào trong Thư viện có dữ liệu chi phí AI ở khoảng thời gian này.',
-        'LIB-06: Empty state must display exact message when no Library games exist in the selected period'
-      );
 
       // =========================================================================
       // BROWSER E2E VERIFICATION FOR TASK A: DELETE ALL GAMES WITHOUT LOGIN
@@ -1609,83 +1637,6 @@ describe('V3 AI Token & Cost Tracking + 4-Sheet Excel Export (All 35 Mandatory C
       assert.equal(afterRefresh.hasGame1, false, 'Case 4: Game 1 must not reappear after refresh');
       assert.equal(afterRefresh.hasGame2, false, 'Case 4: Game 2 must not reappear after refresh');
       assert.equal(afterRefresh.btnDisabled, true, 'Case 5: Delete All button remains disabled on empty Library');
-
-      // =========================================================================
-      // HOTFIX VERIFICATION: ADMIN SIDEBAR & PAGE IN PRODUCTION BUILD + NODE_ENV=production
-      // =========================================================================
-      const prevNodeEnvProdCheck = process.env.NODE_ENV;
-      process.env.NODE_ENV = 'production';
-      try {
-        aiObservabilityService.recordAiCall({
-          generationId: 'gen_prod_public_view',
-          gameId: libGame1Id,
-          gameTitleSnapshot: 'Game Đào Tạo Hội Nhập V2',
-          provider: 'gemini',
-          model: 'gemini-2.5-flash',
-          operation: 'GENERATE_QUESTIONS',
-          taskType: 'QUESTION_GENERATION',
-          gameType: 'MULTIPLE_CHOICE',
-          status: 'SUCCESS',
-          latencyMs: 320,
-          inputTokens: 100_000,
-          outputTokens: 20_000,
-          cachedTokens: 0,
-          thinkingTokens: 0,
-          totalTokens: 120_000,
-        });
-
-        await page.goto(`${baseUrl}/`);
-        await sleep(900);
-
-        const prodSidebarState = await page.eval(`(() => {
-          const aside = document.querySelector('aside.app-layout-left-nav');
-          const buttons = aside ? Array.from(aside.querySelectorAll('#nav-cta-create-game, nav button')) : [];
-          return {
-            items: buttons.map((b) => (b.textContent || '').trim()),
-            hasAdminBtn: Boolean(document.querySelector('#nav-item-admin')),
-          };
-        })()`);
-        assert.equal(prodSidebarState.hasAdminBtn, true, 'Admin item must appear in Sidebar on Production build');
-        assert.deepEqual(prodSidebarState.items, [
-          'Tạo game bằng AI',
-          'Trang Chủ',
-          'Khám phá',
-          'Thư viện',
-          'Thống kê',
-          'Admin',
-          'Nhập mã PIN',
-        ]);
-
-        // Click Admin in Sidebar -> opens Chi phí sử dụng AI V2 and loads live KPI & 6-column table on Production without login
-        await page.eval(`document.querySelector('#nav-item-admin')?.click()`);
-        await sleep(1000);
-
-        const prodAdminPageState = await page.eval(`(() => ({
-          url: window.location.href,
-          hasCostPanel: Boolean(document.querySelector('[data-testid="admin-ai-cost-panel"]')),
-          headerTitle: (document.querySelector('[data-testid="ai-cost-header-title"]')?.textContent || '').trim(),
-          hasBlockedScreen: document.body.innerText.includes('Khu Vực Quản Trị Hệ Thống'),
-          kpiTotalCost: (document.querySelector('[data-testid="kpi-total-paid-cost-vnd-value"]')?.textContent || '').trim(),
-          rows: Array.from(document.querySelectorAll('[data-testid="ai-cost-game-row"]')).map((tr) =>
-            Array.from(tr.querySelectorAll('td')).map((td) => (td.textContent || '').trim())
-          ),
-        }))()`);
-        assert.ok(prodAdminPageState.url.endsWith('/?tab=admin'), 'Must stay on /?tab=admin without redirecting away');
-        assert.equal(prodAdminPageState.hasBlockedScreen, false, 'Must not show blocked screen when clicking Admin');
-        assert.equal(prodAdminPageState.hasCostPanel, true, 'Must render V2 AI Cost dashboard panel');
-        assert.equal(prodAdminPageState.headerTitle, 'Chi phí sử dụng AI');
-        assert.ok(prodAdminPageState.kpiTotalCost.endsWith('₫') && prodAdminPageState.kpiTotalCost !== '0 ₫', 'Production public view must load live KPI data');
-        assert.deepEqual(prodAdminPageState.rows[0], [
-          'Game Đào Tạo Hội Nhập V2',
-          '100.000',
-          '20.000',
-          '765 ₫',
-          '1.275 ₫',
-          '2.040 ₫',
-        ]);
-      } finally {
-        process.env.NODE_ENV = prevNodeEnvProdCheck;
-      }
     } finally {
       await browser.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));

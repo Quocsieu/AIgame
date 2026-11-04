@@ -55,6 +55,13 @@ adminRouter.get(
       const model = typeof req.query.model === 'string' ? req.query.model.trim() : undefined;
       const gameType = typeof req.query.gameType === 'string' ? req.query.gameType.trim() : undefined;
       const taskType = typeof req.query.taskType === 'string' ? req.query.taskType.trim() : undefined;
+      const questionCount =
+        typeof req.query.questionCount === 'string'
+          ? req.query.questionCount.trim()
+          : typeof req.query.requestedQuestions === 'string'
+            ? req.query.requestedQuestions.trim()
+            : undefined;
+      const status = typeof req.query.status === 'string' ? req.query.status.trim() : undefined;
 
       const rawReport = aiObservabilityService.getAdminAiCostReport({
         preset: (presetRaw as any) || undefined,
@@ -63,6 +70,8 @@ adminRouter.get(
         model,
         gameType,
         taskType,
+        questionCount,
+        status,
       });
       const isAdmin = req.user?.role === 'ADMIN';
       const report = sanitizeAiCostReportForPublicView(rawReport, isAdmin);
@@ -94,6 +103,13 @@ adminRouter.get(
       const model = typeof req.query.model === 'string' ? req.query.model.trim() : undefined;
       const gameType = typeof req.query.gameType === 'string' ? req.query.gameType.trim() : undefined;
       const taskType = typeof req.query.taskType === 'string' ? req.query.taskType.trim() : undefined;
+      const questionCount =
+        typeof req.query.questionCount === 'string'
+          ? req.query.questionCount.trim()
+          : typeof req.query.requestedQuestions === 'string'
+            ? req.query.requestedQuestions.trim()
+            : undefined;
+      const status = typeof req.query.status === 'string' ? req.query.status.trim() : undefined;
 
       const rawReport = aiObservabilityService.getAdminAiCostReport({
         preset: (presetRaw as any) || undefined,
@@ -102,11 +118,19 @@ adminRouter.get(
         model,
         gameType,
         taskType,
+        questionCount,
+        status,
       });
       const isAdmin = req.user?.role === 'ADMIN';
       const report = sanitizeAiCostReportForPublicView(rawReport, isAdmin);
 
-      const exported = exportService.exportAdminAiCostReportExcel(report);
+      const formatRaw = typeof req.query.format === 'string' ? req.query.format.trim().toLowerCase() : undefined;
+      const modeRaw = typeof req.query.mode === 'string' ? req.query.mode.trim().toLowerCase() : undefined;
+
+      const exported =
+        formatRaw === 'csv' || modeRaw === 'game-creations'
+          ? exportService.exportGameCreationCostReport(report, formatRaw === 'csv' ? 'csv' : 'xlsx')
+          : exportService.exportAdminAiCostReportExcel(report);
       res.setHeader('Content-Type', exported.contentType);
       res.setHeader('Content-Disposition', `attachment; filename="${exported.filename}"`);
       res.status(200).send(exported.body);

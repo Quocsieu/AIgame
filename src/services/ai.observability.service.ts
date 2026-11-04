@@ -148,6 +148,9 @@ export interface AdminAiCostReportFilters {
   model?: string;
   gameType?: string;
   taskType?: string;
+  questionCount?: number | string | null;
+  requestedQuestions?: number | string | null;
+  status?: string | null;
 }
 
 export interface AdminAiCostApiLogItem {
@@ -168,6 +171,9 @@ export interface AdminAiCostApiLogItem {
   status: string;
   errorCode: string | null;
   latencyMs: number;
+  requestedQuestions: number;
+  generatedQuestions: number;
+  validQuestions: number;
   inputTokens: number | null;
   outputTokens: number | null;
   cachedTokens: number | null;
@@ -200,6 +206,8 @@ export interface AdminAiCostGameItem {
   gameType: string;
   createdAt: string;
   modelsUsed: string[];
+  requestedQuestions: number;
+  generatedQuestions: number;
   requestCount: number;
   successCount: number;
   failedCount: number;
@@ -216,7 +224,7 @@ export interface AdminAiCostGameItem {
   actualCostVnd: number | null;
   paidEquivalentCostUsd: number | null;
   paidEquivalentCostVnd: number | null;
-  status: 'SUCCESS' | 'PARTIAL_FAILURE' | 'FAILED' | 'USAGE_UNAVAILABLE' | 'PRICE_UNAVAILABLE';
+  status: 'SUCCESS' | 'PARTIAL' | 'PARTIAL_FAILURE' | 'FAILED' | 'USAGE_UNAVAILABLE' | 'PRICE_UNAVAILABLE';
   hasUnknownUsage: boolean;
   hasPriceUnavailable: boolean;
   isSavedInLibrary: boolean;
@@ -268,6 +276,8 @@ export interface AdminAiCostReport {
     model: string | null;
     gameType: string | null;
     taskType: string | null;
+    questionCount?: number | null;
+    status?: string | null;
   };
   billingModeConfigured: AiBillingMode;
   exchangeRate: AiExchangeRateConfig;
@@ -495,8 +505,8 @@ export class AiObservabilityService {
         costCalc.imagePriceUsd,
         costCalc.dataNote,
         input.requestedQuestions ?? 0,
-        input.generatedQuestions ?? 0,
-        input.validQuestions ?? 0,
+        input.generatedQuestions ?? (input.validQuestions ?? 0),
+        input.validQuestions ?? (input.status === 'SUCCESS' ? (input.generatedQuestions ?? 0) : 0),
         input.rejectedQuestions ?? 0,
         input.duplicateQuestions ?? 0,
         input.diagnosticsCount ?? 0,
@@ -800,21 +810,23 @@ export class AiObservabilityService {
     const rawRows = db
       .prepare(
         `SELECT
+          l.rowid AS log_rowid,
           l.*,
           g.title AS joined_game_title,
           g.game_type AS joined_game_type,
+          (SELECT COUNT(*) FROM game_questions gq WHERE gq.game_id = l.game_id) AS joined_game_question_count,
           CASE WHEN g.game_id IS NOT NULL THEN 1 ELSE 0 END AS is_saved_in_library
         FROM ai_usage_logs l
         LEFT JOIN games g ON g.game_id = l.game_id
         ${whereClause}
-        ORDER BY l.created_at DESC`
+        ORDER BY l.created_at DESC, l.rowid DESC`
       )
       .all(...params) as Record<string, any>[];
 
     const exchange = getExchangeRateConfig();
     const configuredBillingMode = getConfiguredBillingMode();
 
-    const apiLogs: AdminAiCostApiLogItem[] = rawRows.map((row) => {
+    const allApiLogs: AdminAiCostApiLogItem[] = rawRows.map((row) => {
       const logId = String(row.log_id);
       const requestId = row.request_id ? String(row.request_id) : logId;
       const provider = String(row.provider || 'gemini');
@@ -830,6 +842,9 @@ export class AiObservabilityService {
         ? String(row.task_type)
         : this.inferTaskType(operation, assetSlot, gameType);
       const status = String(row.status || 'SUCCESS');
+      const requestedQuestions = Number(row.requested_questions || 0);
+      const generatedQuestions = Number(row.generated_questions || 0);
+      const validQuestions = Number(row.valid_questions || 0);
 
       const rawIn = row.input_tokens !== null && row.input_tokens !== undefined ? Number(row.input_tokens) : null;
       const rawOut = row.output_tokens !== null && row.output_tokens !== undefined ? Number(row.output_tokens) : null;
@@ -983,6 +998,9 @@ export class AiObservabilityService {
         status,
         errorCode: row.error_code ? String(row.error_code) : null,
         latencyMs: Number(row.latency_ms || 0),
+        requestedQuestions,
+        generatedQuestions,
+        validQuestions,
         inputTokens: rawIn,
         outputTokens: rawOut,
         cachedTokens: rawCached,
@@ -1020,12 +1038,16 @@ export class AiObservabilityService {
         createdAt: string;
         modelsSet: Set<string>;
         requests: AdminAiCostApiLogItem[];
+        rowIds: number[];
+        joinedQuestionCount: number;
         isSavedInLibrary: boolean;
       }
     >();
 
     rawRows.forEach((rawRow, idx) => {
-      const item = apiLogs[idx];
+      const item = allApiLogs[idx];
+      const rowId = Number(rawRow.log_rowid || 0);
+      const joinedQCount = Number(rawRow.joined_game_question_count || 0);
       // Group by gameId if present, else by generationId if present, else by logId
       const key = item.gameId
         ? `game:${item.gameId}`
@@ -1051,11 +1073,17 @@ export class AiObservabilityService {
           createdAt: item.createdAt,
           modelsSet: new Set([item.model]),
           requests: [item],
+          rowIds: [rowId],
+          joinedQuestionCount: joinedQCount,
           isSavedInLibrary: Boolean(rawRow.is_saved_in_library),
         });
       } else {
         existing.modelsSet.add(item.model);
         existing.requests.push(item);
+        existing.rowIds.push(rowId);
+        if (joinedQCount > existing.joinedQuestionCount) {
+          existing.joinedQuestionCount = joinedQCount;
+        }
         if (item.gameId && !existing.gameId) existing.gameId = item.gameId;
         if (item.generationId && !existing.generationId) existing.generationId = item.generationId;
         if (item.gameTitle && existing.gameTitle.startsWith('Lượt tạo AI')) {
@@ -1073,7 +1101,7 @@ export class AiObservabilityService {
       }
     });
 
-    const byGame: AdminAiCostGameItem[] = Array.from(gameGroups.values()).map((grp) => {
+    const allByGame: AdminAiCostGameItem[] = Array.from(gameGroups.values()).map((grp) => {
       let reqCount = grp.requests.length;
       let successCount = 0;
       let failedCount = 0;
@@ -1097,6 +1125,53 @@ export class AiObservabilityService {
       let sumPaidUsd = 0;
       let sumPaidVnd = 0;
       let hasPaidCost = false;
+
+      // Determine requestedQuestions and generatedQuestions (actual valid questions) for this game creation run
+      const indexedReqs = grp.requests.map((r, i) => ({ req: r, rowId: grp.rowIds[i] || 0 }));
+      const primaryQuestionReqs = indexedReqs.filter(
+        ({ req }) =>
+          req.operation === 'GENERATE_QUESTIONS' ||
+          (req.taskType === 'QUESTION_GENERATION' && !req.operation.includes('SUPPLEMENTAL'))
+      );
+      const suppQuestionReqs = indexedReqs.filter(
+        ({ req }) =>
+          req.operation.includes('SUPPLEMENTAL') || req.taskType === 'QUESTION_SUPPLEMENTAL_RETRY'
+      );
+
+      let gameRequestedQuestions = 0;
+      if (primaryQuestionReqs.length > 0) {
+        gameRequestedQuestions = Math.max(0, ...primaryQuestionReqs.map(({ req }) => req.requestedQuestions));
+      } else {
+        gameRequestedQuestions = Math.max(0, ...grp.requests.map((r) => r.requestedQuestions));
+      }
+      if (gameRequestedQuestions === 0 && grp.joinedQuestionCount > 0) {
+        gameRequestedQuestions = grp.joinedQuestionCount;
+      }
+
+      let gameGeneratedQuestions = 0;
+      if (primaryQuestionReqs.length > 0 && suppQuestionReqs.length > 0) {
+        const maxPrimaryRowId = Math.max(...primaryQuestionReqs.map((x) => x.rowId));
+        const maxSuppRowId = Math.max(...suppQuestionReqs.map((x) => x.rowId));
+        if (maxPrimaryRowId > maxSuppRowId) {
+          // Recorded via AiQuestionService.generateGame where primary GENERATE_QUESTIONS is logged last with total validQuestions
+          const latestPrimary = primaryQuestionReqs.reduce((a, b) => (a.rowId >= b.rowId ? a : b)).req;
+          gameGeneratedQuestions = latestPrimary.validQuestions;
+        } else {
+          // Recorded sequentially (primary first, supplemental second): sum validQuestions across batches
+          gameGeneratedQuestions = grp.requests.reduce((acc, r) => acc + r.validQuestions, 0);
+        }
+      } else if (primaryQuestionReqs.length > 0) {
+        gameGeneratedQuestions = Math.max(...primaryQuestionReqs.map(({ req }) => req.validQuestions));
+      } else {
+        gameGeneratedQuestions = grp.requests.reduce((acc, r) => acc + r.validQuestions, 0);
+      }
+      if (
+        gameGeneratedQuestions === 0 &&
+        grp.joinedQuestionCount > 0 &&
+        grp.requests.some((r) => r.status === 'SUCCESS')
+      ) {
+        gameGeneratedQuestions = grp.joinedQuestionCount;
+      }
 
       for (const r of grp.requests) {
         if (r.status === 'SUCCESS') successCount++;
@@ -1174,15 +1249,21 @@ export class AiObservabilityService {
         }
       }
 
+      const allPrimaryFailed =
+        primaryQuestionReqs.length > 0 &&
+        primaryQuestionReqs.every(({ req }) => req.status === 'FAILED') &&
+        !grp.isSavedInLibrary;
+
       let status: AdminAiCostGameItem['status'] = 'SUCCESS';
-      if (failedCount === reqCount) {
+      if (failedCount === reqCount || allPrimaryFailed) {
         status = 'FAILED';
-      } else if (hasPriceUnavailable && !hasPaidCost) {
-        status = 'PRICE_UNAVAILABLE';
-      } else if (hasUnknownUsage && !hasAnyTokens && !hasPaidCost) {
-        status = 'USAGE_UNAVAILABLE';
-      } else if (failedCount > 0) {
-        status = 'PARTIAL_FAILURE';
+      } else if (
+        failedCount > 0 ||
+        (gameRequestedQuestions > 0 &&
+          gameGeneratedQuestions > 0 &&
+          gameGeneratedQuestions < gameRequestedQuestions)
+      ) {
+        status = 'PARTIAL';
       }
 
       const gameInputCostUsd =
@@ -1204,9 +1285,9 @@ export class AiObservabilityService {
           : null;
       const gamePaidCostVnd =
         gamePaidCostUsd !== null
-          ? gameInputCostVnd !== null && gameOutputCostVnd !== null
-            ? gameInputCostVnd + gameOutputCostVnd + Math.round(sumOtherCostVndExact)
-            : Math.round(sumPaidVnd)
+          ? Math.round(
+              sumInputCostVndExact + sumOutputCostVndExact + sumOtherCostVndExact
+            )
           : null;
 
       const gameActualCostUsd =
@@ -1230,6 +1311,8 @@ export class AiObservabilityService {
         gameType: grp.gameType,
         createdAt: grp.createdAt,
         modelsUsed: Array.from(grp.modelsSet),
+        requestedQuestions: gameRequestedQuestions,
+        generatedQuestions: gameGeneratedQuestions,
         requestCount: reqCount,
         successCount,
         failedCount,
@@ -1253,6 +1336,49 @@ export class AiObservabilityService {
         requests: grp.requests,
       };
     });
+
+    // Apply optional per-game-creation filters: questionCount (requestedQuestions) and status (SUCCESS / PARTIAL / FAILED)
+    const rawQuestionCountFilter =
+      filters.questionCount !== undefined && filters.questionCount !== null && String(filters.questionCount).trim() !== ''
+        ? Number(filters.questionCount)
+        : filters.requestedQuestions !== undefined &&
+            filters.requestedQuestions !== null &&
+            String(filters.requestedQuestions).trim() !== ''
+          ? Number(filters.requestedQuestions)
+          : null;
+    const targetQuestionCount =
+      rawQuestionCountFilter !== null && Number.isFinite(rawQuestionCountFilter) && rawQuestionCountFilter > 0
+        ? Math.round(rawQuestionCountFilter)
+        : null;
+
+    const rawStatusFilter =
+      filters.status && String(filters.status).trim() && String(filters.status).trim().toUpperCase() !== 'ALL'
+        ? String(filters.status).trim().toUpperCase()
+        : null;
+
+    const hasGameLevelFilter = targetQuestionCount !== null || rawStatusFilter !== null;
+    const byGame = hasGameLevelFilter
+      ? allByGame.filter((g) => {
+          if (targetQuestionCount !== null && g.requestedQuestions !== targetQuestionCount) {
+            return false;
+          }
+          if (rawStatusFilter !== null) {
+            if (rawStatusFilter === 'PARTIAL' || rawStatusFilter === 'PARTIAL_FAILURE') {
+              if (g.status !== 'PARTIAL' && g.status !== 'PARTIAL_FAILURE') return false;
+            } else if (g.status !== rawStatusFilter) {
+              return false;
+            }
+          }
+          return true;
+        })
+      : allByGame;
+
+    const allowedLogIds = hasGameLevelFilter
+      ? new Set(byGame.flatMap((g) => g.requests.map((r) => r.logId)))
+      : null;
+    const apiLogs = allowedLogIds
+      ? allApiLogs.filter((r) => allowedLogIds.has(r.logId))
+      : allApiLogs;
 
     // Aggregate by Model
     const modelMap = new Map<string, Omit<AdminAiCostModelBreakdownItem, 'shareOfPaidCostPercent'>>();
@@ -1460,6 +1586,8 @@ export class AiObservabilityService {
         model: filters.model || null,
         gameType: filters.gameType || null,
         taskType: filters.taskType || null,
+        questionCount: targetQuestionCount,
+        status: rawStatusFilter,
       },
       billingModeConfigured: configuredBillingMode,
       exchangeRate: exchange,

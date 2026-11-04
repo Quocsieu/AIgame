@@ -8,13 +8,11 @@ import {
   MoonIcon,
   PlusIcon,
   SearchIcon,
-  ShieldIcon,
   SparklesIcon,
   SpinnerIcon,
   SunIcon,
   UsersIcon,
 } from './components/Icons.js';
-import { AdminPage } from './pages/AdminPage.js';
 import { AnalyticsPage, LibraryPage, type LibraryFilterPreset } from './pages/AnalyticsPage.js';
 import { DemoPage } from './pages/DemoPage.js';
 import { HomePage } from './pages/HomePage.js';
@@ -27,7 +25,6 @@ import { SoloPresentationPage } from './pages/SoloPresentationPage.js';
 import {
   fetchCurrentUser,
   fetchGameById,
-  isClientAdminDemoModeEnabled,
 } from './services/api.js';
 import type { AuthenticatedUser, GameSpecification, GameType } from './types/index.js';
 
@@ -40,7 +37,6 @@ type Tab =
   | 'host'
   | 'join'
   | 'play'
-  | 'admin'
   | 'solo-present';
 
 export const AppContent: React.FC = () => {
@@ -182,14 +178,17 @@ export const AppContent: React.FC = () => {
       setActiveTab('join');
     } else if (
       tab &&
-      ['home', 'demo', 'analytics', 'library', 'reports', 'join', 'play', 'admin'].includes(tab)
+      ['home', 'demo', 'analytics', 'library', 'reports', 'join', 'play'].includes(tab)
     ) {
       setActiveTab(tab);
     } else if (tab === 'host') {
       setActiveTab('analytics');
-    } else if (window.location.pathname.startsWith('/admin')) {
-      setActiveTab('admin');
     } else {
+      if (rawTab === 'admin' || window.location.pathname.startsWith('/admin')) {
+        try {
+          window.history.replaceState({}, '', '/');
+        } catch {}
+      }
       setActiveTab('home');
     }
   };
@@ -353,18 +352,12 @@ export const AppContent: React.FC = () => {
     }
   };
 
-  // Navigation bên trái chuẩn hóa theo mô hình Kahoot: Trang Chủ, Khám phá, Thư viện, Thống kê, Admin (Local/Demo hoặc Admin), Nhập mã PIN
-  const showAdminInSidebar =
-    currentUser?.role === 'ADMIN' || isClientAdminDemoModeEnabled();
-
+  // Navigation bên trái chuẩn hóa theo mô hình Kahoot: Trang Chủ, Khám phá, Thư viện, Thống kê, Nhập mã PIN
   const navItems = [
     { id: 'home' as Tab, label: 'Trang Chủ', icon: <HomeIcon size={17} /> },
     { id: 'analytics' as Tab, label: 'Khám phá', icon: <SearchIcon size={17} /> },
     { id: 'library' as Tab, label: 'Thư viện', icon: <BookOpenIcon size={17} /> },
     { id: 'reports' as Tab, label: 'Thống kê', icon: <BarChartIcon size={17} /> },
-    ...(showAdminInSidebar
-      ? [{ id: 'admin' as Tab, label: 'Admin', icon: <ShieldIcon size={17} /> }]
-      : []),
     { id: 'join' as Tab, label: 'Nhập mã PIN', icon: <UsersIcon size={17} /> },
   ];
 
@@ -657,7 +650,6 @@ export const AppContent: React.FC = () => {
                 onNavigateToHost={handleNavigateToHost}
                 onNavigateToSoloPresentation={handleNavigateToSoloPresentation}
                 onSelectSavedGame={handleSelectSavedGame}
-                onNavigateToAdmin={() => navigateWithHistory('admin', '/?tab=admin')}
                 onNavigateToJoin={() => navigateWithHistory('join', '/?tab=join')}
               />
             )}
@@ -766,14 +758,6 @@ export const AppContent: React.FC = () => {
                   setActiveTab('play');
                 }}
                 onBack={() => navigateWithHistory('library', '/?tab=library')}
-              />
-            )}
-
-            {activeTab === 'admin' && (
-              <AdminPage
-                currentUser={currentUser}
-                onOpenAuthModal={() => {}}
-                onNavigateHome={() => navigateWithHistory('home', '/')}
               />
             )}
           </>

@@ -1024,6 +1024,12 @@ export class ExportService {
       'Chi phí quy đổi Paid Tier (USD)',
       'Chi phí quy đổi Paid Tier (VND)',
       'Trạng thái',
+      'Requested Questions',
+      'Generated Questions',
+      'Input Cost (USD)',
+      'Output Cost (USD)',
+      'Input Cost (VND)',
+      'Output Cost (VND)',
     ];
 
     const sheet2DataRows: Array<Array<unknown>> = report.byGame.map((g, idx) => [
@@ -1034,17 +1040,34 @@ export class ExportService {
       g.createdAt,
       g.modelsUsed.join(', '),
       g.requestCount,
-      fmtNullMetric(g.inputTokens),
-      fmtNullMetric(g.outputTokens),
-      fmtNullMetric(g.cachedTokens ?? 0),
-      fmtNullMetric(g.thinkingTokens ?? 0),
-      fmtNullMetric(g.totalTokens),
-      fmtNullMetric(g.actualCostUsd),
-      fmtNullMetric(g.actualCostVnd),
-      fmtNullMetric(g.paidEquivalentCostUsd),
-      fmtNullMetric(g.paidEquivalentCostVnd),
+      fmtNullMetric(g.inputTokens, 'Không có dữ liệu'),
+      fmtNullMetric(g.outputTokens, 'Không có dữ liệu'),
+      fmtNullMetric(g.inputTokens !== null ? (g.cachedTokens ?? 0) : null, 'Không có dữ liệu'),
+      fmtNullMetric(g.inputTokens !== null ? (g.thinkingTokens ?? 0) : null, 'Không có dữ liệu'),
+      fmtNullMetric(g.totalTokens, 'Không có dữ liệu'),
+      fmtNullMetric(g.actualCostUsd, 'Không có dữ liệu'),
+      fmtNullMetric(g.actualCostVnd, 'Không có dữ liệu'),
+      fmtNullMetric(g.paidEquivalentCostUsd, 'Không có dữ liệu'),
+      fmtNullMetric(g.paidEquivalentCostVnd, 'Không có dữ liệu'),
       g.status,
+      g.requestedQuestions ?? 0,
+      g.generatedQuestions ?? 0,
+      fmtNullMetric(g.inputCostUsd, 'Không có dữ liệu'),
+      fmtNullMetric(g.outputCostUsd, 'Không có dữ liệu'),
+      fmtNullMetric(g.inputCostVnd, 'Không có dữ liệu'),
+      fmtNullMetric(g.outputCostVnd, 'Không có dữ liệu'),
     ]);
+
+    const totalRequestedQuestions = report.byGame.reduce((acc, g) => acc + (g.requestedQuestions || 0), 0);
+    const totalGeneratedQuestions = report.byGame.reduce((acc, g) => acc + (g.generatedQuestions || 0), 0);
+    const totalInputCostUsd = Number(
+      report.byGame.reduce((acc, g) => acc + (g.inputCostUsd || 0), 0).toFixed(8)
+    );
+    const totalOutputCostUsd = Number(
+      report.byGame.reduce((acc, g) => acc + (g.outputCostUsd || 0), 0).toFixed(8)
+    );
+    const totalInputCostVnd = report.byGame.reduce((acc, g) => acc + (g.inputCostVnd || 0), 0);
+    const totalOutputCostVnd = report.byGame.reduce((acc, g) => acc + (g.outputCostVnd || 0), 0);
 
     const sheet2TotalRow: Array<unknown> = [
       'TỔNG CỘNG',
@@ -1068,6 +1091,12 @@ export class ExportService {
           ? `$${report.summary.avgPaidEquivalentCostPerGameUsd.toFixed(6)}`
           : 'Chưa xác định'
       }`,
+      totalRequestedQuestions,
+      totalGeneratedQuestions,
+      totalInputCostUsd,
+      totalOutputCostUsd,
+      totalInputCostVnd,
+      totalOutputCostVnd,
     ];
 
     const sanitizedSheet2 = [
@@ -1332,6 +1361,134 @@ export class ExportService {
     return {
       contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       filename: `AI_Game_Cost_Report_${dateStamp}.xlsx`,
+      body: xlsxBuffer,
+    };
+  }
+
+  /**
+   * Exports a focused Per-Game-Creation AI Token & Cost Report in CSV or Excel (.xlsx) format.
+   * Each row represents 1 game creation run with all 14 mandatory tracking columns and a final TỔNG CỘNG row.
+   */
+  public exportGameCreationCostReport(
+    report: AdminAiCostReport,
+    format: 'csv' | 'xlsx' = 'xlsx'
+  ): {
+    contentType: string;
+    filename: string;
+    body: string | Buffer;
+  } {
+    const dateStamp = (report.generatedAt || new Date().toISOString()).slice(0, 10);
+    const fmtNullable = (val: number | null | undefined): number | string => {
+      if (val === null || val === undefined || !Number.isFinite(val)) {
+        return 'Không có dữ liệu';
+      }
+      return val;
+    };
+
+    const headers = [
+      'Thời gian',
+      'Game Type',
+      'Requested Questions',
+      'Generated Questions',
+      'Model',
+      'Input Tokens',
+      'Output Tokens',
+      'Thinking Tokens',
+      'Cached Tokens',
+      'Total Tokens',
+      'Input Cost (USD)',
+      'Output Cost (USD)',
+      'Total Cost (VNĐ)',
+      'Status',
+    ];
+
+    const dataRows: Array<Array<unknown>> = report.byGame.map((g) => [
+      g.createdAt,
+      g.gameType,
+      g.requestedQuestions ?? 0,
+      g.generatedQuestions ?? 0,
+      g.modelsUsed.join(', '),
+      fmtNullable(g.inputTokens),
+      fmtNullable(g.outputTokens),
+      fmtNullable(g.inputTokens !== null ? (g.thinkingTokens ?? 0) : null),
+      fmtNullable(g.inputTokens !== null ? (g.cachedTokens ?? 0) : null),
+      fmtNullable(g.totalTokens),
+      fmtNullable(g.inputCostUsd),
+      fmtNullable(g.outputCostUsd),
+      fmtNullable(g.paidEquivalentCostVnd),
+      g.status,
+    ]);
+
+    const totalRequested = report.byGame.reduce((acc, g) => acc + (g.requestedQuestions || 0), 0);
+    const totalGenerated = report.byGame.reduce((acc, g) => acc + (g.generatedQuestions || 0), 0);
+    const totalInputTokens = report.byGame.reduce((acc, g) => acc + (g.inputTokens || 0), 0);
+    const totalOutputTokens = report.byGame.reduce((acc, g) => acc + (g.outputTokens || 0), 0);
+    const totalThinkingTokens = report.byGame.reduce((acc, g) => acc + (g.thinkingTokens || 0), 0);
+    const totalCachedTokens = report.byGame.reduce((acc, g) => acc + (g.cachedTokens || 0), 0);
+    const totalTokens = report.byGame.reduce((acc, g) => acc + (g.totalTokens || 0), 0);
+    const totalInputCostUsd = Number(
+      report.byGame.reduce((acc, g) => acc + (g.inputCostUsd || 0), 0).toFixed(8)
+    );
+    const totalOutputCostUsd = Number(
+      report.byGame.reduce((acc, g) => acc + (g.outputCostUsd || 0), 0).toFixed(8)
+    );
+    const totalCostVnd = report.byGame.reduce((acc, g) => acc + (g.paidEquivalentCostVnd || 0), 0);
+
+    const totalRow: Array<unknown> = [
+      'TỔNG CỘNG',
+      `${report.byGame.length} lượt tạo game`,
+      totalRequested,
+      totalGenerated,
+      '',
+      totalInputTokens,
+      totalOutputTokens,
+      totalThinkingTokens,
+      totalCachedTokens,
+      totalTokens,
+      totalInputCostUsd,
+      totalOutputCostUsd,
+      totalCostVnd,
+      '',
+    ];
+
+    if (format === 'csv') {
+      return {
+        contentType: 'text/csv; charset=utf-8',
+        filename: `AI_Game_Creation_Cost_Report_${dateStamp}.csv`,
+        body: buildCsvDocument(headers, [...dataRows, totalRow]),
+      };
+    }
+
+    const workbook = XLSX.utils.book_new();
+    const sanitizedRows = [
+      headers.map((h) => sanitizeSpreadsheetText(h)),
+      ...dataRows.map((r) => r.map((c) => sanitizeSpreadsheetText(c))),
+      totalRow.map((c) => sanitizeSpreadsheetText(c)),
+    ];
+    const ws = XLSX.utils.aoa_to_sheet(sanitizedRows);
+    ws['!cols'] = [
+      { wch: 24 },
+      { wch: 20 },
+      { wch: 20 },
+      { wch: 20 },
+      { wch: 24 },
+      { wch: 15 },
+      { wch: 15 },
+      { wch: 16 },
+      { wch: 15 },
+      { wch: 16 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 14 },
+    ];
+    ws['!views'] = [{ state: 'frozen', ySplit: 1 }];
+    XLSX.utils.book_append_sheet(workbook, ws, 'CHI PHÍ TẠO GAME');
+
+    const xlsxBuffer = XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }) as Buffer;
+    return {
+      contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      filename: `AI_Game_Creation_Cost_Report_${dateStamp}.xlsx`,
       body: xlsxBuffer,
     };
   }

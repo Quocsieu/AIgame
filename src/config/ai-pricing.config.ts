@@ -497,9 +497,7 @@ export function calculateAiCallCost(input: CalculateAiCallCostInput): CalculateA
   const tokenOutputCostVnd = Math.round(tokenOutputCostUsd * exchange.usdToVndRate);
 
   const paidEquivalentCostUsd = Number((inputCostUsd + cachedCostUsd + outputCostUsd).toFixed(8));
-  const paidEquivalentCostVnd = hasFlatImageFee
-    ? Math.round(paidEquivalentCostUsd * exchange.usdToVndRate)
-    : tokenInputCostVnd + tokenOutputCostVnd;
+  const paidEquivalentCostVnd = Math.round(paidEquivalentCostUsd * exchange.usdToVndRate);
 
   let actualCostUsd: number | null = null;
   let actualCostVnd: number | null = null;

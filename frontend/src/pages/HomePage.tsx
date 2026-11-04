@@ -48,7 +48,6 @@ interface HomePageProps {
   onNavigateToHost?: (roomCode: string, hostToken: string) => void;
   onNavigateToSoloPresentation?: (spec: GameSpecification) => void;
   onSelectSavedGame?: (spec: GameSpecification, autoStartSolo?: boolean) => void;
-  onNavigateToAdmin?: () => void;
   onNavigateToJoin?: (roomCode?: string) => void;
 }
 
