@@ -337,7 +337,11 @@ export const HostPage: React.FC<HostPageProps> = ({
       soundManager.stopBackgroundMusic();
       if (!hasPlayedFinishSfxRef.current) {
         hasPlayedFinishSfxRef.current = true;
-        soundManager.playSfx('finish');
+        if (Array.isArray(msg.leaderboard) && msg.leaderboard.length > 0) {
+          soundManager.playTop3Celebration();
+        } else {
+          soundManager.playSfx('finish');
+        }
       }
       setFinishData({
         winner: msg.winner,

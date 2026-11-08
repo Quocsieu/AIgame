@@ -435,17 +435,26 @@ const PACK_SYNTH_PATTERNS: Record<string, Record<SfxCueType, PackCueNote[]>> = {
       { freq: 659.25, dur: 0.22, wave: 'triangle', gain: 0.28, delay: 0.2 },
     ],
     finish: [
-      { freq: 523.25, dur: 0.12, wave: 'triangle', gain: 0.25, delay: 0 },
-      { freq: 659.25, dur: 0.12, wave: 'triangle', gain: 0.26, delay: 0.1 },
-      { freq: 783.99, dur: 0.14, wave: 'triangle', gain: 0.28, delay: 0.2 },
-      { freq: 1046.5, dur: 0.32, wave: 'triangle', gain: 0.32, delay: 0.32 },
+      { freq: 392.0, dur: 0.12, wave: 'triangle', gain: 0.24, delay: 0 },
+      { freq: 523.25, dur: 0.12, wave: 'triangle', gain: 0.25, delay: 0.11 },
+      { freq: 659.25, dur: 0.13, wave: 'triangle', gain: 0.26, delay: 0.22 },
+      { freq: 783.99, dur: 0.16, wave: 'triangle', gain: 0.28, delay: 0.34 },
+      { freq: 1046.5, dur: 0.48, wave: 'triangle', gain: 0.32, delay: 0.52 },
+      { freq: 659.25, dur: 0.45, wave: 'sine', gain: 0.22, delay: 0.52 },
+      { freq: 523.25, dur: 0.45, wave: 'sine', gain: 0.22, delay: 0.52 },
     ],
     top3: [
-      { freq: 523.25, dur: 0.12, wave: 'triangle', gain: 0.26, delay: 0 },
-      { freq: 523.25, dur: 0.1, wave: 'triangle', gain: 0.26, delay: 0.13 },
-      { freq: 659.25, dur: 0.18, wave: 'triangle', gain: 0.28, delay: 0.25 },
-      { freq: 783.99, dur: 0.22, wave: 'triangle', gain: 0.3, delay: 0.44 },
-      { freq: 1046.5, dur: 0.35, wave: 'triangle', gain: 0.34, delay: 0.66 },
+      { freq: 392.0, dur: 0.11, wave: 'triangle', gain: 0.26, delay: 0 },
+      { freq: 523.25, dur: 0.11, wave: 'triangle', gain: 0.27, delay: 0.11 },
+      { freq: 659.25, dur: 0.13, wave: 'triangle', gain: 0.28, delay: 0.22 },
+      { freq: 783.99, dur: 0.18, wave: 'triangle', gain: 0.3, delay: 0.36 },
+      { freq: 830.61, dur: 0.24, wave: 'triangle', gain: 0.31, delay: 0.56 },
+      { freq: 622.25, dur: 0.24, wave: 'sine', gain: 0.22, delay: 0.56 },
+      { freq: 932.33, dur: 0.24, wave: 'triangle', gain: 0.32, delay: 0.82 },
+      { freq: 698.46, dur: 0.24, wave: 'sine', gain: 0.23, delay: 0.82 },
+      { freq: 1046.5, dur: 0.65, wave: 'triangle', gain: 0.35, delay: 1.08 },
+      { freq: 783.99, dur: 0.62, wave: 'triangle', gain: 0.26, delay: 1.08 },
+      { freq: 659.25, dur: 0.62, wave: 'sine', gain: 0.25, delay: 1.08 },
     ],
   },
   CLASSROOM_QUIZ: {
@@ -471,15 +480,25 @@ const PACK_SYNTH_PATTERNS: Record<string, Record<SfxCueType, PackCueNote[]>> = {
     ],
     finish: [
       { freq: 440.0, dur: 0.13, wave: 'sine', gain: 0.24, delay: 0 },
-      { freq: 554.37, dur: 0.13, wave: 'sine', gain: 0.26, delay: 0.12 },
-      { freq: 659.25, dur: 0.14, wave: 'sine', gain: 0.27, delay: 0.24 },
-      { freq: 880.0, dur: 0.28, wave: 'sine', gain: 0.3, delay: 0.36 },
+      { freq: 554.37, dur: 0.13, wave: 'sine', gain: 0.25, delay: 0.12 },
+      { freq: 659.25, dur: 0.14, wave: 'sine', gain: 0.26, delay: 0.24 },
+      { freq: 739.99, dur: 0.16, wave: 'sine', gain: 0.28, delay: 0.36 },
+      { freq: 880.0, dur: 0.45, wave: 'sine', gain: 0.31, delay: 0.52 },
+      { freq: 659.25, dur: 0.42, wave: 'triangle', gain: 0.22, delay: 0.52 },
+      { freq: 554.37, dur: 0.42, wave: 'sine', gain: 0.22, delay: 0.52 },
     ],
     top3: [
-      { freq: 587.33, dur: 0.14, wave: 'sine', gain: 0.26, delay: 0 },
-      { freq: 739.99, dur: 0.14, wave: 'sine', gain: 0.28, delay: 0.14 },
-      { freq: 880.0, dur: 0.18, wave: 'sine', gain: 0.3, delay: 0.28 },
-      { freq: 1174.66, dur: 0.32, wave: 'sine', gain: 0.32, delay: 0.46 },
+      { freq: 440.0, dur: 0.12, wave: 'sine', gain: 0.25, delay: 0 },
+      { freq: 587.33, dur: 0.12, wave: 'sine', gain: 0.26, delay: 0.12 },
+      { freq: 739.99, dur: 0.14, wave: 'sine', gain: 0.28, delay: 0.24 },
+      { freq: 880.0, dur: 0.2, wave: 'triangle', gain: 0.3, delay: 0.38 },
+      { freq: 987.77, dur: 0.22, wave: 'triangle', gain: 0.31, delay: 0.6 },
+      { freq: 739.99, dur: 0.22, wave: 'sine', gain: 0.22, delay: 0.6 },
+      { freq: 1046.5, dur: 0.22, wave: 'triangle', gain: 0.32, delay: 0.84 },
+      { freq: 783.99, dur: 0.22, wave: 'sine', gain: 0.23, delay: 0.84 },
+      { freq: 1174.66, dur: 0.6, wave: 'sine', gain: 0.34, delay: 1.08 },
+      { freq: 880.0, dur: 0.58, wave: 'triangle', gain: 0.25, delay: 1.08 },
+      { freq: 739.99, dur: 0.58, wave: 'sine', gain: 0.24, delay: 1.08 },
     ],
   },
   ADVENTURE_QUEST: {
@@ -507,17 +526,26 @@ const PACK_SYNTH_PATTERNS: Record<string, Record<SfxCueType, PackCueNote[]>> = {
       { freq: 587.33, dur: 0.24, wave: 'triangle', gain: 0.3, delay: 0.26 },
     ],
     finish: [
-      { freq: 392.0, dur: 0.14, wave: 'triangle', gain: 0.26, delay: 0 },
-      { freq: 493.88, dur: 0.14, wave: 'triangle', gain: 0.27, delay: 0.12 },
-      { freq: 587.33, dur: 0.15, wave: 'triangle', gain: 0.29, delay: 0.24 },
-      { freq: 783.99, dur: 0.34, wave: 'triangle', gain: 0.32, delay: 0.38 },
+      { freq: 392.0, dur: 0.13, wave: 'triangle', gain: 0.25, delay: 0 },
+      { freq: 493.88, dur: 0.13, wave: 'triangle', gain: 0.26, delay: 0.12 },
+      { freq: 587.33, dur: 0.14, wave: 'triangle', gain: 0.28, delay: 0.24 },
+      { freq: 659.25, dur: 0.16, wave: 'triangle', gain: 0.29, delay: 0.36 },
+      { freq: 783.99, dur: 0.48, wave: 'triangle', gain: 0.33, delay: 0.52 },
+      { freq: 587.33, dur: 0.45, wave: 'sine', gain: 0.23, delay: 0.52 },
+      { freq: 493.88, dur: 0.45, wave: 'sine', gain: 0.22, delay: 0.52 },
     ],
     top3: [
-      { freq: 440.0, dur: 0.14, wave: 'triangle', gain: 0.27, delay: 0 },
-      { freq: 554.37, dur: 0.14, wave: 'triangle', gain: 0.28, delay: 0.14 },
-      { freq: 659.25, dur: 0.16, wave: 'triangle', gain: 0.3, delay: 0.28 },
-      { freq: 880.0, dur: 0.2, wave: 'triangle', gain: 0.32, delay: 0.44 },
-      { freq: 1108.73, dur: 0.36, wave: 'triangle', gain: 0.34, delay: 0.64 },
+      { freq: 440.0, dur: 0.12, wave: 'triangle', gain: 0.27, delay: 0 },
+      { freq: 554.37, dur: 0.12, wave: 'triangle', gain: 0.28, delay: 0.12 },
+      { freq: 659.25, dur: 0.14, wave: 'triangle', gain: 0.29, delay: 0.24 },
+      { freq: 880.0, dur: 0.18, wave: 'triangle', gain: 0.31, delay: 0.38 },
+      { freq: 932.33, dur: 0.24, wave: 'triangle', gain: 0.32, delay: 0.58 },
+      { freq: 698.46, dur: 0.24, wave: 'sine', gain: 0.23, delay: 0.58 },
+      { freq: 987.77, dur: 0.24, wave: 'triangle', gain: 0.33, delay: 0.84 },
+      { freq: 739.99, dur: 0.24, wave: 'sine', gain: 0.24, delay: 0.84 },
+      { freq: 1108.73, dur: 0.65, wave: 'triangle', gain: 0.36, delay: 1.1 },
+      { freq: 880.0, dur: 0.62, wave: 'triangle', gain: 0.26, delay: 1.1 },
+      { freq: 659.25, dur: 0.62, wave: 'sine', gain: 0.25, delay: 1.1 },
     ],
   },
   CORPORATE_TRAINING: {
@@ -541,15 +569,26 @@ const PACK_SYNTH_PATTERNS: Record<string, Record<SfxCueType, PackCueNote[]>> = {
       { freq: 523.25, dur: 0.24, wave: 'sine', gain: 0.26, delay: 0.12 },
     ],
     finish: [
-      { freq: 523.25, dur: 0.14, wave: 'sine', gain: 0.24, delay: 0 },
-      { freq: 659.25, dur: 0.14, wave: 'sine', gain: 0.26, delay: 0.13 },
-      { freq: 783.99, dur: 0.3, wave: 'sine', gain: 0.28, delay: 0.26 },
+      { freq: 523.25, dur: 0.13, wave: 'sine', gain: 0.24, delay: 0 },
+      { freq: 659.25, dur: 0.13, wave: 'sine', gain: 0.25, delay: 0.12 },
+      { freq: 783.99, dur: 0.14, wave: 'sine', gain: 0.26, delay: 0.24 },
+      { freq: 880.0, dur: 0.16, wave: 'sine', gain: 0.28, delay: 0.36 },
+      { freq: 1046.5, dur: 0.45, wave: 'sine', gain: 0.3, delay: 0.52 },
+      { freq: 659.25, dur: 0.42, wave: 'triangle', gain: 0.21, delay: 0.52 },
+      { freq: 523.25, dur: 0.42, wave: 'sine', gain: 0.21, delay: 0.52 },
     ],
     top3: [
-      { freq: 523.25, dur: 0.14, wave: 'sine', gain: 0.25, delay: 0 },
-      { freq: 659.25, dur: 0.14, wave: 'sine', gain: 0.26, delay: 0.13 },
-      { freq: 783.99, dur: 0.16, wave: 'sine', gain: 0.28, delay: 0.26 },
-      { freq: 1046.5, dur: 0.32, wave: 'sine', gain: 0.3, delay: 0.42 },
+      { freq: 523.25, dur: 0.12, wave: 'sine', gain: 0.25, delay: 0 },
+      { freq: 659.25, dur: 0.12, wave: 'sine', gain: 0.26, delay: 0.12 },
+      { freq: 783.99, dur: 0.14, wave: 'sine', gain: 0.28, delay: 0.24 },
+      { freq: 830.61, dur: 0.22, wave: 'triangle', gain: 0.29, delay: 0.4 },
+      { freq: 622.25, dur: 0.22, wave: 'sine', gain: 0.21, delay: 0.4 },
+      { freq: 932.33, dur: 0.22, wave: 'triangle', gain: 0.3, delay: 0.64 },
+      { freq: 698.46, dur: 0.22, wave: 'sine', gain: 0.22, delay: 0.64 },
+      { freq: 1046.5, dur: 0.6, wave: 'sine', gain: 0.32, delay: 0.88 },
+      { freq: 783.99, dur: 0.58, wave: 'triangle', gain: 0.24, delay: 0.88 },
+      { freq: 659.25, dur: 0.58, wave: 'sine', gain: 0.23, delay: 0.88 },
+      { freq: 523.25, dur: 0.58, wave: 'sine', gain: 0.22, delay: 0.88 },
     ],
   },
 };
@@ -869,7 +908,7 @@ class GameAudioManager {
         this.playStart();
         break;
       case 'finish':
-        this.playVictory();
+        this.playFinish();
         break;
       case 'top3':
         this.playTop3Celebration();
@@ -933,7 +972,7 @@ class GameAudioManager {
     if (this.defaultBgmAudioEl) {
       this.defaultBgmAudioEl.volume = Math.max(
         0,
-        Math.min(1, (clamped / 100) * 0.26 * duckFactor)
+        Math.min(1, (clamped / 100) * 0.34 * duckFactor)
       );
     }
     if (this.customAudioEl) {
@@ -959,7 +998,7 @@ class GameAudioManager {
         this.isBgmDucked = false;
         this.duckTimeoutId = null;
         if (this.defaultBgmAudioEl) {
-          this.defaultBgmAudioEl.volume = Math.max(0, Math.min(1, (this.volume / 100) * 0.26));
+          this.defaultBgmAudioEl.volume = Math.max(0, Math.min(1, (this.volume / 100) * 0.34));
         }
         if (this.customAudioEl) {
           this.customAudioEl.volume = Math.max(0, Math.min(1, this.volume / 100));
@@ -1191,8 +1230,8 @@ class GameAudioManager {
     this.lastSfxVariantKey = variantKey;
     this.lastSfxAssetUrl = assetUrl;
 
-    // Duck BGM briefly so the SFX stands out clearly
-    const duckMs = cue === 'top3' || cue === 'finish' ? 950 : 520;
+    // Duck BGM so the SFX or end-of-game fanfare stands out clearly without clashing
+    const duckMs = cue === 'top3' ? 2500 : cue === 'finish' ? 1800 : 520;
     this.duckBgmTemporarily(duckMs);
 
     // Play real WAV/custom asset file
@@ -1481,49 +1520,31 @@ class GameAudioManager {
     this.activeBgmUrl = targetBgmUrl;
     this.bgmStartCount++;
 
-    if (typeof window !== 'undefined' && typeof Audio !== 'undefined') {
-      try {
-        const bgmEl = new Audio(targetBgmUrl);
-        bgmEl.loop = true;
-        bgmEl.volume = Math.max(0, Math.min(1, (this.volume / 100) * 0.26));
-        bgmEl.muted = this.muted;
-        this.defaultBgmAudioEl = bgmEl;
-        const p = bgmEl.play();
-        if (p && typeof p.catch === 'function') {
-          p.catch(() => {
-            // Web Audio harmonic pulse below ensures fallback even if HTMLAudioElement is deferred
-          });
-        }
-      } catch {
-        // Ignore HTMLAudioElement construction errors in non-DOM environments
-      }
-    }
-
     this.stepIndex = 0;
     const notesByPreset: Record<
       string,
       { notes: number[]; tempoMs: number; wave: OscillatorType; gain: number }
     > = {
       ENERGETIC_ARENA: {
-        notes: [261.63, 329.63, 392.0, 523.25, 392.0, 329.63, 293.66, 349.23],
+        notes: [220.0, 261.63, 329.63, 392.0, 440.0, 392.0, 329.63, 293.66],
         tempoMs: 420,
         wave: 'triangle',
         gain: 0.14,
       },
       ARCADE_FUN: {
-        notes: [261.63, 329.63, 392.0, 523.25, 392.0, 329.63, 293.66, 349.23],
+        notes: [220.0, 261.63, 329.63, 392.0, 440.0, 392.0, 329.63, 293.66],
         tempoMs: 420,
         wave: 'triangle',
         gain: 0.14,
       },
       EXAM_FOCUS: {
-        notes: [220.0, 277.18, 329.63, 277.18, 196.0, 246.94, 293.66, 246.94],
+        notes: [220.0, 261.63, 329.63, 293.66, 220.0, 246.94, 293.66, 261.63],
         tempoMs: 880,
         wave: 'sine',
         gain: 0.1,
       },
       CLASSROOM_QUIZ: {
-        notes: [220.0, 277.18, 329.63, 277.18, 196.0, 246.94, 293.66, 246.94],
+        notes: [220.0, 261.63, 329.63, 293.66, 220.0, 246.94, 293.66, 261.63],
         tempoMs: 880,
         wave: 'sine',
         gain: 0.1,
@@ -1555,11 +1576,42 @@ class GameAudioManager {
       if (!this.isPlayingBgm || this.muted || !this.currentConfig.enabled) return;
       const note = preset.notes[this.stepIndex % preset.notes.length];
       this.stepIndex++;
-      this.playTone(note, (preset.tempoMs / 1000) * 0.82, preset.wave, preset.gain, 0, true);
+      this.playTone(note, (preset.tempoMs / 1000) * 0.65, preset.wave, preset.gain, 0, true);
     };
 
+    let htmlBgmActive = false;
+    if (typeof window !== 'undefined' && typeof Audio !== 'undefined') {
+      try {
+        const bgmEl = new Audio(targetBgmUrl);
+        bgmEl.loop = true;
+        bgmEl.volume = Math.max(0, Math.min(1, (this.volume / 100) * 0.34));
+        bgmEl.muted = this.muted;
+        this.defaultBgmAudioEl = bgmEl;
+        htmlBgmActive = true;
+        const p = bgmEl.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch(() => {
+            // Fallback to Web Audio harmonic pulse only if HTMLAudioElement playback is blocked
+            if (
+              this.isPlayingBgm &&
+              !this.muted &&
+              this.defaultBgmAudioEl === bgmEl &&
+              this.bgmLoopInterval === null &&
+              typeof window !== 'undefined'
+            ) {
+              this.bgmLoopInterval = window.setInterval(playStep, preset.tempoMs);
+            }
+          });
+        }
+      } catch {
+        htmlBgmActive = false;
+      }
+    }
+
+    // Play initial warm-up tone once for immediate WebAudio activation & telemetry;
+    // do not run repetitive setInterval single-note beeps over the rich multi-layered BGM WAV loop.
     playStep();
-    if (typeof window !== 'undefined') {
+    if (!htmlBgmActive && typeof window !== 'undefined') {
       this.bgmLoopInterval = window.setInterval(playStep, preset.tempoMs);
     }
   }
@@ -1690,13 +1742,34 @@ class GameAudioManager {
     this.playTone(440.0, 0.11, 'sine', 0.22, 0, false);
   }
 
-  public playVictory(): void {
+  public playFinish(): void {
     this.playCueFromActivePack('finish');
   }
 
+  public playVictory(): void {
+    if (this.isPlayingBgm && !this.isPreviewing) {
+      this.stopBackgroundMusic();
+    }
+    const ok = this.playCueFromActivePack('finish');
+    if (!ok || this.isExamSecrecyActive()) return;
+    // Enhance Victory with a grand triumphant climax chord progression (Abmaj -> Bbmaj -> Cmaj9)
+    // so Victory is distinctly more climactic and conquering than plain Finish completion.
+    this.lastSfxVariantKey = 'victory';
+    this.playTone(415.3, 0.22, 'triangle', 0.22, 0.34, false);
+    this.playTone(622.25, 0.22, 'sine', 0.18, 0.34, false);
+    this.playTone(466.16, 0.22, 'triangle', 0.24, 0.58, false);
+    this.playTone(698.46, 0.22, 'sine', 0.2, 0.58, false);
+    this.playTone(523.25, 0.65, 'triangle', 0.26, 0.82, false);
+    this.playTone(1318.51, 0.58, 'sine', 0.22, 0.86, false);
+    this.playTone(1567.98, 0.62, 'triangle', 0.25, 0.94, false);
+  }
+
   public playTop3Celebration(): void {
+    if (this.isPlayingBgm && !this.isPreviewing) {
+      this.stopBackgroundMusic();
+    }
     if (this.isExamSecrecyActive()) {
-      this.playVictory();
+      this.playFinish();
       return;
     }
     this.playCueFromActivePack('top3');

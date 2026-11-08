@@ -333,25 +333,34 @@ const SOUND_PACK_Specs = {
         ],
       },
       finish: {
-        duration: 0.85,
+        duration: 1.45,
         notes: [
-          { freq: 523.25, startSec: 0.0, durationSec: 0.14, harmonics: BRIGHT_SYNTH_HARMONICS, gain: 0.36 },
-          { freq: 659.25, startSec: 0.12, durationSec: 0.14, harmonics: BRIGHT_SYNTH_HARMONICS, gain: 0.38 },
-          { freq: 783.99, startSec: 0.24, durationSec: 0.16, harmonics: BRIGHT_SYNTH_HARMONICS, gain: 0.4 },
-          { freq: 1046.5, startSec: 0.38, durationSec: 0.44, harmonics: BRIGHT_SYNTH_HARMONICS, gain: 0.45, vibratoHz: 6, vibratoDepth: 0.008 },
-          { freq: 659.25, startSec: 0.38, durationSec: 0.44, harmonics: BELL_CHIME_HARMONICS, gain: 0.25 },
-          { freq: 523.25, startSec: 0.38, durationSec: 0.44, harmonics: WARM_PIANO_HARMONICS, gain: 0.25 },
+          { freq: 392.0, startSec: 0.0, durationSec: 0.12, harmonics: BRASS_QUEST_HARMONICS, gain: 0.34 },
+          { freq: 523.25, startSec: 0.11, durationSec: 0.12, harmonics: BRIGHT_SYNTH_HARMONICS, gain: 0.36 },
+          { freq: 659.25, startSec: 0.22, durationSec: 0.13, harmonics: BRIGHT_SYNTH_HARMONICS, gain: 0.38 },
+          { freq: 783.99, startSec: 0.34, durationSec: 0.18, harmonics: BRASS_QUEST_HARMONICS, gain: 0.42 },
+          { freq: 880.0, startSec: 0.5, durationSec: 0.18, harmonics: BRIGHT_SYNTH_HARMONICS, gain: 0.42 },
+          { freq: 987.77, startSec: 0.66, durationSec: 0.18, harmonics: BRIGHT_SYNTH_HARMONICS, gain: 0.44 },
+          { freq: 1046.5, startSec: 0.82, durationSec: 0.6, harmonics: BRASS_QUEST_HARMONICS, gain: 0.46, vibratoHz: 5.5, vibratoDepth: 0.008 },
+          { freq: 659.25, startSec: 0.82, durationSec: 0.6, harmonics: BELL_CHIME_HARMONICS, gain: 0.3 },
+          { freq: 523.25, startSec: 0.82, durationSec: 0.6, harmonics: WARM_PIANO_HARMONICS, gain: 0.32 },
+          { freq: 261.63, startSec: 0.82, durationSec: 0.6, harmonics: BRASS_QUEST_HARMONICS, gain: 0.28 },
         ],
       },
       top3: {
-        duration: 1.05,
+        duration: 1.85,
         notes: [
-          { freq: 523.25, startSec: 0.0, durationSec: 0.15, harmonics: BRASS_QUEST_HARMONICS, gain: 0.35 },
-          { freq: 523.25, startSec: 0.16, durationSec: 0.12, harmonics: BRASS_QUEST_HARMONICS, gain: 0.35 },
-          { freq: 523.25, startSec: 0.29, durationSec: 0.12, harmonics: BRASS_QUEST_HARMONICS, gain: 0.36 },
-          { freq: 659.25, startSec: 0.42, durationSec: 0.22, harmonics: BRASS_QUEST_HARMONICS, gain: 0.4 },
-          { freq: 783.99, startSec: 0.64, durationSec: 0.38, harmonics: BRASS_QUEST_HARMONICS, gain: 0.44 },
-          { freq: 1046.5, startSec: 0.64, durationSec: 0.38, harmonics: BELL_CHIME_HARMONICS, gain: 0.3 },
+          { freq: 392.0, startSec: 0.0, durationSec: 0.11, harmonics: BRASS_QUEST_HARMONICS, gain: 0.36 },
+          { freq: 523.25, startSec: 0.11, durationSec: 0.11, harmonics: BRASS_QUEST_HARMONICS, gain: 0.38 },
+          { freq: 659.25, startSec: 0.22, durationSec: 0.14, harmonics: BRASS_QUEST_HARMONICS, gain: 0.4 },
+          { freq: 830.61, startSec: 0.38, durationSec: 0.26, harmonics: BRASS_QUEST_HARMONICS, gain: 0.42 },
+          { freq: 415.3, startSec: 0.38, durationSec: 0.26, harmonics: WARM_PIANO_HARMONICS, gain: 0.28 },
+          { freq: 932.33, startSec: 0.66, durationSec: 0.26, harmonics: BRASS_QUEST_HARMONICS, gain: 0.44 },
+          { freq: 466.16, startSec: 0.66, durationSec: 0.26, harmonics: WARM_PIANO_HARMONICS, gain: 0.3 },
+          { freq: 1046.5, startSec: 0.94, durationSec: 0.88, harmonics: BRASS_QUEST_HARMONICS, gain: 0.48, vibratoHz: 5.5, vibratoDepth: 0.008 },
+          { freq: 783.99, startSec: 0.94, durationSec: 0.88, harmonics: BRASS_QUEST_HARMONICS, gain: 0.34 },
+          { freq: 659.25, startSec: 0.94, durationSec: 0.88, harmonics: BELL_CHIME_HARMONICS, gain: 0.32 },
+          { freq: 261.63, startSec: 0.94, durationSec: 0.88, harmonics: WARM_PIANO_HARMONICS, gain: 0.32 },
         ],
       },
     },
@@ -397,23 +406,28 @@ const SOUND_PACK_Specs = {
         ],
       },
       finish: {
-        duration: 0.78,
+        duration: 1.4,
         notes: [
-          { freq: 440.0, startSec: 0.0, durationSec: 0.16, harmonics: BELL_CHIME_HARMONICS, gain: 0.35 },
-          { freq: 554.37, startSec: 0.14, durationSec: 0.16, harmonics: BELL_CHIME_HARMONICS, gain: 0.38 },
-          { freq: 659.25, startSec: 0.28, durationSec: 0.16, harmonics: BELL_CHIME_HARMONICS, gain: 0.4 },
-          { freq: 880.0, startSec: 0.42, durationSec: 0.34, harmonics: BELL_CHIME_HARMONICS, gain: 0.44 },
-          { freq: 554.37, startSec: 0.42, durationSec: 0.34, harmonics: WARM_PIANO_HARMONICS, gain: 0.24 },
+          { freq: 440.0, startSec: 0.0, durationSec: 0.14, harmonics: BELL_CHIME_HARMONICS, gain: 0.35 },
+          { freq: 554.37, startSec: 0.13, durationSec: 0.14, harmonics: BELL_CHIME_HARMONICS, gain: 0.38 },
+          { freq: 659.25, startSec: 0.26, durationSec: 0.16, harmonics: BELL_CHIME_HARMONICS, gain: 0.4 },
+          { freq: 739.99, startSec: 0.44, durationSec: 0.2, harmonics: BELL_CHIME_HARMONICS, gain: 0.42 },
+          { freq: 880.0, startSec: 0.66, durationSec: 0.7, harmonics: BELL_CHIME_HARMONICS, gain: 0.45 },
+          { freq: 554.37, startSec: 0.66, durationSec: 0.7, harmonics: WARM_PIANO_HARMONICS, gain: 0.28 },
+          { freq: 440.0, startSec: 0.66, durationSec: 0.7, harmonics: WARM_PIANO_HARMONICS, gain: 0.28 },
         ],
       },
       top3: {
-        duration: 0.95,
+        duration: 1.75,
         notes: [
-          { freq: 587.33, startSec: 0.0, durationSec: 0.16, harmonics: BELL_CHIME_HARMONICS, gain: 0.38 },
-          { freq: 739.99, startSec: 0.16, durationSec: 0.16, harmonics: BELL_CHIME_HARMONICS, gain: 0.4 },
-          { freq: 880.0, startSec: 0.32, durationSec: 0.2, harmonics: BELL_CHIME_HARMONICS, gain: 0.42 },
-          { freq: 1174.66, startSec: 0.52, durationSec: 0.4, harmonics: BELL_CHIME_HARMONICS, gain: 0.45 },
-          { freq: 739.99, startSec: 0.52, durationSec: 0.4, harmonics: WARM_PIANO_HARMONICS, gain: 0.25 },
+          { freq: 440.0, startSec: 0.0, durationSec: 0.12, harmonics: BELL_CHIME_HARMONICS, gain: 0.36 },
+          { freq: 587.33, startSec: 0.12, durationSec: 0.14, harmonics: BELL_CHIME_HARMONICS, gain: 0.38 },
+          { freq: 739.99, startSec: 0.26, durationSec: 0.16, harmonics: BELL_CHIME_HARMONICS, gain: 0.4 },
+          { freq: 880.0, startSec: 0.44, durationSec: 0.24, harmonics: BRASS_QUEST_HARMONICS, gain: 0.42 },
+          { freq: 987.77, startSec: 0.7, durationSec: 0.24, harmonics: BRASS_QUEST_HARMONICS, gain: 0.44 },
+          { freq: 1174.66, startSec: 0.96, durationSec: 0.76, harmonics: BELL_CHIME_HARMONICS, gain: 0.46 },
+          { freq: 880.0, startSec: 0.96, durationSec: 0.76, harmonics: BRASS_QUEST_HARMONICS, gain: 0.32 },
+          { freq: 587.33, startSec: 0.96, durationSec: 0.76, harmonics: WARM_PIANO_HARMONICS, gain: 0.3 },
         ],
       },
     },
@@ -461,24 +475,29 @@ const SOUND_PACK_Specs = {
         ],
       },
       finish: {
-        duration: 0.9,
+        duration: 1.5,
         notes: [
-          { freq: 392.0, startSec: 0.0, durationSec: 0.15, harmonics: BRASS_QUEST_HARMONICS, gain: 0.36 },
-          { freq: 493.88, startSec: 0.14, durationSec: 0.15, harmonics: BRASS_QUEST_HARMONICS, gain: 0.38 },
-          { freq: 587.33, startSec: 0.28, durationSec: 0.16, harmonics: BRASS_QUEST_HARMONICS, gain: 0.4 },
-          { freq: 783.99, startSec: 0.44, durationSec: 0.44, harmonics: BRASS_QUEST_HARMONICS, gain: 0.45 },
-          { freq: 392.0, startSec: 0.44, durationSec: 0.44, harmonics: WARM_PIANO_HARMONICS, gain: 0.26 },
+          { freq: 392.0, startSec: 0.0, durationSec: 0.13, harmonics: BRASS_QUEST_HARMONICS, gain: 0.36 },
+          { freq: 493.88, startSec: 0.12, durationSec: 0.13, harmonics: BRASS_QUEST_HARMONICS, gain: 0.38 },
+          { freq: 587.33, startSec: 0.24, durationSec: 0.15, harmonics: BRASS_QUEST_HARMONICS, gain: 0.4 },
+          { freq: 659.25, startSec: 0.4, durationSec: 0.2, harmonics: BRASS_QUEST_HARMONICS, gain: 0.42 },
+          { freq: 783.99, startSec: 0.62, durationSec: 0.85, harmonics: BRASS_QUEST_HARMONICS, gain: 0.46, vibratoHz: 5.5, vibratoDepth: 0.008 },
+          { freq: 587.33, startSec: 0.62, durationSec: 0.85, harmonics: BELL_CHIME_HARMONICS, gain: 0.3 },
+          { freq: 392.0, startSec: 0.62, durationSec: 0.85, harmonics: WARM_PIANO_HARMONICS, gain: 0.3 },
         ],
       },
       top3: {
-        duration: 1.1,
+        duration: 1.9,
         notes: [
-          { freq: 440.0, startSec: 0.0, durationSec: 0.15, harmonics: BRASS_QUEST_HARMONICS, gain: 0.38 },
-          { freq: 554.37, startSec: 0.15, durationSec: 0.15, harmonics: BRASS_QUEST_HARMONICS, gain: 0.38 },
-          { freq: 659.25, startSec: 0.3, durationSec: 0.18, harmonics: BRASS_QUEST_HARMONICS, gain: 0.42 },
-          { freq: 880.0, startSec: 0.48, durationSec: 0.22, harmonics: BRASS_QUEST_HARMONICS, gain: 0.44 },
-          { freq: 1108.73, startSec: 0.7, durationSec: 0.38, harmonics: BRASS_QUEST_HARMONICS, gain: 0.46 },
-          { freq: 659.25, startSec: 0.7, durationSec: 0.38, harmonics: BELL_CHIME_HARMONICS, gain: 0.28 },
+          { freq: 440.0, startSec: 0.0, durationSec: 0.13, harmonics: BRASS_QUEST_HARMONICS, gain: 0.38 },
+          { freq: 554.37, startSec: 0.13, durationSec: 0.13, harmonics: BRASS_QUEST_HARMONICS, gain: 0.4 },
+          { freq: 659.25, startSec: 0.26, durationSec: 0.16, harmonics: BRASS_QUEST_HARMONICS, gain: 0.42 },
+          { freq: 880.0, startSec: 0.44, durationSec: 0.26, harmonics: BRASS_QUEST_HARMONICS, gain: 0.44 },
+          { freq: 987.77, startSec: 0.72, durationSec: 0.26, harmonics: BRASS_QUEST_HARMONICS, gain: 0.46 },
+          { freq: 1108.73, startSec: 1.0, durationSec: 0.86, harmonics: BRASS_QUEST_HARMONICS, gain: 0.48, vibratoHz: 5.5, vibratoDepth: 0.008 },
+          { freq: 880.0, startSec: 1.0, durationSec: 0.86, harmonics: BRASS_QUEST_HARMONICS, gain: 0.35 },
+          { freq: 659.25, startSec: 1.0, durationSec: 0.86, harmonics: BELL_CHIME_HARMONICS, gain: 0.32 },
+          { freq: 440.0, startSec: 1.0, durationSec: 0.86, harmonics: WARM_PIANO_HARMONICS, gain: 0.32 },
         ],
       },
     },
@@ -523,22 +542,28 @@ const SOUND_PACK_Specs = {
         ],
       },
       finish: {
-        duration: 0.72,
+        duration: 1.35,
         notes: [
-          { freq: 523.25, startSec: 0.0, durationSec: 0.16, harmonics: WARM_PIANO_HARMONICS, gain: 0.36 },
-          { freq: 659.25, startSec: 0.15, durationSec: 0.16, harmonics: WARM_PIANO_HARMONICS, gain: 0.38 },
-          { freq: 783.99, startSec: 0.3, durationSec: 0.4, harmonics: WARM_PIANO_HARMONICS, gain: 0.42 },
-          { freq: 523.25, startSec: 0.3, durationSec: 0.4, harmonics: BELL_CHIME_HARMONICS, gain: 0.22 },
+          { freq: 523.25, startSec: 0.0, durationSec: 0.14, harmonics: WARM_PIANO_HARMONICS, gain: 0.36 },
+          { freq: 659.25, startSec: 0.13, durationSec: 0.14, harmonics: WARM_PIANO_HARMONICS, gain: 0.38 },
+          { freq: 783.99, startSec: 0.26, durationSec: 0.18, harmonics: WARM_PIANO_HARMONICS, gain: 0.4 },
+          { freq: 880.0, startSec: 0.46, durationSec: 0.2, harmonics: WARM_PIANO_HARMONICS, gain: 0.42 },
+          { freq: 1046.5, startSec: 0.68, durationSec: 0.64, harmonics: WARM_PIANO_HARMONICS, gain: 0.44 },
+          { freq: 659.25, startSec: 0.68, durationSec: 0.64, harmonics: BELL_CHIME_HARMONICS, gain: 0.28 },
+          { freq: 523.25, startSec: 0.68, durationSec: 0.64, harmonics: WARM_PIANO_HARMONICS, gain: 0.3 },
         ],
       },
       top3: {
-        duration: 0.88,
+        duration: 1.7,
         notes: [
-          { freq: 523.25, startSec: 0.0, durationSec: 0.16, harmonics: WARM_PIANO_HARMONICS, gain: 0.36 },
-          { freq: 659.25, startSec: 0.15, durationSec: 0.16, harmonics: WARM_PIANO_HARMONICS, gain: 0.38 },
-          { freq: 783.99, startSec: 0.3, durationSec: 0.18, harmonics: WARM_PIANO_HARMONICS, gain: 0.4 },
-          { freq: 1046.5, startSec: 0.48, durationSec: 0.38, harmonics: WARM_PIANO_HARMONICS, gain: 0.44 },
-          { freq: 659.25, startSec: 0.48, durationSec: 0.38, harmonics: BELL_CHIME_HARMONICS, gain: 0.24 },
+          { freq: 523.25, startSec: 0.0, durationSec: 0.14, harmonics: WARM_PIANO_HARMONICS, gain: 0.36 },
+          { freq: 659.25, startSec: 0.14, durationSec: 0.14, harmonics: WARM_PIANO_HARMONICS, gain: 0.38 },
+          { freq: 783.99, startSec: 0.28, durationSec: 0.18, harmonics: BRASS_QUEST_HARMONICS, gain: 0.4 },
+          { freq: 880.0, startSec: 0.48, durationSec: 0.24, harmonics: BRASS_QUEST_HARMONICS, gain: 0.42 },
+          { freq: 987.77, startSec: 0.74, durationSec: 0.24, harmonics: BRASS_QUEST_HARMONICS, gain: 0.44 },
+          { freq: 1046.5, startSec: 1.0, durationSec: 0.68, harmonics: WARM_PIANO_HARMONICS, gain: 0.46 },
+          { freq: 783.99, startSec: 1.0, durationSec: 0.68, harmonics: BRASS_QUEST_HARMONICS, gain: 0.32 },
+          { freq: 659.25, startSec: 1.0, durationSec: 0.68, harmonics: BELL_CHIME_HARMONICS, gain: 0.3 },
         ],
       },
     },
@@ -817,41 +842,96 @@ const startBuf = synthesizeMultiLayeredWav(
   0.65
 );
 
-// Finish Game (Victory Completion Music Cue)
+// Finish Game (Joyful, Bright Multi-Chord Completion Fanfare — 1.75s)
 const finishBuf = synthesizeMultiLayeredWav(
   [
-    { freq: 523.25, startSec: 0.0, durationSec: 0.14, harmonics: BRASS_QUEST_HARMONICS, gain: 0.36 },
-    { freq: 659.25, startSec: 0.13, durationSec: 0.14, harmonics: BRASS_QUEST_HARMONICS, gain: 0.38 },
-    { freq: 783.99, startSec: 0.26, durationSec: 0.15, harmonics: BRASS_QUEST_HARMONICS, gain: 0.4 },
-    { freq: 1046.5, startSec: 0.42, durationSec: 0.52, harmonics: BRASS_QUEST_HARMONICS, gain: 0.45, vibratoHz: 6, vibratoDepth: 0.008 },
-    { freq: 659.25, startSec: 0.42, durationSec: 0.52, harmonics: BELL_CHIME_HARMONICS, gain: 0.28 },
-    { freq: 523.25, startSec: 0.42, durationSec: 0.52, harmonics: WARM_PIANO_HARMONICS, gain: 0.28 },
+    // Opening celebratory brass & chime run (G4 -> C5 -> E5 -> G5)
+    { freq: 392.0, startSec: 0.0, durationSec: 0.11, harmonics: BRASS_QUEST_HARMONICS, gain: 0.34 },
+    { freq: 196.0, startSec: 0.0, durationSec: 0.11, harmonics: WARM_PIANO_HARMONICS, gain: 0.24 },
+    { freq: 523.25, startSec: 0.1, durationSec: 0.11, harmonics: BRASS_QUEST_HARMONICS, gain: 0.36 },
+    { freq: 659.25, startSec: 0.2, durationSec: 0.12, harmonics: BRASS_QUEST_HARMONICS, gain: 0.38 },
+    { freq: 783.99, startSec: 0.31, durationSec: 0.18, harmonics: BRASS_QUEST_HARMONICS, gain: 0.41 },
+    { freq: 523.25, startSec: 0.31, durationSec: 0.18, harmonics: BELL_CHIME_HARMONICS, gain: 0.24 },
+
+    // Uplifting subdominant-dominant lift (Fmaj -> Gmaj: A5 -> B5)
+    { freq: 880.0, startSec: 0.48, durationSec: 0.18, harmonics: BRASS_QUEST_HARMONICS, gain: 0.42 },
+    { freq: 349.23, startSec: 0.48, durationSec: 0.18, harmonics: WARM_PIANO_HARMONICS, gain: 0.28 },
+    { freq: 987.77, startSec: 0.65, durationSec: 0.19, harmonics: BRASS_QUEST_HARMONICS, gain: 0.44 },
+    { freq: 392.0, startSec: 0.65, durationSec: 0.19, harmonics: WARM_PIANO_HARMONICS, gain: 0.3 },
+
+    // Full C Major Add9 Completion Cadence (0.84s -> 1.75s)
+    { freq: 1046.5, startSec: 0.84, durationSec: 0.88, harmonics: BRASS_QUEST_HARMONICS, gain: 0.46, vibratoHz: 5.5, vibratoDepth: 0.007 },
+    { freq: 783.99, startSec: 0.84, durationSec: 0.88, harmonics: BRASS_QUEST_HARMONICS, gain: 0.32 },
+    { freq: 659.25, startSec: 0.84, durationSec: 0.88, harmonics: BELL_CHIME_HARMONICS, gain: 0.3 },
+    { freq: 523.25, startSec: 0.84, durationSec: 0.88, harmonics: WARM_PIANO_HARMONICS, gain: 0.32 },
+    { freq: 261.63, startSec: 0.84, durationSec: 0.88, harmonics: BRASS_QUEST_HARMONICS, gain: 0.3 },
+    { freq: 130.81, startSec: 0.84, durationSec: 0.88, harmonics: WARM_PIANO_HARMONICS, gain: 0.26 },
+    // Sparkling top chime resolution
+    { freq: 1174.66, startSec: 0.96, durationSec: 0.68, harmonics: BELL_CHIME_HARMONICS, gain: 0.22 },
+    { freq: 1567.98, startSec: 1.08, durationSec: 0.62, harmonics: BELL_CHIME_HARMONICS, gain: 0.24 },
   ],
-  0.96
+  1.75
 );
 
-// Top 3 / Podium Celebration (Grand Fanfare + Real Crowd Applause)
+// Top 3 / Podium Celebration (Grand Royal Brass Fanfare bVI -> bVII -> I + Tubular Bells + Real Crowd Applause — 2.45s)
 const podiumFanfareSamples = renderNotesToSamples(
   [
-    { freq: 523.25, startSec: 0.0, durationSec: 0.14, harmonics: BRASS_QUEST_HARMONICS, gain: 0.36 },
-    { freq: 523.25, startSec: 0.15, durationSec: 0.12, harmonics: BRASS_QUEST_HARMONICS, gain: 0.36 },
-    { freq: 523.25, startSec: 0.28, durationSec: 0.12, harmonics: BRASS_QUEST_HARMONICS, gain: 0.38 },
-    { freq: 659.25, startSec: 0.41, durationSec: 0.22, harmonics: BRASS_QUEST_HARMONICS, gain: 0.4 },
-    { freq: 783.99, startSec: 0.64, durationSec: 0.24, harmonics: BRASS_QUEST_HARMONICS, gain: 0.42 },
-    { freq: 1046.5, startSec: 0.88, durationSec: 0.85, harmonics: BRASS_QUEST_HARMONICS, gain: 0.45 },
-    { freq: 659.25, startSec: 0.88, durationSec: 0.85, harmonics: BELL_CHIME_HARMONICS, gain: 0.28 },
+    // 1. Ceremonial Trumpet Herald Call (0.00s - 0.52s)
+    { freq: 392.0, startSec: 0.0, durationSec: 0.11, harmonics: BRASS_QUEST_HARMONICS, gain: 0.38 },
+    { freq: 130.81, startSec: 0.0, durationSec: 0.14, harmonics: WARM_PIANO_HARMONICS, gain: 0.32, pitchSlideRatio: 0.82 },
+    { freq: 523.25, startSec: 0.11, durationSec: 0.11, harmonics: BRASS_QUEST_HARMONICS, gain: 0.4 },
+    { freq: 659.25, startSec: 0.22, durationSec: 0.12, harmonics: BRASS_QUEST_HARMONICS, gain: 0.42 },
+    { freq: 783.99, startSec: 0.34, durationSec: 0.18, harmonics: BRASS_QUEST_HARMONICS, gain: 0.45 },
+    { freq: 523.25, startSec: 0.34, durationSec: 0.18, harmonics: BRASS_QUEST_HARMONICS, gain: 0.3 },
+
+    // 2. Epic Heroic Progression: Ab Major (bVI) -> Bb Major (bVII) (0.52s - 1.16s)
+    // Ab Major Chord (0.52s - 0.83s)
+    { freq: 830.61, startSec: 0.52, durationSec: 0.31, harmonics: BRASS_QUEST_HARMONICS, gain: 0.46, vibratoHz: 5.0, vibratoDepth: 0.006 },
+    { freq: 622.25, startSec: 0.52, durationSec: 0.31, harmonics: BRASS_QUEST_HARMONICS, gain: 0.34 },
+    { freq: 523.25, startSec: 0.52, durationSec: 0.31, harmonics: WARM_PIANO_HARMONICS, gain: 0.3 },
+    { freq: 415.3, startSec: 0.52, durationSec: 0.31, harmonics: BRASS_QUEST_HARMONICS, gain: 0.32 },
+    { freq: 207.65, startSec: 0.52, durationSec: 0.31, harmonics: WARM_PIANO_HARMONICS, gain: 0.3 },
+
+    // Bb Major Chord (0.84s - 1.15s)
+    { freq: 932.33, startSec: 0.84, durationSec: 0.31, harmonics: BRASS_QUEST_HARMONICS, gain: 0.48, vibratoHz: 5.5, vibratoDepth: 0.007 },
+    { freq: 698.46, startSec: 0.84, durationSec: 0.31, harmonics: BRASS_QUEST_HARMONICS, gain: 0.36 },
+    { freq: 587.33, startSec: 0.84, durationSec: 0.31, harmonics: WARM_PIANO_HARMONICS, gain: 0.32 },
+    { freq: 466.16, startSec: 0.84, durationSec: 0.31, harmonics: BRASS_QUEST_HARMONICS, gain: 0.34 },
+    { freq: 233.08, startSec: 0.84, durationSec: 0.31, harmonics: WARM_PIANO_HARMONICS, gain: 0.32 },
+
+    // 3. Grand Championship Podium Climax: C Major Add9 + Tubular Bells (1.16s - 2.42s)
+    { freq: 1046.5, startSec: 1.16, durationSec: 1.24, harmonics: BRASS_QUEST_HARMONICS, gain: 0.5, vibratoHz: 5.8, vibratoDepth: 0.008 },
+    { freq: 783.99, startSec: 1.16, durationSec: 1.24, harmonics: BRASS_QUEST_HARMONICS, gain: 0.38 },
+    { freq: 659.25, startSec: 1.16, durationSec: 1.24, harmonics: BRASS_QUEST_HARMONICS, gain: 0.35 },
+    { freq: 587.33, startSec: 1.16, durationSec: 1.24, harmonics: BELL_CHIME_HARMONICS, gain: 0.28 },
+    { freq: 523.25, startSec: 1.16, durationSec: 1.24, harmonics: WARM_PIANO_HARMONICS, gain: 0.36 },
+    { freq: 261.63, startSec: 1.16, durationSec: 1.24, harmonics: BRASS_QUEST_HARMONICS, gain: 0.34 },
+    { freq: 130.81, startSec: 1.16, durationSec: 1.24, harmonics: WARM_PIANO_HARMONICS, gain: 0.32 },
+    // Crown tubular chime arpeggio
+    { freq: 1318.51, startSec: 1.26, durationSec: 1.05, harmonics: BELL_CHIME_HARMONICS, gain: 0.26 },
+    { freq: 1567.98, startSec: 1.38, durationSec: 0.98, harmonics: BELL_CHIME_HARMONICS, gain: 0.28 },
+    { freq: 2093.0, startSec: 1.5, durationSec: 0.88, harmonics: BELL_CHIME_HARMONICS, gain: 0.24 },
   ],
-  1.8
+  2.45
 );
 const podiumApplauseSamples = decodeAndResampleWav(applauseRawBuf, {
   startOffsetSec: 0.1,
-  maxDurationSec: 1.75,
-  targetPeak: 0.72,
-  fadeInSec: 0.05,
-  fadeOutSec: 0.3,
+  maxDurationSec: 2.3,
+  targetPeak: 0.68,
+  fadeInSec: 0.06,
+  fadeOutSec: 0.35,
 });
+const podiumBravoSamples = decodeAndResampleWav(bravoRawBuf, {
+  trimSilence: true,
+  silenceThreshold: 0.02,
+  maxDurationSec: 0.8,
+  targetPeak: 0.58,
+  fadeInSec: 0.02,
+  fadeOutSec: 0.12,
+});
+const fanfareWithApplause = mixSampleBuffers(podiumFanfareSamples, podiumApplauseSamples, 0.12, 0.58);
 const top3Buf = encodeSamplesToWavBuffer(
-  mixSampleBuffers(podiumFanfareSamples, podiumApplauseSamples, 0.05, 0.68),
+  mixSampleBuffers(fanfareWithApplause, podiumBravoSamples, 1.18, 0.48),
   0.92
 );
 
@@ -903,54 +983,307 @@ const adventureCheckpointBuf = synthesizeMultiLayeredWav(
   0.35
 );
 
-// Default Looping Background Music (8.0s seamless loop, 16-beat groove at 120 BPM = 0.5s/beat)
+// Default Looping Background Music (16.0s seamless cyclic loop, 32 beats at 120 BPM = 0.5s/beat)
 function buildSeamlessBgmWav(isExamFocus = false) {
-  const loopDurationSec = 8.0;
-  const notes = [];
+  const loopDurationSec = 16.0;
+  const numSamples = Math.floor(SAMPLE_RATE * loopDurationSec);
+  const floatSamples = new Float64Array(numSamples);
+
+  // Helper that renders a note with cyclic wrap-around so tails across 16.0s wrap seamlessly to 0.0s
+  const addCyclicNote = ({
+    freq,
+    startSec,
+    durationSec,
+    harmonics = WARM_PIANO_HARMONICS,
+    gain = 0.2,
+    attackSec = 0.01,
+    decayPower = 1.9,
+    pitchSlideRatio = 1.0,
+  }) => {
+    const startIdx = Math.floor(startSec * SAMPLE_RATE);
+    const len = Math.max(1, Math.floor(durationSec * SAMPLE_RATE));
+    const attackSamples = Math.max(1, Math.floor(attackSec * SAMPLE_RATE));
+    let phase = 0;
+
+    for (let i = 0; i < len; i++) {
+      const progress = i / len;
+      const instFreq = freq * (1 + (pitchSlideRatio - 1) * progress);
+      phase += (2 * Math.PI * instFreq) / SAMPLE_RATE;
+
+      let env = 1.0;
+      if (i < attackSamples) {
+        env = i / attackSamples;
+      } else {
+        const rem = 1.0 - (i - attackSamples) / Math.max(1, len - attackSamples);
+        env = Math.pow(Math.max(0, rem), decayPower);
+      }
+
+      let sampleVal = 0;
+      for (const [mult, hAmp] of harmonics) {
+        sampleVal += Math.sin(phase * mult) * hAmp;
+      }
+
+      const targetIdx = ((startIdx + i) % numSamples + numSamples) % numSamples;
+      floatSamples[targetIdx] += sampleVal * env * gain;
+    }
+  };
+
   if (!isExamFocus) {
-    // Upbeat quiz/arcade marimba & warm pad progression (C - Am - F - G, 16 steps of 0.5s)
-    const melody = [
-      261.63, 329.63, 392.0, 523.25, // C maj
-      220.0, 261.63, 329.63, 440.0,  // A min
-      174.61, 261.63, 349.23, 440.0, // F maj
-      196.0, 246.94, 293.66, 392.0,  // G maj
+    // =========================================================================
+    // DRAMATIC GAME-SHOW COMPETITION BGM (Am9 -> Fmaj7 -> Dm9 -> E7sus4 / E7)
+    // 16.0s = 8 bars of 4/4 at 120 BPM (0.5s per beat, 0.25s per 8th, 0.125s per 16th)
+    // =========================================================================
+    const TENSION_PAD_HARMONICS = [
+      [1, 1.0],
+      [2, 0.48],
+      [3, 0.24],
+      [4, 0.1],
     ];
-    const bass = [130.81, 110.0, 174.61, 196.0];
-    for (let i = 0; i < 16; i++) {
-      notes.push({
-        freq: melody[i],
-        startSec: i * 0.5,
-        durationSec: 0.44,
-        harmonics: WARM_PIANO_HARMONICS,
-        gain: 0.22,
-        decayPower: 2.1,
-      });
-      if (i % 4 === 0) {
-        notes.push({
-          freq: bass[Math.floor(i / 4)],
-          startSec: i * 0.5,
-          durationSec: 1.9,
-          harmonics: [[1, 1.0], [2, 0.2]],
-          gain: 0.16,
-          decayPower: 1.5,
+    const ARENA_BASS_HARMONICS = [
+      [1, 1.0],
+      [2, 0.62],
+      [3, 0.28],
+      [4, 0.12],
+    ];
+    const PULSE_ARP_HARMONICS = [
+      [1, 1.0],
+      [2, 0.38],
+      [3, 0.16],
+    ];
+
+    // 4-section chord structure (each section = 4.0s = 8 beats = 32 sixteenth notes)
+    const sections = [
+      {
+        // Bars 1-2 (0.0s - 4.0s): A Minor 9 — Entering the Arena
+        bassRoot: 110.0, // A2
+        bassSub: 55.0,   // A1
+        bassFifth: 164.81, // E3
+        padChord: [220.0, 261.63, 329.63, 493.88], // A3, C4, E4, B4
+        arpPattern: [220.0, 329.63, 440.0, 261.63, 329.63, 493.88, 440.0, 329.63],
+        leadNotes: [
+          { freq: 440.0, offset: 0.0, dur: 0.9, gain: 0.09 },
+          { freq: 523.25, offset: 1.5, dur: 0.45, gain: 0.09 },
+          { freq: 493.88, offset: 2.0, dur: 1.4, gain: 0.095 },
+        ],
+      },
+      {
+        // Bars 3-4 (4.0s - 8.0s): F Major 7 #11 — Rising Stakes
+        bassRoot: 87.31, // F2
+        bassSub: 43.65,  // F1
+        bassFifth: 130.81, // C3
+        padChord: [174.61, 261.63, 329.63, 440.0], // F3, C4, E4, A4
+        arpPattern: [174.61, 261.63, 349.23, 220.0, 261.63, 392.0, 349.23, 261.63],
+        leadNotes: [
+          { freq: 349.23, offset: 0.0, dur: 0.9, gain: 0.09 },
+          { freq: 440.0, offset: 1.5, dur: 0.45, gain: 0.095 },
+          { freq: 392.0, offset: 2.0, dur: 1.5, gain: 0.1 },
+        ],
+      },
+      {
+        // Bars 5-6 (8.0s - 12.0s): D Minor 9 — High-Speed Reflex & Countdown Tension
+        bassRoot: 73.42, // D2
+        bassSub: 146.83, // D3
+        bassFifth: 110.0, // A2
+        padChord: [293.66, 349.23, 440.0, 659.25], // D4, F4, A4, E5
+        arpPattern: [293.66, 440.0, 587.33, 349.23, 440.0, 659.25, 587.33, 440.0],
+        leadNotes: [
+          { freq: 587.33, offset: 0.0, dur: 0.7, gain: 0.11 },
+          { freq: 659.25, offset: 0.75, dur: 0.7, gain: 0.115 },
+          { freq: 698.46, offset: 1.5, dur: 0.9, gain: 0.12 },
+          { freq: 587.33, offset: 2.5, dur: 1.2, gain: 0.11 },
+        ],
+      },
+      {
+        // Bars 7-8 (12.0s - 16.0s): E7sus4 -> E7 — Dramatic Climax resolving to Am
+        bassRoot: 82.41, // E2
+        bassSub: 41.2,   // E1
+        bassFifth: 123.47, // B2
+        padChord: [164.81, 246.94, 329.63, 415.3], // E3, B3, E4, G#4
+        arpPattern: [164.81, 246.94, 329.63, 220.0, 246.94, 392.0, 329.63, 246.94],
+        arpPatternSecondBar: [164.81, 246.94, 329.63, 207.65, 246.94, 415.3, 329.63, 246.94],
+        leadNotes: [
+          { freq: 493.88, offset: 0.0, dur: 0.9, gain: 0.115 },
+          { freq: 440.0, offset: 1.0, dur: 0.9, gain: 0.115 },
+          { freq: 415.3, offset: 2.0, dur: 0.95, gain: 0.12 },
+          { freq: 659.25, offset: 3.0, dur: 0.95, gain: 0.125 },
+        ],
+      },
+    ];
+
+    const arpVelocity = [1.0, 0.52, 0.76, 0.58, 0.9, 0.54, 0.8, 0.6];
+
+    for (let sIdx = 0; sIdx < sections.length; sIdx++) {
+      const sec = sections[sIdx];
+      const secStart = sIdx * 4.0;
+
+      // Layer 1: Warm Cinematic Tension Pad Swells (2 bars = 4.0s)
+      for (const padFreq of sec.padChord) {
+        addCyclicNote({
+          freq: padFreq,
+          startSec: secStart,
+          durationSec: 4.15,
+          harmonics: TENSION_PAD_HARMONICS,
+          gain: 0.065,
+          attackSec: 0.28,
+          decayPower: 1.15,
+        });
+      }
+
+      // Layer 2: Driving 8th-note Syncopated Bassline (16 eighth notes per 4.0s section)
+      for (let e = 0; e < 16; e++) {
+        const stepStart = secStart + e * 0.25;
+        const isDownbeat = e % 4 === 0;
+        const isOffbeatOctave = e % 2 === 1;
+        const isFifthTurn = e === 7 || e === 15;
+        const bFreq = isFifthTurn
+          ? sec.bassFifth
+          : isOffbeatOctave
+          ? sec.bassRoot * 2
+          : sec.bassRoot;
+
+        addCyclicNote({
+          freq: bFreq,
+          startSec: stepStart,
+          durationSec: isDownbeat ? 0.24 : 0.2,
+          harmonics: ARENA_BASS_HARMONICS,
+          gain: isDownbeat ? 0.21 : 0.145,
+          attackSec: 0.006,
+          decayPower: 2.1,
+        });
+
+        if (isDownbeat) {
+          addCyclicNote({
+            freq: sec.bassSub,
+            startSec: stepStart,
+            durationSec: 0.42,
+            harmonics: [[1, 1.0], [2, 0.3]],
+            gain: 0.15,
+            attackSec: 0.008,
+            decayPower: 1.8,
+          });
+        }
+      }
+
+      // Layer 3: Suspenseful 16th-Note Game-Show Arpeggio Ostinato (32 sixteenth notes per 4.0s section)
+      for (let step = 0; step < 32; step++) {
+        const stepStart = secStart + step * 0.125;
+        const pattern =
+          step >= 16 && sec.arpPatternSecondBar ? sec.arpPatternSecondBar : sec.arpPattern;
+        const noteFreq = pattern[step % 8];
+        const vel = arpVelocity[step % 8] * (sIdx >= 2 ? 1.12 : 1.0);
+
+        addCyclicNote({
+          freq: noteFreq,
+          startSec: stepStart,
+          durationSec: 0.135,
+          harmonics: PULSE_ARP_HARMONICS,
+          gain: 0.145 * vel,
+          attackSec: 0.004,
+          decayPower: 2.35,
+        });
+      }
+
+      // Layer 4: Competition Heartbeat Kick & Ticking Clock Pulse (8 beats per 4.0s section)
+      for (let beat = 0; beat < 8; beat++) {
+        const beatStart = secStart + beat * 0.5;
+        // Soft arena heartbeat kick on every beat
+        addCyclicNote({
+          freq: 118.0,
+          startSec: beatStart,
+          durationSec: 0.11,
+          harmonics: [[1, 1.0], [2, 0.25]],
+          gain: beat % 2 === 0 ? 0.22 : 0.16,
+          attackSec: 0.003,
+          decayPower: 2.8,
+          pitchSlideRatio: 0.42,
+        });
+        // Subtle game-show clock tick on off-beat eighth notes
+        addCyclicNote({
+          freq: beat % 2 === 0 ? 1318.5 : 987.77,
+          startSec: beatStart + 0.25,
+          durationSec: 0.032,
+          harmonics: WOODBLOCK_HARMONICS,
+          gain: 0.055,
+          attackSec: 0.002,
+          decayPower: 3.6,
+        });
+      }
+
+      // Layer 5: Heroic Counter-Melody Motif
+      for (const ln of sec.leadNotes) {
+        addCyclicNote({
+          freq: ln.freq,
+          startSec: secStart + ln.offset,
+          durationSec: ln.dur,
+          harmonics: WARM_PIANO_HARMONICS,
+          gain: ln.gain,
+          attackSec: 0.015,
+          decayPower: 1.65,
         });
       }
     }
   } else {
-    // Calm neutral focus BGM for Exam Mode (8 steps of 1.0s)
-    const calmNotes = [220.0, 261.63, 329.63, 261.63, 196.0, 246.94, 293.66, 246.94];
-    for (let i = 0; i < 8; i++) {
-      notes.push({
-        freq: calmNotes[i],
-        startSec: i * 1.0,
-        durationSec: 0.92,
-        harmonics: [[1, 1.0], [2, 0.15]],
-        gain: 0.18,
-        decayPower: 1.8,
-      });
+    // =========================================================================
+    // FOCUSED INTELLECTUAL EXAM BGM (16.0s seamless loop — Calm, Deep Focus)
+    // =========================================================================
+    const examSections = [
+      { bass: 110.0, chord: [220.0, 261.63, 329.63, 392.0], arp: [220.0, 261.63, 329.63, 392.0, 440.0, 392.0, 329.63, 261.63] }, // Am7
+      { bass: 146.83, chord: [293.66, 349.23, 440.0, 523.25], arp: [293.66, 349.23, 440.0, 523.25, 587.33, 523.25, 440.0, 349.23] }, // Dm7
+      { bass: 87.31, chord: [174.61, 261.63, 329.63, 440.0], arp: [174.61, 261.63, 349.23, 440.0, 523.25, 440.0, 349.23, 261.63] }, // Fmaj7
+      { bass: 82.41, chord: [164.81, 246.94, 329.63, 392.0], arp: [164.81, 246.94, 329.63, 415.3, 493.88, 415.3, 329.63, 246.94] }, // E7sus4/E7
+    ];
+
+    for (let sIdx = 0; sIdx < examSections.length; sIdx++) {
+      const sec = examSections[sIdx];
+      const secStart = sIdx * 4.0;
+
+      for (const cFreq of sec.chord) {
+        addCyclicNote({
+          freq: cFreq,
+          startSec: secStart,
+          durationSec: 4.15,
+          harmonics: [[1, 1.0], [2, 0.22]],
+          gain: 0.055,
+          attackSec: 0.35,
+          decayPower: 1.2,
+        });
+      }
+
+      for (let b = 0; b < 4; b++) {
+        addCyclicNote({
+          freq: sec.bass,
+          startSec: secStart + b * 1.0,
+          durationSec: 0.95,
+          harmonics: [[1, 1.0], [2, 0.25]],
+          gain: 0.13,
+          attackSec: 0.015,
+          decayPower: 1.7,
+        });
+      }
+
+      for (let step = 0; step < 16; step++) {
+        addCyclicNote({
+          freq: sec.arp[step % 8],
+          startSec: secStart + step * 0.25,
+          durationSec: 0.28,
+          harmonics: WARM_PIANO_HARMONICS,
+          gain: step % 4 === 0 ? 0.12 : 0.085,
+          attackSec: 0.01,
+          decayPower: 2.0,
+        });
+      }
     }
   }
-  return synthesizeMultiLayeredWav(notes, loopDurationSec, 0.42);
+
+  // Smoothly taper the very first and last 48 samples (~2ms) to 0.0 so loop boundary is a guaranteed zero-crossing
+  const edgeFade = 48;
+  for (let i = 0; i < edgeFade; i++) {
+    const w = i / edgeFade;
+    floatSamples[i] *= w;
+    floatSamples[numSamples - 1 - i] *= w;
+  }
+
+  return encodeSamplesToWavBuffer(floatSamples, isExamFocus ? 0.42 : 0.56);
 }
 
 const bgmDefaultBuf = buildSeamlessBgmWav(false);
@@ -1034,8 +1367,8 @@ const defaultAssetsMap = {
     buf: finishBuf,
     category: 'finish',
     variantIndex: 0,
-    label: 'Kết thúc — Nhạc hoàn thành màn chơi',
-    source: 'AI Game Platform V3 Original Multi-Chord Victory Synthesis',
+    label: 'Kết thúc — Fanfare hoàn thành màn chơi rạng rỡ & trọn vẹn (1.75s)',
+    source: 'AI Game Platform V3 Original Multi-Chord Completion Fanfare & Chime Synthesis',
     license: 'CC0-1.0 (Public Domain)',
   },
   top3: {
@@ -1043,8 +1376,8 @@ const defaultAssetsMap = {
     buf: top3Buf,
     category: 'top3',
     variantIndex: 0,
-    label: 'Vinh danh Top 3 — Tiếng vỗ tay lớn & kèn Fanfare bục vinh quang',
-    source: 'Wikimedia Commons: File:277021 sandermotions applause-2.wav + Original Podium Brass Fanfare',
+    label: 'Vinh danh Top 3 — Kèn Fanfare hoàng gia (Ab->Bb->C), chuông lớn & tiếng vỗ tay reo hò (2.45s)',
+    source: 'Wikimedia Commons: File:277021 sandermotions applause-2.wav + File:Bravo_02.wav + Original Royal Podium Brass Fanfare',
     license: 'CC0-1.0 (Public Domain)',
   },
   recorded: {
@@ -1088,8 +1421,8 @@ const defaultAssetsMap = {
     buf: bgmDefaultBuf,
     category: 'bgm',
     variantIndex: 0,
-    label: 'Nhạc nền trò chơi mặc định (Loop 8s, cân bằng âm lượng nền)',
-    source: 'AI Game Platform V3 Original Marimba & Pad Loop Composition',
+    label: 'Nhạc nền thi đấu kịch tính (Loop 16s liền mạch 120 BPM, Am9-Fmaj7#11-Dm9-E7sus4, Bass + Arp + Pad + Arena Pulse)',
+    source: 'AI Game Platform V3 Original Dramatic Game-Show Competition Loop Composition',
     license: 'CC0-1.0 (Public Domain)',
   },
   bgm_exam: {
@@ -1097,8 +1430,8 @@ const defaultAssetsMap = {
     buf: bgmExamBuf,
     category: 'bgm_exam',
     variantIndex: 0,
-    label: 'Nhạc nền phòng thi trung tính (Loop 8s, nhẹ nhàng tập trung)',
-    source: 'AI Game Platform V3 Original Ambient Focus Loop Composition',
+    label: 'Nhạc nền phòng thi tập trung (Loop 16s liền mạch, nhịp điệu trí tuệ nghiêm túc)',
+    source: 'AI Game Platform V3 Original Intellectual Focus Loop Composition',
     license: 'CC0-1.0 (Public Domain)',
   },
 };

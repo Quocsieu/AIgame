@@ -1,6 +1,6 @@
 {
   "version": "3.1.0",
-  "generatedAt": "2026-11-02T10:35:29.439Z",
+  "generatedAt": "2026-11-08T19:24:52.109Z",
   "license": "CC0-1.0 (Public Domain - Wikimedia Commons CC0 Recordings + Original Multi-Harmonic Acoustic Instrument Synthesis)",
   "note": "Includes 4 legacy theme sound packs (28 WAV files) + Unified Default Game Audio Pack (16 WAV files: 3 real CC0 correct variants [applause, wow, cheer], 2 wrong variants [tè-tè, real buzzer], countdown, timeout, start, finish, top3, exam recorded, 3 adventure 2D SFX, and 2 looping BGM tracks).",
   "packs": {
@@ -47,16 +47,16 @@
         "finish": {
           "cue": "finish",
           "url": "/audio/packs/arcade_fun/finish.wav",
-          "sizeBytes": 37528,
-          "durationSec": 0.85,
-          "sha256": "de840a1e1370be27639a91fcdcbfed63753dca3e9c20ec70a501865fc4f613ba"
+          "sizeBytes": 63988,
+          "durationSec": 1.45,
+          "sha256": "99642e2bba32479828557c624a3d24712f68822f3e0fbf318b42b2897f6a6e28"
         },
         "top3": {
           "cue": "top3",
           "url": "/audio/packs/arcade_fun/top3.wav",
-          "sizeBytes": 46348,
-          "durationSec": 1.05,
-          "sha256": "5601680536165684ccabf427e18d30cc8d30e85cc44ecad67f332058bcb53452"
+          "sizeBytes": 81628,
+          "durationSec": 1.85,
+          "sha256": "beae6f6142b8ead9e38ddf269129a979d334c2ba4f2c82095bdfde533a11dcae"
         }
       }
     },
@@ -103,16 +103,16 @@
         "finish": {
           "cue": "finish",
           "url": "/audio/packs/classroom_quiz/finish.wav",
-          "sizeBytes": 34442,
-          "durationSec": 0.78,
-          "sha256": "fe50b4864b82971b03b6335c4039c597e029cc7d7eacfc76add708ee285832ee"
+          "sizeBytes": 61782,
+          "durationSec": 1.4,
+          "sha256": "6d2a55c99ba64bc98a2a519f81af9c73e0d6131ac0041822c3223b457d83beab"
         },
         "top3": {
           "cue": "top3",
           "url": "/audio/packs/classroom_quiz/top3.wav",
-          "sizeBytes": 41938,
-          "durationSec": 0.95,
-          "sha256": "b213aca7fe610b7292b3f5b97db51313150581d2701f91c12a37af2e027ddaf6"
+          "sizeBytes": 77218,
+          "durationSec": 1.75,
+          "sha256": "ca8a21dc5aa9f857ffaeda8e6550a48fecfc735f9362a3f5e3a90e8c0202da69"
         }
       }
     },
@@ -159,16 +159,16 @@
         "finish": {
           "cue": "finish",
           "url": "/audio/packs/adventure_quest/finish.wav",
-          "sizeBytes": 39734,
-          "durationSec": 0.9,
-          "sha256": "ebb58c4584eff537338ce9b1893a32775e290d0f1c827f85f78aaca1d2d83826"
+          "sizeBytes": 66194,
+          "durationSec": 1.5,
+          "sha256": "817e6388969cf4a5eaff80850c9936033a5539265d8c4544b683f2c0a7ba9806"
         },
         "top3": {
           "cue": "top3",
           "url": "/audio/packs/adventure_quest/top3.wav",
-          "sizeBytes": 48554,
-          "durationSec": 1.1,
-          "sha256": "36ca859207783a642ee6eff3311fc2d6f2cb5a7e0c61c51552316bf4898fb90b"
+          "sizeBytes": 83834,
+          "durationSec": 1.9,
+          "sha256": "f90cbf99d51296f68eb9fbf02a8b4388482c2b496d3133f3169f6b4b1773e545"
         }
       }
     },
@@ -215,16 +215,16 @@
         "finish": {
           "cue": "finish",
           "url": "/audio/packs/corporate_training/finish.wav",
-          "sizeBytes": 31796,
-          "durationSec": 0.72,
-          "sha256": "5ee7fcc018a3b9985b5f662d55435c118b44b0967d98fad1986f53a7ef4f7e8b"
+          "sizeBytes": 59578,
+          "durationSec": 1.35,
+          "sha256": "6d4cca373605c5d4bbee89ba2e0c540ede5c439b6909398032b0ac63ee1b3764"
         },
         "top3": {
           "cue": "top3",
           "url": "/audio/packs/corporate_training/top3.wav",
-          "sizeBytes": 38852,
-          "durationSec": 0.88,
-          "sha256": "0cb20af56512f25f2a46eb7e641d98d9cd63e439327d8e15dd7142393bb153d1"
+          "sizeBytes": 75014,
+          "durationSec": 1.7,
+          "sha256": "7c7deb71d2f7a6e341c2c009600ec1a430460a48174fc478a8bf407959ad4444"
         }
       }
     }
@@ -334,24 +334,24 @@
         "key": "finish",
         "category": "finish",
         "variantIndex": 0,
-        "label": "Kết thúc — Nhạc hoàn thành màn chơi",
+        "label": "Kết thúc — Fanfare hoàn thành màn chơi rạng rỡ & trọn vẹn (1.75s)",
         "url": "/audio/default/finish.wav",
-        "sizeBytes": 42380,
-        "durationSec": 0.96,
-        "sha256": "705ce69e819d9435e47aec6dbd4792b56e072af2aa7ed771240542a693fa4837",
-        "source": "AI Game Platform V3 Original Multi-Chord Victory Synthesis",
+        "sizeBytes": 77218,
+        "durationSec": 1.75,
+        "sha256": "5db9fac4bdd89102cb2c62999d92c2ee3744a36afdb445993e05a24bc7f68fe9",
+        "source": "AI Game Platform V3 Original Multi-Chord Completion Fanfare & Chime Synthesis",
         "license": "CC0-1.0 (Public Domain)"
       },
       "top3": {
         "key": "top3",
         "category": "top3",
         "variantIndex": 0,
-        "label": "Vinh danh Top 3 — Tiếng vỗ tay lớn & kèn Fanfare bục vinh quang",
+        "label": "Vinh danh Top 3 — Kèn Fanfare hoàng gia (Ab->Bb->C), chuông lớn & tiếng vỗ tay reo hò (2.45s)",
         "url": "/audio/default/top3.wav",
-        "sizeBytes": 79424,
-        "durationSec": 1.8,
-        "sha256": "498079330720412984826f84c671118c320fb2c4795412172787208cd7c9a523",
-        "source": "Wikimedia Commons: File:277021 sandermotions applause-2.wav + Original Podium Brass Fanfare",
+        "sizeBytes": 108088,
+        "durationSec": 2.45,
+        "sha256": "0280eda5afd7cb594700dbcec90981619200887653b82b114aca512ccc8eca0c",
+        "source": "Wikimedia Commons: File:277021 sandermotions applause-2.wav + File:Bravo_02.wav + Original Royal Podium Brass Fanfare",
         "license": "CC0-1.0 (Public Domain)"
       },
       "recorded": {
@@ -406,24 +406,24 @@
         "key": "bgm_default",
         "category": "bgm",
         "variantIndex": 0,
-        "label": "Nhạc nền trò chơi mặc định (Loop 8s, cân bằng âm lượng nền)",
+        "label": "Nhạc nền thi đấu kịch tính (Loop 16s liền mạch 120 BPM, Am9-Fmaj7#11-Dm9-E7sus4, Bass + Arp + Pad + Arena Pulse)",
         "url": "/audio/default/bgm_default.wav",
-        "sizeBytes": 352844,
-        "durationSec": 8,
-        "sha256": "8e580017cced2bbf22068cfd66b4ad024f225a14de79b98e762a6cf2fb0cb13f",
-        "source": "AI Game Platform V3 Original Marimba & Pad Loop Composition",
+        "sizeBytes": 705644,
+        "durationSec": 16,
+        "sha256": "4af69b9992101d6fffef1b6bc9211ca734e8ae5ffe69cb4db789b94f7b5a9d73",
+        "source": "AI Game Platform V3 Original Dramatic Game-Show Competition Loop Composition",
         "license": "CC0-1.0 (Public Domain)"
       },
       "bgm_exam": {
         "key": "bgm_exam",
         "category": "bgm_exam",
         "variantIndex": 0,
-        "label": "Nhạc nền phòng thi trung tính (Loop 8s, nhẹ nhàng tập trung)",
+        "label": "Nhạc nền phòng thi tập trung (Loop 16s liền mạch, nhịp điệu trí tuệ nghiêm túc)",
         "url": "/audio/default/bgm_exam.wav",
-        "sizeBytes": 352844,
-        "durationSec": 8,
-        "sha256": "2c69ca5939139122c3bcff37eab431efcd675f744967b322183d56a28d7142b6",
-        "source": "AI Game Platform V3 Original Ambient Focus Loop Composition",
+        "sizeBytes": 705644,
+        "durationSec": 16,
+        "sha256": "e47d35af44f96e81c13b99a84fc9e8bcf95cbffa72a019c8050b7bccc38cc4d6",
+        "source": "AI Game Platform V3 Original Intellectual Focus Loop Composition",
         "license": "CC0-1.0 (Public Domain)"
       }
     }
