@@ -10,6 +10,7 @@ import type {
   GameQuestion,
   GameSpecification,
   IndustryId,
+  LeaderboardEntry,
   PracticeFinalResult,
   PracticeQuestionResult,
   SanitizedQuestion,
@@ -778,6 +779,19 @@ export interface AdventureGameEngineProps {
   onPrevCheckpointQuestion?: () => void;
   audioMuted?: boolean;
   onToggleAudioMute?: () => void;
+  isMultiplayer?: boolean;
+  multiplayerRoomCode?: string;
+  multiplayerPlayerName?: string;
+  multiplayerPlayerId?: string | null;
+  multiplayerStreak?: number;
+  multiplayerIsAnswerSubmitted?: boolean;
+  multiplayerSubmittedAnswerText?: string;
+  multiplayerIsHostDisconnected?: boolean;
+  multiplayerIsReconnecting?: boolean;
+  multiplayerLeaderboard?: LeaderboardEntry[];
+  multiplayerFinalRank?: number | null;
+  multiplayerTotalPlayers?: number;
+  multiplayerShowLeaderboard?: boolean;
 }
 
 export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
@@ -815,6 +829,19 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   onPrevCheckpointQuestion,
   audioMuted = false,
   onToggleAudioMute,
+  isMultiplayer = false,
+  multiplayerRoomCode = '',
+  multiplayerPlayerName = '',
+  multiplayerPlayerId = null,
+  multiplayerStreak = 0,
+  multiplayerIsAnswerSubmitted = false,
+  multiplayerSubmittedAnswerText = '',
+  multiplayerIsHostDisconnected = false,
+  multiplayerIsReconnecting = false,
+  multiplayerLeaderboard = [],
+  multiplayerFinalRank = null,
+  multiplayerTotalPlayers = 0,
+  multiplayerShowLeaderboard = true,
 }) => {
   const effectiveOnStartSession = onStartSession || onStartLiveSession;
   const effectiveOnSubmitAnswer = onSubmitAnswer || onSubmitLiveAnswer;
@@ -1077,19 +1104,36 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     );
   }, [game.gameId, totalStages, effectiveConfig.obstacleDensity]);
 
-  // Synchronize live session progress (e.g., on page reload recovery in SoloPlayer)
+  // Synchronize live session progress (e.g., on page reload recovery in SoloPlayer or Host question advance in Multiplayer)
   useEffect(() => {
     if (mode !== 'LIVE_SESSION') return;
-    if (currentQuestionIndex > unlockedStageCount) {
+    if (currentQuestionIndex > unlockedStageCount || (isMultiplayer && currentQuestionIndex !== activeStageIndex)) {
+      const targetStage = Math.max(0, Math.min(currentQuestionIndex, totalStages - 1));
       setUnlockedStageCount(currentQuestionIndex);
-      setActiveStageIndex(Math.min(currentQuestionIndex, totalStages - 1));
+      setActiveStageIndex(targetStage);
 
       const p = physicsRef.current;
       p.unlockedStageCount = currentQuestionIndex;
-      p.activeStageIndex = Math.min(currentQuestionIndex, totalStages - 1);
+      p.activeStageIndex = targetStage;
       const prevCpX =
         currentQuestionIndex > 0 ? p.checkpointPositions[currentQuestionIndex - 1] : undefined;
-      if (prevCpX !== undefined && p.playerX < prevCpX) {
+      if (isMultiplayer) {
+        // When Host advances to a new stage, close the previous checkpoint modal and start running from the unlocked gate
+        if (!effectiveLiveFeedback && !multiplayerIsAnswerSubmitted) {
+          setCheckpointModalOpen(false);
+          p.isAtCheckpoint = false;
+          if (prevCpX !== undefined && p.playerX < prevCpX + 20) {
+            p.playerX = prevCpX + 36;
+          } else if (currentQuestionIndex === 0 && p.playerX > p.checkpointPositions[0] - 40) {
+            p.playerX = RUNNER_START_X;
+          }
+          p.playerY = 0;
+          p.vy = 0;
+          p.isGrounded = true;
+          p.jumpState = 'GROUNDED';
+          p.cameraX = Math.max(0, p.playerX - 180);
+        }
+      } else if (prevCpX !== undefined && p.playerX < prevCpX) {
         p.playerX = prevCpX + 36;
         p.playerY = 0;
         p.vy = 0;
@@ -1099,7 +1143,16 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         p.cameraX = Math.max(0, p.playerX - 180);
       }
     }
-  }, [mode, currentQuestionIndex, unlockedStageCount, totalStages]);
+  }, [
+    mode,
+    currentQuestionIndex,
+    unlockedStageCount,
+    activeStageIndex,
+    totalStages,
+    isMultiplayer,
+    effectiveLiveFeedback,
+    multiplayerIsAnswerSubmitted,
+  ]);
 
   const activeQuestion: GameQuestion | SanitizedQuestion | null = useMemo(() => {
     if (mode === 'LIVE_SESSION' && currentQuestion) {
@@ -1112,6 +1165,69 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   const isJourneyFinished =
     mode === 'LIVE_SESSION' ? Boolean(isSessionFinished || effectiveFinalResult) : previewFinished;
   const activeModalOpen = checkpointModalOpen && !isJourneyFinished;
+
+  const handleOpenCheckpointImmediately = useCallback(() => {
+    const targetStage = Math.max(
+      0,
+      Math.min(
+        mode === 'LIVE_SESSION' ? currentQuestionIndex : activeStageIndex,
+        totalStages - 1
+      )
+    );
+    const p = physicsRef.current;
+    const cpX = p.checkpointPositions[targetStage];
+    if (cpX !== undefined) {
+      p.playerX = Math.max(p.playerX, cpX - RUNNER_CHECKPOINT_STOP_OFFSET);
+      p.playerY = 0;
+      p.vx = 0;
+      p.vy = 0;
+      p.isGrounded = true;
+      p.jumpState = 'GROUNDED';
+      p.isAtCheckpoint = true;
+      p.activeStageIndex = targetStage;
+      p.cameraX = Math.max(0, p.playerX - 200);
+      for (const obs of p.obstacles) {
+        if (obs.stageIndex <= targetStage && obs.x < p.playerX) {
+          obs.cleared = true;
+        }
+      }
+      setJourneyProgressPercent(
+        Math.min(100, Math.max(0, Math.round((p.playerX / Math.max(1, p.finishLineX)) * 100)))
+      );
+    }
+    setActiveStageIndex(targetStage);
+    setCheckpointModalOpen(true);
+  }, [mode, currentQuestionIndex, activeStageIndex, totalStages]);
+
+  // In Multiplayer, automatically open the checkpoint modal if the player has already submitted,
+  // if the Host/timer revealed the question, or if <= 5 seconds remain so slow runners never miss answering.
+  useEffect(() => {
+    if (!isMultiplayer || mode !== 'LIVE_SESSION' || isJourneyFinished) return;
+    if (activeFeedback || multiplayerIsAnswerSubmitted) {
+      if (!checkpointModalOpen) {
+        handleOpenCheckpointImmediately();
+      }
+      return;
+    }
+    if (
+      currentQuestion &&
+      !checkpointModalOpen &&
+      typeof timeRemaining === 'number' &&
+      timeRemaining <= 5
+    ) {
+      handleOpenCheckpointImmediately();
+    }
+  }, [
+    isMultiplayer,
+    mode,
+    isJourneyFinished,
+    activeFeedback,
+    multiplayerIsAnswerSubmitted,
+    currentQuestion,
+    checkpointModalOpen,
+    timeRemaining,
+    handleOpenCheckpointImmediately,
+  ]);
 
   useEffect(() => {
     onCheckpointModalChange?.(activeModalOpen, activeStageIndex);
@@ -1219,7 +1335,14 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
   const handleAnswerSubmit = useCallback(
     async (answerValue: string) => {
-      if (!activeQuestion || activeFeedback || submittingAnswer) return;
+      if (
+        !activeQuestion ||
+        activeFeedback ||
+        submittingAnswer ||
+        (isMultiplayer && multiplayerIsAnswerSubmitted)
+      ) {
+        return;
+      }
       const trimmed = answerValue.trim();
       if (!trimmed) return;
 
@@ -1264,11 +1387,30 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
         submittingStageLockRef.current = false;
       }
     },
-    [activeQuestion, activeFeedback, submittingAnswer, activeStageIndex, mode, effectiveOnSubmitAnswer]
+    [
+      activeQuestion,
+      activeFeedback,
+      submittingAnswer,
+      isMultiplayer,
+      multiplayerIsAnswerSubmitted,
+      activeStageIndex,
+      mode,
+      effectiveOnSubmitAnswer,
+    ]
   );
 
   const handleContinueJourney = useCallback(async () => {
     if (!activeFeedback) return;
+
+    if (isMultiplayer) {
+      // In Multiplayer, the Host controls advancing to the next question.
+      // Closing the modal lets the player view the 2D scene at the checkpoint gate while waiting for Host.
+      setCheckpointModalOpen(false);
+      if (effectiveOnNextQuestion) {
+        await effectiveOnNextQuestion();
+      }
+      return;
+    }
 
     const nextUnlocked = Math.min(totalStages, activeStageIndex + 1);
     setUnlockedStageCount(nextUnlocked);
@@ -1294,7 +1436,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     } else {
       setPreviewFinished(true);
     }
-  }, [activeFeedback, totalStages, activeStageIndex, mode, effectiveOnNextQuestion]);
+  }, [activeFeedback, isMultiplayer, totalStages, activeStageIndex, mode, effectiveOnNextQuestion]);
 
   const handleRestartPreview = useCallback(async () => {
     // Reuses already-loaded assets in loadedSpritesRef; never calls Banana API
@@ -1936,7 +2078,16 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
           </div>
 
           {/* 3. Số câu đã hoàn thành */}
-          <div>
+          <div
+            style={
+              isMultiplayer
+                ? {
+                    paddingRight: '10px',
+                    borderRight: '1px solid rgba(148, 163, 184, 0.2)',
+                  }
+                : undefined
+            }
+          >
             <div style={{ fontSize: '10px', fontWeight: 700, color: '#94a3b8' }}>
               ĐÃ HOÀN THÀNH
             </div>
@@ -1952,6 +2103,31 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               {completedQuestionsCount}/{totalStages} câu
             </div>
           </div>
+
+          {isMultiplayer && (
+            <div data-testid="adventure-mp-room-badge">
+              <div style={{ fontSize: '10px', fontWeight: 700, color: '#38bdf8' }}>
+                CHƠI NHÓM · PHÒNG {multiplayerRoomCode}
+              </div>
+              <div
+                style={{
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  color: '#f8fafc',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <span>{multiplayerPlayerName || 'Người chơi'}</span>
+                {multiplayerStreak > 1 && (
+                  <span style={{ color: '#fb923c', fontSize: '11.5px', fontWeight: 900 }}>
+                    🔥 x{multiplayerStreak}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Action controls: Pause/Resume & Exit */}
@@ -1964,6 +2140,90 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
             pointerEvents: 'auto',
           }}
         >
+          {isMultiplayer && multiplayerIsReconnecting && (
+            <div
+              data-testid="adventure-mp-reconnecting-badge"
+              style={{
+                padding: '6px 12px',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(245, 158, 11, 0.22)',
+                border: '1.5px solid #f59e0b',
+                color: '#fde68a',
+                fontSize: '12px',
+                fontWeight: 800,
+              }}
+            >
+              ⏳ Đang kết nối lại...
+            </div>
+          )}
+          {isMultiplayer && multiplayerIsHostDisconnected && (
+            <div
+              data-testid="adventure-mp-host-disconnected-badge"
+              style={{
+                padding: '6px 12px',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(239, 68, 68, 0.22)',
+                border: '1.5px solid #ef4444',
+                color: '#fca5a5',
+                fontSize: '12px',
+                fontWeight: 800,
+              }}
+            >
+              ⚠️ Chủ phòng tạm mất kết nối
+            </div>
+          )}
+          {isMultiplayer &&
+            isJourneyStarted &&
+            !isJourneyFinished &&
+            !activeModalOpen &&
+            !activeFeedback &&
+            !multiplayerIsAnswerSubmitted &&
+            currentQuestion && (
+              <button
+                type="button"
+                data-testid="mp-open-checkpoint-btn"
+                onClick={handleOpenCheckpointImmediately}
+                style={{
+                  minHeight: '44px',
+                  padding: '0 14px',
+                  borderRadius: '10px',
+                  backgroundColor: accentHex,
+                  border: 'none',
+                  color: accentInk,
+                  fontSize: '12.5px',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 14px rgba(0, 0, 0, 0.4)',
+                }}
+              >
+                ⚡ Mở câu hỏi Trạm #{activeStageIndex + 1}
+                {typeof timeRemaining === 'number' ? ` (${timeRemaining}s)` : ''}
+              </button>
+            )}
+          {isMultiplayer &&
+            isJourneyStarted &&
+            !isJourneyFinished &&
+            !activeModalOpen &&
+            (Boolean(activeFeedback) || multiplayerIsAnswerSubmitted) && (
+              <button
+                type="button"
+                data-testid="adventure-mp-waiting-host"
+                onClick={() => setCheckpointModalOpen(true)}
+                style={{
+                  minHeight: '44px',
+                  padding: '0 14px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                  border: `1.5px solid ${accentHex}`,
+                  color: '#f8fafc',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                ⏳ Đang chờ Chủ phòng mở Chặng tiếp theo · Xem trạm
+              </button>
+            )}
           {isPlaytest && (
             <div
               data-testid="playtest-mode-banner"
@@ -2569,7 +2829,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
               {/* Answer Input Area */}
               <div>
-                {activeQuestion.type === 'SLIDER' && activeQuestion.sliderConfig ? (
+                {(() => {
+                  const isInputLocked =
+                    Boolean(activeFeedback) ||
+                    submittingAnswer ||
+                    Boolean(isMultiplayer && multiplayerIsAnswerSubmitted);
+                  return activeQuestion.type === 'SLIDER' && activeQuestion.sliderConfig ? (
                   <div style={{ marginTop: '14px' }}>
                     {(() => {
                       const { min, max, step } = activeQuestion.sliderConfig!;
@@ -2613,7 +2878,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                                 max={max}
                                 step={safeStep}
                                 value={currentVal}
-                                disabled={Boolean(activeFeedback) || submittingAnswer}
+                                disabled={isInputLocked}
                                 onChange={e => {
                                   const parsed = Number(e.target.value);
                                   if (Number.isFinite(parsed)) {
@@ -2646,19 +2911,18 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                             max={max}
                             step={safeStep}
                             value={currentVal}
-                            disabled={Boolean(activeFeedback) || submittingAnswer}
+                            disabled={isInputLocked}
                             onChange={e => setSliderValue(clampVal(Number(e.target.value)))}
                             style={{
                               width: '100%',
                               accentColor: accentHex,
-                              cursor:
-                                Boolean(activeFeedback) || submittingAnswer ? 'default' : 'pointer',
+                              cursor: isInputLocked ? 'default' : 'pointer',
                             }}
                           />
-                          {!activeFeedback && (
+                          {!isInputLocked && (
                             <button
                               type="button"
-                              disabled={submittingAnswer}
+                              disabled={isInputLocked}
                               onClick={() => handleAnswerSubmit(String(clampVal(currentVal)))}
                               style={{
                                 minHeight: '44px',
@@ -2669,7 +2933,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                                 color: accentInk,
                                 fontSize: '14px',
                                 fontWeight: 800,
-                                cursor: submittingAnswer ? 'not-allowed' : 'pointer',
+                                cursor: isInputLocked ? 'not-allowed' : 'pointer',
                               }}
                             >
                               Xác nhận giá trị {currentVal}
@@ -2725,7 +2989,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                           <div style={{ display: 'flex', gap: '6px' }}>
                             <button
                               type="button"
-                              disabled={Boolean(activeFeedback) || submittingAnswer || idx === 0}
+                              disabled={isInputLocked || idx === 0}
                               onClick={() => handleMovePuzzleItem(idx, -1)}
                               style={{
                                 minWidth: '44px',
@@ -2736,7 +3000,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                                 color: idx === 0 ? uiTheme.textMuted : uiTheme.textPrimary,
                                 fontWeight: 800,
                                 cursor:
-                                  Boolean(activeFeedback) || submittingAnswer || idx === 0
+                                  isInputLocked || idx === 0
                                     ? 'not-allowed'
                                     : 'pointer',
                               }}
@@ -2746,8 +3010,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                             <button
                               type="button"
                               disabled={
-                                Boolean(activeFeedback) ||
-                                submittingAnswer ||
+                                isInputLocked ||
                                 idx === arr.length - 1
                               }
                               onClick={() => handleMovePuzzleItem(idx, 1)}
@@ -2760,8 +3023,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                                 color: idx === arr.length - 1 ? uiTheme.textMuted : uiTheme.textPrimary,
                                 fontWeight: 800,
                                 cursor:
-                                  Boolean(activeFeedback) ||
-                                  submittingAnswer ||
+                                  isInputLocked ||
                                   idx === arr.length - 1
                                     ? 'not-allowed'
                                     : 'pointer',
@@ -2773,10 +3035,10 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                         </div>
                       )
                     )}
-                    {!activeFeedback && (
+                    {!isInputLocked && (
                       <button
                         type="button"
-                        disabled={submittingAnswer}
+                        disabled={isInputLocked}
                         onClick={() =>
                           handleAnswerSubmit(
                             (puzzleOrder.length > 0
@@ -2795,7 +3057,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                           color: accentInk,
                           fontSize: '14px',
                           fontWeight: 800,
-                          cursor: submittingAnswer ? 'not-allowed' : 'pointer',
+                          cursor: isInputLocked ? 'not-allowed' : 'pointer',
                         }}
                       >
                         Xác nhận thứ tự đã sắp xếp
@@ -2886,10 +3148,10 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                             type="text"
                             data-testid="checkpoint-crossword-input"
                             value={textAnswer}
-                            disabled={Boolean(activeFeedback) || submittingAnswer}
+                            disabled={isInputLocked}
                             onChange={e => setTextAnswer(e.target.value.toUpperCase())}
                             onKeyDown={e => {
-                              if (e.key === 'Enter' && textAnswer.trim() && !activeFeedback && !submittingAnswer) {
+                              if (e.key === 'Enter' && textAnswer.trim() && !isInputLocked) {
                                 e.preventDefault();
                                 handleAnswerSubmit(normalizeCrosswordAnswerForRunner(textAnswer) || textAnswer.trim());
                               }
@@ -2909,11 +3171,11 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                               textTransform: 'uppercase',
                             }}
                           />
-                          {!activeFeedback && (
+                          {!isInputLocked && (
                             <button
                               type="button"
                               data-testid="checkpoint-submit-answer-btn"
-                              disabled={!textAnswer.trim() || submittingAnswer}
+                              disabled={!textAnswer.trim() || isInputLocked}
                               onClick={() =>
                                 handleAnswerSubmit(
                                   normalizeCrosswordAnswerForRunner(textAnswer) || textAnswer.trim()
@@ -2929,8 +3191,8 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                                 fontSize: '14px',
                                 fontWeight: 800,
                                 cursor:
-                                  !textAnswer.trim() || submittingAnswer ? 'not-allowed' : 'pointer',
-                                opacity: !textAnswer.trim() || submittingAnswer ? 0.5 : 1,
+                                  !textAnswer.trim() || isInputLocked ? 'not-allowed' : 'pointer',
+                                opacity: !textAnswer.trim() || isInputLocked ? 0.5 : 1,
                               }}
                             >
                               Giải Ô Chữ
@@ -2953,7 +3215,13 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     }}
                   >
                     {activeQuestion.choices.map((choice, cIdx) => {
-                      const isSelected = selectedChoice === choice;
+                      const isSelected =
+                        selectedChoice === choice ||
+                        Boolean(
+                          isMultiplayer &&
+                            multiplayerIsAnswerSubmitted &&
+                            multiplayerSubmittedAnswerText === choice
+                        );
                       const isExamQuestionRedacted =
                         game.settings?.sessionMode === 'EXAM' &&
                         !game.settings?.answersPublished &&
@@ -3019,7 +3287,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                                   ? 'selected'
                                   : 'neutral'
                           }
-                          disabled={Boolean(activeFeedback) || submittingAnswer}
+                          disabled={isInputLocked}
                           onClick={() => {
                             setSelectedChoice(choice);
                             handleAnswerSubmit(choice);
@@ -3033,8 +3301,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                             color: textColor,
                             fontSize: '15px',
                             fontWeight: 800,
-                            cursor:
-                              Boolean(activeFeedback) || submittingAnswer ? 'default' : 'pointer',
+                            cursor: isInputLocked ? 'default' : 'pointer',
                             display: 'flex',
                             alignItems: 'center',
                             justifyContent: 'center',
@@ -3059,7 +3326,13 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     }}
                   >
                     {activeQuestion.choices.map((choice, cIdx) => {
-                      const isSelected = selectedChoice === choice;
+                      const isSelected =
+                        selectedChoice === choice ||
+                        Boolean(
+                          isMultiplayer &&
+                            multiplayerIsAnswerSubmitted &&
+                            multiplayerSubmittedAnswerText === choice
+                        );
                       const isExamQuestionRedacted =
                         game.settings?.sessionMode === 'EXAM' &&
                         !game.settings?.answersPublished &&
@@ -3125,7 +3398,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                                   ? 'selected'
                                   : 'neutral'
                           }
-                          disabled={Boolean(activeFeedback) || submittingAnswer}
+                          disabled={isInputLocked}
                           onClick={() => {
                             setSelectedChoice(choice);
                             handleAnswerSubmit(choice);
@@ -3139,8 +3412,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                             color: textColor,
                             fontSize: '13.5px',
                             fontWeight: 600,
-                            cursor:
-                              Boolean(activeFeedback) || submittingAnswer ? 'default' : 'pointer',
+                            cursor: isInputLocked ? 'default' : 'pointer',
                             display: 'flex',
                             alignItems: 'flex-start',
                             gap: '9px',
@@ -3179,10 +3451,10 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                       type="text"
                       data-testid="checkpoint-fill-blank-input"
                       value={textAnswer}
-                      disabled={Boolean(activeFeedback) || submittingAnswer}
+                      disabled={isInputLocked}
                       onChange={e => setTextAnswer(e.target.value)}
                       onKeyDown={e => {
-                        if (e.key === 'Enter' && textAnswer.trim() && !activeFeedback && !submittingAnswer) {
+                        if (e.key === 'Enter' && textAnswer.trim() && !isInputLocked) {
                           e.preventDefault();
                           handleAnswerSubmit(textAnswer.trim());
                         }
@@ -3199,11 +3471,11 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                         fontSize: '14px',
                       }}
                     />
-                    {!activeFeedback && (
+                    {!isInputLocked && (
                       <button
                         type="button"
                         data-testid="checkpoint-submit-answer-btn"
-                        disabled={!textAnswer.trim() || submittingAnswer}
+                        disabled={!textAnswer.trim() || isInputLocked}
                         onClick={() => handleAnswerSubmit(textAnswer.trim())}
                         style={{
                           minHeight: '44px',
@@ -3215,16 +3487,62 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                           fontSize: '14px',
                           fontWeight: 700,
                           cursor:
-                            !textAnswer.trim() || submittingAnswer ? 'not-allowed' : 'pointer',
-                          opacity: !textAnswer.trim() || submittingAnswer ? 0.5 : 1,
+                            !textAnswer.trim() || isInputLocked ? 'not-allowed' : 'pointer',
+                          opacity: !textAnswer.trim() || isInputLocked ? 0.5 : 1,
                         }}
                       >
                         Trả lời
                       </button>
                     )}
                   </div>
-                )}
+                );
+                })()}
               </div>
+
+              {/* Multiplayer Waiting for Reveal Banner */}
+              {isMultiplayer && multiplayerIsAnswerSubmitted && !activeFeedback && (
+                <div
+                  data-testid="adventure-mp-waiting-banner"
+                  style={{
+                    marginTop: '14px',
+                    padding: '12px 16px',
+                    borderRadius: '10px',
+                    backgroundColor: 'rgba(16, 185, 129, 0.14)',
+                    border: '1.5px solid rgba(16, 185, 129, 0.5)',
+                    color: '#34d399',
+                    fontSize: '13.5px',
+                    fontWeight: 800,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '10px',
+                    flexWrap: 'wrap',
+                  }}
+                >
+                  <div>
+                    ✓ Đã ghi nhận câu trả lời của bạn
+                    {multiplayerSubmittedAnswerText
+                      ? `: "${multiplayerSubmittedAnswerText}"`
+                      : ''}
+                    ! Đang đợi Chủ phòng / người chơi khác hoàn thành...
+                  </div>
+                  {typeof timeRemaining === 'number' && (
+                    <span
+                      style={{
+                        padding: '3px 10px',
+                        borderRadius: '999px',
+                        backgroundColor: 'rgba(15, 23, 42, 0.75)',
+                        color: '#f8fafc',
+                        fontSize: '12px',
+                        fontWeight: 900,
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      ⏱ {timeRemaining}s
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* Feedback & Continue Button */}
               {activeFeedback && (() => {
@@ -3260,70 +3578,160 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                           : uiTheme.choiceWrongBorder
                     }`,
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
+                    flexDirection: 'column',
                     gap: '12px',
-                    flexWrap: 'wrap',
                   }}
                 >
-                  <div style={{ flex: '1 1 240px' }}>
-                    <div
-                      style={{
-                        fontSize: '13.5px',
-                        fontWeight: 700,
-                        color: isExamUnpublished
-                          ? uiTheme.feedbackExamText
-                          : activeFeedback.isCorrect
-                            ? uiTheme.choiceCorrectText
-                            : uiTheme.choiceWrongText,
-                      }}
-                    >
-                      {isExamUnpublished
-                        ? isTimedOutFeedback
-                          ? `[HẾT THỜI GIAN TRẢ LỜI] Đã ghi nhận tự động — Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
-                          : `[ĐÃ GHI NHẬN CÂU TRẢ LỜI] Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
-                        : activeFeedback.isCorrect
-                          ? `[CHÍNH XÁC · TRẢ LỜI ĐÚNG +${activeFeedback.pointsEarned}Đ] Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
-                          : isTimedOutFeedback
-                            ? `[HẾT THỜI GIAN TRẢ LỜI · +0Đ]${activeFeedback.correctAnswer ? ` Đáp án chuẩn: ${activeFeedback.correctAnswer}` : ''}`
-                            : `[CHƯA ĐÚNG · TRẢ LỜI SAI +0Đ]${activeFeedback.correctAnswer ? ` Đáp án chuẩn: ${activeFeedback.correctAnswer}` : ''}`}
-                    </div>
-                    {!isExamUnpublished &&
-                      typeof activeFeedback.explanation === 'string' &&
-                      activeFeedback.explanation.trim().length > 0 && (
-                        <div
-                          data-testid="checkpoint-feedback-explanation"
-                          style={{
-                            marginTop: '4px',
-                            fontSize: '12px',
-                            color: uiTheme.textSecondary,
-                            lineHeight: 1.4,
-                          }}
-                        >
-                          {activeFeedback.explanation.trim()}
-                        </div>
-                      )}
-                  </div>
-                  <button
-                    type="button"
-                    data-testid="checkpoint-continue-btn"
-                    onClick={handleContinueJourney}
+                  <div
                     style={{
-                      minHeight: '44px',
-                      padding: '0 16px',
-                      borderRadius: '6px',
-                      backgroundColor: uiTheme.continueBtnBg,
-                      border: 'none',
-                      color: uiTheme.continueBtnText,
-                      fontSize: '13px',
-                      fontWeight: 800,
-                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      gap: '12px',
+                      flexWrap: 'wrap',
                     }}
                   >
-                    {activeStageIndex + 1 < totalStages
-                      ? 'Tiếp tục hành trình (Space)'
-                      : 'Tiến về đích (Space)'}
-                  </button>
+                    <div style={{ flex: '1 1 240px' }}>
+                      <div
+                        style={{
+                          fontSize: '13.5px',
+                          fontWeight: 700,
+                          color: isExamUnpublished
+                            ? uiTheme.feedbackExamText
+                            : activeFeedback.isCorrect
+                              ? uiTheme.choiceCorrectText
+                              : uiTheme.choiceWrongText,
+                        }}
+                      >
+                        {isExamUnpublished
+                          ? isTimedOutFeedback
+                            ? `[HẾT THỜI GIAN TRẢ LỜI] Đã ghi nhận tự động — Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
+                            : `[ĐÃ GHI NHẬN CÂU TRẢ LỜI] Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
+                          : activeFeedback.isCorrect
+                            ? `[CHÍNH XÁC · TRẢ LỜI ĐÚNG +${activeFeedback.pointsEarned}Đ] Cổng chắn chặng ${activeStageIndex + 1} đã mở!`
+                            : isTimedOutFeedback
+                              ? `[HẾT THỜI GIAN TRẢ LỜI · +0Đ]${activeFeedback.correctAnswer ? ` Đáp án chuẩn: ${activeFeedback.correctAnswer}` : ''}`
+                              : `[CHƯA ĐÚNG · TRẢ LỜI SAI +0Đ]${activeFeedback.correctAnswer ? ` Đáp án chuẩn: ${activeFeedback.correctAnswer}` : ''}`}
+                      </div>
+                      {!isExamUnpublished &&
+                        typeof activeFeedback.explanation === 'string' &&
+                        activeFeedback.explanation.trim().length > 0 && (
+                          <div
+                            data-testid="checkpoint-feedback-explanation"
+                            style={{
+                              marginTop: '4px',
+                              fontSize: '12px',
+                              color: uiTheme.textSecondary,
+                              lineHeight: 1.4,
+                            }}
+                          >
+                            {activeFeedback.explanation.trim()}
+                          </div>
+                        )}
+                      {isMultiplayer && (
+                        <div
+                          style={{
+                            marginTop: '6px',
+                            fontSize: '11.5px',
+                            fontWeight: 800,
+                            color: accentHex,
+                          }}
+                        >
+                          ⏳ Chủ phòng điều khiển chuyển sang chặng tiếp theo cho toàn phòng.
+                        </div>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      data-testid="checkpoint-continue-btn"
+                      onClick={handleContinueJourney}
+                      style={{
+                        minHeight: '44px',
+                        padding: '0 16px',
+                        borderRadius: '6px',
+                        backgroundColor: uiTheme.continueBtnBg,
+                        border: 'none',
+                        color: uiTheme.continueBtnText,
+                        fontSize: '13px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      {isMultiplayer
+                        ? 'Đóng bảng & Chờ Chủ phòng (Space)'
+                        : activeStageIndex + 1 < totalStages
+                          ? 'Tiếp tục hành trình (Space)'
+                          : 'Tiến về đích (Space)'}
+                    </button>
+                  </div>
+
+                  {isMultiplayer &&
+                    multiplayerShowLeaderboard &&
+                    Array.isArray(multiplayerLeaderboard) &&
+                    multiplayerLeaderboard.length > 0 && (
+                      <div
+                        data-testid="adventure-mp-reveal-leaderboard"
+                        style={{
+                          padding: '10px 12px',
+                          borderRadius: '8px',
+                          backgroundColor: uiTheme.subCardBg,
+                          border: `1px solid ${uiTheme.subCardBorder}`,
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize: '11.5px',
+                            fontWeight: 800,
+                            color: uiTheme.textMuted,
+                            textTransform: 'uppercase',
+                            marginBottom: '6px',
+                          }}
+                        >
+                          🏆 Bảng xếp hạng trực tiếp (Top 5)
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                          {multiplayerLeaderboard.slice(0, 5).map(entry => {
+                            const isMe = Boolean(
+                              multiplayerPlayerId && entry.playerId === multiplayerPlayerId
+                            );
+                            return (
+                              <div
+                                key={entry.playerId}
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  padding: '5px 8px',
+                                  borderRadius: '6px',
+                                  backgroundColor: isMe
+                                    ? 'rgba(56, 189, 248, 0.16)'
+                                    : uiTheme.cardBg,
+                                  border: `1px solid ${
+                                    isMe ? '#38bdf8' : uiTheme.subCardBorder
+                                  }`,
+                                  fontSize: '12px',
+                                  fontWeight: isMe ? 900 : 700,
+                                  color: uiTheme.textPrimary,
+                                }}
+                              >
+                                <span>
+                                  #{entry.rank} {entry.displayName} {isMe ? '(Bạn)' : ''}
+                                </span>
+                                <span
+                                  style={{
+                                    color: '#34d399',
+                                    fontWeight: 900,
+                                    fontVariantNumeric: 'tabular-nums',
+                                  }}
+                                >
+                                  {entry.score} đ
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
                 </div>
                 );
               })()}
@@ -3381,22 +3789,41 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 <div style={{ fontSize: '12px', color: uiTheme.choiceCorrectText, fontWeight: 700 }}>
                   HOÀN THÀNH MÀN CHƠI · {effectiveConfig.industryLabel}
                 </div>
-                {victoryEval.isPassed !== null && (
-                  <span
-                    data-testid="exam-pass-status-badge"
-                    style={{
-                      padding: '3px 10px',
-                      borderRadius: '999px',
-                      fontSize: '11.5px',
-                      fontWeight: 900,
-                      backgroundColor: victoryEval.isPassed ? uiTheme.choiceCorrectBg : uiTheme.choiceWrongBg,
-                      border: `1.5px solid ${victoryEval.isPassed ? uiTheme.choiceCorrectBorder : uiTheme.choiceWrongBorder}`,
-                      color: victoryEval.isPassed ? uiTheme.choiceCorrectText : uiTheme.choiceWrongText,
-                    }}
-                  >
-                    {victoryEval.isPassed ? '✓ ĐẠT YÊU CẦU' : '✕ CHƯA ĐẠT'} (Ngưỡng {victoryEval.passThresholdPercent}%)
-                  </span>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                  {isMultiplayer && typeof multiplayerFinalRank === 'number' && multiplayerFinalRank > 0 && (
+                    <span
+                      data-testid="adventure-mp-final-rank"
+                      style={{
+                        padding: '3px 10px',
+                        borderRadius: '999px',
+                        fontSize: '11.5px',
+                        fontWeight: 900,
+                        backgroundColor: 'rgba(245, 158, 11, 0.2)',
+                        border: '1.5px solid #f59e0b',
+                        color: '#fbbf24',
+                      }}
+                    >
+                      🏆 Hạng #{multiplayerFinalRank}
+                      {multiplayerTotalPlayers ? ` / ${multiplayerTotalPlayers}` : ''}
+                    </span>
+                  )}
+                  {victoryEval.isPassed !== null && (
+                    <span
+                      data-testid="exam-pass-status-badge"
+                      style={{
+                        padding: '3px 10px',
+                        borderRadius: '999px',
+                        fontSize: '11.5px',
+                        fontWeight: 900,
+                        backgroundColor: victoryEval.isPassed ? uiTheme.choiceCorrectBg : uiTheme.choiceWrongBg,
+                        border: `1.5px solid ${victoryEval.isPassed ? uiTheme.choiceCorrectBorder : uiTheme.choiceWrongBorder}`,
+                        color: victoryEval.isPassed ? uiTheme.choiceCorrectText : uiTheme.choiceWrongText,
+                      }}
+                    >
+                      {victoryEval.isPassed ? '✓ ĐẠT YÊU CẦU' : '✕ CHƯA ĐẠT'} (Ngưỡng {victoryEval.passThresholdPercent}%)
+                    </span>
+                  )}
+                </div>
               </div>
               <h2
                 style={{
@@ -3487,6 +3914,72 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   </div>
                 </div>
               </div>
+
+              {isMultiplayer &&
+                multiplayerShowLeaderboard &&
+                Array.isArray(multiplayerLeaderboard) &&
+                multiplayerLeaderboard.length > 0 && (
+                  <div
+                    data-testid="adventure-mp-final-leaderboard"
+                    style={{
+                      marginBottom: '18px',
+                      padding: '12px',
+                      borderRadius: '10px',
+                      backgroundColor: uiTheme.subCardBg,
+                      border: `1px solid ${uiTheme.subCardBorder}`,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: '12.5px',
+                        fontWeight: 800,
+                        color: uiTheme.textPrimary,
+                        marginBottom: '8px',
+                      }}
+                    >
+                      🏆 Bảng xếp hạng chung cuộc ({multiplayerLeaderboard.length} người chơi)
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {multiplayerLeaderboard.slice(0, 10).map(entry => {
+                        const isMe = Boolean(
+                          multiplayerPlayerId && entry.playerId === multiplayerPlayerId
+                        );
+                        return (
+                          <div
+                            key={entry.playerId}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              padding: '7px 10px',
+                              borderRadius: '8px',
+                              backgroundColor: isMe
+                                ? 'rgba(56, 189, 248, 0.16)'
+                                : uiTheme.cardBg,
+                              border: `1px solid ${isMe ? '#38bdf8' : uiTheme.subCardBorder}`,
+                              fontSize: '13px',
+                              fontWeight: isMe ? 900 : 700,
+                              color: uiTheme.textPrimary,
+                            }}
+                          >
+                            <span>
+                              #{entry.rank} {entry.displayName} {isMe ? '(Bạn)' : ''}
+                            </span>
+                            <span
+                              style={{
+                                color: '#34d399',
+                                fontWeight: 900,
+                                fontVariantNumeric: 'tabular-nums',
+                              }}
+                            >
+                              {entry.score} đ
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
 
               {mode === 'LIVE_SESSION' &&
                 (() => {
@@ -3689,24 +4182,26 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     ✨ Tạo game loại này
                   </button>
                 )}
-                <button
-                  type="button"
-                  data-testid="victory-restart-btn"
-                  onClick={handleRestartPreview}
-                  style={{
-                    minHeight: '44px',
-                    padding: '0 18px',
-                    borderRadius: '8px',
-                    backgroundColor: accentHex,
-                    border: 'none',
-                    color: accentInk,
-                    fontSize: '14px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  Chơi lại
-                </button>
+                {!isMultiplayer && (
+                  <button
+                    type="button"
+                    data-testid="victory-restart-btn"
+                    onClick={handleRestartPreview}
+                    style={{
+                      minHeight: '44px',
+                      padding: '0 18px',
+                      borderRadius: '8px',
+                      backgroundColor: accentHex,
+                      border: 'none',
+                      color: accentInk,
+                      fontSize: '14px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Chơi lại
+                  </button>
+                )}
                 <button
                   type="button"
                   data-testid="victory-exit-btn"
@@ -3723,7 +4218,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     cursor: 'pointer',
                   }}
                 >
-                  Thoát màn hình chơi
+                  {isMultiplayer ? 'Rời phòng chơi' : 'Thoát màn hình chơi'}
                 </button>
               </div>
             </div>

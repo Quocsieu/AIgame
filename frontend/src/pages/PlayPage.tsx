@@ -1,10 +1,23 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useToast } from '../components/ToastContext.js';
 import { GameSocketClient, ConnectionStatus } from '../services/socket.js';
 import { soundManager } from '../services/audio.js';
+import { fetchGameById, fetchRoomLobby } from '../services/api.js';
+import {
+  AdventureGameEngine,
+  resolveAdventureRuntimeAssets,
+} from '../components/AdventureGameEngine.js';
+import {
+  syncAdventureStagesWithQuestions,
+} from '../config/adventureThemes.js';
 import {
   evaluateFrontendPerformance,
+  type GameQuestion,
+  type GameSpecification,
+  type GameType,
   type LeaderboardEntry,
+  type PracticeFinalResult,
+  type PracticeQuestionResult,
   type SanitizedQuestion,
   type SessionMode,
 } from '../types/index.js';
@@ -118,6 +131,51 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   >([]);
   const [isAudioMuted, setIsAudioMuted] = useState<boolean>(() => soundManager.isMuted());
 
+  // Game specification & Adventure Multiplayer 2D state
+  const [activeGameId, setActiveGameId] = useState<string>('');
+  const [roomGameType, setRoomGameType] = useState<GameType | null>(null);
+  const [loadedGameSpec, setLoadedGameSpec] = useState<GameSpecification | null>(null);
+  const [submittedAnswerRecord, setSubmittedAnswerRecord] = useState<string>('');
+  const [currentStreak, setCurrentStreak] = useState<number>(0);
+
+  // Load room metadata & game specification once (no AI calls — uses saved assets or verified industry fallback pack)
+  useEffect(() => {
+    let cancelled = false;
+    fetchRoomLobby(roomCode)
+      .then((lobby) => {
+        if (cancelled) return;
+        if (lobby?.gameId) {
+          setActiveGameId((prev) => prev || lobby.gameId || '');
+        }
+        if (lobby?.gameType) {
+          setRoomGameType((prev) => prev || (lobby.gameType as GameType));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [roomCode]);
+
+  useEffect(() => {
+    if (!activeGameId) return;
+    let cancelled = false;
+    fetchGameById(activeGameId, { mode: 'public' })
+      .catch(() => fetchGameById(activeGameId))
+      .then((spec) => {
+        if (!cancelled && spec) {
+          setLoadedGameSpec(spec);
+          if (spec.gameType) {
+            setRoomGameType((prev) => prev || spec.gameType);
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [activeGameId]);
+
   const handleToggleAudioMute = () => {
     const nextMuted = soundManager.toggleMute();
     setIsAudioMuted(nextMuted);
@@ -202,6 +260,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
     }
 
     setAnswerError(null);
+    setSubmittedAnswerRecord(clean);
     setIsSubmittingAnswer(true);
 
     const sent = socketRef.current.send({
@@ -255,6 +314,12 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
     client.on('room.joined', (msg: any) => {
       setRoomError(null);
+      if (msg.gameId) {
+        setActiveGameId(msg.gameId);
+      }
+      if (msg.gameType) {
+        setRoomGameType(msg.gameType as GameType);
+      }
       if (msg.sessionMode === 'EXAM' || msg.sessionMode === 'PLAY') {
         setSessionMode(msg.sessionMode);
       }
@@ -317,6 +382,13 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       );
     });
 
+    client.on('room.closed', (msg: any) => {
+      stopTimer();
+      soundManager.stopAll();
+      setRoomError(msg?.reason || 'Phòng chơi đã được đóng bởi chủ phòng.');
+      sessionStorage.removeItem(tokenKey);
+    });
+
     client.on('question.started', (msg: any) => {
       hasPlayedFinishSfxRef.current = false;
       if (!soundManager.getIsPlaying()) {
@@ -325,6 +397,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       setCurrentQuestion(msg.question);
       setSelectedAnswer(null);
       setTextInputAnswer('');
+      setSubmittedAnswerRecord('');
       setIsSubmittingAnswer(false);
       setIsAnswerSubmitted(false);
       setAnswerError(null);
@@ -374,6 +447,16 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
       setExplanation(msg.explanation);
       setLeaderboard(msg.leaderboard || []);
       setPersonalResult(msg.personalResult ?? null);
+      if (msg.personalResult?.answer) {
+        setSubmittedAnswerRecord(msg.personalResult.answer);
+      }
+      if (typeof msg.personalResult?.streak === 'number') {
+        setCurrentStreak(msg.personalResult.streak);
+      } else if (msg.personalResult) {
+        setCurrentStreak((prev) => (msg.personalResult.isCorrect ? prev + 1 : 0));
+      } else {
+        setCurrentStreak(0);
+      }
 
       const isExamRedacted =
         (msg.sessionMode === 'EXAM' || sessionMode === 'EXAM') && !msg.answersPublished;
@@ -485,6 +568,215 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   const timerPercentage = totalQuestionTime > 0 ? Math.max(0, (timeRemaining / totalQuestionTime) * 100) : 0;
   const isUrgentTime = timeRemaining <= 5;
 
+  const effectiveGameType: GameType | null = loadedGameSpec?.gameType || roomGameType || null;
+  const isAdventureGame = effectiveGameType === 'ADVENTURE';
+
+  const effectiveAdventureGameSpec = useMemo<GameSpecification>(() => {
+    const totalCount =
+      currentQuestion?.totalQuestions ||
+      loadedGameSpec?.questions?.length ||
+      5;
+    const baseQuestions: GameQuestion[] = Array.isArray(loadedGameSpec?.questions)
+      ? [...loadedGameSpec.questions]
+      : Array.from({ length: totalCount }, (_, idx) => ({
+          id: `mp_adv_q_${idx + 1}`,
+          type: 'MULTIPLE_CHOICE' as const,
+          question: `Câu hỏi trạm #${idx + 1}`,
+          choices: ['A', 'B', 'C', 'D'],
+          correctAnswer: 'A',
+          explanation: '',
+          difficulty: 'MEDIUM' as const,
+          sourceReference: {
+            sourceId: 'mp_adv_src',
+            sourceType: 'TXT' as const,
+            sourceLocation: 'Multiplayer Adventure 2D',
+          },
+        }));
+
+    if (currentQuestion) {
+      const qIdx = Math.max(0, Math.min(baseQuestions.length - 1, currentQuestion.questionIndex ?? 0));
+      const existingQ = baseQuestions[qIdx];
+      baseQuestions[qIdx] = {
+        ...existingQ,
+        id: currentQuestion.id,
+        type: currentQuestion.type,
+        question: currentQuestion.question,
+        choices: currentQuestion.choices ?? existingQ?.choices,
+        crosswordClue: currentQuestion.crosswordClue ?? existingQ?.crosswordClue,
+        correctAnswer: existingQ?.correctAnswer || correctAnswer || '',
+        explanation: existingQ?.explanation || explanation || '',
+        difficulty: existingQ?.difficulty || 'MEDIUM',
+        sourceReference: existingQ?.sourceReference || {
+          sourceId: 'mp_adv_src',
+          sourceType: 'TXT' as const,
+          sourceLocation: 'Multiplayer Adventure 2D',
+        },
+      };
+    }
+
+    const syncedAdventureConfig = syncAdventureStagesWithQuestions(
+      loadedGameSpec?.settings?.adventureConfig,
+      baseQuestions
+    );
+
+    const baseSpec: GameSpecification = {
+      ...(loadedGameSpec || {
+        gameId: activeGameId || `mp_adv_${roomCode}`,
+        title: `Phòng thi đấu #${roomCode}`,
+        description: 'Chế độ Đi cảnh 2D Nhiều người chơi',
+        gameType: 'ADVENTURE',
+        questions: baseQuestions,
+        settings: {
+          questionCount: baseQuestions.length,
+          timePerQuestion: 20,
+          scoringMode: 'SPEED_BONUS',
+          sessionMode,
+          answersPublished,
+          adventureConfig: syncedAdventureConfig,
+        },
+        generatedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString(),
+      }),
+      gameType: 'ADVENTURE',
+      questions: baseQuestions,
+      settings: {
+        questionCount: baseQuestions.length,
+        timePerQuestion: loadedGameSpec?.settings?.timePerQuestion || 20,
+        scoringMode: loadedGameSpec?.settings?.scoringMode || 'SPEED_BONUS',
+        ...(loadedGameSpec?.settings || {}),
+        sessionMode,
+        answersPublished,
+        adventureConfig: syncedAdventureConfig,
+      },
+    };
+
+    return baseSpec;
+  }, [
+    loadedGameSpec,
+    activeGameId,
+    roomCode,
+    currentQuestion,
+    correctAnswer,
+    explanation,
+    sessionMode,
+    answersPublished,
+  ]);
+
+  const adventurePreviewConfig = useMemo(
+    () =>
+      effectiveAdventureGameSpec.settings.adventureConfig ||
+      syncAdventureStagesWithQuestions(undefined, effectiveAdventureGameSpec.questions),
+    [effectiveAdventureGameSpec]
+  );
+
+  const adventurePreviewAssets = useMemo(
+    () => resolveAdventureRuntimeAssets(adventurePreviewConfig),
+    [adventurePreviewConfig]
+  );
+
+  const myLeaderboardEntry = useMemo(
+    () => leaderboard.find((e) => e.playerId === playerId) || null,
+    [leaderboard, playerId]
+  );
+
+  const adventureLastResult = useMemo<PracticeQuestionResult | null>(() => {
+    if (screen !== 'reveal' || !currentQuestion) return null;
+    const isExamUnpublished = sessionMode === 'EXAM' && !answersPublished;
+    return {
+      questionId: currentQuestion.id,
+      questionIndex: currentQuestion.questionIndex ?? 0,
+      answer: submittedAnswerRecord || (personalResult as any)?.answer || '',
+      isCorrect: Boolean(personalResult?.isCorrect),
+      pointsEarned: personalResult?.pointsEarned ?? 0,
+      speedBonus: personalResult?.speedBonus ?? 0,
+      totalScore: playerScore,
+      correctCount: myLeaderboardEntry?.correctCount ?? 0,
+      streak: personalResult?.streak ?? currentStreak,
+      timedOut: !personalResult && !submittedAnswerRecord,
+      responseTimeMs: 0,
+      answeredAt: new Date().toISOString(),
+      correctAnswer: isExamUnpublished ? '' : correctAnswer,
+      explanation: isExamUnpublished ? undefined : explanation,
+      sessionMode,
+      answersPublished,
+      ...(isExamUnpublished ? { examAnswerRecorded: true, examRedacted: true } : {}),
+    } as unknown as PracticeQuestionResult;
+  }, [
+    screen,
+    currentQuestion,
+    sessionMode,
+    answersPublished,
+    submittedAnswerRecord,
+    personalResult,
+    playerScore,
+    myLeaderboardEntry,
+    currentStreak,
+    correctAnswer,
+    explanation,
+  ]);
+
+  const adventureFinalResult = useMemo<PracticeFinalResult | null>(() => {
+    if (screen !== 'finish') return null;
+    const totalQs =
+      myLeaderboardEntry?.totalQuestions ||
+      currentQuestion?.totalQuestions ||
+      effectiveAdventureGameSpec.questions.length ||
+      5;
+    const correctCnt = myLeaderboardEntry?.correctCount ?? 0;
+    const maxPossible = myLeaderboardEntry?.maxPossibleScore || totalQs * 100;
+    const evalRes = evaluateFrontendPerformance({
+      correctAnswers: correctCnt,
+      totalQuestions: totalQs,
+      sessionMode,
+      passThresholdPercent: sessionMode === 'EXAM' ? 50 : undefined,
+    });
+    return {
+      sessionId: `mp_${roomCode}_${playerId}`,
+      gameId: effectiveAdventureGameSpec.gameId || activeGameId || `mp_adv_${roomCode}`,
+      title: effectiveAdventureGameSpec.title,
+      gameType: 'ADVENTURE',
+      playerName: displayName,
+      totalScore: playerScore,
+      maxPossibleScore: maxPossible,
+      correctAnswers: correctCnt,
+      correctCount: correctCnt,
+      totalQuestions: totalQs,
+      accuracyPercentage: evalRes.accuracyPercentage,
+      completedAt: new Date().toISOString(),
+      sessionMode,
+      answersPublished,
+      canRevealAnswers: sessionMode !== 'EXAM' || answersPublished,
+      performanceEvaluation: evalRes,
+      questionResults:
+        publishedAnswersList.length > 0
+          ? publishedAnswersList.map((item, idx) => ({
+              questionId: item.id || `q_${idx}`,
+              questionIndex: idx,
+              answer: '',
+              isCorrect: true,
+              pointsEarned: 0,
+              responseTimeMs: 0,
+              answeredAt: new Date().toISOString(),
+              correctAnswer: item.correctAnswer,
+              explanation: item.explanation,
+            }))
+          : undefined,
+    } as unknown as PracticeFinalResult;
+  }, [
+    screen,
+    myLeaderboardEntry,
+    currentQuestion,
+    effectiveAdventureGameSpec,
+    sessionMode,
+    roomCode,
+    playerId,
+    activeGameId,
+    displayName,
+    playerScore,
+    answersPublished,
+    publishedAnswersList,
+  ]);
+
   // Kahoot color config for 4 choices (A: Red, B: Blue, C: Yellow, D: Green)
   const choiceColors = [
     { bg: 'var(--k-red)', dark: 'var(--k-red-dark)', hover: 'var(--k-red-hover)', icon: '▲', label: 'A', text: '#ffffff' },
@@ -492,6 +784,16 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
     { bg: 'var(--k-yellow)', dark: 'var(--k-yellow-dark)', hover: 'var(--k-yellow-hover)', icon: '●', label: 'C', text: 'var(--k-yellow-ink)' },
     { bg: 'var(--k-green)', dark: 'var(--k-green-dark)', hover: 'var(--k-green-hover)', icon: '■', label: 'D', text: '#ffffff' },
   ];
+
+  const getQuestionTypeBadgeLabel = (qType?: string): string => {
+    if (qType === 'MULTIPLE_CHOICE' || qType === 'QUIZ') return 'Trắc nghiệm';
+    if (qType === 'QUICK_BUTTON' || qType === 'TRUE_FALSE') return 'Đúng / Sai';
+    if (qType === 'FILL_IN_THE_BLANK' || qType === 'TYPE_ANSWER') return 'Điền từ';
+    if (qType === 'CROSSWORD') return 'Ô chữ';
+    if (qType === 'PUZZLE') return 'Sắp xếp thứ tự';
+    if (qType === 'SLIDER') return 'Thanh trượt';
+    return qType || 'Câu hỏi';
+  };
 
   if (roomError) {
     return (
@@ -541,7 +843,13 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   }
 
   return (
-    <div style={{ maxWidth: '640px', margin: '0 auto', padding: '0.75rem 0.5rem 2rem 0.5rem' }}>
+    <div
+      style={{
+        maxWidth: isAdventureGame && screen !== 'lobby' ? '1080px' : '760px',
+        margin: '0 auto',
+        padding: '0.75rem 0.5rem 2rem 0.5rem',
+      }}
+    >
       {/* Reconnecting Status Banner */}
       {connectionStatus === 'reconnecting' && (
         <div
@@ -621,6 +929,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           padding: '0.85rem 1.25rem',
           marginBottom: '1.25rem',
           boxShadow: 'var(--card-shadow)',
+          flexWrap: 'wrap',
+          gap: '0.75rem',
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
@@ -639,7 +949,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             <GamepadIcon size={22} />
           </div>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', flexWrap: 'wrap' }}>
               <span style={{ color: 'var(--text-primary)', fontSize: '1.05rem', fontWeight: 800 }}>
                 {displayName}
               </span>
@@ -663,7 +973,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flexWrap: 'wrap' }}>
           <div style={{ textAlign: 'right' }}>
             <span style={{ color: 'var(--text-muted)', fontSize: '0.7rem', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em', display: 'block' }}>
               ĐIỂM SỐ
@@ -883,36 +1193,205 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             <span>MÃ PHÒNG:</span>
             <span>{roomCode}</span>
           </div>
+
+          {isAdventureGame && (
+            <div
+              data-testid="mp-lobby-adventure-preview"
+              style={{
+                marginTop: '1.5rem',
+                padding: '1.15rem',
+                borderRadius: '16px',
+                backgroundColor: 'var(--bg-card)',
+                border: '1.5px solid var(--border-strong)',
+                textAlign: 'left',
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.5rem',
+                  flexWrap: 'wrap',
+                  marginBottom: '0.65rem',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: '0.76rem',
+                    fontWeight: 900,
+                    color: 'var(--accent-emerald)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.05em',
+                  }}
+                >
+                  🎮 CHẾ ĐỘ ĐI CẢNH 2D NHIỀU NGƯỜI CHƠI · {adventurePreviewConfig.industryLabel}
+                </span>
+                <span
+                  style={{
+                    fontSize: '0.74rem',
+                    fontWeight: 800,
+                    color: 'var(--accent-sky)',
+                    padding: '0.2rem 0.6rem',
+                    borderRadius: '999px',
+                    backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                    border: '1px solid rgba(56, 189, 248, 0.35)',
+                  }}
+                >
+                  {effectiveAdventureGameSpec.questions.length} Trạm kiểm tra 2D
+                </span>
+              </div>
+              <div style={{ fontSize: '0.96rem', fontWeight: 800, color: 'var(--text-primary)', marginBottom: '0.35rem' }}>
+                {adventurePreviewConfig.environmentTitle}
+              </div>
+              <p style={{ margin: '0 0 0.75rem 0', fontSize: '0.84rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                Nhân vật <strong>{adventurePreviewConfig.avatarLabel || 'Nhân vật 2D'}</strong> di chuyển trên màn hình 2D, nhảy vượt qua chướng ngại vật và giải câu hỏi tại từng Trạm kiểm tra theo điều phối của Chủ phòng.
+              </p>
+              {adventurePreviewAssets.assets?.background?.url && (
+                <div
+                  style={{
+                    position: 'relative',
+                    height: '110px',
+                    borderRadius: '12px',
+                    overflow: 'hidden',
+                    backgroundImage: `url(${adventurePreviewAssets.assets.background.url})`,
+                    backgroundSize: 'cover',
+                    backgroundPosition: 'center bottom',
+                    border: '1px solid var(--border-subtle)',
+                    display: 'flex',
+                    alignItems: 'flex-end',
+                    justifyContent: 'space-between',
+                    padding: '0.65rem 1.25rem',
+                  }}
+                >
+                  {adventurePreviewAssets.assets.character?.url && (
+                    <img
+                      src={adventurePreviewAssets.assets.character.url}
+                      alt={adventurePreviewConfig.avatarLabel || 'Character 2D'}
+                      style={{
+                        height: '62px',
+                        width: 'auto',
+                        objectFit: 'contain',
+                        filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.45))',
+                      }}
+                    />
+                  )}
+                  {adventurePreviewAssets.assets.obstacle?.url && (
+                    <img
+                      src={adventurePreviewAssets.assets.obstacle.url}
+                      alt="Obstacle 2D"
+                      style={{
+                        height: '48px',
+                        width: 'auto',
+                        objectFit: 'contain',
+                        filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.45))',
+                      }}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
-      {/* 3. Màn hình Câu hỏi đang diễn ra (Question Screen) */}
-      {screen === 'question' && currentQuestion && (
+      {/* 2B. Chế độ Đi cảnh 2D Nhiều Người Chơi (Adventure Multiplayer 2D) */}
+      {isAdventureGame && (screen === 'question' || screen === 'reveal' || screen === 'finish') && (
+        <div data-testid="mp-adventure-2d-container">
+          <AdventureGameEngine
+            game={effectiveAdventureGameSpec}
+            adventureConfig={adventurePreviewConfig}
+            mode="LIVE_SESSION"
+            sessionStarted={true}
+            isPlaytest={false}
+            isMultiplayer={true}
+            multiplayerRoomCode={roomCode}
+            multiplayerPlayerName={displayName}
+            multiplayerPlayerId={playerId}
+            multiplayerStreak={currentStreak}
+            multiplayerIsAnswerSubmitted={isAnswerSubmitted}
+            multiplayerSubmittedAnswerText={submittedAnswerRecord}
+            multiplayerIsReconnecting={
+              connectionStatus === 'reconnecting' || connectionStatus === 'disconnected'
+            }
+            multiplayerLeaderboard={leaderboard}
+            multiplayerFinalRank={finalRank}
+            multiplayerTotalPlayers={leaderboard.length}
+            multiplayerShowLeaderboard={
+              sessionMode !== 'EXAM' || answersPublished || leaderboard.length > 0
+            }
+            currentQuestion={currentQuestion}
+            currentQuestionIndex={currentQuestion?.questionIndex ?? 0}
+            totalQuestions={
+              currentQuestion?.totalQuestions ??
+              effectiveAdventureGameSpec.questions.length ??
+              5
+            }
+            timeRemaining={timeRemaining}
+            liveScore={playerScore}
+            liveStreak={currentStreak}
+            liveCorrectCount={myLeaderboardEntry?.correctCount ?? 0}
+            submittingAnswer={isSubmittingAnswer}
+            questionFeedback={adventureLastResult}
+            isSessionFinished={screen === 'finish'}
+            finalResult={adventureFinalResult}
+            onSubmitAnswer={async (answerText: string) => {
+              submitAnswer(answerText);
+            }}
+            onNextQuestion={async () => {}}
+            onExit={() => setShowLeaveConfirm(true)}
+            audioMuted={isAudioMuted}
+            onToggleAudioMute={handleToggleAudioMute}
+          />
+        </div>
+      )}
+
+      {/* 3. Màn hình Câu hỏi đang diễn ra (Question Screen — Non-Adventure) */}
+      {!isAdventureGame && screen === 'question' && currentQuestion && (
         <div
+          data-testid="mp-question-card"
+          data-question-type={currentQuestion.type}
           style={{
             backgroundColor: 'var(--bg-surface)',
             border: '1px solid var(--border-subtle)',
             borderRadius: '20px',
-            padding: '1.5rem',
+            padding: 'clamp(1rem, 3vw, 1.5rem)',
             boxShadow: 'var(--card-shadow)',
           }}
         >
-          {/* Top meta row: Question number & Timer */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem' }}>
-            <span
-              style={{
-                backgroundColor: 'rgba(56, 189, 248, 0.15)',
-                color: 'var(--accent-sky)',
-                border: '1px solid rgba(56, 189, 248, 0.3)',
-                padding: '0.3rem 0.75rem',
-                borderRadius: '8px',
-                fontWeight: 800,
-                fontSize: '0.85rem',
-                letterSpacing: '0.05em',
-              }}
-            >
-              CÂU {(currentQuestion.questionIndex || 0) + 1} / {currentQuestion.totalQuestions || 5}
-            </span>
+          {/* Top meta row: Question number + Type Badge & Timer */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.5rem', flexWrap: 'wrap', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+              <span
+                style={{
+                  backgroundColor: 'rgba(56, 189, 248, 0.15)',
+                  color: 'var(--accent-sky)',
+                  border: '1px solid rgba(56, 189, 248, 0.3)',
+                  padding: '0.3rem 0.75rem',
+                  borderRadius: '8px',
+                  fontWeight: 800,
+                  fontSize: '0.85rem',
+                  letterSpacing: '0.05em',
+                }}
+              >
+                CÂU {(currentQuestion.questionIndex || 0) + 1} / {currentQuestion.totalQuestions || 5}
+              </span>
+              <span
+                data-testid="question-type-badge"
+                data-question-type={currentQuestion.type}
+                style={{
+                  padding: '0.25rem 0.65rem',
+                  borderRadius: '8px',
+                  fontSize: '0.76rem',
+                  fontWeight: 800,
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-secondary)',
+                  border: '1px solid var(--border-strong)',
+                }}
+              >
+                {getQuestionTypeBadgeLabel(currentQuestion.type)}
+              </span>
+            </div>
 
             <div
               style={{
@@ -926,6 +1405,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 color: isUrgentTime ? '#ef4444' : 'var(--accent-sky)',
                 fontWeight: 900,
                 fontSize: '1.15rem',
+                fontVariantNumeric: 'tabular-nums',
               }}
             >
               <ClockIcon size={18} />
@@ -941,7 +1421,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               backgroundColor: 'var(--bg-input)',
               borderRadius: '4px',
               overflow: 'hidden',
-              margin: '0.75rem 0 1.5rem 0',
+              margin: '0.75rem 0 1.25rem 0',
               border: '1px solid var(--border-subtle)',
             }}
           >
@@ -955,41 +1435,42 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             />
           </div>
 
-          {/* Question text */}
+          {/* Question text (Unified with SoloPlayer solo-question-box) */}
           <div
+            data-testid="solo-question-box"
             style={{
               backgroundColor: 'var(--bg-card)',
-              border: '1px solid var(--border-subtle)',
+              border: '1.5px solid var(--border-strong)',
               borderRadius: '14px',
-              padding: '1.25rem',
-              marginBottom: '1.5rem',
+              padding: 'clamp(1rem, 2.5vw, 1.35rem)',
+              marginBottom: '1.25rem',
               textAlign: 'center',
+              boxShadow: 'var(--shadow-sm)',
             }}
           >
             <h3
+              data-testid="mp-question-text"
               style={{
                 margin: 0,
-                fontSize: '1.25rem',
+                fontSize: 'clamp(1.08rem, 2.2vw, 1.3rem)',
                 color: 'var(--text-primary)',
-                lineHeight: 1.45,
+                lineHeight: 1.5,
                 fontWeight: 800,
+                overflowWrap: 'anywhere',
               }}
             >
               {currentQuestion.question}
             </h3>
           </div>
 
-          {/* Kahoot-style 2x2 Choice Grid for Quiz / Multiple Choice & True/False / Quick Button */}
-          {(currentQuestion.type === 'MULTIPLE_CHOICE' ||
-            currentQuestion.type === 'QUIZ' ||
-            currentQuestion.type === 'QUICK_BUTTON' ||
-            currentQuestion.type === 'TRUE_FALSE') && (
+          {/* Kahoot-style 2x2 Choice Grid for Quiz / Multiple Choice */}
+          {(currentQuestion.type === 'MULTIPLE_CHOICE' || currentQuestion.type === 'QUIZ') && (
             <div>
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))',
-                  gap: '1rem',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))',
+                  gap: '0.85rem',
                 }}
               >
                 {currentQuestion.choices?.map((choice, idx) => {
@@ -999,6 +1480,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                     <button
                       key={idx}
                       type="button"
+                      data-testid={`mp-choice-btn-${idx}`}
+                      data-choice-letter={config.label}
                       aria-pressed={isSelected}
                       disabled={isAnswerSubmitted || isSubmittingAnswer}
                       onClick={() => {
@@ -1009,12 +1492,12 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                       style={{
                         width: '100%',
                         textAlign: 'left',
-                        padding: '1.1rem 1.25rem',
+                        padding: '1rem 1.15rem',
                         backgroundColor: config.bg,
                         color: config.text,
                         border: isSelected ? '3px solid #ffffff' : 'none',
                         borderRadius: '16px',
-                        fontSize: '1.05rem',
+                        fontSize: '1.02rem',
                         fontWeight: 900,
                         cursor: isAnswerSubmitted || isSubmittingAnswer ? 'not-allowed' : 'pointer',
                         opacity: (isAnswerSubmitted || isSubmittingAnswer) && !isSelected ? 0.35 : 1,
@@ -1040,13 +1523,13 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                           alignItems: 'center',
                           justifyContent: 'center',
                           fontWeight: 900,
-                          fontSize: '1.15rem',
+                          fontSize: '1.1rem',
                           flexShrink: 0,
                         }}
                       >
                         {config.icon}
                       </span>
-                      <span style={{ flex: 1, wordBreak: 'break-word', lineHeight: 1.35 }}>{choice}</span>
+                      <span style={{ flex: 1, wordBreak: 'break-word', lineHeight: 1.38 }}>{choice}</span>
                       {isSelected && (
                         <span
                           style={{
@@ -1073,6 +1556,112 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               {!isAnswerSubmitted && (
                 <button
                   type="button"
+                  data-testid="mp-submit-answer-btn"
+                  className="k-btn"
+                  disabled={!selectedAnswer || isSubmittingAnswer || isAnswerSubmitted}
+                  onClick={() => {
+                    if (selectedAnswer) {
+                      submitAnswer(selectedAnswer);
+                    }
+                  }}
+                  style={{
+                    width: '100%',
+                    marginTop: '1.25rem',
+                    padding: '1rem',
+                    minHeight: '52px',
+                    borderRadius: '14px',
+                    fontSize: '1.1rem',
+                    fontWeight: 900,
+                    cursor: !selectedAnswer || isSubmittingAnswer ? 'not-allowed' : 'pointer',
+                    opacity: !selectedAnswer || isSubmittingAnswer ? 0.6 : 1,
+                    backgroundColor: 'var(--primary)',
+                    color: 'var(--primary-ink)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                  }}
+                >
+                  {isSubmittingAnswer ? (
+                    <>
+                      <SpinnerIcon size={20} />
+                      <span>Đang gửi đáp án...</span>
+                    </>
+                  ) : selectedAnswer ? (
+                    <span>Xác nhận gửi đáp án &rarr;</span>
+                  ) : (
+                    <span>Hãy chọn một đáp án ở trên</span>
+                  )}
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Unified True/False / Quick Button (Green Check / Red Cross matching SoloPlayer) */}
+          {(currentQuestion.type === 'QUICK_BUTTON' || currentQuestion.type === 'TRUE_FALSE') && (
+            <div>
+              <div
+                data-testid="mp-quick-button-group"
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 200px), 1fr))',
+                  gap: '1rem',
+                  maxWidth: '560px',
+                  margin: '0 auto',
+                }}
+              >
+                {(currentQuestion.choices && currentQuestion.choices.length > 0
+                  ? currentQuestion.choices
+                  : ['Đúng', 'Sai']
+                ).map((choice, idx) => {
+                  const isTrueBtn = idx === 0;
+                  const isSelected = selectedAnswer === choice;
+                  const btnBg = isTrueBtn ? 'var(--k-green)' : 'var(--k-red)';
+                  const btnDark = isTrueBtn ? 'var(--k-green-dark)' : 'var(--k-red-dark)';
+                  return (
+                    <button
+                      key={idx}
+                      type="button"
+                      data-testid={`mp-choice-btn-${idx}`}
+                      aria-pressed={isSelected}
+                      disabled={isAnswerSubmitted || isSubmittingAnswer}
+                      onClick={() => {
+                        setAnswerError(null);
+                        setSelectedAnswer(prev => (prev === choice ? null : choice));
+                      }}
+                      className={`k-btn ${isTrueBtn ? 'k-btn-green' : 'k-btn-red'}`}
+                      style={{
+                        width: '100%',
+                        padding: '1.35rem 1rem',
+                        minHeight: '72px',
+                        fontSize: '1.25rem',
+                        fontWeight: 900,
+                        borderRadius: '16px',
+                        backgroundColor: btnBg,
+                        color: '#ffffff',
+                        border: isSelected ? '3px solid #ffffff' : 'none',
+                        cursor: isAnswerSubmitted || isSubmittingAnswer ? 'not-allowed' : 'pointer',
+                        opacity: (isAnswerSubmitted || isSubmittingAnswer) && !isSelected ? 0.35 : 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '0.6rem',
+                        boxShadow: isSelected ? `0 2px 0 ${btnDark}` : `0 5px 0 ${btnDark}`,
+                        transform: isSelected ? 'translateY(3px)' : 'none',
+                        transition: 'transform 0.1s ease, box-shadow 0.1s ease, opacity 0.15s ease',
+                      }}
+                    >
+                      {isTrueBtn ? <CheckIcon size={24} /> : <XMarkIcon size={24} />}
+                      <span>{choice}</span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {!isAnswerSubmitted && (
+                <button
+                  type="button"
+                  data-testid="mp-submit-answer-btn"
                   className="k-btn"
                   disabled={!selectedAnswer || isSubmittingAnswer || isAnswerSubmitted}
                   onClick={() => {
@@ -1115,7 +1704,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
           {/* Puzzle sequence ordering */}
           {currentQuestion.type === 'PUZZLE' && (
-            <div>
+            <div data-testid="mp-puzzle-group">
               <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.75rem', textAlign: 'center' }}>
                 Sắp xếp các mục dưới đây theo đúng thứ tự từ trên xuống dưới:
               </div>
@@ -1153,14 +1742,14 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                     <span style={{ flex: 1, fontWeight: 800, fontSize: '0.96rem', color: 'var(--text-primary)' }}>
                       {item}
                     </span>
-                    <div style={{ display: 'flex', gap: '0.3rem' }}>
+                    <div style={{ display: 'flex', gap: '0.35rem' }}>
                       <button
                         type="button"
                         disabled={isAnswerSubmitted || isSubmittingAnswer || idx === 0}
                         onClick={() => handleMovePuzzleItem(idx, -1)}
                         style={{
-                          width: '34px',
-                          height: '34px',
+                          minWidth: '44px',
+                          minHeight: '44px',
                           borderRadius: '8px',
                           border: '1px solid var(--border-strong)',
                           backgroundColor: 'var(--bg-surface)',
@@ -1176,8 +1765,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                         disabled={isAnswerSubmitted || isSubmittingAnswer || idx === puzzleOrder.length - 1}
                         onClick={() => handleMovePuzzleItem(idx, 1)}
                         style={{
-                          width: '34px',
-                          height: '34px',
+                          minWidth: '44px',
+                          minHeight: '44px',
                           borderRadius: '8px',
                           border: '1px solid var(--border-strong)',
                           backgroundColor: 'var(--bg-surface)',
@@ -1195,6 +1784,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
               {!isAnswerSubmitted && (
                 <button
                   type="button"
+                  data-testid="mp-submit-answer-btn"
                   disabled={isAnswerSubmitted || isSubmittingAnswer || puzzleOrder.length === 0}
                   onClick={() => submitAnswer(puzzleOrder.join(' | '))}
                   style={{
@@ -1231,7 +1821,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             const progressPct = max > min ? Math.max(0, Math.min(100, ((sliderValue - min) / (max - min)) * 100)) : 0;
 
             return (
-              <div style={{ textAlign: 'center' }}>
+              <div data-testid="mp-slider-group" style={{ textAlign: 'center' }}>
                 <div
                   style={{
                     display: 'inline-flex',
@@ -1264,8 +1854,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                         setSliderValue(prev => clampToSlider(prev - step));
                       }}
                       style={{
-                        width: '40px',
-                        height: '40px',
+                        minWidth: '44px',
+                        minHeight: '44px',
                         borderRadius: '10px',
                         border: '1.5px solid var(--border-strong)',
                         backgroundColor: 'var(--bg-surface)',
@@ -1319,8 +1909,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                         setSliderValue(prev => clampToSlider(prev + step));
                       }}
                       style={{
-                        width: '40px',
-                        height: '40px',
+                        minWidth: '44px',
+                        minHeight: '44px',
                         borderRadius: '10px',
                         border: '1.5px solid var(--border-strong)',
                         backgroundColor: 'var(--bg-surface)',
@@ -1346,7 +1936,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                         setSliderValue(min);
                       }}
                       style={{
-                        padding: '0.35rem 0.7rem',
+                        padding: '0.4rem 0.75rem',
+                        minHeight: '38px',
                         borderRadius: '8px',
                         border: '1px solid var(--border-strong)',
                         backgroundColor: sliderTouched && sliderValue === min ? 'var(--primary-subtle)' : 'var(--bg-surface)',
@@ -1367,7 +1958,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                         setSliderValue(clampToSlider(sliderValue));
                       }}
                       style={{
-                        padding: '0.35rem 0.7rem',
+                        padding: '0.4rem 0.75rem',
+                        minHeight: '38px',
                         borderRadius: '8px',
                         border: '1px solid var(--border-strong)',
                         backgroundColor: sliderTouched ? 'var(--primary-subtle)' : 'var(--bg-surface)',
@@ -1388,7 +1980,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                         setSliderValue(max);
                       }}
                       style={{
-                        padding: '0.35rem 0.7rem',
+                        padding: '0.4rem 0.75rem',
+                        minHeight: '38px',
                         borderRadius: '8px',
                         border: '1px solid var(--border-strong)',
                         backgroundColor: sliderTouched && sliderValue === max ? 'var(--primary-subtle)' : 'var(--bg-surface)',
@@ -1406,6 +1999,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                 {!isAnswerSubmitted && (
                   <button
                     type="button"
+                    data-testid="mp-submit-answer-btn"
                     disabled={isAnswerSubmitted || isSubmittingAnswer || !sliderTouched}
                     onClick={() => {
                       if (!sliderTouched) {
@@ -1442,7 +2036,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
 
           {/* Type Answer / Fill in the blank */}
           {(currentQuestion.type === 'FILL_IN_THE_BLANK' || currentQuestion.type === 'TYPE_ANSWER') && (
-            <div>
+            <div data-testid="mp-fill-blank-group">
               <label htmlFor="play-blank-input" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
                 Nhập câu trả lời của bạn:
               </label>
@@ -1467,7 +2061,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   width: '100%',
                   padding: '1rem 1.15rem',
                   backgroundColor: 'var(--bg-input)',
-                  border: '1px solid var(--border-strong)',
+                  border: '1.5px solid var(--border-strong)',
                   borderRadius: '12px',
                   color: 'var(--text-primary)',
                   fontSize: '1.05rem',
@@ -1475,137 +2069,194 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   outline: 'none',
                 }}
               />
-              <button
-                type="button"
-                disabled={isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim()}
-                onClick={() => submitAnswer(textInputAnswer)}
-                style={{
-                  width: '100%',
-                  marginTop: '1rem',
-                  padding: '0.95rem',
-                  minHeight: '48px',
-                  backgroundColor: 'var(--primary)',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '12px',
-                  fontSize: '1.05rem',
-                  fontWeight: 800,
-                  cursor: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'not-allowed' : 'pointer',
-                  opacity: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 0.6 : 1,
-                  transition: 'all 0.15s ease',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.5rem',
-                }}
-              >
-                {isSubmittingAnswer ? (
-                  <>
-                    <SpinnerIcon size={18} />
-                    <span>Đang gửi câu trả lời...</span>
-                  </>
-                ) : (
-                  'Gửi câu trả lời →'
-                )}
-              </button>
-            </div>
-          )}
-
-          {/* Crossword */}
-          {currentQuestion.type === 'CROSSWORD' && (
-            <div>
-              {currentQuestion.crosswordClue && (
-                <div
+              {!isAnswerSubmitted && (
+                <button
+                  type="button"
+                  data-testid="mp-submit-answer-btn"
+                  disabled={isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim()}
+                  onClick={() => submitAnswer(textInputAnswer)}
                   style={{
-                    backgroundColor: 'rgba(56, 189, 248, 0.1)',
-                    padding: '0.95rem 1.25rem',
+                    width: '100%',
+                    marginTop: '1rem',
+                    padding: '0.95rem',
+                    minHeight: '48px',
+                    backgroundColor: 'var(--primary)',
+                    color: '#ffffff',
+                    border: 'none',
                     borderRadius: '12px',
-                    border: '1px solid rgba(56, 189, 248, 0.3)',
-                    color: 'var(--accent-sky)',
-                    marginBottom: '1rem',
-                    fontSize: '0.95rem',
+                    fontSize: '1.05rem',
+                    fontWeight: 800,
+                    cursor: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'not-allowed' : 'pointer',
+                    opacity: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 0.6 : 1,
+                    transition: 'all 0.15s ease',
                     display: 'flex',
                     alignItems: 'center',
+                    justifyContent: 'center',
                     gap: '0.5rem',
                   }}
                 >
-                  <SparklesIcon size={18} />
-                  <span>Gợi ý: <strong style={{ color: 'var(--text-primary)' }}>{currentQuestion.crosswordClue}</strong></span>
-                </div>
+                  {isSubmittingAnswer ? (
+                    <>
+                      <SpinnerIcon size={18} />
+                      <span>Đang gửi câu trả lời...</span>
+                    </>
+                  ) : (
+                    'Gửi câu trả lời →'
+                  )}
+                </button>
               )}
-              <label htmlFor="play-crossword-input" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                Nhập từ khóa ô chữ:
-              </label>
-              <input
-                id="play-crossword-input"
-                type="text"
-                disabled={isAnswerSubmitted || isSubmittingAnswer}
-                maxLength={MAX_ANSWER_LENGTH}
-                value={textInputAnswer}
-                onChange={(e) => {
-                  setAnswerError(null);
-                  setTextInputAnswer(e.target.value);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
-                    e.preventDefault();
-                    submitAnswer(textInputAnswer);
-                  }
-                }}
-                placeholder="Nhập từ khóa ô chữ (hỗ trợ tiếng Việt có dấu hoặc không dấu)..."
-                style={{
-                  width: '100%',
-                  padding: '1rem 1.15rem',
-                  backgroundColor: 'var(--bg-input)',
-                  border: '1px solid var(--border-strong)',
-                  borderRadius: '12px',
-                  color: 'var(--text-primary)',
-                  fontSize: '1.05rem',
-                  boxSizing: 'border-box',
-                  outline: 'none',
-                }}
-              />
-              {textInputAnswer.trim().length > 0 && (
-                <div style={{ marginTop: '0.5rem', fontSize: '0.82rem', color: 'var(--accent-sky)', fontWeight: 700 }}>
-                  Từ khóa chuẩn hóa: <strong>{normalizeCrosswordPreview(textInputAnswer)}</strong> (
-                  {normalizeCrosswordPreview(textInputAnswer).length} ký tự)
-                </div>
-              )}
-              <button
-                type="button"
-                disabled={isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim()}
-                onClick={() => submitAnswer(textInputAnswer)}
-                style={{
-                  width: '100%',
-                  marginTop: '1rem',
-                  padding: '0.95rem',
-                  minHeight: '48px',
-                  backgroundColor: 'var(--primary)',
-                  color: '#ffffff',
-                  border: 'none',
-                  borderRadius: '12px',
-                  fontSize: '1.05rem',
-                  fontWeight: 800,
-                  cursor: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'not-allowed' : 'pointer',
-                  opacity: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 0.6 : 1,
-                  transition: 'all 0.15s ease',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '0.5rem',
-                }}
-              >
-                {isSubmittingAnswer ? (
-                  <>
-                    <SpinnerIcon size={18} />
-                    <span>Đang gửi từ khóa...</span>
-                  </>
-                ) : (
-                  'Gửi từ khóa →'
-                )}
-              </button>
             </div>
           )}
+
+          {/* Crossword (Unified with SoloPlayer solo-crossword-box & letter slots) */}
+          {currentQuestion.type === 'CROSSWORD' && (() => {
+            const specQ =
+              loadedGameSpec?.questions?.[currentQuestion.questionIndex || 0] ||
+              loadedGameSpec?.questions?.find((item) => item.id === currentQuestion.id);
+            const expectedWordLength =
+              currentQuestion.crosswordWordLength && currentQuestion.crosswordWordLength > 0
+                ? currentQuestion.crosswordWordLength
+                : normalizeCrosswordPreview(specQ?.crosswordAnswer || specQ?.correctAnswer || '').length;
+            const typedPreview = normalizeCrosswordPreview(textInputAnswer);
+
+            return (
+              <div data-testid="solo-crossword-box">
+                {currentQuestion.crosswordClue && (
+                  <div
+                    style={{
+                      backgroundColor: 'rgba(56, 189, 248, 0.1)',
+                      padding: '0.95rem 1.25rem',
+                      borderRadius: '12px',
+                      border: '1px solid rgba(56, 189, 248, 0.3)',
+                      color: 'var(--accent-sky)',
+                      marginBottom: '1rem',
+                      fontSize: '0.95rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                    }}
+                  >
+                    <SparklesIcon size={18} />
+                    <span>Gợi ý: <strong style={{ color: 'var(--text-primary)' }}>{currentQuestion.crosswordClue}</strong></span>
+                  </div>
+                )}
+
+                {expectedWordLength > 0 && expectedWordLength <= 20 && (
+                  <div
+                    data-testid="solo-crossword-slots"
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      justifyContent: 'center',
+                      gap: '6px',
+                      marginBottom: '0.85rem',
+                    }}
+                  >
+                    {Array.from({ length: expectedWordLength }).map((_, slotIdx) => {
+                      const ch = typedPreview[slotIdx] || '';
+                      return (
+                        <span
+                          key={slotIdx}
+                          style={{
+                            width: '36px',
+                            height: '40px',
+                            borderRadius: '8px',
+                            backgroundColor: ch ? 'var(--bg-surface)' : 'var(--bg-input)',
+                            border: `2px solid ${ch ? 'var(--primary)' : 'var(--border-strong)'}`,
+                            color: 'var(--text-primary)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '1rem',
+                            fontWeight: 900,
+                          }}
+                        >
+                          {ch || '_'}
+                        </span>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <label htmlFor="play-crossword-input" style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                  Nhập từ khóa ô chữ {expectedWordLength > 0 ? `(${expectedWordLength} chữ cái)` : ''}:
+                </label>
+                <input
+                  id="play-crossword-input"
+                  type="text"
+                  disabled={isAnswerSubmitted || isSubmittingAnswer}
+                  maxLength={MAX_ANSWER_LENGTH}
+                  value={textInputAnswer}
+                  onChange={(e) => {
+                    setAnswerError(null);
+                    setTextInputAnswer(e.target.value.toUpperCase());
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.nativeEvent.isComposing) {
+                      e.preventDefault();
+                      submitAnswer(textInputAnswer);
+                    }
+                  }}
+                  placeholder="Nhập từ khóa ô chữ (VD: ANTOAN)..."
+                  style={{
+                    width: '100%',
+                    padding: '1rem 1.15rem',
+                    backgroundColor: 'var(--bg-input)',
+                    border: '1.5px solid var(--border-strong)',
+                    borderRadius: '12px',
+                    color: 'var(--text-primary)',
+                    fontSize: '1.05rem',
+                    fontWeight: 800,
+                    letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    boxSizing: 'border-box',
+                    outline: 'none',
+                  }}
+                />
+                {textInputAnswer.trim().length > 0 && (
+                  <div style={{ marginTop: '0.5rem', fontSize: '0.82rem', color: 'var(--accent-sky)', fontWeight: 700 }}>
+                    Từ khóa chuẩn hóa: <strong>{typedPreview}</strong> ({typedPreview.length} ký tự)
+                  </div>
+                )}
+                {!isAnswerSubmitted && (
+                  <button
+                    type="button"
+                    data-testid="mp-submit-answer-btn"
+                    disabled={isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim()}
+                    onClick={() => submitAnswer(textInputAnswer)}
+                    style={{
+                      width: '100%',
+                      marginTop: '1rem',
+                      padding: '0.95rem',
+                      minHeight: '48px',
+                      backgroundColor: 'var(--primary)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '12px',
+                      fontSize: '1.05rem',
+                      fontWeight: 800,
+                      cursor: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 'not-allowed' : 'pointer',
+                      opacity: isAnswerSubmitted || isSubmittingAnswer || !textInputAnswer.trim() ? 0.6 : 1,
+                      transition: 'all 0.15s ease',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '0.5rem',
+                    }}
+                  >
+                    {isSubmittingAnswer ? (
+                      <>
+                        <SpinnerIcon size={18} />
+                        <span>Đang gửi từ khóa...</span>
+                      </>
+                    ) : (
+                      'Gửi từ khóa →'
+                    )}
+                  </button>
+                )}
+              </div>
+            );
+          })()}
 
           {answerError && !isAnswerSubmitted && (
             <div
@@ -1657,14 +2308,15 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
         </div>
       )}
 
-      {/* 4. Màn hình Công bố Đáp án & Kết quả Cá nhân (Reveal Screen) */}
-      {screen === 'reveal' && (
+      {/* 4. Màn hình Công bố Đáp án & Kết quả Cá nhân (Reveal Screen — Non-Adventure, Unified with SoloPlayer) */}
+      {!isAdventureGame && screen === 'reveal' && (
         <div
+          data-testid="solo-question-feedback"
           style={{
             backgroundColor: 'var(--bg-surface)',
             border: '2px solid var(--border-subtle)',
             borderRadius: '24px',
-            padding: '2.5rem 1.5rem',
+            padding: 'clamp(1.25rem, 3.5vw, 2rem)',
             textAlign: 'center',
             boxShadow: 'var(--card-shadow)',
             animation: 'popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1)',
@@ -1696,16 +2348,16 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           ) : (
             <>
               {personalResult ? (
-                <div style={{ marginBottom: '2rem' }}>
+                <div style={{ marginBottom: '1.25rem' }}>
                   <div
                     style={{
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: '0.65rem',
-                      padding: '0.85rem 2rem',
+                      padding: '0.75rem 1.75rem',
                       borderRadius: '16px',
                       fontWeight: 900,
-                      fontSize: '1.35rem',
+                      fontSize: '1.25rem',
                       backgroundColor: personalResult.isCorrect ? 'var(--k-green)' : 'var(--k-red)',
                       color: '#ffffff',
                       boxShadow: personalResult.isCorrect
@@ -1713,14 +2365,14 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                         : '0 4px 0 var(--k-red-dark)',
                     }}
                   >
-                    {personalResult.isCorrect ? <CheckIcon size={26} /> : <XMarkIcon size={26} />}
+                    {personalResult.isCorrect ? <CheckIcon size={24} /> : <XMarkIcon size={24} />}
                     <span>{personalResult.isCorrect ? 'CHÍNH XÁC!' : 'CHƯA ĐÚNG!'}</span>
                   </div>
 
                   <div
                     style={{
-                      marginTop: '1.15rem',
-                      fontSize: '1.85rem',
+                      marginTop: '0.9rem',
+                      fontSize: '1.65rem',
                       fontWeight: 900,
                       color: personalResult.isCorrect ? 'var(--accent-emerald)' : 'var(--text-muted)',
                     }}
@@ -1734,14 +2386,14 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                         display: 'inline-flex',
                         alignItems: 'center',
                         gap: '0.35rem',
-                        marginTop: '0.75rem',
+                        marginTop: '0.6rem',
                         padding: '0.35rem 0.85rem',
                         borderRadius: '20px',
                         backgroundColor: 'rgba(255, 166, 2, 0.2)',
                         border: '1.5px solid var(--k-yellow)',
                         color: 'var(--k-yellow)',
                         fontWeight: 900,
-                        fontSize: '0.95rem',
+                        fontSize: '0.92rem',
                       }}
                     >
                       <FlameIcon size={16} />
@@ -1750,7 +2402,7 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                   )}
                 </div>
               ) : (
-                <div style={{ marginBottom: '2rem' }}>
+                <div style={{ marginBottom: '1.25rem' }}>
                   <div
                     style={{
                       display: 'inline-flex',
@@ -1768,49 +2420,203 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                     <ClockIcon size={22} />
                     <span>CHƯA TRẢ LỜI / HẾT GIỜ</span>
                   </div>
-                  <div style={{ marginTop: '0.75rem', fontSize: '1.35rem', fontWeight: 800, color: 'var(--text-muted)' }}>
+                  <div style={{ marginTop: '0.65rem', fontSize: '1.3rem', fontWeight: 800, color: 'var(--text-muted)' }}>
                     +0 điểm
                   </div>
                 </div>
               )}
 
-              {/* Correct answer callout */}
-              {correctAnswer && (
+              {/* Question Prompt & Answer Comparison Strip (Unified with SoloPlayer) */}
+              {currentQuestion?.question && (
                 <div
                   style={{
-                    margin: '1.25rem 0',
-                    padding: '1.15rem',
+                    margin: '0 0 0.85rem 0',
+                    padding: '0.75rem 1rem',
+                    borderRadius: '12px',
+                    backgroundColor: 'var(--bg-card)',
+                    border: '1px solid var(--border-subtle)',
+                    fontSize: '0.94rem',
+                    fontWeight: 800,
+                    color: 'var(--text-primary)',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  {currentQuestion.question}
+                </div>
+              )}
+
+              {correctAnswer && (
+                <div
+                  data-testid="mp-reveal-answer-comparison"
+                  style={{
+                    margin: '0.85rem 0',
+                    padding: '1rem 1.15rem',
                     backgroundColor: 'var(--bg-card)',
                     borderRadius: '14px',
                     border: '1px solid var(--border-subtle)',
+                    textAlign: 'left',
                   }}
                 >
-                  <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem', textTransform: 'uppercase', fontWeight: 800, letterSpacing: '0.05em', display: 'block', marginBottom: '0.4rem' }}>
-                    ĐÁP ÁN ĐÚNG
-                  </span>
-                  <strong style={{ color: 'var(--accent-emerald)', fontSize: '1.35rem', fontWeight: 900 }}>
-                    {correctAnswer}
-                  </strong>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexWrap: 'wrap',
+                      gap: '0.75rem 1.25rem',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                    }}
+                  >
+                    <div>
+                      <span
+                        style={{
+                          color: 'var(--text-muted)',
+                          fontSize: '0.75rem',
+                          textTransform: 'uppercase',
+                          fontWeight: 800,
+                          letterSpacing: '0.04em',
+                          display: 'block',
+                          marginBottom: '0.2rem',
+                        }}
+                      >
+                        CÂU TRẢ LỜI CỦA BẠN
+                      </span>
+                      <strong
+                        data-testid="mp-reveal-my-answer"
+                        style={{
+                          color: personalResult?.isCorrect ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                          fontSize: '1rem',
+                          fontWeight: 900,
+                        }}
+                      >
+                        {submittedAnswerRecord || (personalResult as any)?.answer || 'Chưa trả lời (Hết thời gian)'}
+                      </strong>
+                    </div>
+
+                    <div>
+                      <span
+                        style={{
+                          color: 'var(--text-muted)',
+                          fontSize: '0.75rem',
+                          textTransform: 'uppercase',
+                          fontWeight: 800,
+                          letterSpacing: '0.04em',
+                          display: 'block',
+                          marginBottom: '0.2rem',
+                        }}
+                      >
+                        ĐÁP ÁN ĐÚNG
+                      </span>
+                      <strong
+                        data-testid="solo-feedback-correct-answer"
+                        style={{
+                          color: 'var(--accent-emerald)',
+                          fontSize: '1.15rem',
+                          fontWeight: 900,
+                        }}
+                      >
+                        {correctAnswer}
+                      </strong>
+                    </div>
+                  </div>
+
+                  {/* Choice Review Grid highlighting Correct vs Wrong Selected (matching SoloPlayer) */}
+                  {Array.isArray(currentQuestion?.choices) &&
+                    currentQuestion!.choices!.length > 0 &&
+                    (currentQuestion!.type === 'MULTIPLE_CHOICE' ||
+                      currentQuestion!.type === 'QUIZ' ||
+                      currentQuestion!.type === 'QUICK_BUTTON' ||
+                      currentQuestion!.type === 'TRUE_FALSE') && (
+                      <div
+                        data-testid="mp-reveal-choices-review"
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 210px), 1fr))',
+                          gap: '0.5rem',
+                          marginTop: '0.85rem',
+                          paddingTop: '0.85rem',
+                          borderTop: '1px solid var(--border-subtle)',
+                        }}
+                      >
+                        {currentQuestion!.choices!.map((choice, cIdx) => {
+                          const myAns = (submittedAnswerRecord || (personalResult as any)?.answer || '').trim();
+                          const normChoice = choice.replace(/^[A-Da-d1-4][\.\)\:\-]\s*/, '').trim().toLowerCase();
+                          const normCorrect = correctAnswer.replace(/^[A-Da-d1-4][\.\)\:\-]\s*/, '').trim().toLowerCase();
+                          const normMy = myAns.replace(/^[A-Da-d1-4][\.\)\:\-]\s*/, '').trim().toLowerCase();
+                          const isCorrectOption =
+                            choice.trim().toLowerCase() === correctAnswer.trim().toLowerCase() ||
+                            (Boolean(normChoice) && normChoice === normCorrect);
+                          const isMySelected =
+                            Boolean(myAns) &&
+                            (choice.trim().toLowerCase() === myAns.toLowerCase() ||
+                              (Boolean(normChoice) && normChoice === normMy));
+                          const isWrongSelected = isMySelected && !isCorrectOption;
+
+                          return (
+                            <div
+                              key={cIdx}
+                              data-testid={`mp-reveal-choice-${cIdx}`}
+                              data-feedback-state={
+                                isCorrectOption ? 'correct' : isWrongSelected ? 'wrong' : 'neutral'
+                              }
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                gap: '0.5rem',
+                                padding: '0.55rem 0.75rem',
+                                borderRadius: '10px',
+                                backgroundColor: isCorrectOption
+                                  ? 'rgba(16, 185, 129, 0.16)'
+                                  : isWrongSelected
+                                    ? 'rgba(239, 68, 68, 0.16)'
+                                    : 'var(--bg-surface)',
+                                border: `1.5px solid ${
+                                  isCorrectOption
+                                    ? '#10b981'
+                                    : isWrongSelected
+                                      ? '#ef4444'
+                                      : 'var(--border-subtle)'
+                                }`,
+                                color: 'var(--text-primary)',
+                                fontSize: '0.86rem',
+                                fontWeight: isCorrectOption || isWrongSelected ? 800 : 600,
+                                opacity: isCorrectOption || isWrongSelected ? 1 : 0.65,
+                              }}
+                            >
+                              <span style={{ wordBreak: 'break-word' }}>{choice}</span>
+                              {isCorrectOption && (
+                                <span style={{ color: 'var(--accent-emerald)', fontWeight: 900, fontSize: '0.76rem', flexShrink: 0 }}>
+                                  ✓ Đúng
+                                </span>
+                              )}
+                              {isWrongSelected && (
+                                <span style={{ color: 'var(--accent-rose)', fontWeight: 900, fontSize: '0.76rem', flexShrink: 0 }}>
+                                  ✕ Bạn chọn
+                                </span>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
 
                   {explanation && (
-                    <p
+                    <div
+                      data-testid="solo-feedback-explanation"
                       style={{
                         color: 'var(--text-secondary)',
-                        fontSize: '0.9rem',
-                        fontStyle: 'italic',
-                        margin: '0.75rem 0 0 0',
-                        lineHeight: '1.45',
+                        fontSize: '0.88rem',
+                        margin: '0.85rem 0 0 0',
+                        lineHeight: '1.48',
                         paddingTop: '0.75rem',
                         borderTop: '1px solid var(--border-subtle)',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '0.45rem',
+                        maxHeight: '150px',
+                        overflowY: 'auto',
                       }}
                     >
-                      <SparklesIcon size={16} />
+                      <strong style={{ color: 'var(--accent-sky)' }}>💡 Giải thích: </strong>
                       <span>{explanation}</span>
-                    </p>
+                    </div>
                   )}
                 </div>
               )}
@@ -1821,12 +2627,12 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
           {leaderboard.length > 0 && (
           <div
             style={{
-              marginTop: '1.75rem',
+              marginTop: '1.25rem',
               textAlign: 'left',
               backgroundColor: 'var(--bg-card)',
               border: '1px solid var(--border-subtle)',
               borderRadius: '14px',
-              padding: '1.25rem',
+              padding: '1.15rem',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
@@ -1877,11 +2683,23 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
             </div>
           </div>
           )}
+
+          <div
+            data-testid="mp-waiting-host-next"
+            style={{
+              marginTop: '1rem',
+              fontSize: '0.84rem',
+              fontWeight: 800,
+              color: 'var(--text-muted)',
+            }}
+          >
+            ⏳ Đang chờ Chủ phòng chuyển sang câu tiếp theo...
+          </div>
         </div>
       )}
 
-      {/* 5. Màn hình Kết thúc (Finish Screen) */}
-      {screen === 'finish' && (() => {
+      {/* 5. Màn hình Kết thúc (Finish Screen — Non-Adventure) */}
+      {!isAdventureGame && screen === 'finish' && (() => {
         const myEntry = leaderboard.find((e) => e.playerId === playerId);
         const totalQs = myEntry?.totalQuestions || currentQuestion?.totalQuestions || 5;
         const correctCnt = myEntry?.correctCount ?? 0;

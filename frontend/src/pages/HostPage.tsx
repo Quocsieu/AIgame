@@ -1,14 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useToast } from '../components/ToastContext.js';
 import { GameSocketClient, ConnectionStatus } from '../services/socket.js';
 import {
   fetchRoomQr,
+  fetchGameById,
   closeMultiplayerRoom,
   downloadGameScoreboardExport,
   grantParticipantRetakeApi,
   closeGameExamApi,
 } from '../services/api.js';
 import { soundManager } from '../services/audio.js';
+import { resolveAdventureRuntimeAssets } from '../components/AdventureGameEngine.js';
+import { syncAdventureStagesWithQuestions } from '../config/adventureThemes.js';
 import {
   AlertTriangleIcon,
   ArrowLeftIcon,
@@ -29,6 +32,8 @@ import {
 } from '../components/Icons.js';
 import {
   evaluateFrontendPerformance,
+  type GameSpecification,
+  type GameType,
   type LeaderboardEntry,
   type SanitizedQuestion,
   type SessionMode,
@@ -57,7 +62,44 @@ export const HostPage: React.FC<HostPageProps> = ({
   );
   const [activeGameId, setActiveGameId] = useState(initialGameId || '');
   const [gameTitle, setGameTitle] = useState('');
+  const [roomGameType, setRoomGameType] = useState<GameType | null>(null);
+  const [loadedGameSpec, setLoadedGameSpec] = useState<GameSpecification | null>(null);
   const [joinUrl, setJoinUrl] = useState('');
+
+  useEffect(() => {
+    if (!activeGameId) return;
+    let cancelled = false;
+    fetchGameById(activeGameId, { mode: 'public' })
+      .catch(() => fetchGameById(activeGameId))
+      .then((spec) => {
+        if (!cancelled && spec) {
+          setLoadedGameSpec(spec);
+          if (spec.gameType) {
+            setRoomGameType((prev) => prev || spec.gameType);
+          }
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [activeGameId]);
+
+  const effectiveGameType: GameType | null = loadedGameSpec?.gameType || roomGameType || null;
+  const isAdventureGame = effectiveGameType === 'ADVENTURE';
+
+  const hostAdventureConfig = useMemo(() => {
+    if (!isAdventureGame) return null;
+    return syncAdventureStagesWithQuestions(
+      loadedGameSpec?.settings?.adventureConfig,
+      loadedGameSpec?.questions || []
+    );
+  }, [isAdventureGame, loadedGameSpec]);
+
+  const hostAdventureAssets = useMemo(() => {
+    if (!hostAdventureConfig) return null;
+    return resolveAdventureRuntimeAssets(hostAdventureConfig);
+  }, [hostAdventureConfig]);
   const [qrDataUrl, setQrDataUrl] = useState('');
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>('connecting');
   const [isLocked, setIsLocked] = useState(false);
@@ -150,6 +192,9 @@ export const HostPage: React.FC<HostPageProps> = ({
       setGameTitle(msg.title || 'Trò chơi nhiều người');
       if (msg.gameId) {
         setActiveGameId(msg.gameId);
+      }
+      if (msg.gameType) {
+        setRoomGameType(msg.gameType as GameType);
       }
       if (msg.sessionMode === 'EXAM' || msg.sessionMode === 'PLAY') {
         setSessionMode(msg.sessionMode);
@@ -531,6 +576,99 @@ export const HostPage: React.FC<HostPageProps> = ({
           >
             <RefreshIcon size={14} /> Kết nối lại
           </button>
+        </div>
+      )}
+
+      {/* Banner Bối Cảnh Đi Cảnh 2D Ngành Nghề trên màn hình Chủ phòng (Adventure 2D Host Stage Banner) */}
+      {isAdventureGame && hostAdventureConfig && (
+        <div
+          data-testid="host-adventure-stage-banner"
+          style={{
+            marginBottom: '1rem',
+            padding: '0.9rem 1.25rem',
+            borderRadius: '18px',
+            backgroundColor: 'var(--bg-surface)',
+            border: '2px solid var(--accent-emerald)',
+            boxShadow: 'var(--card-shadow)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '1rem',
+            backgroundImage: hostAdventureAssets?.assets?.background?.url
+              ? `linear-gradient(90deg, rgba(15, 23, 42, 0.92) 0%, rgba(15, 23, 42, 0.72) 60%, rgba(15, 23, 42, 0.45) 100%), url(${hostAdventureAssets.assets.background.url})`
+              : undefined,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            color: '#f8fafc',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.85rem', flex: '1 1 280px' }}>
+            {hostAdventureAssets?.assets?.character?.url && (
+              <img
+                src={hostAdventureAssets.assets.character.url}
+                alt={hostAdventureConfig.avatarLabel || 'Nhân vật 2D'}
+                style={{
+                  width: '54px',
+                  height: '54px',
+                  objectFit: 'contain',
+                  borderRadius: '12px',
+                  backgroundColor: 'rgba(15, 23, 42, 0.65)',
+                  border: '1px solid rgba(52, 211, 153, 0.5)',
+                  padding: '4px',
+                  flexShrink: 0,
+                }}
+              />
+            )}
+            <div>
+              <div style={{ fontSize: '0.74rem', fontWeight: 900, color: '#34d399', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                🎮 CHẾ ĐỘ ĐI CẢNH 2D NHIỀU NGƯỜI CHƠI · {hostAdventureConfig.industryLabel}
+              </div>
+              <div style={{ fontSize: '1.02rem', fontWeight: 900, color: '#f8fafc', marginTop: '2px' }}>
+                {hostAdventureConfig.environmentTitle}
+              </div>
+              <div style={{ fontSize: '0.8rem', color: '#cbd5e1', marginTop: '2px' }}>
+                Nhân vật: <strong>{hostAdventureConfig.avatarLabel || 'Nhân vật 2D'}</strong> · Bối cảnh:{' '}
+                <strong>{hostAdventureConfig.subEnvironment || hostAdventureConfig.environmentSubtitle}</strong>
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+            {hostAdventureAssets?.assets?.obstacle?.url && (
+              <img
+                src={hostAdventureAssets.assets.obstacle.url}
+                alt="Obstacle 2D"
+                style={{
+                  width: '44px',
+                  height: '44px',
+                  objectFit: 'contain',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(15, 23, 42, 0.65)',
+                  border: '1px solid rgba(251, 191, 36, 0.45)',
+                  padding: '4px',
+                }}
+              />
+            )}
+            <span
+              data-testid="host-adventure-stage-indicator"
+              style={{
+                padding: '0.45rem 0.9rem',
+                borderRadius: '12px',
+                backgroundColor: 'rgba(16, 185, 129, 0.22)',
+                border: '1.5px solid #34d399',
+                color: '#6ee7b7',
+                fontWeight: 900,
+                fontSize: '0.86rem',
+              }}
+            >
+              {viewState === 'lobby'
+                ? `${loadedGameSpec?.questions?.length || hostAdventureConfig.stages?.length || 5} Trạm kiểm tra 2D`
+                : viewState === 'finish'
+                  ? '🏁 Đã hoàn thành toàn bộ chặng 2D'
+                  : `🚩 Chặng ${(currentQuestion?.questionIndex ?? 0) + 1} / ${currentQuestion?.totalQuestions || loadedGameSpec?.questions?.length || 5}`}
+            </span>
+          </div>
         </div>
       )}
 
