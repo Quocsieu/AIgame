@@ -91,8 +91,11 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
   }, [currentQuestion?.id, currentQuestion?.type]);
 
   const handleMovePuzzleItem = (idx: number, direction: -1 | 1) => {
+    if (isAnswerSubmitted || isSubmittingAnswer) return;
+    const targetIdx = idx + direction;
+    if (targetIdx < 0 || targetIdx >= puzzleOrder.length) return;
+    soundManager.playSelect();
     setPuzzleOrder(prev => {
-      const targetIdx = idx + direction;
       if (targetIdx < 0 || targetIdx >= prev.length) return prev;
       const next = [...prev];
       const tmp = next[idx];
@@ -1485,6 +1488,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                       aria-pressed={isSelected}
                       disabled={isAnswerSubmitted || isSubmittingAnswer}
                       onClick={() => {
+                        if (isAnswerSubmitted || isSubmittingAnswer) return;
+                        soundManager.playSelect();
                         setAnswerError(null);
                         setSelectedAnswer(prev => (prev === choice ? null : choice));
                       }}
@@ -1626,6 +1631,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                       aria-pressed={isSelected}
                       disabled={isAnswerSubmitted || isSubmittingAnswer}
                       onClick={() => {
+                        if (isAnswerSubmitted || isSubmittingAnswer) return;
+                        soundManager.playSelect();
                         setAnswerError(null);
                         setSelectedAnswer(prev => (prev === choice ? null : choice));
                       }}
@@ -1849,6 +1856,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                       type="button"
                       disabled={isAnswerSubmitted || isSubmittingAnswer || sliderValue <= min}
                       onClick={() => {
+                        if (isAnswerSubmitted || isSubmittingAnswer) return;
+                        soundManager.playSelect();
                         setAnswerError(null);
                         setSliderTouched(true);
                         setSliderValue(prev => clampToSlider(prev - step));
@@ -1904,6 +1913,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                       type="button"
                       disabled={isAnswerSubmitted || isSubmittingAnswer || sliderValue >= max}
                       onClick={() => {
+                        if (isAnswerSubmitted || isSubmittingAnswer) return;
+                        soundManager.playSelect();
                         setAnswerError(null);
                         setSliderTouched(true);
                         setSliderValue(prev => clampToSlider(prev + step));
@@ -1931,6 +1942,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                       type="button"
                       disabled={isAnswerSubmitted || isSubmittingAnswer}
                       onClick={() => {
+                        if (isAnswerSubmitted || isSubmittingAnswer) return;
+                        soundManager.playSelect();
                         setAnswerError(null);
                         setSliderTouched(true);
                         setSliderValue(min);
@@ -1953,6 +1966,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                       type="button"
                       disabled={isAnswerSubmitted || isSubmittingAnswer}
                       onClick={() => {
+                        if (isAnswerSubmitted || isSubmittingAnswer) return;
+                        soundManager.playSelect();
                         setAnswerError(null);
                         setSliderTouched(true);
                         setSliderValue(clampToSlider(sliderValue));
@@ -1975,6 +1990,8 @@ export const PlayPage: React.FC<PlayPageProps> = ({ roomCode, displayName, onLea
                       type="button"
                       disabled={isAnswerSubmitted || isSubmittingAnswer}
                       onClick={() => {
+                        if (isAnswerSubmitted || isSubmittingAnswer) return;
+                        soundManager.playSelect();
                         setAnswerError(null);
                         setSliderTouched(true);
                         setSliderValue(max);

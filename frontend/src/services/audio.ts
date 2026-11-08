@@ -562,6 +562,7 @@ class GameAudioManager {
   private customAudioEl: HTMLAudioElement | null = null;
   private activeSfxAudioElements: Map<string, HTMLAudioElement> = new Map();
   private activeSfxOscillators: Set<OscillatorNode> = new Set();
+  private activeBgmOscillators: Set<OscillatorNode> = new Set();
   private duckTimeoutId: number | null = null;
   private isBgmDucked: boolean = false;
   private isPlayingBgm: boolean = false;
@@ -974,11 +975,21 @@ class GameAudioManager {
   }
 
   private stopActiveSfxPlayback(): void {
-    for (const osc of this.activeSfxOscillators) {
+    for (const osc of Array.from(this.activeSfxOscillators)) {
       try {
+        osc.onended = null;
         osc.stop();
-        osc.disconnect();
       } catch {}
+      const cleanup = (osc as OscillatorNode & { __cleanup?: () => void }).__cleanup;
+      if (typeof cleanup === 'function') {
+        cleanup();
+      } else {
+        this.activeOscillatorCount = Math.max(0, this.activeOscillatorCount - 1);
+        this.activeSfxOscillators.delete(osc);
+        try {
+          osc.disconnect();
+        } catch {}
+      }
     }
     this.activeSfxOscillators.clear();
     for (const el of this.activeSfxAudioElements.values()) {
@@ -1030,18 +1041,26 @@ class GameAudioManager {
       this.activeOscillatorCount++;
       this.lastGainValue = gainVal;
       this.lastToneFrequency = freq;
-      if (!isBgmTone) {
+      if (isBgmTone) {
+        this.activeBgmOscillators.add(osc);
+      } else {
         this.activeSfxOscillators.add(osc);
       }
 
-      osc.onended = () => {
+      let cleanedUp = false;
+      const cleanup = () => {
+        if (cleanedUp) return;
+        cleanedUp = true;
         this.activeOscillatorCount = Math.max(0, this.activeOscillatorCount - 1);
         this.activeSfxOscillators.delete(osc);
+        this.activeBgmOscillators.delete(osc);
         try {
           osc.disconnect();
           gain.disconnect();
         } catch {}
       };
+      (osc as OscillatorNode & { __cleanup?: () => void }).__cleanup = cleanup;
+      osc.onended = cleanup;
 
       osc.start(now);
       osc.stop(now + durationSec + 0.02);
@@ -1550,6 +1569,23 @@ class GameAudioManager {
       window.clearInterval(this.bgmLoopInterval);
       this.bgmLoopInterval = null;
     }
+    for (const osc of Array.from(this.activeBgmOscillators)) {
+      try {
+        osc.onended = null;
+        osc.stop();
+      } catch {}
+      const cleanup = (osc as OscillatorNode & { __cleanup?: () => void }).__cleanup;
+      if (typeof cleanup === 'function') {
+        cleanup();
+      } else {
+        this.activeOscillatorCount = Math.max(0, this.activeOscillatorCount - 1);
+        this.activeBgmOscillators.delete(osc);
+        try {
+          osc.disconnect();
+        } catch {}
+      }
+    }
+    this.activeBgmOscillators.clear();
     if (this.defaultBgmAudioEl) {
       const el = this.defaultBgmAudioEl;
       this.defaultBgmAudioEl = null;

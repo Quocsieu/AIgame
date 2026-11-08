@@ -1267,6 +1267,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   }, [activeQuestion?.id, activeStageIndex]);
 
   const handleMovePuzzleItem = useCallback((index: number, direction: -1 | 1) => {
+    soundManager.playSelect();
     setPuzzleOrder(prev => {
       const targetIndex = index + direction;
       if (targetIndex < 0 || targetIndex >= prev.length) return prev;
@@ -1358,6 +1359,9 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
 
       try {
         if (mode === 'LIVE_SESSION' && effectiveOnSubmitAnswer) {
+          if (isMultiplayer) {
+            soundManager.playSelect();
+          }
           await effectiveOnSubmitAnswer(trimmed);
           return;
         }

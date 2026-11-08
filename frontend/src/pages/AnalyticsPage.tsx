@@ -1055,6 +1055,44 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const [generatingCoverGameId, setGeneratingCoverGameId] = useState<string | null>(null);
   const [duplicatingGameId, setDuplicatingGameId] = useState<string | null>(null);
   const [previewDemoType, setPreviewDemoType] = useState<GameType | null>(null);
+  const [openCardMenuId, setOpenCardMenuId] = useState<string | null>(null);
+  const [isDetailMoreMenuOpen, setIsDetailMoreMenuOpen] = useState<boolean>(false);
+  const [isCompactViewport, setIsCompactViewport] = useState<boolean>(() =>
+    typeof window !== 'undefined' ? window.innerWidth <= 640 : false
+  );
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleResize = () => {
+      setIsCompactViewport(window.innerWidth <= 640);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (!openCardMenuId && !isDetailMoreMenuOpen) return;
+    const handlePointerDownOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('[data-card-action-menu-root="true"]')) return;
+      if (target.closest('[data-detail-action-menu-root="true"]')) return;
+      setOpenCardMenuId(null);
+      setIsDetailMoreMenuOpen(false);
+    };
+    const handleKeyDownEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setOpenCardMenuId(null);
+        setIsDetailMoreMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDownOutside);
+    document.addEventListener('keydown', handleKeyDownEscape);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDownOutside);
+      document.removeEventListener('keydown', handleKeyDownEscape);
+    };
+  }, [openCardMenuId, isDetailMoreMenuOpen]);
 
   const handleGenerateAiCover = async (
     game: Pick<PersistedGameSummary, 'gameId' | 'title' | 'coverImageUrl'>,
@@ -4238,7 +4276,16 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     )}
                 </div>
 
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <div
+                  data-testid="library-detail-actions-row"
+                  style={{
+                    display: 'flex',
+                    gap: isCompactViewport ? '4px' : '8px',
+                    flexWrap: 'wrap',
+                    alignItems: 'center',
+                    position: 'relative',
+                  }}
+                >
                   <button
                     type="button"
                     data-testid="explore-detail-open-game-btn"
@@ -4248,17 +4295,18 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       color: 'var(--primary-ink, #08090e)',
                       border: 'none',
                       borderRadius: '8px',
-                      padding: '0 16px',
-                      height: '38px',
+                      padding: isCompactViewport ? '0 8px' : '0 14px',
+                      height: isCompactViewport ? '36px' : '38px',
                       fontWeight: 800,
-                      fontSize: '0.84rem',
+                      fontSize: isCompactViewport ? '0.75rem' : '0.84rem',
                       cursor: 'pointer',
                       display: 'inline-flex',
                       alignItems: 'center',
-                      gap: '6px',
+                      gap: '5px',
+                      whiteSpace: 'nowrap',
                     }}
                   >
-                    <GamepadIcon size={15} />
+                    {!isCompactViewport && <GamepadIcon size={14} />}
                     <span>Mở game</span>
                   </button>
                   {isLibraryMode && canManageGame(activeGameSpec) ? (
@@ -4272,18 +4320,19 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           color: 'var(--accent-sky)',
                           border: '1px solid rgba(56, 189, 248, 0.45)',
                           borderRadius: '8px',
-                          padding: '0 14px',
-                          height: '38px',
+                          padding: isCompactViewport ? '0 8px' : '0 12px',
+                          height: isCompactViewport ? '36px' : '38px',
                           fontWeight: 800,
-                          fontSize: '0.84rem',
+                          fontSize: isCompactViewport ? '0.75rem' : '0.84rem',
                           cursor: 'pointer',
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '6px',
+                          gap: '5px',
+                          whiteSpace: 'nowrap',
                         }}
                         title="Chơi thử bộ câu hỏi này (không tính lượt thi, không lưu lịch sử, giữ nguyên trạng thái xuất bản)"
                       >
-                        <GamepadIcon size={14} />
+                        {!isCompactViewport && <GamepadIcon size={14} />}
                         <span>Chơi thử</span>
                       </button>
                       <button
@@ -4315,87 +4364,374 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           color: 'var(--accent-amber)',
                           border: '1px solid var(--border-strong)',
                           borderRadius: '8px',
-                          padding: '0 14px',
-                          height: '38px',
+                          padding: isCompactViewport ? '0 8px' : '0 12px',
+                          height: isCompactViewport ? '36px' : '38px',
                           fontWeight: 700,
-                          fontSize: '0.84rem',
+                          fontSize: isCompactViewport ? '0.75rem' : '0.84rem',
                           cursor: 'pointer',
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '6px',
+                          gap: '5px',
+                          whiteSpace: 'nowrap',
                         }}
                         title="Chỉnh sửa nội dung câu hỏi và thiết lập của bộ câu hỏi này"
                       >
-                        <PencilIcon size={14} />
+                        {!isCompactViewport && <PencilIcon size={13} />}
                         <span>Sửa</span>
                       </button>
-                      <button
-                        type="button"
-                        data-testid="detail-duplicate-game-btn"
-                        onClick={() =>
-                          handleDuplicateGame({
-                            gameId: activeGameSpec.gameId,
-                            title: activeGameSpec.title,
-                          })
-                        }
-                        disabled={duplicatingGameId === activeGameSpec.gameId}
-                        style={{
-                          backgroundColor: 'var(--bg-input)',
-                          color: 'var(--text-primary)',
-                          border: '1px solid var(--border-strong)',
-                          borderRadius: '8px',
-                          padding: '0 12px',
-                          height: '38px',
-                          fontWeight: 700,
-                          fontSize: '0.82rem',
-                          cursor: duplicatingGameId === activeGameSpec.gameId ? 'not-allowed' : 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '6px',
-                        }}
-                        title="Nhân bản bộ câu hỏi này sang bản nháp mới"
-                      >
-                        {duplicatingGameId === activeGameSpec.gameId ? (
-                          <SpinnerIcon size={14} />
-                        ) : (
-                          <CopyIcon size={14} />
-                        )}
-                        <span>Sao chép</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleExportGame(activeGameSpec.gameId, 'csv')}
-                        style={{
-                          backgroundColor: 'var(--bg-input)',
-                          color: 'var(--accent-emerald)',
-                          border: '1px solid var(--border-strong)',
-                          borderRadius: '8px',
-                          padding: '0 12px',
-                          height: '38px',
-                          fontWeight: 700,
-                          fontSize: '0.82rem',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Xuất CSV
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleExportGame(activeGameSpec.gameId, 'json')}
-                        style={{
-                          backgroundColor: 'var(--bg-input)',
-                          color: 'var(--accent-sky)',
-                          border: '1px solid var(--border-strong)',
-                          borderRadius: '8px',
-                          padding: '0 12px',
-                          height: '38px',
-                          fontWeight: 700,
-                          fontSize: '0.82rem',
-                          cursor: 'pointer',
-                        }}
-                      >
-                        Xuất JSON
-                      </button>
+
+                      {!isCompactViewport ? (
+                        <>
+                          <button
+                            type="button"
+                            data-testid="detail-duplicate-game-btn"
+                            onClick={() =>
+                              handleDuplicateGame({
+                                gameId: activeGameSpec.gameId,
+                                title: activeGameSpec.title,
+                              })
+                            }
+                            disabled={duplicatingGameId === activeGameSpec.gameId}
+                            style={{
+                              backgroundColor: 'var(--bg-input)',
+                              color: 'var(--text-primary)',
+                              border: '1px solid var(--border-strong)',
+                              borderRadius: '8px',
+                              padding: '0 12px',
+                              height: '38px',
+                              fontWeight: 700,
+                              fontSize: '0.82rem',
+                              cursor: duplicatingGameId === activeGameSpec.gameId ? 'not-allowed' : 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                            }}
+                            title="Nhân bản bộ câu hỏi này sang bản nháp mới"
+                          >
+                            {duplicatingGameId === activeGameSpec.gameId ? (
+                              <SpinnerIcon size={14} />
+                            ) : (
+                              <CopyIcon size={14} />
+                            )}
+                            <span>Sao chép</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleExportGame(activeGameSpec.gameId, 'csv')}
+                            style={{
+                              backgroundColor: 'var(--bg-input)',
+                              color: 'var(--accent-emerald)',
+                              border: '1px solid var(--border-strong)',
+                              borderRadius: '8px',
+                              padding: '0 12px',
+                              height: '38px',
+                              fontWeight: 700,
+                              fontSize: '0.82rem',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Xuất CSV
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleExportGame(activeGameSpec.gameId, 'json')}
+                            style={{
+                              backgroundColor: 'var(--bg-input)',
+                              color: 'var(--accent-sky)',
+                              border: '1px solid var(--border-strong)',
+                              borderRadius: '8px',
+                              padding: '0 12px',
+                              height: '38px',
+                              fontWeight: 700,
+                              fontSize: '0.82rem',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            Xuất JSON
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="library-detail-delete-game-btn"
+                            onClick={() => {
+                              const matched = savedGames.find((item) => item.gameId === activeGameSpec.gameId);
+                              handleOpenDeleteModal(
+                                matched || {
+                                  gameId: activeGameSpec.gameId,
+                                  title: activeGameSpec.title,
+                                  description: activeGameSpec.description,
+                                  gameType: activeGameSpec.gameType,
+                                  scoringMode: activeGameSpec.settings.scoringMode,
+                                  questionCount: activeGameSpec.questions.length,
+                                  timePerQuestion: activeGameSpec.settings.timePerQuestion,
+                                  isPublic: Boolean(activeGameSpec.isPublic),
+                                  ownerUserId: activeGameSpec.ownerUserId ?? null,
+                                  sourceCount: activeGameSpec.sourceSummary?.sourceCount || 1,
+                                  generatedAt: activeGameSpec.generatedAt,
+                                  createdAt: activeGameSpec.generatedAt,
+                                  updatedAt: activeGameSpec.generatedAt,
+                                }
+                              );
+                            }}
+                            style={{
+                              backgroundColor: 'rgba(244, 63, 94, 0.12)',
+                              color: 'var(--accent-rose)',
+                              border: '1px solid rgba(244, 63, 94, 0.35)',
+                              borderRadius: '8px',
+                              padding: '0 12px',
+                              height: '38px',
+                              fontWeight: 700,
+                              fontSize: '0.82rem',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                            }}
+                          >
+                            <TrashIcon size={14} />
+                            <span>Xóa</span>
+                          </button>
+                        </>
+                      ) : (
+                        <div
+                          data-detail-action-menu-root="true"
+                          style={{ position: 'relative', display: 'inline-flex' }}
+                        >
+                          <button
+                            type="button"
+                            data-testid="library-detail-more-btn"
+                            aria-haspopup="menu"
+                            aria-expanded={isDetailMoreMenuOpen}
+                            aria-label="Tác vụ phụ"
+                            onClick={() => setIsDetailMoreMenuOpen((prev) => !prev)}
+                            style={{
+                              backgroundColor: 'var(--bg-input)',
+                              color: 'var(--text-primary)',
+                              border: '1px solid var(--border-strong)',
+                              borderRadius: '8px',
+                              padding: '0 10px',
+                              height: '36px',
+                              fontWeight: 800,
+                              fontSize: '0.9rem',
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            ⋯
+                          </button>
+                          {isDetailMoreMenuOpen && (
+                            <div
+                              role="menu"
+                              data-testid="library-detail-more-menu"
+                              style={{
+                                position: 'absolute',
+                                top: 'calc(100% + 6px)',
+                                right: 0,
+                                zIndex: 60,
+                                minWidth: '195px',
+                                backgroundColor: 'var(--bg-elevated, #161b26)',
+                                border: '1px solid var(--border-strong)',
+                                borderRadius: '10px',
+                                padding: '6px',
+                                boxShadow: '0 14px 32px rgba(0, 0, 0, 0.45)',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '4px',
+                              }}
+                            >
+                              <button
+                                type="button"
+                                role="menuitem"
+                                data-testid="detail-menu-open-room-btn"
+                                onClick={() => {
+                                  setIsDetailMoreMenuOpen(false);
+                                  handleOpenMultiplayerRoom({
+                                    gameId: activeGameSpec.gameId,
+                                    title: activeGameSpec.title,
+                                    isPublic: Boolean(activeGameSpec.isPublic),
+                                    sessionMode: activeGameSpec.settings?.sessionMode,
+                                  });
+                                }}
+                                style={{
+                                  width: '100%',
+                                  textAlign: 'left',
+                                  backgroundColor: 'transparent',
+                                  color: 'var(--accent-sky)',
+                                  border: 'none',
+                                  borderRadius: '7px',
+                                  padding: '8px 10px',
+                                  fontWeight: 700,
+                                  fontSize: '0.82rem',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                }}
+                              >
+                                <UsersIcon size={14} />
+                                <span>Mở phòng chơi nhóm</span>
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                data-testid="detail-menu-qr-btn"
+                                onClick={() => {
+                                  setIsDetailMoreMenuOpen(false);
+                                  handleOpenSoloShareModal({
+                                    gameId: activeGameSpec.gameId,
+                                    title: activeGameSpec.title,
+                                    isPublic: Boolean(activeGameSpec.isPublic),
+                                    sessionMode: activeGameSpec.settings?.sessionMode,
+                                  });
+                                }}
+                                style={{
+                                  width: '100%',
+                                  textAlign: 'left',
+                                  backgroundColor: 'transparent',
+                                  color: 'var(--text-primary)',
+                                  border: 'none',
+                                  borderRadius: '7px',
+                                  padding: '8px 10px',
+                                  fontWeight: 700,
+                                  fontSize: '0.82rem',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                }}
+                              >
+                                <QrCodeIcon size={14} />
+                                <span>Mã QR / Link Chơi đơn</span>
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                data-testid="detail-duplicate-game-btn"
+                                onClick={() => {
+                                  setIsDetailMoreMenuOpen(false);
+                                  handleDuplicateGame({
+                                    gameId: activeGameSpec.gameId,
+                                    title: activeGameSpec.title,
+                                  });
+                                }}
+                                disabled={duplicatingGameId === activeGameSpec.gameId}
+                                style={{
+                                  width: '100%',
+                                  textAlign: 'left',
+                                  backgroundColor: 'transparent',
+                                  color: 'var(--text-primary)',
+                                  border: 'none',
+                                  borderRadius: '7px',
+                                  padding: '8px 10px',
+                                  fontWeight: 700,
+                                  fontSize: '0.82rem',
+                                  cursor:
+                                    duplicatingGameId === activeGameSpec.gameId
+                                      ? 'not-allowed'
+                                      : 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                }}
+                              >
+                                <CopyIcon size={14} />
+                                <span>Bản sao (Sao chép)</span>
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setIsDetailMoreMenuOpen(false);
+                                  handleExportGame(activeGameSpec.gameId, 'csv');
+                                }}
+                                style={{
+                                  width: '100%',
+                                  textAlign: 'left',
+                                  backgroundColor: 'transparent',
+                                  color: 'var(--accent-emerald)',
+                                  border: 'none',
+                                  borderRadius: '7px',
+                                  padding: '8px 10px',
+                                  fontWeight: 700,
+                                  fontSize: '0.82rem',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Xuất CSV
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                onClick={() => {
+                                  setIsDetailMoreMenuOpen(false);
+                                  handleExportGame(activeGameSpec.gameId, 'json');
+                                }}
+                                style={{
+                                  width: '100%',
+                                  textAlign: 'left',
+                                  backgroundColor: 'transparent',
+                                  color: 'var(--accent-sky)',
+                                  border: 'none',
+                                  borderRadius: '7px',
+                                  padding: '8px 10px',
+                                  fontWeight: 700,
+                                  fontSize: '0.82rem',
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                Xuất JSON
+                              </button>
+                              <button
+                                type="button"
+                                role="menuitem"
+                                data-testid="library-detail-delete-game-btn"
+                                onClick={() => {
+                                  setIsDetailMoreMenuOpen(false);
+                                  const matched = savedGames.find(
+                                    (item) => item.gameId === activeGameSpec.gameId
+                                  );
+                                  handleOpenDeleteModal(
+                                    matched || {
+                                      gameId: activeGameSpec.gameId,
+                                      title: activeGameSpec.title,
+                                      description: activeGameSpec.description,
+                                      gameType: activeGameSpec.gameType,
+                                      scoringMode: activeGameSpec.settings.scoringMode,
+                                      questionCount: activeGameSpec.questions.length,
+                                      timePerQuestion: activeGameSpec.settings.timePerQuestion,
+                                      isPublic: Boolean(activeGameSpec.isPublic),
+                                      ownerUserId: activeGameSpec.ownerUserId ?? null,
+                                      sourceCount: activeGameSpec.sourceSummary?.sourceCount || 1,
+                                      generatedAt: activeGameSpec.generatedAt,
+                                      createdAt: activeGameSpec.generatedAt,
+                                      updatedAt: activeGameSpec.generatedAt,
+                                    }
+                                  );
+                                }}
+                                style={{
+                                  width: '100%',
+                                  textAlign: 'left',
+                                  backgroundColor: 'rgba(244, 63, 94, 0.1)',
+                                  color: 'var(--accent-rose)',
+                                  border: 'none',
+                                  borderRadius: '7px',
+                                  padding: '8px 10px',
+                                  fontWeight: 700,
+                                  fontSize: '0.82rem',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                }}
+                              >
+                                <TrashIcon size={14} />
+                                <span>Xóa bộ câu hỏi</span>
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {(() => {
                         const matchedActiveGame = savedGames.find(
                           (item) => item.gameId === activeGameSpec.gameId
@@ -4482,47 +4818,6 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           </>
                         );
                       })()}
-                      <button
-                        type="button"
-                        data-testid="library-detail-delete-game-btn"
-                        onClick={() => {
-                          const matched = savedGames.find((item) => item.gameId === activeGameSpec.gameId);
-                          handleOpenDeleteModal(
-                            matched || {
-                              gameId: activeGameSpec.gameId,
-                              title: activeGameSpec.title,
-                              description: activeGameSpec.description,
-                              gameType: activeGameSpec.gameType,
-                              scoringMode: activeGameSpec.settings.scoringMode,
-                              questionCount: activeGameSpec.questions.length,
-                              timePerQuestion: activeGameSpec.settings.timePerQuestion,
-                              isPublic: Boolean(activeGameSpec.isPublic),
-                              ownerUserId: activeGameSpec.ownerUserId ?? null,
-                              sourceCount: activeGameSpec.sourceSummary?.sourceCount || 1,
-                              generatedAt: activeGameSpec.generatedAt,
-                              createdAt: activeGameSpec.generatedAt,
-                              updatedAt: activeGameSpec.generatedAt,
-                            }
-                          );
-                        }}
-                        style={{
-                          backgroundColor: 'rgba(244, 63, 94, 0.12)',
-                          color: 'var(--accent-rose)',
-                          border: '1px solid rgba(244, 63, 94, 0.35)',
-                          borderRadius: '8px',
-                          padding: '0 12px',
-                          height: '38px',
-                          fontWeight: 700,
-                          fontSize: '0.82rem',
-                          cursor: 'pointer',
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: '5px',
-                        }}
-                      >
-                        <TrashIcon size={14} />
-                        <span>Xóa</span>
-                      </button>
                     </>
                   ) : (
                     <button
@@ -4568,17 +4863,18 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       color: 'var(--text-secondary)',
                       border: '1px solid var(--border-subtle)',
                       borderRadius: '8px',
-                      padding: '0 12px',
-                      height: '38px',
+                      padding: isCompactViewport ? '0 8px' : '0 12px',
+                      height: isCompactViewport ? '36px' : '38px',
                       fontWeight: 600,
-                      fontSize: '0.82rem',
+                      fontSize: isCompactViewport ? '0.75rem' : '0.82rem',
                       cursor: 'pointer',
                       display: 'inline-flex',
                       alignItems: 'center',
                       gap: '4px',
+                      whiteSpace: 'nowrap',
                     }}
                   >
-                    <XMarkIcon size={14} />
+                    {!isCompactViewport && <XMarkIcon size={14} />}
                     <span>Đóng</span>
                   </button>
                 </div>
@@ -6713,14 +7009,17 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                     key={g.gameId}
                     data-testid={`library-game-card-${g.gameId}`}
                     style={{
+                      position: 'relative',
+                      overflow: 'visible',
+                      zIndex: openCardMenuId === g.gameId ? 30 : 1,
                       borderRadius: '10px',
                       backgroundColor: 'var(--bg-surface)',
                       border: '1px solid var(--border-subtle)',
-                      padding: '16px',
+                      padding: isCompactViewport ? '13px 14px' : '16px',
                       display: 'flex',
                       flexDirection: 'column',
                       justifyContent: 'space-between',
-                      gap: '12px',
+                      gap: '10px',
                       boxSizing: 'border-box',
                       transition: 'border-color 0.15s ease, background-color 0.15s ease',
                     }}
@@ -6962,15 +7261,16 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       )}
                     </div>
 
-                    {/* Hành động trên thẻ: Mở game, Chơi thử (Thư viện) và Chi tiết */}
+                    {/* Hành động trên thẻ: Mở game, Chơi thử, Chi tiết và Menu ⋯ */}
                     <div
+                      data-testid={`library-card-actions-${g.gameId}`}
                       style={{
-                        display: 'grid',
-                        gridTemplateColumns:
-                          isLibraryMode && canManageGame(g) ? '1fr 1fr 1fr' : '1fr 1fr',
+                        display: 'flex',
+                        alignItems: 'center',
                         gap: '6px',
                         paddingTop: '10px',
                         borderTop: '1px solid var(--border-subtle)',
+                        position: 'relative',
                       }}
                     >
                       <button
@@ -6978,6 +7278,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         data-testid={`library-card-open-btn-${g.gameId}`}
                         onClick={() => handleOpenModeModal(g.gameId)}
                         style={{
+                          flex: '1.15 1 0',
+                          minWidth: 0,
                           backgroundColor: 'var(--primary)',
                           color: 'var(--primary-ink, #08090e)',
                           border: '1px solid var(--primary)',
@@ -7004,6 +7306,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                           data-testid={`library-card-playtest-btn-${g.gameId}`}
                           onClick={() => handleStartSavedGamePlaytest(g.gameId)}
                           style={{
+                            flex: '1 1 0',
+                            minWidth: 0,
                             backgroundColor: 'rgba(56, 189, 248, 0.14)',
                             color: 'var(--accent-sky)',
                             border: '1px solid rgba(56, 189, 248, 0.45)',
@@ -7030,6 +7334,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                         data-testid={`library-card-detail-btn-${g.gameId}`}
                         onClick={() => handleViewOrEditGame(g.gameId, false)}
                         style={{
+                          flex: '0.9 1 0',
+                          minWidth: 0,
                           backgroundColor: 'var(--bg-input)',
                           color: 'var(--text-primary)',
                           border: '1px solid var(--border-strong)',
@@ -7048,6 +7354,211 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                       >
                         <span>Chi tiết</span>
                       </button>
+
+                      <div
+                        data-card-action-menu-root="true"
+                        style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}
+                      >
+                        <button
+                          type="button"
+                          data-testid={`library-card-more-btn-${g.gameId}`}
+                          aria-haspopup="menu"
+                          aria-expanded={openCardMenuId === g.gameId}
+                          aria-label={`Tác vụ khác cho ${g.title}`}
+                          title="Tác vụ khác (Mở phòng, Sửa, QR, Bản sao, Xóa)"
+                          onClick={() =>
+                            setOpenCardMenuId((prev) => (prev === g.gameId ? null : g.gameId))
+                          }
+                          style={{
+                            width: '36px',
+                            height: '36px',
+                            borderRadius: '6px',
+                            backgroundColor:
+                              openCardMenuId === g.gameId
+                                ? 'var(--bg-elevated)'
+                                : 'var(--bg-input)',
+                            color: 'var(--text-primary)',
+                            border: '1px solid var(--border-strong)',
+                            fontWeight: 900,
+                            fontSize: '0.95rem',
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            padding: 0,
+                          }}
+                        >
+                          ⋯
+                        </button>
+
+                        {openCardMenuId === g.gameId && (
+                          <div
+                            role="menu"
+                            aria-label={`Menu tác vụ cho ${g.title}`}
+                            data-testid={`library-card-more-menu-${g.gameId}`}
+                            style={{
+                              position: 'absolute',
+                              bottom: 'calc(100% + 6px)',
+                              right: 0,
+                              zIndex: 55,
+                              minWidth: '196px',
+                              backgroundColor: 'var(--bg-elevated, #161b26)',
+                              border: '1px solid var(--border-strong)',
+                              borderRadius: '10px',
+                              padding: '6px',
+                              boxShadow: '0 14px 32px rgba(0, 0, 0, 0.48)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '3px',
+                            }}
+                          >
+                            <button
+                              type="button"
+                              role="menuitem"
+                              data-testid={`library-card-menu-room-${g.gameId}`}
+                              onClick={() => {
+                                setOpenCardMenuId(null);
+                                handleOpenMultiplayerRoom(g);
+                              }}
+                              style={{
+                                width: '100%',
+                                textAlign: 'left',
+                                backgroundColor: 'transparent',
+                                color: 'var(--accent-sky)',
+                                border: 'none',
+                                borderRadius: '7px',
+                                padding: '8px 10px',
+                                fontWeight: 700,
+                                fontSize: '0.8rem',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                              }}
+                            >
+                              <UsersIcon size={14} />
+                              <span>Mở phòng chơi nhóm</span>
+                            </button>
+
+                            {isLibraryMode && canManageGame(g) && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                data-testid={`library-card-menu-edit-${g.gameId}`}
+                                onClick={() => {
+                                  setOpenCardMenuId(null);
+                                  handleViewOrEditGame(g.gameId, true);
+                                }}
+                                style={{
+                                  width: '100%',
+                                  textAlign: 'left',
+                                  backgroundColor: 'transparent',
+                                  color: 'var(--accent-amber)',
+                                  border: 'none',
+                                  borderRadius: '7px',
+                                  padding: '8px 10px',
+                                  fontWeight: 700,
+                                  fontSize: '0.8rem',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                }}
+                              >
+                                <PencilIcon size={14} />
+                                <span>Sửa bộ câu hỏi</span>
+                              </button>
+                            )}
+
+                            <button
+                              type="button"
+                              role="menuitem"
+                              data-testid={`library-card-menu-qr-${g.gameId}`}
+                              onClick={() => {
+                                setOpenCardMenuId(null);
+                                handleOpenSoloShareModal(g);
+                              }}
+                              style={{
+                                width: '100%',
+                                textAlign: 'left',
+                                backgroundColor: 'transparent',
+                                color: 'var(--text-primary)',
+                                border: 'none',
+                                borderRadius: '7px',
+                                padding: '8px 10px',
+                                fontWeight: 700,
+                                fontSize: '0.8rem',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                              }}
+                            >
+                              <QrCodeIcon size={14} />
+                              <span>Mã QR / Link Chơi đơn</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              role="menuitem"
+                              data-testid={`library-card-menu-duplicate-${g.gameId}`}
+                              disabled={duplicatingGameId === g.gameId}
+                              onClick={() => {
+                                setOpenCardMenuId(null);
+                                handleDuplicateGame({ gameId: g.gameId, title: g.title });
+                              }}
+                              style={{
+                                width: '100%',
+                                textAlign: 'left',
+                                backgroundColor: 'transparent',
+                                color: 'var(--text-primary)',
+                                border: 'none',
+                                borderRadius: '7px',
+                                padding: '8px 10px',
+                                fontWeight: 700,
+                                fontSize: '0.8rem',
+                                cursor: duplicatingGameId === g.gameId ? 'not-allowed' : 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                              }}
+                            >
+                              <CopyIcon size={14} />
+                              <span>Tạo bản sao</span>
+                            </button>
+
+                            {isLibraryMode && canManageGame(g) && (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                data-testid={`library-card-menu-delete-${g.gameId}`}
+                                onClick={() => {
+                                  setOpenCardMenuId(null);
+                                  handleOpenDeleteModal(g);
+                                }}
+                                style={{
+                                  width: '100%',
+                                  textAlign: 'left',
+                                  backgroundColor: 'rgba(244, 63, 94, 0.1)',
+                                  color: 'var(--accent-rose)',
+                                  border: 'none',
+                                  borderRadius: '7px',
+                                  padding: '8px 10px',
+                                  fontWeight: 700,
+                                  fontSize: '0.8rem',
+                                  cursor: 'pointer',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                }}
+                              >
+                                <TrashIcon size={14} />
+                                <span>Xóa bộ câu hỏi</span>
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </article>
                 ))}
