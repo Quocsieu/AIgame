@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   BookOpenIcon,
   CheckIcon,
@@ -8,6 +8,8 @@ import {
   StarIcon,
 } from './Icons.js';
 import type { GameType } from '../types/index.js';
+import { GameTypeDemoModal } from './GameTypeDemoModal.js';
+import { soundManager } from '../services/audio.js';
 
 export interface GameTypeOption {
   id: GameType;
@@ -124,199 +126,322 @@ export const GameTypeSelector: React.FC<GameTypeSelectorProps> = ({
   compact = false,
   variant,
 }) => {
+  const [previewDemoType, setPreviewDemoType] = useState<GameType | null>(null);
   const isChipVariant = variant === 'chips' || (compact && variant !== 'cards');
+
+  const demoModalNode = (
+    <GameTypeDemoModal
+      gameType={previewDemoType}
+      onClose={() => setPreviewDemoType(null)}
+      onCreateGameType={(gt) => {
+        onSelectType(gt);
+        setPreviewDemoType(null);
+      }}
+    />
+  );
 
   if (isChipVariant) {
     return (
+      <>
+        {demoModalNode}
+        <div
+          role="radiogroup"
+          aria-label="Chọn định dạng game"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(215px, 1fr))',
+            gap: '0.5rem',
+            width: '100%',
+          }}
+        >
+          {SUPPORTED_GAME_TYPES.map((item) => {
+            const isSelected = isMatchingSelectorType(item.id, selectedType);
+            return (
+              <div
+                key={item.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: '0.35rem',
+                  padding: '0.25rem 0.45rem 0.25rem 0.65rem',
+                  minHeight: '44px',
+                  borderRadius: '10px',
+                  border: `2px solid ${isSelected ? item.badgeColor : 'var(--border-subtle)'}`,
+                  backgroundColor: isSelected
+                    ? 'var(--bg-card-hover)'
+                    : 'var(--bg-surface)',
+                  transition: 'background-color 0.15s ease, border-color 0.15s ease',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={isSelected}
+                  data-testid={`game-type-option-${item.id}`}
+                  onClick={() => {
+                    soundManager.playSelect();
+                    onSelectType(item.id);
+                  }}
+                  style={{
+                    flex: 1,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '0.45rem',
+                    overflow: 'hidden',
+                    border: 'none',
+                    background: 'transparent',
+                    color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
+                    fontWeight: isSelected ? 800 : 600,
+                    fontSize: '0.82rem',
+                    cursor: 'pointer',
+                    padding: '0.2rem 0',
+                    textAlign: 'left',
+                    outline: 'none',
+                  }}
+                >
+                  <span
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: item.badgeColor,
+                      flexShrink: 0,
+                    }}
+                  >
+                    {item.icon}
+                  </span>
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                    {item.title}
+                  </span>
+                </button>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexShrink: 0 }}>
+                  <button
+                    type="button"
+                    data-testid={`preview-demo-btn-${item.id}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      soundManager.playSelect();
+                      setPreviewDemoType(item.id);
+                    }}
+                    title={`Xem demo tương tác: ${item.title}`}
+                    style={{
+                      padding: '0.22rem 0.48rem',
+                      borderRadius: '7px',
+                      border: '1px solid var(--border-strong)',
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--primary)',
+                      fontSize: '0.7rem',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Xem demo
+                  </button>
+
+                  <span
+                    onClick={() => {
+                      soundManager.playSelect();
+                      onSelectType(item.id);
+                    }}
+                    style={{
+                      width: '18px',
+                      height: '18px',
+                      borderRadius: '50%',
+                      backgroundColor: isSelected ? item.badgeColor : 'transparent',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      flexShrink: 0,
+                      cursor: 'pointer',
+                      border: isSelected ? 'none' : '1.5px solid var(--border-subtle)',
+                    }}
+                  >
+                    {isSelected && <CheckIcon size={11} />}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <>
+      {demoModalNode}
       <div
         role="radiogroup"
         aria-label="Chọn định dạng game"
         style={{
           display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))',
-          gap: '0.5rem',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: '0.85rem',
           width: '100%',
         }}
       >
         {SUPPORTED_GAME_TYPES.map((item) => {
           const isSelected = isMatchingSelectorType(item.id, selectedType);
           return (
-            <button
+            <div
               key={item.id}
-              type="button"
               role="radio"
               aria-checked={isSelected}
               data-testid={`game-type-option-${item.id}`}
-              onClick={() => onSelectType(item.id)}
+              onClick={() => {
+                soundManager.playSelect();
+                onSelectType(item.id);
+              }}
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '0 0.75rem',
-                height: '42px',
-                borderRadius: '10px',
+                display: 'flex',
+                flexDirection: 'column',
+                textAlign: 'left',
+                padding: compact ? '0.85rem' : '1.1rem',
+                borderRadius: '16px',
                 border: `2px solid ${isSelected ? item.badgeColor : 'var(--border-subtle)'}`,
                 backgroundColor: isSelected
                   ? 'var(--bg-card-hover)'
                   : 'var(--bg-surface)',
-                color: isSelected ? 'var(--text-primary)' : 'var(--text-secondary)',
-                fontWeight: isSelected ? 800 : 600,
-                fontSize: '0.82rem',
                 cursor: 'pointer',
-                transition: 'background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease',
-                boxSizing: 'border-box',
+                transition: 'background-color 0.15s ease, border-color 0.15s ease',
+                position: 'relative',
                 outline: 'none',
+                boxSizing: 'border-box',
+                minHeight: '44px',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', overflow: 'hidden' }}>
-                <span
+              {/* Top row: Icon & Badge */}
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '0.65rem',
+                  width: '100%',
+                }}
+              >
+                <div
                   style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '10px',
+                    backgroundColor: 'var(--bg-input)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    color: item.badgeColor,
-                    flexShrink: 0,
                   }}
                 >
                   {item.icon}
-                </span>
-                <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                  {item.title}
-                </span>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <div
+                    style={{
+                      width: '22px',
+                      height: '22px',
+                      borderRadius: '50%',
+                      backgroundColor: isSelected ? item.badgeColor : 'transparent',
+                      color: '#ffffff',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      border: isSelected ? 'none' : '1.5px solid var(--border-subtle)',
+                    }}
+                  >
+                    {isSelected && <CheckIcon size={13} />}
+                  </div>
+                </div>
               </div>
 
-              <span
+              {/* Title & Description */}
+              <h4
                 style={{
-                  width: '18px',
-                  height: '18px',
-                  borderRadius: '50%',
-                  backgroundColor: isSelected ? item.badgeColor : 'transparent',
-                  color: '#ffffff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                  marginLeft: '0.35rem',
-                  border: isSelected ? 'none' : '1.5px solid var(--border-subtle)',
+                  margin: '0 0 0.3rem 0',
+                  fontSize: compact ? '0.96rem' : '1.05rem',
+                  fontWeight: 800,
+                  color: 'var(--text-primary)',
                 }}
               >
-                {isSelected && <CheckIcon size={11} />}
-              </span>
-            </button>
+                {item.title}
+              </h4>
+
+              <p
+                style={{
+                  margin: '0 0 0.75rem 0',
+                  fontSize: '0.82rem',
+                  color: 'var(--text-secondary)',
+                  lineHeight: 1.45,
+                  flex: 1,
+                }}
+              >
+                {item.subtitle}
+              </p>
+
+              {/* Action Row: Xem demo & Tạo game */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  marginTop: 'auto',
+                }}
+              >
+                <button
+                  type="button"
+                  data-testid={`preview-demo-btn-${item.id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    soundManager.playSelect();
+                    setPreviewDemoType(item.id);
+                  }}
+                  style={{
+                    flex: 1,
+                    minHeight: '34px',
+                    padding: '0.32rem 0.6rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    fontSize: '0.76rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ▶ Xem demo
+                </button>
+                <button
+                  type="button"
+                  data-testid={`select-create-btn-${item.id}`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    soundManager.playSelect();
+                    onSelectType(item.id);
+                  }}
+                  style={{
+                    flex: 1,
+                    minHeight: '34px',
+                    padding: '0.32rem 0.6rem',
+                    borderRadius: '8px',
+                    border: 'none',
+                    backgroundColor: isSelected ? item.badgeColor : 'var(--primary)',
+                    color: '#ffffff',
+                    fontSize: '0.76rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  {isSelected ? '✓ Đang chọn' : 'Tạo game'}
+                </button>
+              </div>
+            </div>
           );
         })}
       </div>
-    );
-  }
-
-  return (
-    <div
-      role="radiogroup"
-      aria-label="Chọn định dạng game"
-      style={{
-        display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
-        gap: '0.85rem',
-        width: '100%',
-      }}
-    >
-      {SUPPORTED_GAME_TYPES.map((item) => {
-        const isSelected = isMatchingSelectorType(item.id, selectedType);
-        return (
-          <button
-            key={item.id}
-            type="button"
-            role="radio"
-            aria-checked={isSelected}
-            data-testid={`game-type-option-${item.id}`}
-            onClick={() => onSelectType(item.id)}
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              textAlign: 'left',
-              padding: compact ? '0.85rem' : '1.15rem',
-              borderRadius: '16px',
-              border: `2px solid ${isSelected ? item.badgeColor : 'var(--border-subtle)'}`,
-              backgroundColor: isSelected
-                ? 'var(--bg-card-hover)'
-                : 'var(--bg-surface)',
-              cursor: 'pointer',
-              transition: 'background-color 0.15s ease, border-color 0.15s ease',
-              position: 'relative',
-              outline: 'none',
-              boxSizing: 'border-box',
-              minHeight: '44px',
-            }}
-          >
-            {/* Top row: Icon & Badge */}
-            <div
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                marginBottom: '0.75rem',
-                width: '100%',
-              }}
-            >
-              <div
-                style={{
-                  width: '40px',
-                  height: '40px',
-                  borderRadius: '10px',
-                  backgroundColor: 'var(--bg-input)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                {item.icon}
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <div
-                  style={{
-                    width: '22px',
-                    height: '22px',
-                    borderRadius: '50%',
-                    backgroundColor: isSelected ? item.badgeColor : 'transparent',
-                    color: '#ffffff',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    border: isSelected ? 'none' : '1.5px solid var(--border-subtle)',
-                  }}
-                >
-                  {isSelected && <CheckIcon size={13} />}
-                </div>
-              </div>
-            </div>
-
-            {/* Title & Description */}
-            <h4
-              style={{
-                margin: '0 0 0.35rem 0',
-                fontSize: compact ? '0.98rem' : '1.08rem',
-                fontWeight: 800,
-                color: 'var(--text-primary)',
-              }}
-            >
-              {item.title}
-            </h4>
-
-            <p
-              style={{
-                margin: 0,
-                fontSize: '0.84rem',
-                color: 'var(--text-secondary)',
-                lineHeight: 1.45,
-                flex: 1,
-              }}
-            >
-              {item.subtitle}
-            </p>
-          </button>
-        );
-      })}
-    </div>
+    </>
   );
 };

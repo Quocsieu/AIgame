@@ -30,6 +30,7 @@ import { AdventureGameEngine } from './AdventureGameEngine.js';
 import type {
   GameQuestion,
   GameSpecification,
+  GameType,
   ParticipantRosterItem,
   PracticeFinalResult,
   PracticeQuestionResult,
@@ -47,7 +48,23 @@ interface SoloPlayerProps {
   onLeave: () => void;
   playtestMode?: boolean;
   onSpecUpdated?: (spec: GameSpecification) => void;
+  demoMode?: boolean;
+  demoGuideText?: string;
+  onCreateThisGameType?: (gameType: GameType) => void;
 }
+
+const QUESTION_TYPE_LABELS: Record<string, string> = {
+  MULTIPLE_CHOICE: 'Trắc nghiệm 4 lựa chọn (A/B/C/D)',
+  QUIZ: 'Trắc nghiệm 4 lựa chọn',
+  QUICK_BUTTON: 'Đúng hoặc Sai',
+  TRUE_FALSE: 'Đúng hoặc Sai',
+  FILL_IN_THE_BLANK: 'Điền vào chỗ trống',
+  TYPE_ANSWER: 'Điền câu trả lời ngắn',
+  CROSSWORD: 'Ô chữ từ khóa',
+  PUZZLE: 'Sắp xếp thứ tự',
+  SLIDER: 'Thanh trượt giá trị',
+  ADVENTURE: 'Đi cảnh vượt chướng ngại vật',
+};
 
 function normalizePlaytestToken(value: string): string {
   return String(value ?? '')
@@ -329,6 +346,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   onLeave,
   playtestMode = false,
   onSpecUpdated,
+  demoMode = false,
+  demoGuideText,
+  onCreateThisGameType,
 }) => {
   const toast = useToast();
   const effectiveBatchId =
@@ -380,6 +400,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const [inlineEditOpen, setInlineEditOpen] = useState<boolean>(false);
   const [inlineEditIndex, setInlineEditIndex] = useState<number>(0);
   const [savingInlineEdit, setSavingInlineEdit] = useState<boolean>(false);
+  const [editorCloseConfirmOpen, setEditorCloseConfirmOpen] = useState<boolean>(false);
+  const [editorPendingSwitchIdx, setEditorPendingSwitchIdx] = useState<number | null>(null);
+  const initialEditDraftJsonRef = useRef<string>('');
   const [editDraft, setEditDraft] = useState<{
     question: string;
     choices: string[];
@@ -387,8 +410,15 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     explanation: string;
     timeLimitSeconds: number;
     points: number;
+    difficulty: 'EASY' | 'MEDIUM' | 'HARD';
     crosswordClue?: string;
     crosswordAnswer?: string;
+    sliderMin?: number;
+    sliderMax?: number;
+    sliderStep?: number;
+    sliderCorrectValue?: number;
+    sliderTolerance?: number;
+    sliderUnit?: string;
   }>({
     question: '',
     choices: ['', '', '', ''],
@@ -396,6 +426,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     explanation: '',
     timeLimitSeconds: 20,
     points: 100,
+    difficulty: 'MEDIUM',
   });
 
   useEffect(() => {
@@ -432,6 +463,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
   const [questionFeedback, setQuestionFeedback] = useState<PracticeQuestionResult | null>(null);
   const [isQuestionTimedOut, setIsQuestionTimedOut] = useState(false);
+  const [isReviewingPreviousAnswer, setIsReviewingPreviousAnswer] = useState(false);
   const [finalResult, setFinalResult] = useState<PracticeFinalResult | null>(null);
 
   const [playerScore, setPlayerScore] = useState(0);
@@ -441,6 +473,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const submittingLockRef = useRef(false);
   const advancingLockRef = useRef(false);
   const answeredQuestionIdsRef = useRef<Set<string>>(new Set());
+  const playtestResultsByIndexRef = useRef<Record<number, PracticeQuestionResult>>({});
   const [timeLeft, setTimeLeft] = useState(20);
 
   const timerRef = useRef<number | null>(null);
@@ -451,6 +484,39 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const playtestMaxStreakRef = useRef<number>(0);
   const playtestQuestionResultsRef = useRef<PracticeQuestionResult[]>([]);
   const adventureCheckpointOpenRef = useRef<boolean>(false);
+
+  const recomputePlaytestAggregates = (spec: GameSpecification | null | undefined) => {
+    const total = spec?.questions?.length || 0;
+    const orderedResults: PracticeQuestionResult[] = [];
+    let score = 0;
+    let correct = 0;
+    let wrong = 0;
+    let streak = 0;
+    let maxStreak = 0;
+
+    for (let i = 0; i < total; i++) {
+      const r = playtestResultsByIndexRef.current[i];
+      if (!r) continue;
+      orderedResults.push(r);
+      score += typeof r.pointsEarned === 'number' ? r.pointsEarned : 0;
+      if (r.isCorrect) {
+        correct += 1;
+        streak += 1;
+        if (streak > maxStreak) maxStreak = streak;
+      } else {
+        wrong += 1;
+        streak = 0;
+      }
+    }
+
+    playtestQuestionResultsRef.current = orderedResults;
+    playtestMaxStreakRef.current = maxStreak;
+    setPlayerScore(score);
+    setPlayerCorrectCount(correct);
+    setPlayerWrongCount(wrong);
+    setPlayerStreak(streak);
+    return { orderedResults, score, correct, wrong, streak, maxStreak };
+  };
 
   const clearAutoAdvanceTimer = () => {
     if (autoAdvanceTimerRef.current !== null) {
@@ -519,6 +585,51 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     }, 1000);
   };
 
+  const loadPlaytestQuestionAtIndex = (
+    spec: GameSpecification,
+    targetIdx: number,
+    options?: { forceResetResult?: boolean }
+  ) => {
+    const clampedIdx = Math.max(0, Math.min(targetIdx, spec.questions.length - 1));
+    const qRaw = spec.questions[clampedIdx];
+    const qId = qRaw?.id || `q_${clampedIdx + 1}`;
+
+    if (options?.forceResetResult) {
+      delete playtestResultsByIndexRef.current[clampedIdx];
+      answeredQuestionIdsRef.current.delete(qId);
+      recomputePlaytestAggregates(spec);
+    }
+
+    const clientQ = buildPlaytestClientQuestion(spec, clampedIdx);
+    playtestQuestionIndexRef.current = clampedIdx;
+    setCurrentQuestion(clientQ);
+
+    const existingResult = playtestResultsByIndexRef.current[clampedIdx];
+    if (existingResult && !options?.forceResetResult) {
+      stopTimer();
+      soundManager.resetCountdownTracker();
+      setTimeLeft(0);
+      setIsQuestionTimedOut(false);
+      setIsReviewingPreviousAnswer(true);
+      setSelectedChoice(existingResult.answer || null);
+      setTextAnswerInput(existingResult.answer || '');
+      setQuestionFeedback(existingResult);
+    } else {
+      setQuestionFeedback(null);
+      setIsQuestionTimedOut(false);
+      setIsReviewingPreviousAnswer(false);
+      setSelectedChoice(null);
+      setTextAnswerInput('');
+      playtestQuestionStartedAtRef.current = Date.now();
+      if (spec.gameType === 'ADVENTURE') {
+        stopTimer();
+        setTimeLeft(clientQ.timePerQuestion || 20);
+      } else {
+        startCountdown(clientQ.timePerQuestion || 20);
+      }
+    }
+  };
+
   // Trigger countdown tick sound when timeLeft reaches last N seconds
   useEffect(() => {
     if (!currentQuestion || questionFeedback || isQuestionTimedOut || inlineEditOpen) return;
@@ -535,6 +646,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     setFinalResult(null);
     setQuestionFeedback(null);
     setIsQuestionTimedOut(false);
+    setIsReviewingPreviousAnswer(false);
     setSelectedChoice(null);
     setTextAnswerInput('');
     setPlayerScore(0);
@@ -545,6 +657,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     advancingLockRef.current = false;
     clearAutoAdvanceTimer();
     answeredQuestionIdsRef.current.clear();
+    playtestResultsByIndexRef.current = {};
 
     if (playtestMode) {
       stopTimer();
@@ -572,14 +685,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       playtestMaxStreakRef.current = 0;
       playtestQuestionResultsRef.current = [];
       setSessionId('playtest-local-session');
-      const firstQ = buildPlaytestClientQuestion(spec, 0);
-      setCurrentQuestion(firstQ);
-      if (spec.gameType === 'ADVENTURE') {
-        setTimeLeft(firstQ.timePerQuestion || 20);
-        setIsQuestionTimedOut(false);
-      } else {
-        startCountdown(firstQ.timePerQuestion || 20);
-      }
+      loadPlaytestQuestionAtIndex(spec, 0);
       setIsLoading(false);
       return;
     }
@@ -926,7 +1032,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     [loadedSpec, initialSpec, questionFeedback, currentQuestion?.timePerQuestion, playtestMode, sessionId]
   );
 
-  // Ghi nhận tự động khi hết thời gian trả lời (cả Playtest lẫn Live Session) để chuyển sang feedback & tự động qua câu
+  // Ghi nhận tự động khi hết thời gian trả lời (cả Playtest lẫn Live Session) để chuyển sang feedback
   useEffect(() => {
     if (!isQuestionTimedOut || !currentQuestion || questionFeedback || inlineEditOpen) {
       return;
@@ -957,12 +1063,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         sourceReference: rawQ.sourceReference,
       };
       answeredQuestionIdsRef.current.add(currentQuestion.id);
-      playtestQuestionResultsRef.current.push(timeoutRes);
+      playtestResultsByIndexRef.current[currentQuestion.questionIndex] = timeoutRes;
+      recomputePlaytestAggregates(spec);
       soundManager.playTimeout();
+      setIsReviewingPreviousAnswer(false);
       setQuestionFeedback(timeoutRes);
       setIsQuestionTimedOut(false);
-      setPlayerStreak(0);
-      setPlayerWrongCount((prev) => prev + 1);
       return;
     }
 
@@ -1033,10 +1139,16 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           0,
           Math.min(timeLimitMs, Date.now() - playtestQuestionStartedAtRef.current)
         );
-        const nextStreak = isCorrect ? playerStreak + 1 : 0;
-        if (nextStreak > playtestMaxStreakRef.current) {
-          playtestMaxStreakRef.current = nextStreak;
+        let streakBefore = 0;
+        for (let i = 0; i < currentQuestion.questionIndex; i++) {
+          const prevRes = playtestResultsByIndexRef.current[i];
+          if (prevRes?.isCorrect) {
+            streakBefore += 1;
+          } else if (prevRes) {
+            streakBefore = 0;
+          }
         }
+        const nextStreak = isCorrect ? streakBefore + 1 : 0;
         const pointsEarned = calculatePlaytestPoints(
           isCorrect,
           spec.settings?.scoringMode,
@@ -1045,7 +1157,6 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           nextStreak,
           rawQ.points
         );
-        const nextScore = playerScore + pointsEarned;
         const effectiveType = rawQ.type || spec.gameType;
         const displayCorrectAnswer =
           effectiveType === 'CROSSWORD'
@@ -1067,18 +1178,16 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         };
 
         answeredQuestionIdsRef.current.add(currentQuestion.id);
-        playtestQuestionResultsRef.current.push(localRes);
+        playtestResultsByIndexRef.current[currentQuestion.questionIndex] = localRes;
+        recomputePlaytestAggregates(spec);
         if (isCorrect) {
           soundManager.playCorrect();
         } else {
           soundManager.playWrong();
         }
+        setIsReviewingPreviousAnswer(false);
         setQuestionFeedback(localRes);
         setIsQuestionTimedOut(false);
-        setPlayerScore(nextScore);
-        setPlayerStreak(nextStreak);
-        setPlayerCorrectCount((prev) => prev + (isCorrect ? 1 : 0));
-        setPlayerWrongCount((prev) => prev + (isCorrect ? 0 : 1));
       } finally {
         submittingLockRef.current = false;
         setIsSubmitting(false);
@@ -1163,6 +1272,24 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     }
   };
 
+  const handlePrevQuestion = () => {
+    if (!playtestMode || !sessionId || advancingLockRef.current) return;
+    const spec = loadedSpec || initialSpec;
+    const currentIdx = currentQuestion?.questionIndex ?? playtestQuestionIndexRef.current;
+    if (!spec || currentIdx <= 0) return;
+    soundManager.playSelect();
+    loadPlaytestQuestionAtIndex(spec, currentIdx - 1);
+  };
+
+  const handleRetestCurrentQuestion = () => {
+    if (!playtestMode || demoMode || !currentQuestion) return;
+    const spec = loadedSpec || initialSpec;
+    if (!spec) return;
+    soundManager.playSelect();
+    loadPlaytestQuestionAtIndex(spec, currentQuestion.questionIndex, { forceResetResult: true });
+    toast.info(`Đã đặt lại Câu #${currentQuestion.questionIndex + 1} để bạn kiểm thử lại.`, 'Chơi lại câu này');
+  };
+
   const handleNextQuestion = async () => {
     if (!sessionId || advancingLockRef.current) return;
     advancingLockRef.current = true;
@@ -1171,17 +1298,36 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     const wasTimedOut = isQuestionTimedOut && !questionFeedback;
     setQuestionFeedback(null);
     setIsQuestionTimedOut(false);
+    setIsReviewingPreviousAnswer(false);
     setSelectedChoice(null);
     setTextAnswerInput('');
 
     try {
       if (playtestMode) {
         const spec = loadedSpec || initialSpec;
-        const nextWrongCount = wasTimedOut ? playerWrongCount + 1 : playerWrongCount;
-        if (wasTimedOut) {
-          setPlayerStreak(0);
-          setPlayerWrongCount(nextWrongCount);
+        if (wasTimedOut && spec && currentQuestion) {
+          const rawQ = spec.questions[currentQuestion.questionIndex];
+          const effectiveType = rawQ?.type || spec.gameType;
+          const displayCorrectAnswer =
+            effectiveType === 'CROSSWORD'
+              ? rawQ?.crosswordAnswer || rawQ?.correctAnswer
+              : effectiveType === 'SLIDER' && rawQ?.sliderConfig
+                ? `${rawQ.sliderConfig.correctValue}${rawQ.sliderConfig.unit ? ` ${rawQ.sliderConfig.unit}` : ''}`
+                : rawQ?.correctAnswer;
+          playtestResultsByIndexRef.current[currentQuestion.questionIndex] = {
+            questionId: currentQuestion.id,
+            answer: '',
+            isCorrect: false,
+            timedOut: true,
+            pointsEarned: 0,
+            responseTimeMs: (currentQuestion.timePerQuestion || 20) * 1000,
+            answeredAt: new Date().toISOString(),
+            correctAnswer: displayCorrectAnswer,
+            explanation: rawQ?.explanation,
+            sourceReference: rawQ?.sourceReference,
+          };
         }
+        const agg = recomputePlaytestAggregates(spec);
         const nextIdx = playtestQuestionIndexRef.current + 1;
         if (!spec || nextIdx >= spec.questions.length) {
           const totalQ = spec?.questions.length || 1;
@@ -1190,7 +1336,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             spec?.settings?.scoringMode
           );
           const perfEval = evaluateFrontendPerformance({
-            correctAnswers: playerCorrectCount,
+            correctAnswers: agg.correct,
             totalQuestions: totalQ,
             sessionMode: spec?.settings?.sessionMode,
             passThresholdPercent: spec?.settings?.passThresholdPercent,
@@ -1199,34 +1345,27 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             1,
             Math.round((Date.now() - playtestStartedAtRef.current) / 1000)
           );
-          const isPlaytestExam = spec?.settings?.sessionMode === 'EXAM';
           const localFinal: PracticeFinalResult = {
             sessionId: 'playtest-local-session',
             gameId: spec?.gameId || 'playtest-game',
             title: spec?.title || 'Chơi thử',
             gameType: spec?.gameType || 'MIXED',
             sessionMode: spec?.settings?.sessionMode || 'PLAY',
-            canRevealAnswers: isPlaytestExam,
-            totalScore: playerScore,
-            score: playerScore,
+            canRevealAnswers: true,
+            totalScore: agg.score,
+            score: agg.score,
             maxPossibleScore: maxScore,
-            maxStreak: playtestMaxStreakRef.current,
+            maxStreak: agg.maxStreak,
             totalQuestions: totalQ,
-            correctAnswers: playerCorrectCount,
-            correctCount: playerCorrectCount,
-            wrongCount: nextWrongCount,
-            wrongAnswers: nextWrongCount,
+            correctAnswers: agg.correct,
+            correctCount: agg.correct,
+            wrongCount: agg.wrong,
+            wrongAnswers: agg.wrong,
             accuracy: perfEval.accuracyPercentage,
             performanceEvaluation: perfEval,
             durationMs: durationSeconds * 1000,
             finishedAt: new Date().toISOString(),
-            questionResults: isPlaytestExam
-              ? [...playtestQuestionResultsRef.current]
-              : playtestQuestionResultsRef.current.map((qr) => ({
-                  ...qr,
-                  correctAnswer: undefined,
-                  explanation: undefined,
-                })),
+            questionResults: [...agg.orderedResults],
           };
           soundManager.stopAll();
           soundManager.playVictory();
@@ -1234,17 +1373,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           setCurrentQuestion(null);
           stopTimer();
         } else {
-          playtestQuestionIndexRef.current = nextIdx;
-          playtestQuestionStartedAtRef.current = Date.now();
-          const nextQ = buildPlaytestClientQuestion(spec, nextIdx);
-          setCurrentQuestion(nextQ);
-          if (spec.gameType === 'ADVENTURE') {
-            stopTimer();
-            setTimeLeft(nextQ.timePerQuestion || 20);
-            setIsQuestionTimedOut(false);
-          } else {
-            startCountdown(nextQ.timePerQuestion || 20);
-          }
+          soundManager.playSelect();
+          loadPlaytestQuestionAtIndex(spec, nextIdx);
         }
         return;
       }
@@ -1294,11 +1424,17 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     }
   };
 
-  // Auto-advance after questionFeedback (3500ms in PLAY mode, 1500ms in EXAM mode) for non-Adventure modes
+  // Auto-advance after questionFeedback ONLY for real Solo sessions (Playtest & Demo require manual "Câu tiếp theo")
   useEffect(() => {
     clearAutoAdvanceTimer();
     const spec = loadedSpec || initialSpec;
-    if (!questionFeedback || inlineEditOpen || finalResult || spec?.gameType === 'ADVENTURE') {
+    if (
+      playtestMode ||
+      !questionFeedback ||
+      inlineEditOpen ||
+      finalResult ||
+      spec?.gameType === 'ADVENTURE'
+    ) {
       return;
     }
     const isExamMode = spec?.settings?.sessionMode === 'EXAM';
@@ -1314,24 +1450,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     return () => {
       clearAutoAdvanceTimer();
     };
-  }, [questionFeedback, inlineEditOpen, finalResult, loadedSpec, initialSpec]);
+  }, [playtestMode, questionFeedback, inlineEditOpen, finalResult, loadedSpec, initialSpec]);
 
-  // Open Inline Question Editor during Playtest
-  const handleOpenInlineEditor = (targetIdx?: number) => {
-    if (!playtestMode) return;
-    const spec = loadedSpec || initialSpec;
-    if (!spec || !Array.isArray(spec.questions)) return;
-    const idx =
-      typeof targetIdx === 'number'
-        ? targetIdx
-        : currentQuestion?.questionIndex ?? playtestQuestionIndexRef.current;
+  const populateEditDraftForQuestion = (spec: GameSpecification, idx: number) => {
     const q = spec.questions[idx];
     if (!q) return;
-
-    stopTimer();
-    clearAutoAdvanceTimer();
-    setInlineEditIndex(idx);
-    setEditDraft({
+    const nextDraft = {
       question: q.question || '',
       choices: Array.isArray(q.choices) && q.choices.length > 0 ? [...q.choices] : ['', '', '', ''],
       correctAnswer: q.correctAnswer || '',
@@ -1339,13 +1463,46 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       timeLimitSeconds:
         q.timeLimitSeconds || currentQuestion?.timePerQuestion || spec.settings?.timePerQuestion || 20,
       points: typeof q.points === 'number' && q.points >= 10 ? q.points : 100,
+      difficulty: (q.difficulty || 'MEDIUM') as 'EASY' | 'MEDIUM' | 'HARD',
       crosswordClue: q.crosswordClue,
       crosswordAnswer: q.crosswordAnswer,
-    });
+      sliderMin: q.sliderConfig?.min ?? 0,
+      sliderMax: q.sliderConfig?.max ?? 100,
+      sliderStep: q.sliderConfig?.step ?? 1,
+      sliderCorrectValue: q.sliderConfig?.correctValue ?? Number(q.correctAnswer || 50),
+      sliderTolerance: q.sliderConfig?.tolerance ?? 0,
+      sliderUnit: q.sliderConfig?.unit ?? '',
+    };
+    initialEditDraftJsonRef.current = JSON.stringify(nextDraft);
+    setInlineEditIndex(idx);
+    setEditDraft(nextDraft);
+    setEditorCloseConfirmOpen(false);
+    setEditorPendingSwitchIdx(null);
+  };
+
+  // Open Inline Question Editor during Playtest (disabled in public Demo mode)
+  const handleOpenInlineEditor = (targetIdx?: number) => {
+    if (!playtestMode || demoMode) return;
+    const spec = loadedSpec || initialSpec;
+    if (!spec || !Array.isArray(spec.questions)) return;
+    const idx =
+      typeof targetIdx === 'number'
+        ? targetIdx
+        : currentQuestion?.questionIndex ?? playtestQuestionIndexRef.current;
+    if (!spec.questions[idx]) return;
+
+    stopTimer();
+    clearAutoAdvanceTimer();
+    populateEditDraftForQuestion(spec, idx);
     setInlineEditOpen(true);
   };
 
-  const handleCloseInlineEditor = () => {
+  const isInlineEditorDirty =
+    inlineEditOpen && JSON.stringify(editDraft) !== initialEditDraftJsonRef.current;
+
+  const forceCloseInlineEditor = () => {
+    setEditorCloseConfirmOpen(false);
+    setEditorPendingSwitchIdx(null);
     setInlineEditOpen(false);
     const spec = loadedSpec || initialSpec;
     if (!questionFeedback && currentQuestion && spec?.gameType !== 'ADVENTURE') {
@@ -1353,11 +1510,38 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     }
   };
 
+  const handleCloseInlineEditor = () => {
+    if (isInlineEditorDirty && !editorCloseConfirmOpen) {
+      setEditorPendingSwitchIdx(null);
+      setEditorCloseConfirmOpen(true);
+      return;
+    }
+    forceCloseInlineEditor();
+  };
+
+  const handleSwitchQuestionInEditor = (targetIdx: number) => {
+    const spec = loadedSpec || initialSpec;
+    if (!spec || targetIdx < 0 || targetIdx >= spec.questions.length) return;
+    if (isInlineEditorDirty) {
+      setEditorPendingSwitchIdx(targetIdx);
+      setEditorCloseConfirmOpen(true);
+      return;
+    }
+    soundManager.playSelect();
+    populateEditDraftForQuestion(spec, targetIdx);
+    loadPlaytestQuestionAtIndex(spec, targetIdx);
+  };
+
   const handleSaveInlineEditor = async () => {
     const spec = loadedSpec || initialSpec;
     if (!spec || !Array.isArray(spec.questions)) return;
+    const targetQ = spec.questions[inlineEditIndex];
+    const effectiveType = targetQ?.type || spec.gameType;
     const trimmedQ = editDraft.question.trim();
-    const trimmedAns = editDraft.correctAnswer.trim();
+    const trimmedAns =
+      effectiveType === 'SLIDER'
+        ? String(editDraft.sliderCorrectValue ?? editDraft.correctAnswer).trim()
+        : editDraft.correctAnswer.trim();
     if (!trimmedQ || !trimmedAns) {
       toast.warning('Nội dung câu hỏi và đáp án đúng không được để trống.', 'Thiếu thông tin');
       return;
@@ -1367,30 +1551,42 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     try {
       const updatedQuestions: GameQuestion[] = spec.questions.map((item, idx) => {
         if (idx !== inlineEditIndex) return item;
-        const effectiveType = item.type || spec.gameType;
+        const qType = item.type || spec.gameType;
         const cleanedChoices = editDraft.choices.map((c) => c.trim()).filter(Boolean);
         return {
           ...item,
           question: trimmedQ,
           choices:
-            effectiveType === 'MULTIPLE_CHOICE' ||
-            effectiveType === 'QUIZ' ||
-            effectiveType === 'QUICK_BUTTON' ||
-            effectiveType === 'TRUE_FALSE' ||
-            effectiveType === 'PUZZLE'
+            qType === 'MULTIPLE_CHOICE' ||
+            qType === 'QUIZ' ||
+            qType === 'QUICK_BUTTON' ||
+            qType === 'TRUE_FALSE' ||
+            qType === 'PUZZLE'
               ? cleanedChoices.length > 0
                 ? cleanedChoices
                 : item.choices
               : item.choices,
           correctAnswer: trimmedAns,
           explanation: editDraft.explanation.trim(),
+          difficulty: editDraft.difficulty || item.difficulty || 'MEDIUM',
           timeLimitSeconds: Math.max(5, Math.min(300, Number(editDraft.timeLimitSeconds) || 20)),
           points: Math.max(10, Math.min(1000, Math.round(Number(editDraft.points) || 100))),
           crosswordClue: editDraft.crosswordClue ?? item.crosswordClue,
           crosswordAnswer:
-            effectiveType === 'CROSSWORD'
+            qType === 'CROSSWORD'
               ? editDraft.crosswordAnswer?.trim() || trimmedAns
               : item.crosswordAnswer,
+          sliderConfig:
+            qType === 'SLIDER'
+              ? {
+                  min: Number(editDraft.sliderMin ?? item.sliderConfig?.min ?? 0),
+                  max: Number(editDraft.sliderMax ?? item.sliderConfig?.max ?? 100),
+                  step: Math.max(0.1, Number(editDraft.sliderStep ?? item.sliderConfig?.step ?? 1)),
+                  correctValue: Number(editDraft.sliderCorrectValue ?? trimmedAns),
+                  tolerance: Math.max(0, Number(editDraft.sliderTolerance ?? item.sliderConfig?.tolerance ?? 0)),
+                  unit: editDraft.sliderUnit?.trim() || item.sliderConfig?.unit,
+                }
+              : item.sliderConfig,
         };
       });
 
@@ -1420,17 +1616,16 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       setLoadedSpec(updatedSpec);
       onSpecUpdated?.(updatedSpec);
 
-      if (currentQuestion && currentQuestion.questionIndex === inlineEditIndex) {
-        const refreshedQ = buildPlaytestClientQuestion(updatedSpec, inlineEditIndex);
-        setCurrentQuestion(refreshedQ);
-        setTimeLeft(refreshedQ.timePerQuestion || 20);
-        if (!questionFeedback && updatedSpec.gameType !== 'ADVENTURE') {
-          startCountdown(refreshedQ.timePerQuestion || 20);
-        }
-      }
+      // Reset the edited question's playtest result and jump to it so the creator can immediately re-test
+      loadPlaytestQuestionAtIndex(updatedSpec, inlineEditIndex, { forceResetResult: true });
 
+      setEditorCloseConfirmOpen(false);
+      setEditorPendingSwitchIdx(null);
       setInlineEditOpen(false);
-      toast.success(`Đã cập nhật Câu #${inlineEditIndex + 1} ngay trong phiên chơi thử.`, 'Đã lưu câu hỏi');
+      toast.success(
+        `Đã lưu Câu #${inlineEditIndex + 1}. Bạn có thể trả lời lại câu này ngay để kiểm thử.`,
+        'Đã lưu & đặt lại câu hỏi'
+      );
     } finally {
       setSavingInlineEdit(false);
     }
@@ -1460,7 +1655,10 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         !questionFeedback?.correctAnswer
     );
 
-  const inlineEditModalNode = inlineEditOpen ? (
+  const editingQuestionRaw = activeGameSpec?.questions?.[inlineEditIndex];
+  const editingQuestionEffectiveType = editingQuestionRaw?.type || activeGameSpec?.gameType || 'MULTIPLE_CHOICE';
+
+  const inlineEditModalNode = inlineEditOpen && !demoMode ? (
     <div
       data-testid="playtest-inline-edit-modal"
       style={{
@@ -1471,18 +1669,20 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '1rem',
+        padding: '0.85rem',
         overflowY: 'auto',
       }}
     >
       <div
         style={{
           width: '100%',
-          maxWidth: '640px',
+          maxWidth: '660px',
+          maxHeight: 'calc(100dvh - 1.7rem)',
+          overflowY: 'auto',
           backgroundColor: 'var(--bg-surface)',
           border: '1.5px solid var(--primary)',
           borderRadius: '18px',
-          padding: '1.5rem',
+          padding: '1.25rem 1.35rem',
           color: 'var(--text-primary)',
           boxShadow: 'var(--shadow-xl)',
           textAlign: 'left',
@@ -1494,47 +1694,170 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             alignItems: 'center',
             justifyContent: 'space-between',
             gap: '0.75rem',
-            marginBottom: '1rem',
+            marginBottom: '0.85rem',
+            flexWrap: 'wrap',
           }}
         >
           <div>
             <span
               style={{
-                fontSize: '0.75rem',
+                fontSize: '0.74rem',
                 fontWeight: 900,
                 color: '#f59e0b',
                 textTransform: 'uppercase',
               }}
             >
-              Chỉnh sửa trực tiếp trong Chơi thử · Câu #{inlineEditIndex + 1}
+              Chỉnh sửa trực tiếp trong Chơi thử · Câu #{inlineEditIndex + 1} /{' '}
+              {activeGameSpec?.questions?.length || 1}
             </span>
-            <h3 style={{ margin: '0.2rem 0 0 0', fontSize: '1.15rem', fontWeight: 900 }}>
+            <h3 style={{ margin: '0.15rem 0 0 0', fontSize: '1.08rem', fontWeight: 900 }}>
               Cập nhật nội dung câu hỏi (Đồng hồ đã tạm dừng)
             </h3>
           </div>
-          <button
-            type="button"
-            onClick={handleCloseInlineEditor}
-            style={{
-              width: '36px',
-              height: '36px',
-              borderRadius: '10px',
-              border: '1px solid var(--border-strong)',
-              backgroundColor: 'var(--bg-input)',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
-            <XMarkIcon size={18} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            {activeGameSpec && activeGameSpec.questions.length > 1 && (
+              <>
+                <button
+                  type="button"
+                  data-testid="playtest-editor-prev-q-btn"
+                  disabled={inlineEditIndex <= 0}
+                  onClick={() => handleSwitchQuestionInEditor(inlineEditIndex - 1)}
+                  style={{
+                    height: '34px',
+                    padding: '0 0.65rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: inlineEditIndex <= 0 ? 'var(--text-muted)' : 'var(--text-primary)',
+                    fontSize: '0.78rem',
+                    fontWeight: 800,
+                    cursor: inlineEditIndex <= 0 ? 'not-allowed' : 'pointer',
+                  }}
+                >
+                  ← Câu trước
+                </button>
+                <button
+                  type="button"
+                  data-testid="playtest-editor-next-q-btn"
+                  disabled={inlineEditIndex + 1 >= activeGameSpec.questions.length}
+                  onClick={() => handleSwitchQuestionInEditor(inlineEditIndex + 1)}
+                  style={{
+                    height: '34px',
+                    padding: '0 0.65rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color:
+                      inlineEditIndex + 1 >= activeGameSpec.questions.length
+                        ? 'var(--text-muted)'
+                        : 'var(--text-primary)',
+                    fontSize: '0.78rem',
+                    fontWeight: 800,
+                    cursor:
+                      inlineEditIndex + 1 >= activeGameSpec.questions.length
+                        ? 'not-allowed'
+                        : 'pointer',
+                  }}
+                >
+                  Câu tiếp →
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              data-testid="playtest-inline-close-btn"
+              onClick={handleCloseInlineEditor}
+              style={{
+                width: '34px',
+                height: '34px',
+                borderRadius: '10px',
+                border: '1px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-input)',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              <XMarkIcon size={18} />
+            </button>
+          </div>
         </div>
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
+        {editorCloseConfirmOpen && (
+          <div
+            data-testid="playtest-unsaved-warning-banner"
+            style={{
+              marginBottom: '0.85rem',
+              padding: '0.75rem 0.95rem',
+              borderRadius: '12px',
+              backgroundColor: 'rgba(245, 158, 11, 0.14)',
+              border: '1.5px solid rgba(245, 158, 11, 0.55)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '0.6rem',
+            }}
+          >
+            <div style={{ fontSize: '0.83rem', fontWeight: 800, color: 'var(--text-primary)' }}>
+              ⚠ Bạn có thay đổi chưa lưu ở Câu #{inlineEditIndex + 1}. Bạn muốn lưu hay bỏ thay đổi?
+            </div>
+            <div style={{ display: 'flex', gap: '0.45rem', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                data-testid="playtest-unsaved-keep-editing-btn"
+                onClick={() => {
+                  setEditorCloseConfirmOpen(false);
+                  setEditorPendingSwitchIdx(null);
+                }}
+                style={{
+                  padding: '0.35rem 0.7rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-surface)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                Tiếp tục sửa
+              </button>
+              <button
+                type="button"
+                data-testid="playtest-inline-discard-btn"
+                onClick={() => {
+                  const spec = loadedSpec || initialSpec;
+                  if (typeof editorPendingSwitchIdx === 'number' && spec) {
+                    const target = editorPendingSwitchIdx;
+                    populateEditDraftForQuestion(spec, target);
+                    loadPlaytestQuestionAtIndex(spec, target);
+                  } else {
+                    forceCloseInlineEditor();
+                  }
+                }}
+                style={{
+                  padding: '0.35rem 0.7rem',
+                  borderRadius: '8px',
+                  border: '1px solid rgba(239, 68, 68, 0.5)',
+                  backgroundColor: 'rgba(239, 68, 68, 0.14)',
+                  color: 'var(--accent-rose)',
+                  fontSize: '0.78rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                Bỏ thay đổi
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           <div>
-            <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
+            <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, marginBottom: '0.3rem' }}>
               Nội dung câu hỏi:
             </label>
             <textarea
@@ -1544,24 +1867,137 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               onChange={(e) => setEditDraft((prev) => ({ ...prev, question: e.target.value }))}
               style={{
                 width: '100%',
-                padding: '0.65rem 0.85rem',
+                padding: '0.55rem 0.8rem',
                 borderRadius: '10px',
                 border: '1.5px solid var(--border-strong)',
                 backgroundColor: 'var(--bg-input)',
                 color: 'var(--text-primary)',
-                fontSize: '0.95rem',
+                fontSize: '0.92rem',
                 fontWeight: 700,
+                boxSizing: 'border-box',
               }}
             />
           </div>
 
-          {Array.isArray(activeGameSpec?.questions?.[inlineEditIndex]?.choices) &&
-            (activeGameSpec?.questions?.[inlineEditIndex]?.choices?.length || 0) > 0 && (
+          {editingQuestionEffectiveType === 'CROSSWORD' && (
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, marginBottom: '0.3rem' }}>
+                Gợi ý ô chữ (Clue):
+              </label>
+              <input
+                type="text"
+                data-testid="playtest-inline-crossword-clue-input"
+                value={editDraft.crosswordClue || ''}
+                onChange={(e) => setEditDraft((prev) => ({ ...prev, crosswordClue: e.target.value }))}
+                style={{
+                  width: '100%',
+                  padding: '0.55rem 0.8rem',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.88rem',
+                  fontWeight: 600,
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+          )}
+
+          {editingQuestionEffectiveType === 'SLIDER' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.5rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
+                <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, marginBottom: '0.25rem' }}>
+                  Min:
+                </label>
+                <input
+                  type="number"
+                  value={editDraft.sliderMin ?? 0}
+                  onChange={(e) => setEditDraft((prev) => ({ ...prev, sliderMin: Number(e.target.value) }))}
+                  style={{
+                    width: '100%',
+                    padding: '0.5rem 0.65rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    fontWeight: 700,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, marginBottom: '0.25rem' }}>
+                  Max:
+                </label>
+                <input
+                  type="number"
+                  value={editDraft.sliderMax ?? 100}
+                  onChange={(e) => setEditDraft((prev) => ({ ...prev, sliderMax: Number(e.target.value) }))}
+                  style={{
+                    width: '100%',
+                    padding: '0.5rem 0.65rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    fontWeight: 700,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, marginBottom: '0.25rem' }}>
+                  Sai số (±):
+                </label>
+                <input
+                  type="number"
+                  min={0}
+                  value={editDraft.sliderTolerance ?? 0}
+                  onChange={(e) => setEditDraft((prev) => ({ ...prev, sliderTolerance: Number(e.target.value) }))}
+                  style={{
+                    width: '100%',
+                    padding: '0.5rem 0.65rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    fontWeight: 700,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontSize: '0.76rem', fontWeight: 800, marginBottom: '0.25rem' }}>
+                  Đơn vị:
+                </label>
+                <input
+                  type="text"
+                  value={editDraft.sliderUnit ?? ''}
+                  onChange={(e) => setEditDraft((prev) => ({ ...prev, sliderUnit: e.target.value }))}
+                  placeholder="%, năm..."
+                  style={{
+                    width: '100%',
+                    padding: '0.5rem 0.65rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    fontWeight: 700,
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {Array.isArray(editingQuestionRaw?.choices) &&
+            (editingQuestionRaw?.choices?.length || 0) > 0 && (
+              <div>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, marginBottom: '0.3rem' }}>
                   Các lựa chọn:
                 </label>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.5rem' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.45rem' }}>
                   {editDraft.choices.map((ch, cIdx) => (
                     <input
                       key={cIdx}
@@ -1578,13 +2014,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                       }}
                       placeholder={`Lựa chọn ${cIdx + 1}`}
                       style={{
-                        padding: '0.55rem 0.75rem',
+                        padding: '0.5rem 0.7rem',
                         borderRadius: '8px',
                         border: '1px solid var(--border-strong)',
                         backgroundColor: 'var(--bg-input)',
                         color: 'var(--text-primary)',
-                        fontSize: '0.88rem',
+                        fontSize: '0.86rem',
                         fontWeight: 600,
+                        boxSizing: 'border-box',
                       }}
                     />
                   ))}
@@ -1592,31 +2029,40 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               </div>
             )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr', gap: '0.75rem' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr', gap: '0.6rem' }}>
             <div>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, marginBottom: '0.3rem' }}>
                 Đáp án đúng:
               </label>
               <input
                 type="text"
                 data-testid="playtest-inline-correct-input"
                 value={editDraft.correctAnswer}
-                onChange={(e) => setEditDraft((prev) => ({ ...prev, correctAnswer: e.target.value }))}
+                onChange={(e) =>
+                  setEditDraft((prev) => ({
+                    ...prev,
+                    correctAnswer: e.target.value,
+                    ...(editingQuestionEffectiveType === 'SLIDER'
+                      ? { sliderCorrectValue: Number(e.target.value) || 0 }
+                      : {}),
+                  }))
+                }
                 style={{
                   width: '100%',
-                  padding: '0.6rem 0.85rem',
+                  padding: '0.55rem 0.75rem',
                   borderRadius: '10px',
                   border: '1.5px solid var(--border-strong)',
                   backgroundColor: 'var(--bg-input)',
                   color: 'var(--text-primary)',
-                  fontSize: '0.92rem',
+                  fontSize: '0.9rem',
                   fontWeight: 800,
+                  boxSizing: 'border-box',
                 }}
               />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
-                Thời gian (giây):
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, marginBottom: '0.3rem' }}>
+                Thời gian (s):
               </label>
               <input
                 type="number"
@@ -1632,19 +2078,20 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 }
                 style={{
                   width: '100%',
-                  padding: '0.6rem 0.85rem',
+                  padding: '0.55rem 0.65rem',
                   borderRadius: '10px',
                   border: '1.5px solid var(--border-strong)',
                   backgroundColor: 'var(--bg-input)',
                   color: 'var(--text-primary)',
-                  fontSize: '0.92rem',
+                  fontSize: '0.9rem',
                   fontWeight: 800,
+                  boxSizing: 'border-box',
                 }}
               />
             </div>
             <div>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 800, marginBottom: '0.35rem' }}>
-                Điểm (10-1000):
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, marginBottom: '0.3rem' }}>
+                Điểm:
               </label>
               <input
                 type="number"
@@ -1661,15 +2108,46 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 }
                 style={{
                   width: '100%',
-                  padding: '0.6rem 0.85rem',
+                  padding: '0.55rem 0.65rem',
                   borderRadius: '10px',
                   border: '1.5px solid var(--border-strong)',
                   backgroundColor: 'var(--bg-input)',
                   color: 'var(--text-primary)',
-                  fontSize: '0.92rem',
+                  fontSize: '0.9rem',
                   fontWeight: 800,
+                  boxSizing: 'border-box',
                 }}
               />
+            </div>
+            <div>
+              <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 800, marginBottom: '0.3rem' }}>
+                Độ khó:
+              </label>
+              <select
+                data-testid="playtest-inline-difficulty-select"
+                value={editDraft.difficulty}
+                onChange={(e) =>
+                  setEditDraft((prev) => ({
+                    ...prev,
+                    difficulty: e.target.value as 'EASY' | 'MEDIUM' | 'HARD',
+                  }))
+                }
+                style={{
+                  width: '100%',
+                  padding: '0.55rem 0.5rem',
+                  borderRadius: '10px',
+                  border: '1.5px solid var(--border-strong)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-primary)',
+                  fontSize: '0.85rem',
+                  fontWeight: 800,
+                  boxSizing: 'border-box',
+                }}
+              >
+                <option value="EASY">Dễ</option>
+                <option value="MEDIUM">Vừa</option>
+                <option value="HARD">Khó</option>
+              </select>
             </div>
           </div>
 
@@ -2492,88 +2970,44 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     );
   }
 
-  const playtestBanner = playtestMode ? (
+  const finishPlaytestBanner = playtestMode ? (
     <div
       data-testid="playtest-mode-banner"
       style={{
         display: 'flex',
         alignItems: 'center',
-        justifyContent: 'space-between',
+        justifyContent: 'center',
         flexWrap: 'wrap',
-        gap: '0.75rem',
-        padding: '0.65rem 1.15rem',
+        gap: '0.6rem',
+        padding: '0.5rem 0.95rem',
         marginBottom: '1rem',
-        borderRadius: '14px',
-        backgroundColor: 'rgba(245, 158, 11, 0.12)',
-        border: '1.5px solid rgba(245, 158, 11, 0.38)',
+        borderRadius: '12px',
+        backgroundColor: demoMode ? 'rgba(99, 102, 241, 0.12)' : 'rgba(245, 158, 11, 0.12)',
+        border: `1.5px solid ${demoMode ? 'rgba(99, 102, 241, 0.4)' : 'rgba(245, 158, 11, 0.38)'}`,
         color: 'var(--text-primary)',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', flexWrap: 'wrap' }}>
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            padding: '0.2rem 0.6rem',
-            borderRadius: '999px',
-            backgroundColor: '#f59e0b',
-            color: '#0f172a',
-            fontSize: '0.72rem',
-            fontWeight: 900,
-            letterSpacing: '0.04em',
-            textTransform: 'uppercase',
-          }}
-        >
-          CHẾ ĐỘ CHƠI THỬ
-        </span>
-        <span style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
-          Trải nghiệm kiểm thử — Không ghi điểm, lịch sử hay thống kê thật
-        </span>
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-        {currentQuestion && (
-          <button
-            type="button"
-            data-testid="playtest-inline-edit-btn"
-            onClick={() => handleOpenInlineEditor(currentQuestion.questionIndex)}
-            style={{
-              minHeight: '36px',
-              padding: '0.35rem 0.85rem',
-              borderRadius: '10px',
-              border: '1.5px solid var(--primary)',
-              backgroundColor: 'var(--primary-subtle)',
-              color: 'var(--primary)',
-              fontSize: '0.82rem',
-              fontWeight: 800,
-              cursor: 'pointer',
-            }}
-          >
-            ✎ Chỉnh sửa câu này
-          </button>
-        )}
-        <button
-          type="button"
-          data-testid="exit-playtest-btn"
-          onClick={handleLeave}
-          style={{
-            minHeight: '36px',
-            padding: '0.35rem 0.9rem',
-            borderRadius: '10px',
-            border: '1.5px solid rgba(245, 158, 11, 0.5)',
-            backgroundColor: 'var(--bg-surface)',
-            color: 'var(--text-primary)',
-            fontSize: '0.82rem',
-            fontWeight: 800,
-            cursor: 'pointer',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.35rem',
-          }}
-        >
-          <XMarkIcon size={15} />
-          <span>Thoát chơi thử</span>
-        </button>
-      </div>
+      <span
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          padding: '0.18rem 0.55rem',
+          borderRadius: '999px',
+          backgroundColor: demoMode ? 'var(--primary)' : '#f59e0b',
+          color: demoMode ? '#ffffff' : '#0f172a',
+          fontSize: '0.7rem',
+          fontWeight: 900,
+          letterSpacing: '0.04em',
+          textTransform: 'uppercase',
+        }}
+      >
+        {demoMode ? 'CHẾ ĐỘ XEM DEMO' : 'CHẾ ĐỘ CHƠI THỬ'}
+      </span>
+      <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+        {demoMode
+          ? 'Trải nghiệm câu hỏi mẫu — Không tốn AI token và không ghi dữ liệu thật'
+          : 'Trải nghiệm kiểm thử — Không ghi điểm, lịch sử hay thống kê thật'}
+      </span>
     </div>
   ) : null;
 
@@ -2602,10 +3036,17 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           submittingAnswer={isSubmitting}
           onSubmitAnswer={handleSubmitAnswer}
           onNextQuestion={handleNextQuestion}
+          onPrevCheckpointQuestion={handlePrevQuestion}
           finalResult={finalResult}
           onRestartSession={() => initializeSession('RESTART')}
           onExit={handleLeave}
           isPlaytest={playtestMode}
+          isDemoMode={demoMode}
+          onCreateThisGameType={
+            demoMode && onCreateThisGameType
+              ? () => onCreateThisGameType('ADVENTURE')
+              : undefined
+          }
           onCheckpointModalChange={handleAdventureCheckpointModalChange}
           onEditCheckpointQuestion={(stageIdx) => handleOpenInlineEditor(stageIdx)}
           audioMuted={audioMuted}
@@ -2638,43 +3079,44 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       <div
         data-testid="solo-finish-screen"
         style={{
-          maxWidth: '580px',
-          margin: '2rem auto',
-          padding: '2.5rem 2rem',
+          maxWidth: '640px',
+          margin: '1.25rem auto',
+          padding: '1.75rem 1.5rem',
           backgroundColor: 'var(--bg-surface)',
           border: '1px solid var(--border-subtle)',
-          borderRadius: '24px',
+          borderRadius: '22px',
           textAlign: 'center',
           boxShadow: 'var(--shadow-xl)',
           animation: 'popIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
+        {inlineEditModalNode}
         <div
           style={{
-            width: '68px',
-            height: '68px',
-            borderRadius: '20px',
+            width: '56px',
+            height: '56px',
+            borderRadius: '18px',
             backgroundColor: 'var(--accent-amber)',
             color: '#ffffff',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            marginBottom: '1rem',
+            marginBottom: '0.75rem',
           }}
         >
-          <TrophyIcon size={34} />
+          <TrophyIcon size={28} />
         </div>
 
         {perfEval.isPassed !== null && (
-          <div style={{ marginBottom: '0.65rem' }}>
+          <div style={{ marginBottom: '0.5rem' }}>
             <span
               data-testid="exam-pass-status-badge"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                padding: '0.3rem 0.9rem',
+                padding: '0.28rem 0.85rem',
                 borderRadius: '999px',
-                fontSize: '0.82rem',
+                fontSize: '0.8rem',
                 fontWeight: 900,
                 backgroundColor: perfEval.isPassed
                   ? 'rgba(16, 185, 129, 0.16)'
@@ -2690,14 +3132,16 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           </div>
         )}
 
-        <h2 style={{ margin: '0 0 0.35rem 0', fontSize: '1.75rem', fontWeight: 900 }}>
-          {playtestMode
-            ? 'Hoàn Thành Chơi Thử!'
-            : isExamMode
-              ? 'Hoàn Thành Bài Thi!'
-              : 'Hoàn Thành Trận Đấu!'}
+        <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.5rem', fontWeight: 900 }}>
+          {demoMode
+            ? 'Hoàn Thành Bản Demo!'
+            : playtestMode
+              ? 'Hoàn Thành Chơi Thử!'
+              : isExamMode
+                ? 'Hoàn Thành Bài Thi!'
+                : 'Hoàn Thành Trận Đấu!'}
         </h2>
-        <p style={{ margin: '0 0 1.25rem 0', color: 'var(--text-secondary)', fontSize: '0.95rem' }}>
+        <p style={{ margin: '0 0 1rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
           {activeGameSpec?.title || finalResult.title}
         </p>
 
@@ -2719,31 +3163,31 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           </div>
         )}
 
-        {playtestBanner}
+        {finishPlaytestBanner}
 
         {/* Unified 4-Tier Evaluation Card */}
         <div
           data-testid="solo-result-evaluation"
           style={{
-            padding: '1rem 1.25rem',
-            borderRadius: '16px',
+            padding: '0.85rem 1.1rem',
+            borderRadius: '14px',
             backgroundColor: 'var(--bg-input)',
             border: '1.5px solid var(--primary)',
-            marginBottom: '1.5rem',
+            marginBottom: '1.15rem',
             textAlign: 'left',
           }}
         >
           <div
             data-testid="result-tier-label"
-            style={{ fontSize: '1.05rem', fontWeight: 900, color: 'var(--primary)' }}
+            style={{ fontSize: '0.98rem', fontWeight: 900, color: 'var(--primary)' }}
           >
             Mức đánh giá: {perfEval.tierLabel} ({perfEval.accuracyPercentage}%)
           </div>
           <div
             style={{
-              fontSize: '0.88rem',
+              fontSize: '0.84rem',
               color: 'var(--text-secondary)',
-              marginTop: '0.35rem',
+              marginTop: '0.25rem',
               lineHeight: 1.45,
             }}
           >
@@ -2755,25 +3199,25 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-            gap: '0.85rem',
-            marginBottom: '2rem',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
+            gap: '0.75rem',
+            marginBottom: '1.35rem',
           }}
         >
           <div
             style={{
-              padding: '1.25rem 1rem',
-              borderRadius: '16px',
+              padding: '0.95rem 0.85rem',
+              borderRadius: '14px',
               backgroundColor: 'var(--bg-input)',
               border: '1px solid var(--border-subtle)',
             }}
           >
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.35rem' }}>
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
               ĐIỂM ĐẠT / TỐI ĐA
             </div>
             <div
               data-testid="solo-result-score-ratio"
-              style={{ fontSize: '1.45rem', fontWeight: 900, color: 'var(--primary)' }}
+              style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--primary)' }}
             >
               {totalPts.toLocaleString()} / {maxScore.toLocaleString()}
             </div>
@@ -2781,18 +3225,18 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
           <div
             style={{
-              padding: '1.25rem 1rem',
-              borderRadius: '16px',
+              padding: '0.95rem 0.85rem',
+              borderRadius: '14px',
               backgroundColor: 'var(--bg-input)',
               border: '1px solid var(--border-subtle)',
             }}
           >
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.35rem' }}>
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
               SỐ CÂU ĐÚNG
             </div>
             <div
               data-testid="solo-result-correct-ratio"
-              style={{ fontSize: '1.45rem', fontWeight: 900, color: 'var(--accent-emerald)' }}
+              style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--accent-emerald)' }}
             >
               {correctCount} / {finalResult.totalQuestions}
             </div>
@@ -2800,18 +3244,18 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
           <div
             style={{
-              padding: '1.25rem 1rem',
-              borderRadius: '16px',
+              padding: '0.95rem 0.85rem',
+              borderRadius: '14px',
               backgroundColor: 'var(--bg-input)',
               border: '1px solid var(--border-subtle)',
             }}
           >
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.35rem' }}>
+            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
               TỶ LỆ ĐÚNG
             </div>
             <div
               data-testid="solo-result-accuracy"
-              style={{ fontSize: '1.45rem', fontWeight: 900, color: '#f59e0b' }}
+              style={{ fontSize: '1.3rem', fontWeight: 900, color: '#f59e0b' }}
             >
               {perfEval.accuracyPercentage}%
             </div>
@@ -2821,12 +3265,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         {/* Per-Question Answer & Explanation Review */}
         {(() => {
           const canShowResultAnswers =
-            isExamMode &&
-            (playtestMode ||
-              Boolean(finalResult.canRevealAnswers) ||
-              Boolean(finalResult.answersPublished) ||
-              effectiveExamRevealPolicy === 'IMMEDIATE' ||
-              effectiveExamRevealPolicy === 'AFTER_SUBMIT');
+            playtestMode ||
+            (isExamMode &&
+              (Boolean(finalResult.canRevealAnswers) ||
+                Boolean(finalResult.answersPublished) ||
+                effectiveExamRevealPolicy === 'IMMEDIATE' ||
+                effectiveExamRevealPolicy === 'AFTER_SUBMIT'));
           const qResults = Array.isArray(finalResult.questionResults)
             ? finalResult.questionResults
             : [];
@@ -2837,19 +3281,19 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 data-testid="solo-result-question-review"
                 style={{
                   textAlign: 'left',
-                  marginBottom: '1.75rem',
-                  padding: '1.15rem',
-                  borderRadius: '16px',
+                  marginBottom: '1.35rem',
+                  padding: '0.95rem',
+                  borderRadius: '14px',
                   backgroundColor: 'var(--bg-input)',
                   border: '1px solid var(--border-subtle)',
                 }}
               >
                 <div
                   style={{
-                    fontSize: '0.92rem',
+                    fontSize: '0.88rem',
                     fontWeight: 900,
                     color: 'var(--text-primary)',
-                    marginBottom: '0.85rem',
+                    marginBottom: '0.65rem',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
@@ -2858,7 +3302,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                   }}
                 >
                   <span>Chi tiết đáp án từng câu ({qResults.length} câu)</span>
-                  <span style={{ fontSize: '0.76rem', color: 'var(--accent-emerald)', fontWeight: 800 }}>
+                  <span style={{ fontSize: '0.74rem', color: 'var(--accent-emerald)', fontWeight: 800 }}>
                     Đã hiển thị đáp án
                   </span>
                 </div>
@@ -2866,8 +3310,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                   style={{
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '0.75rem',
-                    maxHeight: '360px',
+                    gap: '0.6rem',
+                    maxHeight: '280px',
                     overflowY: 'auto',
                   }}
                 >
@@ -2882,7 +3326,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                         key={qr.questionId || idx}
                         data-testid={`solo-result-review-item-${idx}`}
                         style={{
-                          padding: '0.85rem 1rem',
+                          padding: '0.75rem 0.9rem',
                           borderRadius: '12px',
                           backgroundColor: 'var(--bg-surface)',
                           border: `1.5px solid ${
@@ -2897,44 +3341,66 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                             justifyContent: 'space-between',
                             gap: '0.5rem',
                             marginBottom: '0.35rem',
+                            flexWrap: 'wrap',
                           }}
                         >
-                          <span style={{ fontSize: '0.82rem', fontWeight: 900, color: 'var(--text-secondary)' }}>
+                          <span style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--text-secondary)' }}>
                             Câu #{idx + 1}
                           </span>
-                          <span
-                            data-testid={`solo-result-review-status-${idx}`}
-                            style={{
-                              padding: '0.18rem 0.55rem',
-                              borderRadius: '999px',
-                              fontSize: '0.72rem',
-                              fontWeight: 900,
-                              backgroundColor: isRight
-                                ? 'rgba(16, 185, 129, 0.16)'
-                                : 'rgba(239, 68, 68, 0.16)',
-                              color: isRight ? 'var(--accent-emerald)' : 'var(--accent-rose)',
-                            }}
-                          >
-                            {isRight
-                              ? `✓ Trả lời đúng (+${qr.pointsEarned ?? 0}đ)`
-                              : isTimedOutItem
-                                ? '⏰ Hết thời gian (+0đ)'
-                                : '✕ Trả lời sai (+0đ)'}
-                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                            <span
+                              data-testid={`solo-result-review-status-${idx}`}
+                              style={{
+                                padding: '0.16rem 0.5rem',
+                                borderRadius: '999px',
+                                fontSize: '0.72rem',
+                                fontWeight: 900,
+                                backgroundColor: isRight
+                                  ? 'rgba(16, 185, 129, 0.16)'
+                                  : 'rgba(239, 68, 68, 0.16)',
+                                color: isRight ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                              }}
+                            >
+                              {isRight
+                                ? `✓ Trả lời đúng (+${qr.pointsEarned ?? 0}đ)`
+                                : isTimedOutItem
+                                  ? '⏰ Hết thời gian (+0đ)'
+                                  : '✕ Trả lời sai (+0đ)'}
+                            </span>
+                            {playtestMode && !demoMode && (
+                              <button
+                                type="button"
+                                data-testid={`playtest-finish-edit-q-${idx}`}
+                                onClick={() => handleOpenInlineEditor(idx)}
+                                style={{
+                                  padding: '0.18rem 0.55rem',
+                                  borderRadius: '6px',
+                                  border: '1px solid var(--border-strong)',
+                                  backgroundColor: 'var(--bg-input)',
+                                  color: 'var(--text-primary)',
+                                  fontSize: '0.72rem',
+                                  fontWeight: 800,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                ✎ Sửa câu này
+                              </button>
+                            )}
+                          </div>
                         </div>
                         {specQ?.question && (
                           <div
                             style={{
-                              fontSize: '0.9rem',
+                              fontSize: '0.88rem',
                               fontWeight: 800,
                               color: 'var(--text-primary)',
-                              marginBottom: '0.4rem',
+                              marginBottom: '0.35rem',
                             }}
                           >
                             {specQ.question}
                           </div>
                         )}
-                        <div style={{ fontSize: '0.83rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                        <div style={{ fontSize: '0.81rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
                           <div>
                             Câu trả lời của bạn:{' '}
                             <strong style={{ color: isRight ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
@@ -2942,7 +3408,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                             </strong>
                           </div>
                           {qr.correctAnswer && (
-                            <div style={{ marginTop: '0.2rem' }}>
+                            <div style={{ marginTop: '0.15rem' }}>
                               Đáp án chính xác:{' '}
                               <strong style={{ color: 'var(--accent-emerald)' }}>{qr.correctAnswer}</strong>
                             </div>
@@ -2951,8 +3417,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                             <div
                               data-testid={`solo-result-review-explanation-${idx}`}
                               style={{
-                                marginTop: '0.35rem',
-                                paddingTop: '0.35rem',
+                                marginTop: '0.3rem',
+                                paddingTop: '0.3rem',
                                 borderTop: '1px dashed var(--border-subtle)',
                                 color: 'var(--text-secondary)',
                               }}
@@ -2974,13 +3440,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               <div
                 data-testid="solo-result-answers-pending-publish"
                 style={{
-                  marginBottom: '1.75rem',
-                  padding: '1rem 1.25rem',
+                  marginBottom: '1.35rem',
+                  padding: '0.9rem 1.15rem',
                   borderRadius: '14px',
                   backgroundColor: 'rgba(56, 189, 248, 0.1)',
                   border: '1.5px solid rgba(56, 189, 248, 0.4)',
                   color: 'var(--text-secondary)',
-                  fontSize: '0.86rem',
+                  fontSize: '0.84rem',
                   fontWeight: 700,
                   lineHeight: 1.5,
                 }}
@@ -2994,49 +3460,101 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         })()}
 
         {/* Buttons */}
-        <div style={{ display: 'flex', gap: '0.85rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+          {demoMode && onCreateThisGameType && activeGameSpec && (
+            <button
+              type="button"
+              data-testid="demo-finish-create-btn"
+              onClick={() => onCreateThisGameType(activeGameSpec.gameType)}
+              style={{
+                minHeight: '46px',
+                padding: '0.7rem 1.35rem',
+                borderRadius: '12px',
+                border: 'none',
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+                color: '#ffffff',
+                fontWeight: 900,
+                fontSize: '0.92rem',
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.45rem',
+                boxShadow: '0 4px 16px rgba(16, 185, 129, 0.3)',
+              }}
+            >
+              <span>✨ Tạo game loại này</span>
+            </button>
+          )}
+
+          {playtestMode && !demoMode && (activeGameSpec?.questions?.length || 0) > 0 && (
+            <button
+              type="button"
+              data-testid="playtest-back-to-questions-btn"
+              onClick={() => {
+                if (!activeGameSpec) return;
+                setFinalResult(null);
+                const lastIdx = Math.max(0, (activeGameSpec.questions?.length || 1) - 1);
+                loadPlaytestQuestionAtIndex(activeGameSpec, lastIdx);
+              }}
+              style={{
+                minHeight: '46px',
+                padding: '0.7rem 1.2rem',
+                borderRadius: '12px',
+                border: '1.5px solid var(--primary)',
+                backgroundColor: 'var(--bg-surface)',
+                color: 'var(--primary)',
+                fontWeight: 800,
+                fontSize: '0.9rem',
+                cursor: 'pointer',
+              }}
+            >
+              ← Quay lại xem các câu
+            </button>
+          )}
+
           {(!isExamMode || playtestMode) && activeGameSpec?.settings?.allowReplay !== false && (
             <button
               type="button"
               data-testid="solo-replay-btn"
               onClick={() => initializeSession('RESTART')}
               style={{
-                minHeight: '48px',
-                padding: '0.75rem 1.5rem',
+                minHeight: '46px',
+                padding: '0.7rem 1.35rem',
                 borderRadius: '12px',
                 border: 'none',
                 backgroundColor: 'var(--primary)',
                 color: 'var(--primary-ink)',
                 fontWeight: 800,
-                fontSize: '0.95rem',
+                fontSize: '0.9rem',
                 cursor: 'pointer',
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '0.5rem',
-                boxShadow: '0 0 16px var(--primary-subtle)',
+                gap: '0.45rem',
+                boxShadow: '0 0 14px var(--primary-subtle)',
               }}
             >
-              <RefreshIcon size={18} />
-              <span>Chơi Lại Trận Này</span>
+              <RefreshIcon size={17} />
+              <span>{demoMode ? 'Chơi lại Demo' : 'Chơi Lại Trận Này'}</span>
             </button>
           )}
 
           <button
             type="button"
+            data-testid="exit-playtest-btn"
             onClick={handleLeave}
             style={{
-              minHeight: '48px',
-              padding: '0.75rem 1.5rem',
+              minHeight: '46px',
+              padding: '0.7rem 1.35rem',
               borderRadius: '12px',
               border: '1.5px solid var(--border-strong)',
               backgroundColor: 'var(--bg-surface)',
               color: 'var(--text-primary)',
               fontWeight: 700,
-              fontSize: '0.95rem',
+              fontSize: '0.9rem',
               cursor: 'pointer',
             }}
           >
-            {playtestMode ? 'Thoát chơi thử' : 'Rời Khỏi'}
+            {demoMode ? 'Đóng demo' : playtestMode ? 'Thoát chơi thử' : 'Rời Khỏi'}
           </button>
         </div>
       </div>
@@ -3046,38 +3564,86 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   // ACTIVE QUESTION SCREEN
   if (!currentQuestion) return null;
 
+  const isLastQuestion = currentQuestion.questionIndex + 1 >= currentQuestion.totalQuestions;
+  const hasAnsweredOrTimedOut = Boolean(questionFeedback) || isQuestionTimedOut;
+  const questionTypeLabel =
+    QUESTION_TYPE_LABELS[currentQuestion.type] || currentQuestion.type;
+
   return (
-    <div style={{ maxWidth: '820px', margin: '0 auto', padding: '1rem 1rem 3rem' }}>
+    <div
+      style={{
+        maxWidth: '840px',
+        margin: '0 auto',
+        padding: playtestMode ? '0.6rem 0.85rem 0.85rem' : '1rem 1rem 3rem',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: playtestMode ? '0.6rem' : '1.15rem',
+      }}
+    >
       {inlineEditModalNode}
-      {/* Top Bar: Question Index, Score, Streak, Audio, Timer, Leave */}
-      {playtestBanner}
+
+      {/* Unified Compact Header Bar (Single Exit Button, No Duplicate Banner) */}
       <div
+        data-testid={playtestMode ? 'playtest-mode-banner' : 'solo-active-top-bar'}
         style={{
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
           flexWrap: 'wrap',
-          gap: '0.75rem',
-          padding: '0.85rem 1.25rem',
-          backgroundColor: 'var(--bg-surface)',
-          border: '1px solid var(--border-subtle)',
-          borderRadius: '16px',
+          gap: '0.55rem',
+          padding: playtestMode ? '0.55rem 0.9rem' : '0.85rem 1.25rem',
+          backgroundColor: playtestMode ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-surface)',
+          border: playtestMode
+            ? '1.5px solid rgba(99, 102, 241, 0.35)'
+            : '1px solid var(--border-subtle)',
+          borderRadius: '14px',
           boxShadow: 'var(--shadow-sm)',
-          marginBottom: '1.5rem',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+          {playtestMode && (
+            <span
+              style={{
+                padding: '0.2rem 0.55rem',
+                borderRadius: '999px',
+                backgroundColor: demoMode ? '#10b981' : 'var(--primary)',
+                color: '#ffffff',
+                fontSize: '0.68rem',
+                fontWeight: 900,
+                letterSpacing: '0.03em',
+              }}
+            >
+              {demoMode ? 'XEM DEMO' : 'CHƠI THỬ'}
+            </span>
+          )}
+
           <span
+            data-testid="solo-question-progress-pill"
             style={{
               fontWeight: 800,
-              fontSize: '0.95rem',
+              fontSize: '0.86rem',
               color: 'var(--primary)',
-              backgroundColor: 'rgba(99, 102, 241, 0.12)',
-              padding: '0.3rem 0.75rem',
+              backgroundColor: 'rgba(99, 102, 241, 0.14)',
+              padding: '0.22rem 0.65rem',
               borderRadius: '8px',
             }}
           >
             Câu {currentQuestion.questionIndex + 1} / {currentQuestion.totalQuestions}
+          </span>
+
+          <span
+            data-testid="question-type-badge"
+            style={{
+              fontWeight: 800,
+              fontSize: '0.74rem',
+              color: 'var(--text-secondary)',
+              backgroundColor: 'var(--bg-surface)',
+              border: '1px solid var(--border-subtle)',
+              padding: '0.2rem 0.55rem',
+              borderRadius: '8px',
+            }}
+          >
+            {questionTypeLabel}
           </span>
 
           {isExamMode && (
@@ -3085,11 +3651,11 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               data-testid="solo-exam-mode-badge"
               style={{
                 fontWeight: 900,
-                fontSize: '0.75rem',
+                fontSize: '0.72rem',
                 color: '#ef4444',
                 backgroundColor: 'rgba(239, 68, 68, 0.12)',
                 border: '1px solid rgba(239, 68, 68, 0.35)',
-                padding: '0.22rem 0.55rem',
+                padding: '0.18rem 0.5rem',
                 borderRadius: '999px',
               }}
             >
@@ -3101,13 +3667,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.35rem',
-              fontSize: '0.92rem',
+              gap: '0.3rem',
+              fontSize: '0.86rem',
               fontWeight: 800,
               color: 'var(--text-primary)',
             }}
           >
-            <StarIcon size={16} style={{ color: '#f59e0b' }} />
+            <StarIcon size={15} style={{ color: '#f59e0b' }} />
             <span>{playerScore.toLocaleString()} đ</span>
           </div>
 
@@ -3116,30 +3682,30 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '0.25rem',
-                fontSize: '0.82rem',
+                gap: '0.2rem',
+                fontSize: '0.76rem',
                 fontWeight: 800,
                 color: '#ef4444',
                 backgroundColor: 'rgba(239, 68, 68, 0.12)',
-                padding: '0.2rem 0.55rem',
+                padding: '0.16rem 0.45rem',
                 borderRadius: '8px',
               }}
             >
-              <FlameIcon size={14} />
-              <span>x{playerStreak} streak</span>
+              <FlameIcon size={13} />
+              <span>x{playerStreak}</span>
             </div>
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
           {/* Audio Mute & Volume Controls */}
           <div
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.4rem',
-              padding: '0.25rem 0.6rem',
-              borderRadius: '10px',
+              gap: '0.35rem',
+              padding: '0.2rem 0.5rem',
+              borderRadius: '9px',
               backgroundColor: 'var(--bg-input)',
               border: '1px solid var(--border-subtle)',
             }}
@@ -3154,9 +3720,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 background: 'transparent',
                 color: audioMuted ? 'var(--text-muted)' : 'var(--primary)',
                 fontWeight: 800,
-                fontSize: '0.82rem',
+                fontSize: '0.78rem',
                 cursor: 'pointer',
-                padding: '0.15rem 0.25rem',
+                padding: '0.1rem 0.2rem',
               }}
             >
               {audioMuted ? '🔇' : '🔊'}
@@ -3177,8 +3743,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               onChange={(e) => handleAudioVolumeChange(Number(e.target.value))}
               aria-label="Âm lượng"
               style={{
-                width: '64px',
-                height: '6px',
+                width: '54px',
+                height: '5px',
                 accentColor: 'var(--primary)',
                 cursor: 'pointer',
               }}
@@ -3191,79 +3757,113 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.4rem',
-              padding: '0.35rem 0.85rem',
+              gap: '0.3rem',
+              padding: '0.25rem 0.7rem',
               borderRadius: '999px',
-              backgroundColor: timeLeft <= 5 ? 'rgba(239, 68, 68, 0.15)' : 'var(--bg-input)',
-              color: timeLeft <= 5 ? 'var(--accent-rose)' : 'var(--text-primary)',
-              border: `1.5px solid ${timeLeft <= 5 ? 'var(--accent-rose)' : 'var(--border-strong)'}`,
+              backgroundColor:
+                hasAnsweredOrTimedOut
+                  ? 'var(--bg-input)'
+                  : timeLeft <= 5
+                    ? 'rgba(239, 68, 68, 0.15)'
+                    : 'var(--bg-input)',
+              color:
+                hasAnsweredOrTimedOut
+                  ? 'var(--text-secondary)'
+                  : timeLeft <= 5
+                    ? 'var(--accent-rose)'
+                    : 'var(--text-primary)',
+              border: `1.5px solid ${
+                !hasAnsweredOrTimedOut && timeLeft <= 5
+                  ? 'var(--accent-rose)'
+                  : 'var(--border-strong)'
+              }`,
               fontWeight: 900,
-              fontSize: '1rem',
+              fontSize: '0.9rem',
             }}
           >
-            <ClockIcon size={16} />
+            <ClockIcon size={14} />
             <span>{timeLeft}s</span>
           </div>
 
-          {/* Leave Button */}
+          {/* Single Leave / Exit Button */}
           <button
             type="button"
+            data-testid="exit-playtest-btn"
             onClick={handleLeave}
-            title="Thoát trận đấu"
+            title={demoMode ? 'Đóng demo' : playtestMode ? 'Thoát chơi thử' : 'Thoát trận đấu'}
             style={{
-              minHeight: '40px',
-              padding: '0.4rem 0.75rem',
-              borderRadius: '10px',
+              minHeight: '34px',
+              padding: '0.3rem 0.7rem',
+              borderRadius: '9px',
               border: '1px solid var(--border-strong)',
               backgroundColor: 'var(--bg-surface)',
-              color: 'var(--text-secondary)',
+              color: 'var(--text-primary)',
               cursor: 'pointer',
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.3rem',
-              fontSize: '0.85rem',
-              fontWeight: 700,
+              gap: '0.25rem',
+              fontSize: '0.8rem',
+              fontWeight: 800,
             }}
           >
-            <XMarkIcon size={16} />
-            <span>{playtestMode ? 'Thoát chơi thử' : 'Thoát'}</span>
+            <XMarkIcon size={14} />
+            <span>{demoMode ? 'Đóng demo' : playtestMode ? 'Thoát chơi thử' : 'Thoát'}</span>
           </button>
         </div>
       </div>
+
+      {/* Optional Demo How-to-Play Guide Banner */}
+      {demoMode && demoGuideText && (
+        <div
+          data-testid="demo-how-to-play-guide"
+          style={{
+            padding: '0.5rem 0.85rem',
+            borderRadius: '11px',
+            backgroundColor: 'rgba(16, 185, 129, 0.09)',
+            border: '1px solid rgba(16, 185, 129, 0.32)',
+            color: 'var(--text-secondary)',
+            fontSize: '0.8rem',
+            fontWeight: 700,
+            lineHeight: 1.4,
+          }}
+        >
+          <strong style={{ color: 'var(--accent-emerald)' }}>💡 Hướng dẫn cách chơi:</strong>{' '}
+          {demoGuideText}
+        </div>
+      )}
 
       {/* Question Card */}
       <div
         style={{
           backgroundColor: 'var(--bg-surface)',
           border: '1px solid var(--border-subtle)',
-          borderRadius: '24px',
-          padding: '2.5rem 2rem',
+          borderRadius: '20px',
+          padding: playtestMode ? '1.15rem 1.35rem' : '2rem 1.75rem',
           boxShadow: 'var(--card-shadow)',
-          marginBottom: '1.5rem',
           textAlign: 'center',
         }}
       >
         <h2
           data-testid="solo-active-question-text"
           style={{
-            fontSize: 'clamp(1.25rem, 3vw, 1.85rem)',
+            fontSize: playtestMode ? 'clamp(1.05rem, 2.1vw, 1.35rem)' : 'clamp(1.2rem, 2.8vw, 1.75rem)',
             fontWeight: 800,
             color: 'var(--text-primary)',
-            lineHeight: 1.4,
-            margin: '0 auto 1.5rem auto',
+            lineHeight: 1.35,
+            margin: playtestMode ? '0 auto 0.85rem auto' : '0 auto 1.25rem auto',
             maxWidth: '720px',
           }}
         >
           {currentQuestion.question}
         </h2>
 
-        {/* FEEDBACK STATE: Reveal Answer and Explanation (or Redacted in EXAM Mode) */}
+        {/* FEEDBACK STATE: Priority Order: (1) Status & Points, (2) Correct Answer & Choice Grid, (3) Scrollable Explanation */}
         {questionFeedback ? (
           <div
             data-testid="solo-question-feedback"
             style={{
-              padding: '1.75rem',
-              borderRadius: '18px',
+              padding: playtestMode ? '0.95rem 1.15rem' : '1.4rem',
+              borderRadius: '16px',
               backgroundColor: isExamUnpublished
                 ? 'rgba(56, 189, 248, 0.1)'
                 : questionFeedback.isCorrect
@@ -3276,7 +3876,6 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                     ? 'var(--accent-emerald)'
                     : 'var(--accent-rose)'
               }`,
-              marginBottom: '1.5rem',
               animation: 'popIn 0.2s ease',
             }}
           >
@@ -3284,75 +3883,142 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               <div data-testid="exam-feedback-recorded">
                 <div
                   style={{
-                    fontSize: '1.3rem',
+                    fontSize: '1.15rem',
                     fontWeight: 900,
                     color: '#0284c7',
-                    marginBottom: '0.5rem',
+                    marginBottom: '0.4rem',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '0.5rem',
+                    gap: '0.45rem',
                   }}
                 >
                   {questionFeedback.timedOut ? (
                     <>
-                      <ClockIcon size={24} />
+                      <ClockIcon size={22} />
                       <span>Hết thời gian trả lời — Đã ghi nhận tự động (+0 điểm)</span>
                     </>
                   ) : (
                     <>
-                      <CheckIcon size={24} />
+                      <CheckIcon size={22} />
                       <span>Đã ghi nhận câu trả lời của bạn</span>
                     </>
                   )}
                 </div>
                 <p
                   style={{
-                    margin: '0.35rem auto 0 auto',
-                    fontSize: '0.88rem',
+                    margin: '0.25rem auto 0 auto',
+                    fontSize: '0.84rem',
                     color: 'var(--text-secondary)',
                     maxWidth: '540px',
                   }}
                 >
-                  Chế độ Thi nghiêm túc: Đáp án và giải thích được bảo mật cho đến khi kết thúc kỳ thi. Hệ thống tự động chuyển câu sau 1.5 giây...
+                  Chế độ Thi nghiêm túc: Đáp án và giải thích được bảo mật cho đến khi kết thúc kỳ thi.
                 </p>
               </div>
             ) : (
               <>
+                {/* 1. Status & Points Header */}
                 <div
                   data-testid="solo-feedback-status-banner"
                   style={{
-                    fontSize: '1.4rem',
+                    fontSize: playtestMode ? '1.12rem' : '1.3rem',
                     fontWeight: 900,
                     color: questionFeedback.isCorrect
                       ? 'var(--accent-emerald)'
                       : 'var(--accent-rose)',
-                    marginBottom: '0.65rem',
+                    marginBottom: '0.45rem',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '0.5rem',
+                    gap: '0.45rem',
+                    flexWrap: 'wrap',
                   }}
                 >
                   {questionFeedback.isCorrect ? (
                     <>
-                      <CheckIcon size={26} />
+                      <CheckIcon size={22} />
                       <span>Chính Xác! Trả lời đúng (+{questionFeedback.pointsEarned} điểm)</span>
                     </>
                   ) : questionFeedback.timedOut ? (
                     <>
-                      <ClockIcon size={26} />
+                      <ClockIcon size={22} />
                       <span>Hết Thời Gian Trả Lời! (+0 điểm)</span>
                     </>
                   ) : (
                     <>
-                      <XMarkIcon size={26} />
+                      <XMarkIcon size={22} />
                       <span>Chưa Đúng! Trả lời sai (+0 điểm)</span>
                     </>
                   )}
+
+                  {playtestMode && !demoMode && (
+                    <button
+                      type="button"
+                      data-testid="playtest-retest-question-btn"
+                      onClick={handleRetestCurrentQuestion}
+                      title="Làm lại câu hỏi này để kiểm thử đáp án khác"
+                      style={{
+                        marginLeft: '0.35rem',
+                        padding: '0.22rem 0.65rem',
+                        borderRadius: '999px',
+                        border: '1px solid var(--border-strong)',
+                        backgroundColor: 'var(--bg-surface)',
+                        color: 'var(--text-primary)',
+                        fontSize: '0.74rem',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ↻ Kiểm thử lại câu này
+                    </button>
+                  )}
                 </div>
 
-                {/* Highlighted choices for choice-based questions (Green for correct, Red for selected wrong) */}
+                {/* 2. Correct Answer & User Answer */}
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '1rem',
+                    flexWrap: 'wrap',
+                    marginBottom: '0.5rem',
+                  }}
+                >
+                  {!questionFeedback.isCorrect &&
+                    !questionFeedback.timedOut &&
+                    (questionFeedback.answer || selectedChoice || textAnswerInput) && (
+                      <p
+                        data-testid="solo-feedback-user-answer"
+                        style={{
+                          margin: 0,
+                          fontSize: '0.88rem',
+                          fontWeight: 800,
+                          color: 'var(--accent-rose)',
+                        }}
+                      >
+                        Câu trả lời của bạn:{' '}
+                        <strong>{questionFeedback.answer || selectedChoice || textAnswerInput}</strong>
+                      </p>
+                    )}
+
+                  {questionFeedback.correctAnswer && (
+                    <p
+                      data-testid="solo-feedback-correct-answer"
+                      style={{
+                        margin: 0,
+                        fontSize: '0.92rem',
+                        fontWeight: 800,
+                        color: 'var(--accent-emerald)',
+                      }}
+                    >
+                      Đáp án chính xác: <strong>{questionFeedback.correctAnswer}</strong>
+                    </p>
+                  )}
+                </div>
+
+                {/* Compact Highlighted Choices for choice-based questions */}
                 {(currentQuestion.type === 'MULTIPLE_CHOICE' ||
                   currentQuestion.type === 'QUIZ' ||
                   currentQuestion.type === 'QUICK_BUTTON' ||
@@ -3374,9 +4040,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                           gridTemplateColumns:
                             currentQuestion.type === 'QUICK_BUTTON' || currentQuestion.type === 'TRUE_FALSE'
                               ? '1fr 1fr'
-                              : 'repeat(auto-fit, minmax(230px, 1fr))',
-                          gap: '0.75rem',
-                          margin: '0.85rem auto 1rem auto',
+                              : 'repeat(auto-fit, minmax(210px, 1fr))',
+                          gap: '0.55rem',
+                          margin: '0.45rem auto 0.55rem auto',
                           maxWidth: '680px',
                           textAlign: 'left',
                         }}
@@ -3412,36 +4078,36 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                                     : 'neutral'
                               }
                               style={{
-                                padding: '0.8rem 1rem',
-                                borderRadius: '14px',
+                                padding: playtestMode ? '0.55rem 0.85rem' : '0.75rem 0.95rem',
+                                borderRadius: '12px',
                                 backgroundColor: isCorrectOption
                                   ? '#16a34a'
                                   : isSelectedWrongOption
                                     ? '#dc2626'
                                     : 'var(--bg-input)',
                                 border: isCorrectOption
-                                  ? '3px solid #4ade80'
+                                  ? '2.5px solid #4ade80'
                                   : isSelectedWrongOption
-                                    ? '3px solid #f87171'
+                                    ? '2.5px solid #f87171'
                                     : '1.5px solid var(--border-subtle)',
                                 color: isCorrectOption || isSelectedWrongOption ? '#ffffff' : 'var(--text-secondary)',
                                 fontWeight: 800,
-                                fontSize: '0.94rem',
+                                fontSize: '0.88rem',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
-                                gap: '0.6rem',
+                                gap: '0.5rem',
                                 opacity: isCorrectOption || isSelectedWrongOption ? 1 : 0.65,
                               }}
                             >
-                              <span style={{ wordBreak: 'break-word', lineHeight: 1.35 }}>{opt}</span>
+                              <span style={{ wordBreak: 'break-word', lineHeight: 1.3 }}>{opt}</span>
                               {isCorrectOption && (
                                 <span
                                   style={{
                                     flexShrink: 0,
-                                    fontSize: '0.75rem',
+                                    fontSize: '0.72rem',
                                     fontWeight: 900,
-                                    padding: '0.18rem 0.5rem',
+                                    padding: '0.14rem 0.45rem',
                                     borderRadius: '999px',
                                     backgroundColor: 'rgba(255, 255, 255, 0.22)',
                                   }}
@@ -3453,9 +4119,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                                 <span
                                   style={{
                                     flexShrink: 0,
-                                    fontSize: '0.75rem',
+                                    fontSize: '0.72rem',
                                     fontWeight: 900,
-                                    padding: '0.18rem 0.5rem',
+                                    padding: '0.14rem 0.45rem',
                                     borderRadius: '999px',
                                     backgroundColor: 'rgba(255, 255, 255, 0.22)',
                                   }}
@@ -3470,149 +4136,127 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                     );
                   })()}
 
-                {!questionFeedback.isCorrect &&
-                  !questionFeedback.timedOut &&
-                  (questionFeedback.answer || selectedChoice || textAnswerInput) && (
-                    <p
-                      data-testid="solo-feedback-user-answer"
-                      style={{
-                        margin: '0 0 0.4rem 0',
-                        fontSize: '0.92rem',
-                        fontWeight: 800,
-                        color: 'var(--accent-rose)',
-                      }}
-                    >
-                      Câu trả lời của bạn:{' '}
-                      <strong>{questionFeedback.answer || selectedChoice || textAnswerInput}</strong>
-                    </p>
-                  )}
-
-                {questionFeedback.correctAnswer && (
-                  <p
-                    data-testid="solo-feedback-correct-answer"
-                    style={{
-                      margin: '0 0 0.5rem 0',
-                      fontSize: '0.98rem',
-                      fontWeight: 800,
-                      color: 'var(--accent-emerald)',
-                    }}
-                  >
-                    Đáp án chính xác: <strong>{questionFeedback.correctAnswer}</strong>
-                  </p>
-                )}
-
+                {/* 3. Explanation (Scrollable internally if long, never pushing action buttons off screen) */}
                 {typeof questionFeedback.explanation === 'string' &&
                   questionFeedback.explanation.trim().length > 0 && (
-                    <p
+                    <div
                       data-testid="solo-feedback-explanation"
                       style={{
-                        margin: '0.5rem auto 0 auto',
-                        fontSize: '0.88rem',
+                        margin: '0.45rem auto 0 auto',
+                        padding: '0.55rem 0.85rem',
+                        borderRadius: '10px',
+                        backgroundColor: 'var(--bg-surface)',
+                        border: '1px solid var(--border-subtle)',
+                        fontSize: '0.84rem',
                         color: 'var(--text-secondary)',
-                        lineHeight: 1.5,
-                        maxWidth: '600px',
+                        lineHeight: 1.45,
+                        maxWidth: '640px',
+                        maxHeight: '92px',
+                        overflowY: 'auto',
+                        textAlign: 'left',
                       }}
                     >
-                      <strong>Giải thích:</strong> {questionFeedback.explanation.trim()}
-                    </p>
+                      <strong style={{ color: 'var(--text-primary)' }}>Giải thích:</strong>{' '}
+                      {questionFeedback.explanation.trim()}
+                    </div>
                   )}
               </>
             )}
 
-            <button
-              type="button"
-              data-testid="solo-next-question-btn"
-              onClick={handleNextQuestion}
-              style={{
-                marginTop: '1.25rem',
-                minHeight: '46px',
-                padding: '0.75rem 1.75rem',
-                borderRadius: '12px',
-                border: 'none',
-                backgroundColor: 'var(--primary)',
-                color: 'var(--primary-ink)',
-                fontWeight: 800,
-                fontSize: '0.95rem',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                boxShadow: '0 0 16px var(--primary-subtle)',
-              }}
-            >
-              <span>
-                {currentQuestion.questionIndex + 1 < currentQuestion.totalQuestions
-                  ? 'Tiếp Tục Câu Kế Tiếp'
-                  : 'Tiếp Tục — Xem Kết Quả'}
-              </span>
-              <ArrowRightIcon size={16} />
-            </button>
+            {/* In non-playtest mode, keep the inline Next button inside feedback card */}
+            {!playtestMode && (
+              <button
+                type="button"
+                data-testid="solo-next-question-btn"
+                onClick={handleNextQuestion}
+                style={{
+                  marginTop: '1rem',
+                  minHeight: '44px',
+                  padding: '0.65rem 1.5rem',
+                  borderRadius: '12px',
+                  border: 'none',
+                  backgroundColor: 'var(--primary)',
+                  color: 'var(--primary-ink)',
+                  fontWeight: 800,
+                  fontSize: '0.92rem',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  boxShadow: '0 0 16px var(--primary-subtle)',
+                }}
+              >
+                <span>
+                  {!isLastQuestion ? 'Tiếp Tục Câu Kế Tiếp' : 'Tiếp Tục — Xem Kết Quả'}
+                </span>
+                <ArrowRightIcon size={16} />
+              </button>
+            )}
           </div>
         ) : isQuestionTimedOut ? (
           <div
             data-testid="solo-timeout-banner"
             style={{
-              padding: '1.75rem',
-              borderRadius: '18px',
+              padding: playtestMode ? '1rem 1.15rem' : '1.5rem',
+              borderRadius: '16px',
               backgroundColor: 'rgba(239, 68, 68, 0.12)',
               border: '2px solid var(--accent-rose)',
-              marginBottom: '1.5rem',
               animation: 'popIn 0.2s ease',
             }}
           >
             <div
               style={{
-                fontSize: '1.4rem',
+                fontSize: '1.25rem',
                 fontWeight: 900,
                 color: 'var(--accent-rose)',
-                marginBottom: '0.5rem',
+                marginBottom: '0.4rem',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '0.5rem',
+                gap: '0.45rem',
               }}
             >
-              <ClockIcon size={26} />
+              <ClockIcon size={24} />
               <span>Hết Thời Gian Trả Lời! (+0 điểm)</span>
             </div>
             <p
               style={{
-                margin: '0.35rem auto 0 auto',
-                fontSize: '0.92rem',
+                margin: '0.25rem auto 0 auto',
+                fontSize: '0.88rem',
                 color: 'var(--text-secondary)',
-                lineHeight: 1.5,
+                lineHeight: 1.45,
                 maxWidth: '560px',
               }}
             >
               Thời gian cho câu hỏi này đã kết thúc trước khi hệ thống nhận được đáp án của bạn.
             </p>
-            <button
-              type="button"
-              onClick={handleNextQuestion}
-              style={{
-                marginTop: '1.25rem',
-                minHeight: '46px',
-                padding: '0.75rem 1.75rem',
-                borderRadius: '12px',
-                border: 'none',
-                backgroundColor: 'var(--primary)',
-                color: 'var(--primary-ink)',
-                fontWeight: 800,
-                fontSize: '0.95rem',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                boxShadow: '0 0 16px var(--primary-subtle)',
-              }}
-            >
-              <span>
-                {currentQuestion.questionIndex + 1 < currentQuestion.totalQuestions
-                  ? 'Tiếp Tục Câu Kế Tiếp'
-                  : 'Tiếp Tục — Xem Kết Quả'}
-              </span>
-              <ArrowRightIcon size={16} />
-            </button>
+            {!playtestMode && (
+              <button
+                type="button"
+                onClick={handleNextQuestion}
+                style={{
+                  marginTop: '1rem',
+                  minHeight: '44px',
+                  padding: '0.65rem 1.5rem',
+                  borderRadius: '12px',
+                  border: 'none',
+                  backgroundColor: 'var(--primary)',
+                  color: 'var(--primary-ink)',
+                  fontWeight: 800,
+                  fontSize: '0.92rem',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.45rem',
+                  boxShadow: '0 0 16px var(--primary-subtle)',
+                }}
+              >
+                <span>
+                  {!isLastQuestion ? 'Tiếp Tục Câu Kế Tiếp' : 'Tiếp Tục — Xem Kết Quả'}
+                </span>
+                <ArrowRightIcon size={16} />
+              </button>
+            )}
           </div>
         ) : (
           /* ACTIVE ANSWER INPUT / OPTIONS */
@@ -3622,8 +4266,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
-                  gap: '1rem',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
+                  gap: playtestMode ? '0.65rem' : '1rem',
                 }}
               >
                 {currentQuestion.choices.map((opt: string, idx: number) => {
@@ -3643,44 +4287,45 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                       data-testid={`solo-choice-btn-${idx}`}
                       disabled={isSubmitting}
                       onClick={() => {
+                        soundManager.playSelect();
                         setSelectedChoice(opt);
                         handleSubmitAnswer(opt);
                       }}
                       className="k-btn"
                       style={{
-                        padding: '1.15rem 1.25rem',
-                        minHeight: '68px',
-                        borderRadius: '16px',
+                        padding: playtestMode ? '0.8rem 1rem' : '1.15rem 1.25rem',
+                        minHeight: playtestMode ? '54px' : '68px',
+                        borderRadius: '14px',
                         border: isSelected ? '3px solid #ffffff' : 'none',
                         backgroundColor: cfg.bg,
                         color: cfg.text,
                         fontWeight: 900,
-                        fontSize: '1.05rem',
+                        fontSize: playtestMode ? '0.96rem' : '1.05rem',
                         cursor: isSubmitting ? 'not-allowed' : 'pointer',
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'flex-start',
                         textAlign: 'left',
-                        gap: '0.85rem',
+                        gap: '0.75rem',
                         boxShadow: isSelected
                           ? `0 2px 0 ${cfg.dark}`
-                          : `0 5px 0 ${cfg.dark}`,
+                          : `0 4px 0 ${cfg.dark}`,
                         transform: isSelected ? 'translateY(3px)' : 'none',
                         transition: 'transform 0.1s ease, box-shadow 0.1s ease',
                       }}
                     >
                       <span
                         style={{
-                          width: '36px',
-                          height: '36px',
-                          borderRadius: '10px',
+                          width: playtestMode ? '32px' : '36px',
+                          height: playtestMode ? '32px' : '36px',
+                          borderRadius: '9px',
                           backgroundColor: 'rgba(0, 0, 0, 0.2)',
                           color: '#ffffff',
                           display: 'flex',
                           alignItems: 'center',
                           justifyContent: 'center',
                           fontWeight: 900,
-                          fontSize: '1.15rem',
+                          fontSize: '1.05rem',
                           flexShrink: 0,
                         }}
                       >
@@ -3699,55 +4344,59 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 style={{
                   display: 'grid',
                   gridTemplateColumns: '1fr 1fr',
-                  gap: '1.5rem',
+                  gap: playtestMode ? '1rem' : '1.5rem',
                   maxWidth: '540px',
                   margin: '0 auto',
                 }}
               >
                 <button
                   type="button"
+                  data-testid="solo-quick-true-btn"
                   disabled={isSubmitting}
-                  onClick={() =>
-                    handleSubmitAnswer(currentQuestion.choices?.[0] || 'Đúng')
-                  }
+                  onClick={() => {
+                    soundManager.playSelect();
+                    handleSubmitAnswer(currentQuestion.choices?.[0] || 'Đúng');
+                  }}
                   className="k-btn k-btn-green"
                   style={{
-                    minHeight: '74px',
-                    borderRadius: '18px',
+                    minHeight: playtestMode ? '60px' : '74px',
+                    borderRadius: '16px',
                     border: 'none',
                     fontWeight: 900,
-                    fontSize: '1.35rem',
+                    fontSize: playtestMode ? '1.2rem' : '1.35rem',
                     cursor: isSubmitting ? 'not-allowed' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '0.65rem',
+                    gap: '0.6rem',
                   }}
                 >
-                  <CheckIcon size={26} />
+                  <CheckIcon size={24} />
                   <span>{currentQuestion.choices?.[0] || 'ĐÚNG'}</span>
                 </button>
                 <button
                   type="button"
+                  data-testid="solo-quick-false-btn"
                   disabled={isSubmitting}
-                  onClick={() =>
-                    handleSubmitAnswer(currentQuestion.choices?.[1] || 'Sai')
-                  }
+                  onClick={() => {
+                    soundManager.playSelect();
+                    handleSubmitAnswer(currentQuestion.choices?.[1] || 'Sai');
+                  }}
                   className="k-btn k-btn-red"
                   style={{
-                    minHeight: '74px',
-                    borderRadius: '18px',
+                    minHeight: playtestMode ? '60px' : '74px',
+                    borderRadius: '16px',
                     border: 'none',
                     fontWeight: 900,
-                    fontSize: '1.35rem',
+                    fontSize: playtestMode ? '1.2rem' : '1.35rem',
                     cursor: isSubmitting ? 'not-allowed' : 'pointer',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '0.65rem',
+                    gap: '0.6rem',
                   }}
                 >
-                  <XMarkIcon size={26} />
+                  <XMarkIcon size={24} />
                   <span>{currentQuestion.choices?.[1] || 'SAI'}</span>
                 </button>
               </div>
@@ -3756,27 +4405,27 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             {/* FILL IN THE BLANK / CROSSWORD / TEXT */}
             {currentQuestion.type === 'PUZZLE' && (
               <div style={{ maxWidth: '580px', margin: '0 auto', textAlign: 'left' }}>
-                <div style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.75rem', textAlign: 'center' }}>
+                <div style={{ fontSize: '0.84rem', fontWeight: 700, color: 'var(--text-secondary)', marginBottom: '0.55rem', textAlign: 'center' }}>
                   Sắp xếp các bước dưới đây theo đúng thứ tự từ trên xuống dưới:
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '0.85rem' }}>
                   {puzzleOrder.map((item, idx) => (
                     <div
                       key={`${idx}_${item}`}
                       style={{
                         display: 'flex',
                         alignItems: 'center',
-                        gap: '0.75rem',
-                        padding: '0.85rem 1rem',
-                        borderRadius: '14px',
+                        gap: '0.65rem',
+                        padding: playtestMode ? '0.65rem 0.85rem' : '0.85rem 1rem',
+                        borderRadius: '12px',
                         backgroundColor: 'var(--bg-input)',
                         border: '1.5px solid var(--border-strong)',
                       }}
                     >
                       <span
                         style={{
-                          width: '32px',
-                          height: '32px',
+                          width: '28px',
+                          height: '28px',
                           borderRadius: '8px',
                           backgroundColor: 'var(--primary)',
                           color: '#ffffff',
@@ -3784,23 +4433,26 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                           alignItems: 'center',
                           justifyContent: 'center',
                           fontWeight: 900,
-                          fontSize: '0.9rem',
+                          fontSize: '0.84rem',
                           flexShrink: 0,
                         }}
                       >
                         {idx + 1}
                       </span>
-                      <span style={{ flex: 1, fontWeight: 800, fontSize: '0.98rem', color: 'var(--text-primary)' }}>
+                      <span style={{ flex: 1, fontWeight: 800, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
                         {item}
                       </span>
-                      <div style={{ display: 'flex', gap: '0.35rem' }}>
+                      <div style={{ display: 'flex', gap: '0.3rem' }}>
                         <button
                           type="button"
                           disabled={isSubmitting || idx === 0}
-                          onClick={() => handleMovePuzzleItem(idx, -1)}
+                          onClick={() => {
+                            soundManager.playSelect();
+                            handleMovePuzzleItem(idx, -1);
+                          }}
                           style={{
-                            width: '36px',
-                            height: '36px',
+                            width: '32px',
+                            height: '32px',
                             borderRadius: '8px',
                             border: '1px solid var(--border-strong)',
                             backgroundColor: 'var(--bg-surface)',
@@ -3815,10 +4467,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                         <button
                           type="button"
                           disabled={isSubmitting || idx === puzzleOrder.length - 1}
-                          onClick={() => handleMovePuzzleItem(idx, 1)}
+                          onClick={() => {
+                            soundManager.playSelect();
+                            handleMovePuzzleItem(idx, 1);
+                          }}
                           style={{
-                            width: '36px',
-                            height: '36px',
+                            width: '32px',
+                            height: '32px',
                             borderRadius: '8px',
                             border: '1px solid var(--border-strong)',
                             backgroundColor: 'var(--bg-surface)',
@@ -3836,18 +4491,22 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 </div>
                 <button
                   type="button"
+                  data-testid="solo-puzzle-submit-btn"
                   disabled={isSubmitting || puzzleOrder.length === 0}
-                  onClick={() => handleSubmitAnswer(puzzleOrder.join(' | '))}
+                  onClick={() => {
+                    soundManager.playSelect();
+                    handleSubmitAnswer(puzzleOrder.join(' | '));
+                  }}
                   style={{
                     width: '100%',
-                    minHeight: '50px',
-                    padding: '0.85rem 1.5rem',
-                    borderRadius: '14px',
+                    minHeight: '44px',
+                    padding: '0.7rem 1.25rem',
+                    borderRadius: '12px',
                     border: 'none',
                     backgroundColor: 'var(--primary)',
                     color: '#ffffff',
                     fontWeight: 900,
-                    fontSize: '1rem',
+                    fontSize: '0.94rem',
                     cursor: isSubmitting || puzzleOrder.length === 0 ? 'not-allowed' : 'pointer',
                   }}
                 >
@@ -4037,12 +4696,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
                   <button
                     type="button"
+                    data-testid="solo-slider-submit-btn"
                     disabled={isSubmitting || !sliderTouched}
                     onClick={() => {
                       if (!sliderTouched) {
                         toast.warning('Vui lòng kéo thanh trượt hoặc chọn một mức giá trị trước khi xác nhận.', 'Chưa chọn giá trị');
                         return;
                       }
+                      soundManager.playSelect();
                       const safeVal = clampToSlider(sliderValue);
                       handleSubmitAnswer(String(safeVal));
                     }}
@@ -4218,6 +4879,162 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           </div>
         )}
       </div>
+
+      {/* 4. Bottom Question Navigation & Action Bar for Playtest / Demo Mode (Never overlaps question content on mobile) */}
+      {playtestMode && (
+        <div
+          data-testid="playtest-question-nav-bar"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            flexWrap: 'wrap',
+            gap: '0.55rem',
+            padding: '0.6rem 0.95rem',
+            borderRadius: '14px',
+            backgroundColor: 'var(--bg-surface)',
+            border: '1.5px solid var(--border-strong)',
+            boxShadow: 'var(--shadow-sm)',
+          }}
+        >
+          {/* Left: Previous Question */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <button
+              type="button"
+              data-testid="playtest-prev-question-btn"
+              disabled={currentQuestion.questionIndex <= 0}
+              onClick={handlePrevQuestion}
+              style={{
+                minHeight: '38px',
+                padding: '0.4rem 0.85rem',
+                borderRadius: '10px',
+                border: '1.5px solid var(--border-strong)',
+                backgroundColor: 'var(--bg-input)',
+                color:
+                  currentQuestion.questionIndex <= 0
+                    ? 'var(--text-muted)'
+                    : 'var(--text-primary)',
+                fontWeight: 800,
+                fontSize: '0.84rem',
+                cursor: currentQuestion.questionIndex <= 0 ? 'not-allowed' : 'pointer',
+                opacity: currentQuestion.questionIndex <= 0 ? 0.5 : 1,
+              }}
+            >
+              ← Câu trước
+            </button>
+          </div>
+
+          {/* Center: Question Indicator + Edit Action (Creator Playtest only) */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.6rem',
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+            }}
+          >
+            <span
+              data-testid="playtest-nav-counter"
+              style={{
+                fontSize: '0.85rem',
+                fontWeight: 900,
+                color: 'var(--text-secondary)',
+              }}
+            >
+              Câu {currentQuestion.questionIndex + 1} / {currentQuestion.totalQuestions}
+            </span>
+
+            {isReviewingPreviousAnswer && (
+              <span
+                data-testid="playtest-reviewing-prev-badge"
+                style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  padding: '0.16rem 0.5rem',
+                  borderRadius: '999px',
+                  backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                  color: 'var(--primary)',
+                }}
+              >
+                Đã trả lời
+              </span>
+            )}
+
+            {!demoMode && (
+              <button
+                type="button"
+                data-testid="playtest-inline-edit-btn"
+                onClick={() => handleOpenInlineEditor(currentQuestion.questionIndex)}
+                style={{
+                  minHeight: '36px',
+                  padding: '0.35rem 0.8rem',
+                  borderRadius: '9px',
+                  border: '1.5px solid var(--primary)',
+                  backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                  color: 'var(--primary)',
+                  fontSize: '0.8rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.3rem',
+                }}
+              >
+                <span>✎ Chỉnh sửa câu này</span>
+              </button>
+            )}
+          </div>
+
+          {/* Right: Manual Next Question Button */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {hasAnsweredOrTimedOut ? (
+              <button
+                type="button"
+                data-testid="solo-next-question-btn"
+                onClick={handleNextQuestion}
+                style={{
+                  minHeight: '40px',
+                  padding: '0.45rem 1.15rem',
+                  borderRadius: '10px',
+                  border: 'none',
+                  backgroundColor: 'var(--primary)',
+                  color: 'var(--primary-ink)',
+                  fontWeight: 900,
+                  fontSize: '0.88rem',
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
+                  boxShadow: '0 4px 14px var(--primary-subtle)',
+                }}
+              >
+                <span>
+                  {!isLastQuestion
+                    ? 'Câu tiếp theo →'
+                    : demoMode
+                      ? 'Hoàn thành demo →'
+                      : 'Hoàn thành chơi thử'}
+                </span>
+              </button>
+            ) : (
+              <span
+                data-testid="playtest-awaiting-answer-hint"
+                style={{
+                  fontSize: '0.78rem',
+                  fontWeight: 700,
+                  color: 'var(--text-muted)',
+                  padding: '0.35rem 0.65rem',
+                  borderRadius: '8px',
+                  backgroundColor: 'var(--bg-input)',
+                }}
+              >
+                Chọn / gửi đáp án để tiếp tục
+              </span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

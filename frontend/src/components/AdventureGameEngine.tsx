@@ -771,8 +771,11 @@ export interface AdventureGameEngineProps {
   onExit: () => void;
   onOpenConfigTab?: () => void;
   isPlaytest?: boolean;
+  isDemoMode?: boolean;
+  onCreateThisGameType?: () => void;
   onCheckpointModalChange?: (isOpen: boolean, stageIndex: number) => void;
   onEditCheckpointQuestion?: (stageIndex: number) => void;
+  onPrevCheckpointQuestion?: () => void;
   audioMuted?: boolean;
   onToggleAudioMute?: () => void;
 }
@@ -805,8 +808,11 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
   onRestartLiveSession,
   onExit,
   isPlaytest = false,
+  isDemoMode = false,
+  onCreateThisGameType,
   onCheckpointModalChange,
   onEditCheckpointQuestion,
+  onPrevCheckpointQuestion,
   audioMuted = false,
   onToggleAudioMute,
 }) => {
@@ -1117,7 +1123,14 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
     }
   }, [isJourneyFinished]);
 
-  // Reset question input controls when activeQuestion changes
+  // Reset question input controls when activeQuestion changes or when feedback is reset after inline edit
+  useEffect(() => {
+    if (!activeFeedback) {
+      submittedStageIndicesRef.current.delete(activeStageIndex);
+      submittingStageLockRef.current = false;
+    }
+  }, [activeFeedback, activeStageIndex, activeQuestion?.question, (activeQuestion as any)?.correctAnswer]);
+
   useEffect(() => {
     setSelectedChoice('');
     setTextAnswer('');
@@ -1961,15 +1974,15 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 height: '38px',
                 padding: '0 12px',
                 borderRadius: '10px',
-                backgroundColor: 'rgba(245, 158, 11, 0.18)',
-                border: '1.5px solid rgba(245, 158, 11, 0.5)',
-                color: '#fbbf24',
+                backgroundColor: isDemoMode ? 'rgba(16, 185, 129, 0.2)' : 'rgba(245, 158, 11, 0.18)',
+                border: isDemoMode ? '1.5px solid rgba(16, 185, 129, 0.55)' : '1.5px solid rgba(245, 158, 11, 0.5)',
+                color: isDemoMode ? '#34d399' : '#fbbf24',
                 fontSize: '11.5px',
                 fontWeight: 900,
                 letterSpacing: '0.03em',
               }}
             >
-              <span>CHẾ ĐỘ CHƠI THỬ</span>
+              <span>{isDemoMode ? 'XEM DEMO' : 'CHẾ ĐỘ CHƠI THỬ'}</span>
             </div>
           )}
           {onToggleAudioMute && (
@@ -2015,7 +2028,7 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
               {isPaused ? 'Tiếp tục' : 'Tạm dừng'}
             </button>
           )}
-          {isPlaytest && (
+          {isPlaytest ? (
             <button
               type="button"
               data-testid="exit-playtest-btn"
@@ -2033,28 +2046,29 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 cursor: 'pointer',
               }}
             >
-              Thoát chơi thử
+              {isDemoMode ? 'Đóng demo' : 'Thoát chơi thử'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              data-testid="hud-exit-button"
+              onClick={handleExitGame}
+              style={{
+                minHeight: '44px',
+                minWidth: '44px',
+                padding: '0 14px',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(15, 23, 42, 0.88)',
+                border: '1px solid rgba(239, 68, 68, 0.45)',
+                color: '#fca5a5',
+                fontSize: '12.5px',
+                fontWeight: 700,
+                cursor: 'pointer',
+              }}
+            >
+              Thoát
             </button>
           )}
-          <button
-            type="button"
-            data-testid="hud-exit-button"
-            onClick={handleExitGame}
-            style={{
-              minHeight: '44px',
-              minWidth: '44px',
-              padding: '0 14px',
-              borderRadius: '10px',
-              backgroundColor: 'rgba(15, 23, 42, 0.88)',
-              border: '1px solid rgba(239, 68, 68, 0.45)',
-              color: '#fca5a5',
-              fontSize: '12.5px',
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
-          >
-            Thoát
-          </button>
         </div>
       </div>
 
@@ -2469,14 +2483,40 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                   </span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                  {isPlaytest && onEditCheckpointQuestion && (
+                  {isPlaytest && onPrevCheckpointQuestion && activeStageIndex > 0 && (
+                    <button
+                      type="button"
+                      data-testid="playtest-prev-question-btn"
+                      onClick={() => {
+                        const prevIdx = Math.max(0, activeStageIndex - 1);
+                        submittedStageIndicesRef.current.delete(prevIdx);
+                        setActiveStageIndex(prevIdx);
+                        physicsRef.current.activeStageIndex = prevIdx;
+                        onPrevCheckpointQuestion();
+                      }}
+                      style={{
+                        padding: '6px 12px',
+                        minHeight: '38px',
+                        borderRadius: '8px',
+                        fontSize: '11.5px',
+                        fontWeight: 800,
+                        backgroundColor: uiTheme.subCardBg,
+                        border: `1px solid ${uiTheme.choiceBorder}`,
+                        color: uiTheme.textPrimary,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ← Câu trước
+                    </button>
+                  )}
+                  {isPlaytest && !isDemoMode && onEditCheckpointQuestion && (
                     <button
                       type="button"
                       data-testid="playtest-inline-edit-btn"
                       onClick={() => onEditCheckpointQuestion(activeStageIndex)}
                       style={{
                         padding: '6px 12px',
-                        minHeight: '44px',
+                        minHeight: '38px',
                         borderRadius: '8px',
                         fontSize: '11.5px',
                         fontWeight: 800,
@@ -3550,6 +3590,26 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                 })()}
 
               <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                {isDemoMode && onCreateThisGameType && (
+                  <button
+                    type="button"
+                    data-testid="demo-finish-create-btn"
+                    onClick={onCreateThisGameType}
+                    style={{
+                      minHeight: '44px',
+                      padding: '0 18px',
+                      borderRadius: '8px',
+                      backgroundColor: '#10b981',
+                      border: 'none',
+                      color: '#052e16',
+                      fontSize: '14px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ✨ Tạo game loại này
+                  </button>
+                )}
                 <button
                   type="button"
                   data-testid="victory-restart-btn"

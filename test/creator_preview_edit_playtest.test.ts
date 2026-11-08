@@ -895,7 +895,7 @@ async function runTests() {
       await sleep(300);
       await page.eval(`(() => {
         const overlay = document.querySelector('[data-testid="playtest-overlay"]');
-        const nextBtn = Array.from(overlay.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Tiếp Tục'));
+        const nextBtn = overlay.querySelector('[data-testid="solo-next-question-btn"]') || Array.from(overlay.querySelectorAll('button')).find(b => b.textContent && (b.textContent.includes('Câu tiếp theo') || b.textContent.includes('Hoàn thành chơi thử') || b.textContent.includes('Tiếp Tục')));
         if (nextBtn) nextBtn.click();
       })()`);
       await sleep(300);
@@ -908,7 +908,7 @@ async function runTests() {
       await sleep(300);
       await page.eval(`(() => {
         const overlay = document.querySelector('[data-testid="playtest-overlay"]');
-        const nextBtn = Array.from(overlay.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Tiếp Tục'));
+        const nextBtn = overlay.querySelector('[data-testid="solo-next-question-btn"]') || Array.from(overlay.querySelectorAll('button')).find(b => b.textContent && (b.textContent.includes('Câu tiếp theo') || b.textContent.includes('Hoàn thành chơi thử') || b.textContent.includes('Tiếp Tục')));
         if (nextBtn) nextBtn.click();
       })()`);
       await sleep(350);
@@ -958,7 +958,7 @@ async function runTests() {
       await sleep(250);
       await page.eval(`(() => {
         const overlay = document.querySelector('[data-testid="playtest-overlay"]');
-        const nextBtn = Array.from(overlay.querySelectorAll('button')).find(b => b.textContent && b.textContent.includes('Tiếp Tục'));
+        const nextBtn = overlay.querySelector('[data-testid="solo-next-question-btn"]') || Array.from(overlay.querySelectorAll('button')).find(b => b.textContent && (b.textContent.includes('Câu tiếp theo') || b.textContent.includes('Hoàn thành chơi thử') || b.textContent.includes('Tiếp Tục')));
         if (nextBtn) nextBtn.click();
       })()`);
       await sleep(300);

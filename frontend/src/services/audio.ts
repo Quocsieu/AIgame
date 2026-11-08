@@ -418,8 +418,8 @@ const PACK_SYNTH_PATTERNS: Record<string, Record<SfxCueType, PackCueNote[]>> = {
       { freq: 1046.5, dur: 0.22, wave: 'triangle', gain: 0.3, delay: 0.24 },
     ],
     wrong: [
-      { freq: 311.13, dur: 0.18, wave: 'sawtooth', gain: 0.22, delay: 0 },
-      { freq: 233.08, dur: 0.26, wave: 'sawtooth', gain: 0.24, delay: 0.15 },
+      { freq: 329.63, dur: 0.14, wave: 'triangle', gain: 0.19, delay: 0 },
+      { freq: 261.63, dur: 0.2, wave: 'sine', gain: 0.2, delay: 0.12 },
     ],
     timeout: [
       { freq: 440.0, dur: 0.12, wave: 'sine', gain: 0.23, delay: 0 },
@@ -490,8 +490,8 @@ const PACK_SYNTH_PATTERNS: Record<string, Record<SfxCueType, PackCueNote[]>> = {
       { freq: 880.0, dur: 0.22, wave: 'triangle', gain: 0.3, delay: 0.3 },
     ],
     wrong: [
-      { freq: 261.63, dur: 0.18, wave: 'sawtooth', gain: 0.23, delay: 0 },
-      { freq: 196.0, dur: 0.26, wave: 'sawtooth', gain: 0.25, delay: 0.16 },
+      { freq: 293.66, dur: 0.15, wave: 'triangle', gain: 0.19, delay: 0 },
+      { freq: 220.0, dur: 0.22, wave: 'sine', gain: 0.2, delay: 0.13 },
     ],
     timeout: [
       { freq: 392.0, dur: 0.14, wave: 'triangle', gain: 0.24, delay: 0 },
@@ -561,6 +561,7 @@ class GameAudioManager {
   private activeBgmUrl: string | null = null;
   private customAudioEl: HTMLAudioElement | null = null;
   private activeSfxAudioElements: Map<string, HTMLAudioElement> = new Map();
+  private activeSfxOscillators: Set<OscillatorNode> = new Set();
   private duckTimeoutId: number | null = null;
   private isBgmDucked: boolean = false;
   private isPlayingBgm: boolean = false;
@@ -834,6 +835,7 @@ class GameAudioManager {
 
   public playSfx(
     type:
+      | 'select'
       | 'correct'
       | 'wrong'
       | 'timeout'
@@ -847,6 +849,9 @@ class GameAudioManager {
       | 'adventure_checkpoint'
   ): void {
     switch (type) {
+      case 'select':
+        this.playSelect();
+        break;
       case 'correct':
         this.playCorrect();
         break;
@@ -968,6 +973,33 @@ class GameAudioManager {
     return Math.min(1, Math.max(0, (this.volume / 100) * multiplier * duckFactor));
   }
 
+  private stopActiveSfxPlayback(): void {
+    for (const osc of this.activeSfxOscillators) {
+      try {
+        osc.stop();
+        osc.disconnect();
+      } catch {}
+    }
+    this.activeSfxOscillators.clear();
+    for (const el of this.activeSfxAudioElements.values()) {
+      try {
+        el.pause();
+        el.currentTime = 0;
+      } catch {}
+    }
+    this.activeSfxAudioElements.clear();
+  }
+
+  private isCueDebounced(cueKey: string, minIntervalMs: number = 75): boolean {
+    const now = Date.now();
+    const last = this.lastCuePlayedAtMap.get(cueKey) || 0;
+    if (now - last < minIntervalMs) {
+      return true;
+    }
+    this.lastCuePlayedAtMap.set(cueKey, now);
+    return false;
+  }
+
   private playTone(
     freq: number,
     durationSec: number,
@@ -998,9 +1030,13 @@ class GameAudioManager {
       this.activeOscillatorCount++;
       this.lastGainValue = gainVal;
       this.lastToneFrequency = freq;
+      if (!isBgmTone) {
+        this.activeSfxOscillators.add(osc);
+      }
 
       osc.onended = () => {
         this.activeOscillatorCount = Math.max(0, this.activeOscillatorCount - 1);
+        this.activeSfxOscillators.delete(osc);
         try {
           osc.disconnect();
           gain.disconnect();
@@ -1127,6 +1163,14 @@ class GameAudioManager {
       }
     }
 
+    // Prevent overlapping SFX when user clicks rapidly
+    if (cue !== 'countdown') {
+      if (!forcePlayForPreview && this.isCueDebounced(cue, 70)) {
+        return false;
+      }
+      this.stopActiveSfxPlayback();
+    }
+
     this.lastSfxPlayed = cue;
     this.lastSfxVariantKey = variantKey;
     this.lastSfxAssetUrl = assetUrl;
@@ -1145,13 +1189,13 @@ class GameAudioManager {
 
     if (variantKey === 'wrong_tete') {
       packNotes = [
-        { freq: 233.08, dur: 0.2, wave: 'sawtooth', gain: 0.25, delay: 0 },
-        { freq: 164.81, dur: 0.3, wave: 'sawtooth', gain: 0.26, delay: 0.22 },
+        { freq: 311.13, dur: 0.14, wave: 'triangle', gain: 0.19, delay: 0 },
+        { freq: 246.94, dur: 0.2, wave: 'sine', gain: 0.2, delay: 0.13 },
       ];
     } else if (variantKey === 'wrong_buzzer') {
       packNotes = [
-        { freq: 146.83, dur: 0.32, wave: 'sawtooth', gain: 0.26, delay: 0 },
-        { freq: 155.56, dur: 0.32, wave: 'square', gain: 0.2, delay: 0.04 },
+        { freq: 277.18, dur: 0.16, wave: 'triangle', gain: 0.19, delay: 0 },
+        { freq: 220.0, dur: 0.22, wave: 'sine', gain: 0.2, delay: 0.12 },
       ];
     }
 
@@ -1531,13 +1575,7 @@ class GameAudioManager {
       this.duckTimeoutId = null;
     }
     this.stopBgmInternal();
-    for (const el of this.activeSfxAudioElements.values()) {
-      try {
-        el.pause();
-        el.currentTime = 0;
-      } catch {}
-    }
-    this.activeSfxAudioElements.clear();
+    this.stopActiveSfxPlayback();
     if (wasPreviewing) {
       cb?.onStateChange?.(false);
     }
@@ -1563,6 +1601,14 @@ class GameAudioManager {
       const pitch = sec <= 2 ? 880 : 660;
       this.playTone(pitch, 0.12, 'sine', 0.24, 0, false);
     }
+  }
+
+  public playSelect(): void {
+    if (this.currentConfig.sfxEnabled === false || this.muted || !this.currentConfig.enabled) return;
+    if (this.isCueDebounced('select', 55)) return;
+    this.lastSfxPlayed = 'select';
+    this.lastSfxVariantKey = 'select';
+    this.playTone(660.0, 0.042, 'sine', 0.12, 0, false);
   }
 
   public playStart(): void {

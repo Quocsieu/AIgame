@@ -1,5 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { GameModeSelectionModal } from '../components/GameModeSelectionModal.js';
+import { GameTypeDemoModal } from '../components/GameTypeDemoModal.js';
+import { soundManager } from '../services/audio.js';
 import { useToast } from '../components/ToastContext.js';
 import {
   AlertTriangleIcon,
@@ -168,6 +170,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [isModeModalOpen, setIsModeModalOpen] = useState(false);
   const [modeModalSpec, setModeModalSpec] = useState<GameSpecification | null>(null);
   const [loadingGameId, setLoadingGameId] = useState<string | null>(null);
+  const [previewDemoType, setPreviewDemoType] = useState<GameType | null>(null);
 
   const canManageGame = (game: { ownerUserId?: string | null } | null | undefined): boolean => {
     if (!game) return false;
@@ -1230,29 +1233,58 @@ export const HomePage: React.FC<HomePageProps> = ({
                 }}
               >
                 <button
-                  id={`create-format-btn-${fmt.type.toLowerCase()}`}
                   type="button"
-                  onClick={() => onNavigateToCreate(fmt.type)}
+                  data-testid={`home-demo-format-btn-${fmt.type.toLowerCase()}`}
+                  onClick={() => {
+                    soundManager.playSelect();
+                    setPreviewDemoType(fmt.type);
+                  }}
                   style={{
-                    width: '100%',
-                    backgroundColor: 'var(--primary)',
-                    color: 'var(--primary-ink, #08090e)',
-                    border: '1px solid var(--primary)',
+                    flex: 1,
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-primary)',
+                    border: '1px solid var(--border-strong)',
                     borderRadius: '6px',
                     height: '34px',
-                    padding: '0 12px',
-                    fontSize: '0.82rem',
+                    padding: '0 10px',
+                    fontSize: '0.8rem',
                     fontWeight: 800,
                     cursor: 'pointer',
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',
-                    gap: '6px',
+                    gap: '5px',
                   }}
                 >
-                  <PlusIcon size={14} />
+                  <span>▶ Xem demo</span>
+                </button>
+
+                <button
+                  id={`create-format-btn-${fmt.type.toLowerCase()}`}
+                  type="button"
+                  onClick={() => {
+                    soundManager.playSelect();
+                    onNavigateToCreate(fmt.type);
+                  }}
+                  style={{
+                    flex: 1,
+                    backgroundColor: 'var(--primary)',
+                    color: 'var(--primary-ink, #08090e)',
+                    border: '1px solid var(--primary)',
+                    borderRadius: '6px',
+                    height: '34px',
+                    padding: '0 10px',
+                    fontSize: '0.8rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '5px',
+                  }}
+                >
+                  <PlusIcon size={13} />
                   <span>Tạo game</span>
-                  <ArrowRightIcon size={13} />
                 </button>
               </div>
             </article>
@@ -1879,6 +1911,16 @@ export const HomePage: React.FC<HomePageProps> = ({
         }}
         onNavigateToHost={onNavigateToHost}
         isOwner={canManageGame(modeModalSpec)}
+      />
+
+      {/* Modal xem Demo tương tác cho từng loại game */}
+      <GameTypeDemoModal
+        gameType={previewDemoType}
+        onClose={() => setPreviewDemoType(null)}
+        onCreateGameType={(gt) => {
+          setPreviewDemoType(null);
+          onNavigateToCreate(gt);
+        }}
       />
     </div>
   );
