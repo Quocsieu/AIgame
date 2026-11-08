@@ -2975,12 +2975,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         alignItems: 'center',
         justifyContent: 'center',
         flexWrap: 'wrap',
-        gap: '0.6rem',
-        padding: '0.5rem 0.95rem',
-        marginBottom: '1rem',
-        borderRadius: '12px',
+        gap: '0.45rem',
+        padding: '0.32rem 0.75rem',
+        marginBottom: '0.5rem',
+        borderRadius: '10px',
         backgroundColor: demoMode ? 'rgba(99, 102, 241, 0.12)' : 'rgba(245, 158, 11, 0.12)',
-        border: `1.5px solid ${demoMode ? 'rgba(99, 102, 241, 0.4)' : 'rgba(245, 158, 11, 0.38)'}`,
+        border: `1px solid ${demoMode ? 'rgba(99, 102, 241, 0.4)' : 'rgba(245, 158, 11, 0.38)'}`,
         color: 'var(--text-primary)',
       }}
     >
@@ -2988,11 +2988,11 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         style={{
           display: 'inline-flex',
           alignItems: 'center',
-          padding: '0.18rem 0.55rem',
+          padding: '0.14rem 0.48rem',
           borderRadius: '999px',
           backgroundColor: demoMode ? 'var(--primary)' : '#f59e0b',
           color: demoMode ? '#ffffff' : '#0f172a',
-          fontSize: '0.7rem',
+          fontSize: '0.66rem',
           fontWeight: 900,
           letterSpacing: '0.04em',
           textTransform: 'uppercase',
@@ -3000,7 +3000,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       >
         {demoMode ? 'CHẾ ĐỘ XEM DEMO' : 'CHẾ ĐỘ CHƠI THỬ'}
       </span>
-      <span style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
+      <span style={{ fontSize: '0.76rem', fontWeight: 700, color: 'var(--text-secondary)' }}>
         {demoMode
           ? 'Trải nghiệm câu hỏi mẫu — Không tốn AI token và không ghi dữ liệu thật'
           : 'Trải nghiệm kiểm thử — Không ghi điểm, lịch sử hay thống kê thật'}
@@ -3075,191 +3075,255 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     return (
       <div
         data-testid="solo-finish-screen"
+        className="solo-finish-screen-card"
         style={{
-          maxWidth: '640px',
-          margin: '1.25rem auto',
-          padding: '1.75rem 1.5rem',
+          maxWidth: '760px',
+          width: '100%',
+          margin: playtestMode ? '0 auto' : '0.75rem auto',
+          padding: '0.95rem 1.25rem',
+          maxHeight: demoMode ? 'calc(100dvh - 116px)' : 'calc(100dvh - 2rem)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          boxSizing: 'border-box',
           backgroundColor: 'var(--bg-surface)',
           border: '1px solid var(--border-subtle)',
-          borderRadius: '22px',
+          borderRadius: '20px',
           textAlign: 'center',
           boxShadow: 'var(--shadow-xl)',
           animation: 'popIn 0.3s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
       >
+        <style>{`
+          @media (max-width: 639px), (max-height: 580px) {
+            .solo-finish-screen-card {
+              max-height: none !important;
+              overflow: visible !important;
+              padding: 0.85rem 0.9rem !important;
+              margin: 0.25rem auto !important;
+            }
+            .solo-finish-review-scroll {
+              max-height: 52dvh !important;
+            }
+            .solo-finish-score-grid {
+              grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+              gap: 0.4rem !important;
+            }
+          }
+        `}</style>
         {inlineEditModalNode}
+
+        {/* VÙNG TRÊN: Tiêu đề, đánh giá kết quả, điểm, số câu đúng, tỷ lệ đúng (Thiết kế gọn, cố định) */}
         <div
+          data-testid="solo-finish-top-summary"
           style={{
-            width: '56px',
-            height: '56px',
-            borderRadius: '18px',
-            backgroundColor: 'var(--accent-amber)',
-            color: '#ffffff',
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            marginBottom: '0.75rem',
+            flexShrink: 0,
+            display: 'flex',
+            flexDirection: 'column',
           }}
         >
-          <TrophyIcon size={28} />
-        </div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '0.75rem',
+              flexWrap: 'wrap',
+              marginBottom: '0.5rem',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem', minWidth: 0, flex: '1 1 240px' }}>
+              <div
+                style={{
+                  width: '40px',
+                  height: '40px',
+                  borderRadius: '12px',
+                  backgroundColor: 'var(--accent-amber)',
+                  color: '#ffffff',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <TrophyIcon size={22} />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <h2 style={{ margin: 0, fontSize: '1.22rem', fontWeight: 900, lineHeight: 1.2 }}>
+                  {demoMode
+                    ? 'Hoàn Thành Bản Demo!'
+                    : playtestMode
+                      ? 'Hoàn Thành Chơi Thử!'
+                      : isExamMode
+                        ? 'Hoàn Thành Bài Thi!'
+                        : 'Hoàn Thành Trận Đấu!'}
+                </h2>
+                <p
+                  style={{
+                    margin: '0.1rem 0 0 0',
+                    color: 'var(--text-secondary)',
+                    fontSize: '0.82rem',
+                    fontWeight: 600,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {activeGameSpec?.title || finalResult.title}
+                </p>
+              </div>
+            </div>
 
-        {perfEval.isPassed !== null && (
-          <div style={{ marginBottom: '0.5rem' }}>
-            <span
-              data-testid="exam-pass-status-badge"
+            {perfEval.isPassed !== null && (
+              <span
+                data-testid="exam-pass-status-badge"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  padding: '0.24rem 0.75rem',
+                  borderRadius: '999px',
+                  fontSize: '0.76rem',
+                  fontWeight: 900,
+                  backgroundColor: perfEval.isPassed
+                    ? 'rgba(16, 185, 129, 0.16)'
+                    : 'rgba(239, 68, 68, 0.16)',
+                  border: `1.5px solid ${
+                    perfEval.isPassed ? 'var(--accent-emerald)' : 'var(--accent-rose)'
+                  }`,
+                  color: perfEval.isPassed ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                  flexShrink: 0,
+                }}
+              >
+                {perfEval.isPassed ? '✓ ĐẠT YÊU CẦU' : '✕ CHƯA ĐẠT'} (Ngưỡng {perfEval.passThresholdPercent}%)
+              </span>
+            )}
+          </div>
+
+          {(examClosedByBtc || (finalResult as any)?.examStatus === 'CLOSED') && (
+            <div
+              data-testid="solo-exam-closed-banner"
               style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                padding: '0.28rem 0.85rem',
-                borderRadius: '999px',
-                fontSize: '0.8rem',
-                fontWeight: 900,
-                backgroundColor: perfEval.isPassed
-                  ? 'rgba(16, 185, 129, 0.16)'
-                  : 'rgba(239, 68, 68, 0.16)',
-                border: `1.5px solid ${
-                  perfEval.isPassed ? 'var(--accent-emerald)' : 'var(--accent-rose)'
-                }`,
-                color: perfEval.isPassed ? 'var(--accent-emerald)' : 'var(--accent-rose)',
+                padding: '0.45rem 0.75rem',
+                borderRadius: '10px',
+                backgroundColor: 'rgba(245, 158, 11, 0.14)',
+                border: '1.5px solid rgba(245, 158, 11, 0.45)',
+                color: 'var(--text-primary)',
+                fontSize: '0.78rem',
+                fontWeight: 800,
+                marginBottom: '0.5rem',
               }}
             >
-              {perfEval.isPassed ? '✓ ĐẠT YÊU CẦU' : '✕ CHƯA ĐẠT'} (Ngưỡng {perfEval.passThresholdPercent}%)
-            </span>
-          </div>
-        )}
+              Đợt thi đã kết thúc — Hệ thống đã tự động ghi nhận và chấm điểm các câu bạn đã hoàn thành.
+            </div>
+          )}
 
-        <h2 style={{ margin: '0 0 0.25rem 0', fontSize: '1.5rem', fontWeight: 900 }}>
-          {demoMode
-            ? 'Hoàn Thành Bản Demo!'
-            : playtestMode
-              ? 'Hoàn Thành Chơi Thử!'
-              : isExamMode
-                ? 'Hoàn Thành Bài Thi!'
-                : 'Hoàn Thành Trận Đấu!'}
-        </h2>
-        <p style={{ margin: '0 0 1rem 0', color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-          {activeGameSpec?.title || finalResult.title}
-        </p>
+          {finishPlaytestBanner}
 
-        {(examClosedByBtc || (finalResult as any)?.examStatus === 'CLOSED') && (
+          {/* Unified 4-Tier Evaluation Card + 3 Score Cards */}
           <div
-            data-testid="solo-exam-closed-banner"
+            data-testid="solo-result-evaluation"
             style={{
-              padding: '0.8rem 1rem',
-              borderRadius: '14px',
-              backgroundColor: 'rgba(245, 158, 11, 0.14)',
-              border: '1.5px solid rgba(245, 158, 11, 0.45)',
-              color: 'var(--text-primary)',
-              fontSize: '0.86rem',
-              fontWeight: 800,
-              marginBottom: '1rem',
-            }}
-          >
-            Đợt thi đã kết thúc — Hệ thống đã tự động ghi nhận và chấm điểm các câu bạn đã hoàn thành.
-          </div>
-        )}
-
-        {finishPlaytestBanner}
-
-        {/* Unified 4-Tier Evaluation Card */}
-        <div
-          data-testid="solo-result-evaluation"
-          style={{
-            padding: '0.85rem 1.1rem',
-            borderRadius: '14px',
-            backgroundColor: 'var(--bg-input)',
-            border: '1.5px solid var(--primary)',
-            marginBottom: '1.15rem',
-            textAlign: 'left',
-          }}
-        >
-          <div
-            data-testid="result-tier-label"
-            style={{ fontSize: '0.98rem', fontWeight: 900, color: 'var(--primary)' }}
-          >
-            Mức đánh giá: {perfEval.tierLabel} ({perfEval.accuracyPercentage}%)
-          </div>
-          <div
-            style={{
-              fontSize: '0.84rem',
-              color: 'var(--text-secondary)',
-              marginTop: '0.25rem',
-              lineHeight: 1.45,
-            }}
-          >
-            {perfEval.comment}
-          </div>
-        </div>
-
-        {/* Score cards */}
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))',
-            gap: '0.75rem',
-            marginBottom: '1.35rem',
-          }}
-        >
-          <div
-            style={{
-              padding: '0.95rem 0.85rem',
-              borderRadius: '14px',
+              padding: '0.5rem 0.85rem',
+              borderRadius: '11px',
               backgroundColor: 'var(--bg-input)',
-              border: '1px solid var(--border-subtle)',
+              border: '1.5px solid var(--primary)',
+              marginBottom: '0.55rem',
+              textAlign: 'left',
+              display: 'flex',
+              alignItems: 'baseline',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: '0.25rem 0.75rem',
             }}
           >
-            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
-              ĐIỂM ĐẠT / TỐI ĐA
+            <div
+              data-testid="result-tier-label"
+              style={{ fontSize: '0.88rem', fontWeight: 900, color: 'var(--primary)' }}
+            >
+              Mức đánh giá: {perfEval.tierLabel} ({perfEval.accuracyPercentage}%)
             </div>
             <div
-              data-testid="solo-result-score-ratio"
-              style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--primary)' }}
+              style={{
+                fontSize: '0.78rem',
+                color: 'var(--text-secondary)',
+                lineHeight: 1.35,
+              }}
             >
-              {totalPts.toLocaleString()} / {maxScore.toLocaleString()}
+              {perfEval.comment}
             </div>
           </div>
 
+          {/* Score cards */}
           <div
+            className="solo-finish-score-grid"
             style={{
-              padding: '0.95rem 0.85rem',
-              borderRadius: '14px',
-              backgroundColor: 'var(--bg-input)',
-              border: '1px solid var(--border-subtle)',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+              gap: '0.55rem',
+              marginBottom: '0.6rem',
             }}
           >
-            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
-              SỐ CÂU ĐÚNG
-            </div>
             <div
-              data-testid="solo-result-correct-ratio"
-              style={{ fontSize: '1.3rem', fontWeight: 900, color: 'var(--accent-emerald)' }}
+              style={{
+                padding: '0.5rem 0.65rem',
+                borderRadius: '11px',
+                backgroundColor: 'var(--bg-input)',
+                border: '1px solid var(--border-subtle)',
+              }}
             >
-              {correctCount} / {finalResult.totalQuestions}
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 800, marginBottom: '0.1rem' }}>
+                ĐIỂM ĐẠT / TỐI ĐA
+              </div>
+              <div
+                data-testid="solo-result-score-ratio"
+                style={{ fontSize: '1.08rem', fontWeight: 900, color: 'var(--primary)', lineHeight: 1.2 }}
+              >
+                {totalPts.toLocaleString()} / {maxScore.toLocaleString()}
+              </div>
             </div>
-          </div>
 
-          <div
-            style={{
-              padding: '0.95rem 0.85rem',
-              borderRadius: '14px',
-              backgroundColor: 'var(--bg-input)',
-              border: '1px solid var(--border-subtle)',
-            }}
-          >
-            <div style={{ fontSize: '0.74rem', color: 'var(--text-muted)', fontWeight: 700, marginBottom: '0.25rem' }}>
-              TỶ LỆ ĐÚNG
-            </div>
             <div
-              data-testid="solo-result-accuracy"
-              style={{ fontSize: '1.3rem', fontWeight: 900, color: '#f59e0b' }}
+              style={{
+                padding: '0.5rem 0.65rem',
+                borderRadius: '11px',
+                backgroundColor: 'var(--bg-input)',
+                border: '1px solid var(--border-subtle)',
+              }}
             >
-              {perfEval.accuracyPercentage}%
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 800, marginBottom: '0.1rem' }}>
+                SỐ CÂU ĐÚNG
+              </div>
+              <div
+                data-testid="solo-result-correct-ratio"
+                style={{ fontSize: '1.08rem', fontWeight: 900, color: 'var(--accent-emerald)', lineHeight: 1.2 }}
+              >
+                {correctCount} / {finalResult.totalQuestions}
+              </div>
+            </div>
+
+            <div
+              style={{
+                padding: '0.5rem 0.65rem',
+                borderRadius: '11px',
+                backgroundColor: 'var(--bg-input)',
+                border: '1px solid var(--border-subtle)',
+              }}
+            >
+              <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)', fontWeight: 800, marginBottom: '0.1rem' }}>
+                TỶ LỆ ĐÚNG
+              </div>
+              <div
+                data-testid="solo-result-accuracy"
+                style={{ fontSize: '1.08rem', fontWeight: 900, color: '#f59e0b', lineHeight: 1.2 }}
+              >
+                {perfEval.accuracyPercentage}%
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Per-Question Answer & Explanation Review */}
+        {/* VÙNG GIỮA: Danh sách chi tiết đáp án & giải thích (Khu vực cuộn dọc chính: flex: 1, min-height: 0, overflow-y: auto) */}
         {(() => {
           const canShowResultAnswers =
             playtestMode ||
@@ -3277,20 +3341,26 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               <div
                 data-testid="solo-result-question-review"
                 style={{
+                  flex: '1 1 auto',
+                  minHeight: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
                   textAlign: 'left',
-                  marginBottom: '1.35rem',
-                  padding: '0.95rem',
-                  borderRadius: '14px',
+                  marginBottom: '0.65rem',
+                  padding: '0.65rem 0.8rem',
+                  borderRadius: '13px',
                   backgroundColor: 'var(--bg-input)',
                   border: '1px solid var(--border-subtle)',
                 }}
               >
                 <div
                   style={{
-                    fontSize: '0.88rem',
+                    flexShrink: 0,
+                    fontSize: '0.84rem',
                     fontWeight: 900,
                     color: 'var(--text-primary)',
-                    marginBottom: '0.65rem',
+                    marginBottom: '0.5rem',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'space-between',
@@ -3299,17 +3369,23 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                   }}
                 >
                   <span>Chi tiết đáp án từng câu ({qResults.length} câu)</span>
-                  <span style={{ fontSize: '0.74rem', color: 'var(--accent-emerald)', fontWeight: 800 }}>
+                  <span style={{ fontSize: '0.72rem', color: 'var(--accent-emerald)', fontWeight: 800 }}>
                     Đã hiển thị đáp án
                   </span>
                 </div>
                 <div
+                  data-testid="solo-result-review-scroll-list"
+                  className="solo-finish-review-scroll"
                   style={{
+                    flex: '1 1 auto',
+                    minHeight: 0,
                     display: 'flex',
                     flexDirection: 'column',
-                    gap: '0.6rem',
-                    maxHeight: '280px',
+                    gap: '0.55rem',
                     overflowY: 'auto',
+                    overscrollBehavior: 'contain',
+                    scrollbarGutter: 'stable',
+                    paddingRight: '0.25rem',
                   }}
                 >
                   {qResults.map((qr, idx) => {
@@ -3323,8 +3399,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                         key={qr.questionId || idx}
                         data-testid={`solo-result-review-item-${idx}`}
                         style={{
-                          padding: '0.75rem 0.9rem',
-                          borderRadius: '12px',
+                          flexShrink: 0,
+                          padding: '0.65rem 0.85rem',
+                          borderRadius: '11px',
                           backgroundColor: 'var(--bg-surface)',
                           border: `1.5px solid ${
                             isRight ? 'rgba(16, 185, 129, 0.45)' : 'rgba(239, 68, 68, 0.45)'
@@ -3337,20 +3414,20 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                             alignItems: 'center',
                             justifyContent: 'space-between',
                             gap: '0.5rem',
-                            marginBottom: '0.35rem',
+                            marginBottom: '0.3rem',
                             flexWrap: 'wrap',
                           }}
                         >
-                          <span style={{ fontSize: '0.8rem', fontWeight: 900, color: 'var(--text-secondary)' }}>
+                          <span style={{ fontSize: '0.78rem', fontWeight: 900, color: 'var(--text-secondary)' }}>
                             Câu #{idx + 1}
                           </span>
                           <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
                             <span
                               data-testid={`solo-result-review-status-${idx}`}
                               style={{
-                                padding: '0.16rem 0.5rem',
+                                padding: '0.14rem 0.48rem',
                                 borderRadius: '999px',
-                                fontSize: '0.72rem',
+                                fontSize: '0.7rem',
                                 fontWeight: 900,
                                 backgroundColor: isRight
                                   ? 'rgba(16, 185, 129, 0.16)'
@@ -3370,12 +3447,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                                 data-testid={`playtest-finish-edit-q-${idx}`}
                                 onClick={() => handleOpenInlineEditor(idx)}
                                 style={{
-                                  padding: '0.18rem 0.55rem',
+                                  padding: '0.16rem 0.5rem',
                                   borderRadius: '6px',
                                   border: '1px solid var(--border-strong)',
                                   backgroundColor: 'var(--bg-input)',
                                   color: 'var(--text-primary)',
-                                  fontSize: '0.72rem',
+                                  fontSize: '0.7rem',
                                   fontWeight: 800,
                                   cursor: 'pointer',
                                 }}
@@ -3388,16 +3465,17 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                         {specQ?.question && (
                           <div
                             style={{
-                              fontSize: '0.88rem',
+                              fontSize: '0.85rem',
                               fontWeight: 800,
                               color: 'var(--text-primary)',
-                              marginBottom: '0.35rem',
+                              marginBottom: '0.28rem',
+                              lineHeight: 1.4,
                             }}
                           >
                             {specQ.question}
                           </div>
                         )}
-                        <div style={{ fontSize: '0.81rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
+                        <div style={{ fontSize: '0.79rem', color: 'var(--text-secondary)', lineHeight: 1.45 }}>
                           <div>
                             Câu trả lời của bạn:{' '}
                             <strong style={{ color: isRight ? 'var(--accent-emerald)' : 'var(--accent-rose)' }}>
@@ -3405,7 +3483,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                             </strong>
                           </div>
                           {qr.correctAnswer && (
-                            <div style={{ marginTop: '0.15rem' }}>
+                            <div style={{ marginTop: '0.12rem' }}>
                               Đáp án chính xác:{' '}
                               <strong style={{ color: 'var(--accent-emerald)' }}>{qr.correctAnswer}</strong>
                             </div>
@@ -3414,10 +3492,11 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                             <div
                               data-testid={`solo-result-review-explanation-${idx}`}
                               style={{
-                                marginTop: '0.3rem',
-                                paddingTop: '0.3rem',
+                                marginTop: '0.25rem',
+                                paddingTop: '0.25rem',
                                 borderTop: '1px dashed var(--border-subtle)',
                                 color: 'var(--text-secondary)',
+                                wordBreak: 'break-word',
                               }}
                             >
                               Giải thích: {qr.explanation.trim()}
@@ -3437,15 +3516,16 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               <div
                 data-testid="solo-result-answers-pending-publish"
                 style={{
-                  marginBottom: '1.35rem',
-                  padding: '0.9rem 1.15rem',
-                  borderRadius: '14px',
+                  flexShrink: 0,
+                  marginBottom: '0.65rem',
+                  padding: '0.75rem 1rem',
+                  borderRadius: '12px',
                   backgroundColor: 'rgba(56, 189, 248, 0.1)',
                   border: '1.5px solid rgba(56, 189, 248, 0.4)',
                   color: 'var(--text-secondary)',
-                  fontSize: '0.84rem',
+                  fontSize: '0.82rem',
                   fontWeight: 700,
-                  lineHeight: 1.5,
+                  lineHeight: 1.45,
                 }}
               >
                 🔒 Chế độ Thi bảo mật đáp án: Chi tiết đúng/sai từng câu, đáp án chính xác và lời giải thích sẽ được hiển thị sau khi người tạo chính thức công bố đáp án.
@@ -3456,22 +3536,33 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           return null;
         })()}
 
-        {/* Buttons */}
-        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
+        {/* VÙNG DƯỚI: Thanh nút hành động luôn nhìn thấy (flex-shrink: 0) */}
+        <div
+          data-testid="solo-finish-actions-bar"
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            gap: '0.65rem',
+            justifyContent: 'center',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            paddingTop: '0.15rem',
+          }}
+        >
           {demoMode && onCreateThisGameType && activeGameSpec && (
             <button
               type="button"
               data-testid="demo-finish-create-btn"
               onClick={() => onCreateThisGameType(activeGameSpec.gameType)}
               style={{
-                minHeight: '46px',
-                padding: '0.7rem 1.35rem',
-                borderRadius: '12px',
+                minHeight: '42px',
+                padding: '0.55rem 1.2rem',
+                borderRadius: '11px',
                 border: 'none',
                 background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
                 color: '#ffffff',
                 fontWeight: 900,
-                fontSize: '0.92rem',
+                fontSize: '0.88rem',
                 cursor: 'pointer',
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -3494,14 +3585,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 loadPlaytestQuestionAtIndex(activeGameSpec, lastIdx);
               }}
               style={{
-                minHeight: '46px',
-                padding: '0.7rem 1.2rem',
-                borderRadius: '12px',
+                minHeight: '42px',
+                padding: '0.55rem 1.1rem',
+                borderRadius: '11px',
                 border: '1.5px solid var(--primary)',
                 backgroundColor: 'var(--bg-surface)',
                 color: 'var(--primary)',
                 fontWeight: 800,
-                fontSize: '0.9rem',
+                fontSize: '0.86rem',
                 cursor: 'pointer',
               }}
             >
@@ -3515,14 +3606,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               data-testid="solo-replay-btn"
               onClick={() => initializeSession('RESTART')}
               style={{
-                minHeight: '46px',
-                padding: '0.7rem 1.35rem',
-                borderRadius: '12px',
+                minHeight: '42px',
+                padding: '0.55rem 1.2rem',
+                borderRadius: '11px',
                 border: 'none',
                 backgroundColor: 'var(--primary)',
                 color: 'var(--primary-ink)',
                 fontWeight: 800,
-                fontSize: '0.9rem',
+                fontSize: '0.86rem',
                 cursor: 'pointer',
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -3530,7 +3621,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 boxShadow: '0 0 14px var(--primary-subtle)',
               }}
             >
-              <RefreshIcon size={17} />
+              <RefreshIcon size={16} />
               <span>{demoMode ? 'Chơi lại Demo' : 'Chơi Lại Trận Này'}</span>
             </button>
           )}
@@ -3540,14 +3631,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             data-testid="exit-playtest-btn"
             onClick={handleLeave}
             style={{
-              minHeight: '46px',
-              padding: '0.7rem 1.35rem',
-              borderRadius: '12px',
+              minHeight: '42px',
+              padding: '0.55rem 1.2rem',
+              borderRadius: '11px',
               border: '1.5px solid var(--border-strong)',
               backgroundColor: 'var(--bg-surface)',
               color: 'var(--text-primary)',
               fontWeight: 700,
-              fontSize: '0.9rem',
+              fontSize: '0.86rem',
               cursor: 'pointer',
             }}
           >
