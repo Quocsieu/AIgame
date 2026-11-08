@@ -54,10 +54,10 @@ interface SoloPlayerProps {
 }
 
 const QUESTION_TYPE_LABELS: Record<string, string> = {
-  MULTIPLE_CHOICE: 'Trắc nghiệm 4 lựa chọn (A/B/C/D)',
+  MULTIPLE_CHOICE: 'Trắc nghiệm 4 lựa chọn',
   QUIZ: 'Trắc nghiệm 4 lựa chọn',
-  QUICK_BUTTON: 'Đúng hoặc Sai',
-  TRUE_FALSE: 'Đúng hoặc Sai',
+  QUICK_BUTTON: 'Đúng / Sai',
+  TRUE_FALSE: 'Đúng / Sai',
   FILL_IN_THE_BLANK: 'Điền vào chỗ trống',
   TYPE_ANSWER: 'Điền câu trả lời ngắn',
   CROSSWORD: 'Ô chữ từ khóa',
@@ -913,6 +913,16 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     }
   };
 
+  const sessionInitKey = `${playtestMode ? 'playtest' : 'solo'}::${demoMode ? 'demo' : 'std'}::${
+    gameId || initialSpec?.gameId || 'inline'
+  }::${effectiveBatchId || ''}`;
+
+  useEffect(() => {
+    if (initialSpec) {
+      setLoadedSpec(initialSpec);
+    }
+  }, [initialSpec]);
+
   useEffect(() => {
     if (prevBatchIdRef.current !== undefined && prevBatchIdRef.current !== effectiveBatchId) {
       confirmedIdentityRef.current = null;
@@ -925,7 +935,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       clearAutoAdvanceTimer();
       soundManager.stopAll();
     };
-  }, [gameId, effectiveBatchId, initialSpec]);
+  }, [sessionInitKey]);
 
   // V3 Stage 5: Poll session status during active Solo Exam to detect BTC Close Exam & auto-submit immediately
   useEffect(() => {
@@ -1424,33 +1434,20 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     }
   };
 
-  // Auto-advance after questionFeedback ONLY for real Solo sessions (Playtest & Demo require manual "Câu tiếp theo")
+  // Unified Question Progression Policy:
+  // Both Creator Playtest (playtestMode === true) and Real Solo Play (playtestMode === false)
+  // strictly use MANUAL progression — never auto-advance after answering or timing out.
+  const questionAdvancePolicy: 'MANUAL' | 'AUTO' = 'MANUAL';
+
   useEffect(() => {
     clearAutoAdvanceTimer();
-    const spec = loadedSpec || initialSpec;
-    if (
-      playtestMode ||
-      !questionFeedback ||
-      inlineEditOpen ||
-      finalResult ||
-      spec?.gameType === 'ADVENTURE'
-    ) {
+    if (questionAdvancePolicy === 'MANUAL') {
       return;
     }
-    const isExamMode = spec?.settings?.sessionMode === 'EXAM';
-    const delayMs =
-      typeof spec?.settings?.autoAdvanceDelayMs === 'number' && spec.settings.autoAdvanceDelayMs >= 500
-        ? spec.settings.autoAdvanceDelayMs
-        : isExamMode
-          ? 1500
-          : 3500;
-    autoAdvanceTimerRef.current = window.setTimeout(() => {
-      handleNextQuestion();
-    }, delayMs);
     return () => {
       clearAutoAdvanceTimer();
     };
-  }, [playtestMode, questionFeedback, inlineEditOpen, finalResult, loadedSpec, initialSpec]);
+  }, [questionAdvancePolicy, playtestMode, questionFeedback, inlineEditOpen, finalResult]);
 
   const populateEditDraftForQuestion = (spec: GameSpecification, idx: number) => {
     const q = spec.questions[idx];
@@ -3566,23 +3563,29 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
   const isLastQuestion = currentQuestion.questionIndex + 1 >= currentQuestion.totalQuestions;
   const hasAnsweredOrTimedOut = Boolean(questionFeedback) || isQuestionTimedOut;
+  const questionPhase: 'ANSWERING' | 'RESULT' = hasAnsweredOrTimedOut ? 'RESULT' : 'ANSWERING';
   const questionTypeLabel =
     QUESTION_TYPE_LABELS[currentQuestion.type] || currentQuestion.type;
 
   return (
     <div
+      data-testid="solo-active-question-screen"
+      data-advance-policy={questionAdvancePolicy}
+      data-question-phase={questionPhase}
       style={{
-        maxWidth: '840px',
+        maxWidth: '880px',
+        width: '100%',
         margin: '0 auto',
-        padding: playtestMode ? '0.6rem 0.85rem 0.85rem' : '1rem 1rem 3rem',
+        padding: '0.6rem 0.85rem 0.85rem',
         display: 'flex',
         flexDirection: 'column',
-        gap: playtestMode ? '0.6rem' : '1.15rem',
+        gap: '0.6rem',
+        boxSizing: 'border-box',
       }}
     >
       {inlineEditModalNode}
 
-      {/* Unified Compact Header Bar (Single Exit Button, No Duplicate Banner) */}
+      {/* Unified Compact Single-Row Header Bar (Identical across Playtest, Demo, and Real Solo Play) */}
       <div
         data-testid={playtestMode ? 'playtest-mode-banner' : 'solo-active-top-bar'}
         style={{
@@ -3590,18 +3593,16 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           justifyContent: 'space-between',
           alignItems: 'center',
           flexWrap: 'wrap',
-          gap: '0.55rem',
-          padding: playtestMode ? '0.55rem 0.9rem' : '0.85rem 1.25rem',
-          backgroundColor: playtestMode ? 'rgba(99, 102, 241, 0.08)' : 'var(--bg-surface)',
-          border: playtestMode
-            ? '1.5px solid rgba(99, 102, 241, 0.35)'
-            : '1px solid var(--border-subtle)',
+          gap: '0.45rem 0.65rem',
+          padding: '0.5rem 0.85rem',
+          backgroundColor: 'var(--bg-surface)',
+          border: '1px solid var(--border-subtle)',
           borderRadius: '14px',
           boxShadow: 'var(--shadow-sm)',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-          {playtestMode && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+          {playtestMode ? (
             <span
               style={{
                 padding: '0.2rem 0.55rem',
@@ -3611,9 +3612,44 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 fontSize: '0.68rem',
                 fontWeight: 900,
                 letterSpacing: '0.03em',
+                whiteSpace: 'nowrap',
               }}
             >
               {demoMode ? 'XEM DEMO' : 'CHƠI THỬ'}
+            </span>
+          ) : isExamMode ? (
+            <span
+              data-testid="solo-exam-mode-badge"
+              style={{
+                fontWeight: 900,
+                fontSize: '0.68rem',
+                color: '#ef4444',
+                backgroundColor: 'rgba(239, 68, 68, 0.12)',
+                border: '1px solid rgba(239, 68, 68, 0.35)',
+                padding: '0.18rem 0.55rem',
+                borderRadius: '999px',
+                letterSpacing: '0.03em',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              CHẾ ĐỘ THI
+            </span>
+          ) : (
+            <span
+              data-testid="solo-play-mode-badge"
+              style={{
+                padding: '0.2rem 0.55rem',
+                borderRadius: '999px',
+                backgroundColor: 'rgba(99, 102, 241, 0.14)',
+                border: '1px solid rgba(99, 102, 241, 0.35)',
+                color: 'var(--primary)',
+                fontSize: '0.68rem',
+                fontWeight: 900,
+                letterSpacing: '0.03em',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              CHƠI ĐƠN
             </span>
           )}
 
@@ -3621,11 +3657,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             data-testid="solo-question-progress-pill"
             style={{
               fontWeight: 800,
-              fontSize: '0.86rem',
+              fontSize: '0.84rem',
               color: 'var(--primary)',
-              backgroundColor: 'rgba(99, 102, 241, 0.14)',
-              padding: '0.22rem 0.65rem',
+              backgroundColor: 'rgba(99, 102, 241, 0.12)',
+              padding: '0.2rem 0.6rem',
               borderRadius: '8px',
+              whiteSpace: 'nowrap',
+              fontVariantNumeric: 'tabular-nums',
             }}
           >
             Câu {currentQuestion.questionIndex + 1} / {currentQuestion.totalQuestions}
@@ -3634,29 +3672,31 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           <span
             data-testid="question-type-badge"
             style={{
-              fontWeight: 800,
-              fontSize: '0.74rem',
+              fontWeight: 700,
+              fontSize: '0.73rem',
               color: 'var(--text-secondary)',
-              backgroundColor: 'var(--bg-surface)',
+              backgroundColor: 'var(--bg-input)',
               border: '1px solid var(--border-subtle)',
-              padding: '0.2rem 0.55rem',
+              padding: '0.18rem 0.5rem',
               borderRadius: '8px',
+              whiteSpace: 'nowrap',
             }}
           >
             {questionTypeLabel}
           </span>
 
-          {isExamMode && (
+          {playtestMode && isExamMode && (
             <span
               data-testid="solo-exam-mode-badge"
               style={{
                 fontWeight: 900,
-                fontSize: '0.72rem',
+                fontSize: '0.68rem',
                 color: '#ef4444',
                 backgroundColor: 'rgba(239, 68, 68, 0.12)',
                 border: '1px solid rgba(239, 68, 68, 0.35)',
-                padding: '0.18rem 0.5rem',
+                padding: '0.16rem 0.45rem',
                 borderRadius: '999px',
+                whiteSpace: 'nowrap',
               }}
             >
               CHẾ ĐỘ THI
@@ -3667,13 +3707,18 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.3rem',
-              fontSize: '0.86rem',
+              gap: '0.28rem',
+              fontSize: '0.84rem',
               fontWeight: 800,
               color: 'var(--text-primary)',
+              padding: '0.18rem 0.5rem',
+              borderRadius: '8px',
+              backgroundColor: 'var(--bg-input)',
+              whiteSpace: 'nowrap',
+              fontVariantNumeric: 'tabular-nums',
             }}
           >
-            <StarIcon size={15} style={{ color: '#f59e0b' }} />
+            <StarIcon size={14} style={{ color: '#f59e0b' }} />
             <span>{playerScore.toLocaleString()} đ</span>
           </div>
 
@@ -3683,12 +3728,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '0.2rem',
-                fontSize: '0.76rem',
+                fontSize: '0.74rem',
                 fontWeight: 800,
                 color: '#ef4444',
                 backgroundColor: 'rgba(239, 68, 68, 0.12)',
                 padding: '0.16rem 0.45rem',
                 borderRadius: '8px',
+                whiteSpace: 'nowrap',
               }}
             >
               <FlameIcon size={13} />
@@ -3697,14 +3743,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
           {/* Audio Mute & Volume Controls */}
           <div
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.35rem',
-              padding: '0.2rem 0.5rem',
+              gap: '0.3rem',
+              padding: '0.18rem 0.45rem',
               borderRadius: '9px',
               backgroundColor: 'var(--bg-input)',
               border: '1px solid var(--border-subtle)',
@@ -3720,9 +3766,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 background: 'transparent',
                 color: audioMuted ? 'var(--text-muted)' : 'var(--primary)',
                 fontWeight: 800,
-                fontSize: '0.78rem',
+                fontSize: '0.76rem',
                 cursor: 'pointer',
-                padding: '0.1rem 0.2rem',
+                padding: '0.1rem 0.18rem',
               }}
             >
               {audioMuted ? '🔇' : '🔊'}
@@ -3743,7 +3789,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               onChange={(e) => handleAudioVolumeChange(Number(e.target.value))}
               aria-label="Âm lượng"
               style={{
-                width: '54px',
+                width: '48px',
                 height: '5px',
                 accentColor: 'var(--primary)',
                 cursor: 'pointer',
@@ -3757,8 +3803,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             style={{
               display: 'inline-flex',
               alignItems: 'center',
-              gap: '0.3rem',
-              padding: '0.25rem 0.7rem',
+              gap: '0.28rem',
+              padding: '0.22rem 0.65rem',
               borderRadius: '999px',
               backgroundColor:
                 hasAnsweredOrTimedOut
@@ -3778,10 +3824,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                   : 'var(--border-strong)'
               }`,
               fontWeight: 900,
-              fontSize: '0.9rem',
+              fontSize: '0.86rem',
+              fontVariantNumeric: 'tabular-nums',
+              whiteSpace: 'nowrap',
             }}
           >
-            <ClockIcon size={14} />
+            <ClockIcon size={13} />
             <span>{timeLeft}s</span>
           </div>
 
@@ -3792,8 +3840,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             onClick={handleLeave}
             title={demoMode ? 'Đóng demo' : playtestMode ? 'Thoát chơi thử' : 'Thoát trận đấu'}
             style={{
-              minHeight: '34px',
-              padding: '0.3rem 0.7rem',
+              minHeight: '32px',
+              padding: '0.26rem 0.65rem',
               borderRadius: '9px',
               border: '1px solid var(--border-strong)',
               backgroundColor: 'var(--bg-surface)',
@@ -3802,11 +3850,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               display: 'inline-flex',
               alignItems: 'center',
               gap: '0.25rem',
-              fontSize: '0.8rem',
+              fontSize: '0.78rem',
               fontWeight: 800,
+              whiteSpace: 'nowrap',
             }}
           >
-            <XMarkIcon size={14} />
+            <XMarkIcon size={13} />
             <span>{demoMode ? 'Đóng demo' : playtestMode ? 'Thoát chơi thử' : 'Thoát'}</span>
           </button>
         </div>
@@ -3817,12 +3866,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         <div
           data-testid="demo-how-to-play-guide"
           style={{
-            padding: '0.5rem 0.85rem',
+            padding: '0.45rem 0.85rem',
             borderRadius: '11px',
-            backgroundColor: 'rgba(16, 185, 129, 0.09)',
-            border: '1px solid rgba(16, 185, 129, 0.32)',
+            backgroundColor: 'rgba(16, 185, 129, 0.08)',
+            border: '1px solid rgba(16, 185, 129, 0.3)',
             color: 'var(--text-secondary)',
-            fontSize: '0.8rem',
+            fontSize: '0.79rem',
             fontWeight: 700,
             lineHeight: 1.4,
           }}
@@ -3832,13 +3881,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         </div>
       )}
 
-      {/* Question Card */}
+      {/* Question & Answer / Result Card */}
       <div
         style={{
           backgroundColor: 'var(--bg-surface)',
           border: '1px solid var(--border-subtle)',
-          borderRadius: '20px',
-          padding: playtestMode ? '1.15rem 1.35rem' : '2rem 1.75rem',
+          borderRadius: '18px',
+          padding: '1.15rem 1.35rem',
           boxShadow: 'var(--card-shadow)',
           textAlign: 'center',
         }}
@@ -3846,47 +3895,46 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         <h2
           data-testid="solo-active-question-text"
           style={{
-            fontSize: playtestMode ? 'clamp(1.05rem, 2.1vw, 1.35rem)' : 'clamp(1.2rem, 2.8vw, 1.75rem)',
+            fontSize: 'clamp(1.05rem, 1.9vw, 1.32rem)',
             fontWeight: 800,
             color: 'var(--text-primary)',
-            lineHeight: 1.35,
-            margin: playtestMode ? '0 auto 0.85rem auto' : '0 auto 1.25rem auto',
-            maxWidth: '720px',
+            lineHeight: 1.4,
+            margin: '0 auto 0.9rem auto',
+            maxWidth: '760px',
+            wordBreak: 'break-word',
           }}
         >
           {currentQuestion.question}
         </h2>
 
-        {/* FEEDBACK STATE: Priority Order: (1) Status & Points, (2) Correct Answer & Choice Grid, (3) Scrollable Explanation */}
+        {/* FEEDBACK STATE: Clean Modern Hierarchy without nested heavy green/red boxes */}
         {questionFeedback ? (
           <div
             data-testid="solo-question-feedback"
             style={{
-              padding: playtestMode ? '0.95rem 1.15rem' : '1.4rem',
-              borderRadius: '16px',
-              backgroundColor: isExamUnpublished
-                ? 'rgba(56, 189, 248, 0.1)'
-                : questionFeedback.isCorrect
-                  ? 'rgba(16, 185, 129, 0.12)'
-                  : 'rgba(239, 68, 68, 0.12)',
-              border: `2px solid ${
+              padding: '0.95rem 1.15rem',
+              borderRadius: '14px',
+              backgroundColor: 'var(--bg-input)',
+              border: '1px solid var(--border-subtle)',
+              borderLeft: `4px solid ${
                 isExamUnpublished
                   ? '#38bdf8'
                   : questionFeedback.isCorrect
                     ? 'var(--accent-emerald)'
                     : 'var(--accent-rose)'
               }`,
+              textAlign: 'left',
               animation: 'popIn 0.2s ease',
             }}
           >
             {isExamUnpublished ? (
-              <div data-testid="exam-feedback-recorded">
+              <div data-testid="exam-feedback-recorded" style={{ textAlign: 'center', padding: '0.35rem 0' }}>
                 <div
                   style={{
-                    fontSize: '1.15rem',
+                    fontSize: '1.08rem',
                     fontWeight: 900,
                     color: '#0284c7',
-                    marginBottom: '0.4rem',
+                    marginBottom: '0.35rem',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
@@ -3895,19 +3943,19 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                 >
                   {questionFeedback.timedOut ? (
                     <>
-                      <ClockIcon size={22} />
+                      <ClockIcon size={20} />
                       <span>Hết thời gian trả lời — Đã ghi nhận tự động (+0 điểm)</span>
                     </>
                   ) : (
                     <>
-                      <CheckIcon size={22} />
+                      <CheckIcon size={20} />
                       <span>Đã ghi nhận câu trả lời của bạn</span>
                     </>
                   )}
                 </div>
                 <p
                   style={{
-                    margin: '0.25rem auto 0 auto',
+                    margin: '0.2rem auto 0 auto',
                     fontSize: '0.84rem',
                     color: 'var(--text-secondary)',
                     maxWidth: '540px',
@@ -3918,107 +3966,167 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
               </div>
             ) : (
               <>
-                {/* 1. Status & Points Header */}
+                {/* 1. Status, Points & Creator Retest Header Row */}
                 <div
                   data-testid="solo-feedback-status-banner"
                   style={{
-                    fontSize: playtestMode ? '1.12rem' : '1.3rem',
-                    fontWeight: 900,
-                    color: questionFeedback.isCorrect
-                      ? 'var(--accent-emerald)'
-                      : 'var(--accent-rose)',
-                    marginBottom: '0.45rem',
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '0.45rem',
+                    justifyContent: 'space-between',
+                    gap: '0.6rem',
                     flexWrap: 'wrap',
+                    paddingBottom: '0.6rem',
+                    marginBottom: '0.6rem',
+                    borderBottom: '1px solid var(--border-subtle)',
                   }}
                 >
-                  {questionFeedback.isCorrect ? (
-                    <>
-                      <CheckIcon size={22} />
-                      <span>Chính Xác! Trả lời đúng (+{questionFeedback.pointsEarned} điểm)</span>
-                    </>
-                  ) : questionFeedback.timedOut ? (
-                    <>
-                      <ClockIcon size={22} />
-                      <span>Hết Thời Gian Trả Lời! (+0 điểm)</span>
-                    </>
-                  ) : (
-                    <>
-                      <XMarkIcon size={22} />
-                      <span>Chưa Đúng! Trả lời sai (+0 điểm)</span>
-                    </>
-                  )}
-
-                  {playtestMode && !demoMode && (
-                    <button
-                      type="button"
-                      data-testid="playtest-retest-question-btn"
-                      onClick={handleRetestCurrentQuestion}
-                      title="Làm lại câu hỏi này để kiểm thử đáp án khác"
+                  <div
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.45rem',
+                      fontSize: '1.05rem',
+                      fontWeight: 900,
+                      color: questionFeedback.isCorrect
+                        ? 'var(--accent-emerald)'
+                        : 'var(--accent-rose)',
+                    }}
+                  >
+                    <span
                       style={{
-                        marginLeft: '0.35rem',
-                        padding: '0.22rem 0.65rem',
-                        borderRadius: '999px',
-                        border: '1px solid var(--border-strong)',
-                        backgroundColor: 'var(--bg-surface)',
-                        color: 'var(--text-primary)',
-                        fontSize: '0.74rem',
-                        fontWeight: 800,
-                        cursor: 'pointer',
+                        width: '26px',
+                        height: '26px',
+                        borderRadius: '8px',
+                        backgroundColor: questionFeedback.isCorrect
+                          ? 'rgba(16, 185, 129, 0.16)'
+                          : 'rgba(239, 68, 68, 0.16)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
                       }}
                     >
-                      ↻ Kiểm thử lại câu này
-                    </button>
-                  )}
+                      {questionFeedback.isCorrect ? (
+                        <CheckIcon size={16} />
+                      ) : questionFeedback.timedOut ? (
+                        <ClockIcon size={16} />
+                      ) : (
+                        <XMarkIcon size={16} />
+                      )}
+                    </span>
+                    <span>
+                      {questionFeedback.isCorrect
+                        ? `Chính Xác! Trả lời đúng (+${questionFeedback.pointsEarned} điểm)`
+                        : questionFeedback.timedOut
+                          ? 'Hết Thời Gian Trả Lời! (+0 điểm)'
+                          : 'Chưa Đúng! Trả lời sai (+0 điểm)'}
+                    </span>
+                  </div>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                    <span
+                      data-testid="solo-feedback-points-pill"
+                      style={{
+                        padding: '0.2rem 0.6rem',
+                        borderRadius: '999px',
+                        fontSize: '0.78rem',
+                        fontWeight: 900,
+                        backgroundColor: questionFeedback.isCorrect
+                          ? 'rgba(16, 185, 129, 0.15)'
+                          : 'var(--bg-surface)',
+                        border: `1px solid ${
+                          questionFeedback.isCorrect
+                            ? 'rgba(16, 185, 129, 0.4)'
+                            : 'var(--border-subtle)'
+                        }`,
+                        color: questionFeedback.isCorrect
+                          ? 'var(--accent-emerald)'
+                          : 'var(--text-secondary)',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      +{questionFeedback.pointsEarned ?? 0} điểm
+                    </span>
+
+                    {playtestMode && !demoMode && (
+                      <button
+                        type="button"
+                        data-testid="playtest-retest-question-btn"
+                        onClick={handleRetestCurrentQuestion}
+                        title="Làm lại câu hỏi này để kiểm thử đáp án khác"
+                        style={{
+                          padding: '0.24rem 0.68rem',
+                          borderRadius: '999px',
+                          border: '1px solid var(--border-strong)',
+                          backgroundColor: 'var(--bg-surface)',
+                          color: 'var(--text-primary)',
+                          fontSize: '0.74rem',
+                          fontWeight: 800,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        ↻ Kiểm thử lại câu này
+                      </button>
+                    )}
+                  </div>
                 </div>
 
-                {/* 2. Correct Answer & User Answer */}
+                {/* 2. Correct Answer & User Selected Answer Comparison Strip */}
                 <div
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '1rem',
+                    gap: '0.6rem',
                     flexWrap: 'wrap',
-                    marginBottom: '0.5rem',
+                    marginBottom: '0.6rem',
                   }}
                 >
                   {!questionFeedback.isCorrect &&
                     !questionFeedback.timedOut &&
                     (questionFeedback.answer || selectedChoice || textAnswerInput) && (
-                      <p
+                      <div
                         data-testid="solo-feedback-user-answer"
                         style={{
                           margin: 0,
-                          fontSize: '0.88rem',
-                          fontWeight: 800,
-                          color: 'var(--accent-rose)',
+                          padding: '0.32rem 0.7rem',
+                          borderRadius: '9px',
+                          backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                          border: '1px solid rgba(239, 68, 68, 0.28)',
+                          fontSize: '0.84rem',
+                          fontWeight: 700,
+                          color: 'var(--text-secondary)',
                         }}
                       >
                         Câu trả lời của bạn:{' '}
-                        <strong>{questionFeedback.answer || selectedChoice || textAnswerInput}</strong>
-                      </p>
+                        <strong style={{ color: 'var(--accent-rose)', fontWeight: 800 }}>
+                          {questionFeedback.answer || selectedChoice || textAnswerInput}
+                        </strong>
+                      </div>
                     )}
 
                   {questionFeedback.correctAnswer && (
-                    <p
+                    <div
                       data-testid="solo-feedback-correct-answer"
                       style={{
                         margin: 0,
-                        fontSize: '0.92rem',
-                        fontWeight: 800,
-                        color: 'var(--accent-emerald)',
+                        padding: '0.32rem 0.7rem',
+                        borderRadius: '9px',
+                        backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                        border: '1px solid rgba(16, 185, 129, 0.28)',
+                        fontSize: '0.85rem',
+                        fontWeight: 700,
+                        color: 'var(--text-secondary)',
                       }}
                     >
-                      Đáp án chính xác: <strong>{questionFeedback.correctAnswer}</strong>
-                    </p>
+                      Đáp án chính xác:{' '}
+                      <strong style={{ color: 'var(--accent-emerald)', fontWeight: 800 }}>
+                        {questionFeedback.correctAnswer}
+                      </strong>
+                    </div>
                   )}
                 </div>
 
-                {/* Compact Highlighted Choices for choice-based questions */}
+                {/* Balanced 2x2 Choice Review Grid for choice-based questions */}
                 {(currentQuestion.type === 'MULTIPLE_CHOICE' ||
                   currentQuestion.type === 'QUIZ' ||
                   currentQuestion.type === 'QUICK_BUTTON' ||
@@ -4040,10 +4148,9 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                           gridTemplateColumns:
                             currentQuestion.type === 'QUICK_BUTTON' || currentQuestion.type === 'TRUE_FALSE'
                               ? '1fr 1fr'
-                              : 'repeat(auto-fit, minmax(210px, 1fr))',
-                          gap: '0.55rem',
-                          margin: '0.45rem auto 0.55rem auto',
-                          maxWidth: '680px',
+                              : 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))',
+                          gap: '0.5rem',
+                          marginBottom: '0.55rem',
                           textAlign: 'left',
                         }}
                       >
@@ -4059,6 +4166,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                             !questionFeedback.timedOut &&
                             Boolean(submittedText) &&
                             doesChoiceMatchTarget(opt, submittedText, idx, currentQuestion.type);
+                          const optionLetter = ['A', 'B', 'C', 'D'][idx] || String(idx + 1);
 
                           return (
                             <div
@@ -4078,38 +4186,68 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                                     : 'neutral'
                               }
                               style={{
-                                padding: playtestMode ? '0.55rem 0.85rem' : '0.75rem 0.95rem',
-                                borderRadius: '12px',
+                                padding: '0.55rem 0.8rem',
+                                borderRadius: '11px',
                                 backgroundColor: isCorrectOption
-                                  ? '#16a34a'
+                                  ? 'rgba(16, 185, 129, 0.13)'
                                   : isSelectedWrongOption
-                                    ? '#dc2626'
-                                    : 'var(--bg-input)',
+                                    ? 'rgba(239, 68, 68, 0.13)'
+                                    : 'var(--bg-surface)',
                                 border: isCorrectOption
-                                  ? '2.5px solid #4ade80'
+                                  ? '1.5px solid var(--accent-emerald)'
                                   : isSelectedWrongOption
-                                    ? '2.5px solid #f87171'
-                                    : '1.5px solid var(--border-subtle)',
-                                color: isCorrectOption || isSelectedWrongOption ? '#ffffff' : 'var(--text-secondary)',
-                                fontWeight: 800,
-                                fontSize: '0.88rem',
+                                    ? '1.5px solid var(--accent-rose)'
+                                    : '1px solid var(--border-subtle)',
+                                color:
+                                  isCorrectOption || isSelectedWrongOption
+                                    ? 'var(--text-primary)'
+                                    : 'var(--text-secondary)',
+                                fontWeight: isCorrectOption || isSelectedWrongOption ? 800 : 600,
+                                fontSize: '0.86rem',
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
                                 gap: '0.5rem',
-                                opacity: isCorrectOption || isSelectedWrongOption ? 1 : 0.65,
+                                opacity: isCorrectOption || isSelectedWrongOption ? 1 : 0.72,
                               }}
                             >
-                              <span style={{ wordBreak: 'break-word', lineHeight: 1.3 }}>{opt}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', minWidth: 0 }}>
+                                <span
+                                  style={{
+                                    width: '24px',
+                                    height: '24px',
+                                    borderRadius: '6px',
+                                    backgroundColor: isCorrectOption
+                                      ? 'var(--accent-emerald)'
+                                      : isSelectedWrongOption
+                                        ? 'var(--accent-rose)'
+                                        : 'var(--bg-input)',
+                                    color:
+                                      isCorrectOption || isSelectedWrongOption
+                                        ? '#ffffff'
+                                        : 'var(--text-secondary)',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: '0.74rem',
+                                    fontWeight: 900,
+                                    flexShrink: 0,
+                                  }}
+                                >
+                                  {optionLetter}
+                                </span>
+                                <span style={{ wordBreak: 'break-word', lineHeight: 1.35 }}>{opt}</span>
+                              </div>
                               {isCorrectOption && (
                                 <span
                                   style={{
                                     flexShrink: 0,
-                                    fontSize: '0.72rem',
+                                    fontSize: '0.7rem',
                                     fontWeight: 900,
-                                    padding: '0.14rem 0.45rem',
+                                    padding: '0.14rem 0.48rem',
                                     borderRadius: '999px',
-                                    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+                                    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+                                    color: 'var(--accent-emerald)',
                                   }}
                                 >
                                   ✓ Đúng
@@ -4119,11 +4257,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                                 <span
                                   style={{
                                     flexShrink: 0,
-                                    fontSize: '0.72rem',
+                                    fontSize: '0.7rem',
                                     fontWeight: 900,
-                                    padding: '0.14rem 0.45rem',
+                                    padding: '0.14rem 0.48rem',
                                     borderRadius: '999px',
-                                    backgroundColor: 'rgba(255, 255, 255, 0.22)',
+                                    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                                    color: 'var(--accent-rose)',
                                   }}
                                 >
                                   ✕ Bạn chọn
@@ -4136,138 +4275,82 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                     );
                   })()}
 
-                {/* 3. Explanation (Scrollable internally if long, never pushing action buttons off screen) */}
+                {/* 3. Explanation (Clean readable card, scrollable internally if very long) */}
                 {typeof questionFeedback.explanation === 'string' &&
                   questionFeedback.explanation.trim().length > 0 && (
                     <div
                       data-testid="solo-feedback-explanation"
                       style={{
-                        margin: '0.45rem auto 0 auto',
-                        padding: '0.55rem 0.85rem',
+                        marginTop: '0.35rem',
+                        padding: '0.6rem 0.85rem',
                         borderRadius: '10px',
                         backgroundColor: 'var(--bg-surface)',
                         border: '1px solid var(--border-subtle)',
-                        fontSize: '0.84rem',
+                        borderLeft: '3px solid var(--primary)',
+                        fontSize: '0.85rem',
                         color: 'var(--text-secondary)',
-                        lineHeight: 1.45,
-                        maxWidth: '640px',
-                        maxHeight: '92px',
+                        lineHeight: 1.5,
+                        maxHeight: '100px',
                         overflowY: 'auto',
                         textAlign: 'left',
                       }}
                     >
-                      <strong style={{ color: 'var(--text-primary)' }}>Giải thích:</strong>{' '}
+                      <strong style={{ color: 'var(--text-primary)' }}>💡 Giải thích:</strong>{' '}
                       {questionFeedback.explanation.trim()}
                     </div>
                   )}
               </>
-            )}
-
-            {/* In non-playtest mode, keep the inline Next button inside feedback card */}
-            {!playtestMode && (
-              <button
-                type="button"
-                data-testid="solo-next-question-btn"
-                onClick={handleNextQuestion}
-                style={{
-                  marginTop: '1rem',
-                  minHeight: '44px',
-                  padding: '0.65rem 1.5rem',
-                  borderRadius: '12px',
-                  border: 'none',
-                  backgroundColor: 'var(--primary)',
-                  color: 'var(--primary-ink)',
-                  fontWeight: 800,
-                  fontSize: '0.92rem',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.45rem',
-                  boxShadow: '0 0 16px var(--primary-subtle)',
-                }}
-              >
-                <span>
-                  {!isLastQuestion ? 'Tiếp Tục Câu Kế Tiếp' : 'Tiếp Tục — Xem Kết Quả'}
-                </span>
-                <ArrowRightIcon size={16} />
-              </button>
             )}
           </div>
         ) : isQuestionTimedOut ? (
           <div
             data-testid="solo-timeout-banner"
             style={{
-              padding: playtestMode ? '1rem 1.15rem' : '1.5rem',
-              borderRadius: '16px',
-              backgroundColor: 'rgba(239, 68, 68, 0.12)',
-              border: '2px solid var(--accent-rose)',
+              padding: '1rem 1.15rem',
+              borderRadius: '14px',
+              backgroundColor: 'var(--bg-input)',
+              border: '1px solid var(--border-subtle)',
+              borderLeft: '4px solid var(--accent-rose)',
               animation: 'popIn 0.2s ease',
             }}
           >
             <div
               style={{
-                fontSize: '1.25rem',
+                fontSize: '1.1rem',
                 fontWeight: 900,
                 color: 'var(--accent-rose)',
-                marginBottom: '0.4rem',
+                marginBottom: '0.35rem',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '0.45rem',
               }}
             >
-              <ClockIcon size={24} />
+              <ClockIcon size={20} />
               <span>Hết Thời Gian Trả Lời! (+0 điểm)</span>
             </div>
             <p
               style={{
-                margin: '0.25rem auto 0 auto',
-                fontSize: '0.88rem',
+                margin: '0.2rem auto 0 auto',
+                fontSize: '0.85rem',
                 color: 'var(--text-secondary)',
                 lineHeight: 1.45,
                 maxWidth: '560px',
               }}
             >
-              Thời gian cho câu hỏi này đã kết thúc trước khi hệ thống nhận được đáp án của bạn.
+              Thời gian cho câu hỏi này đã kết thúc. Bấm "Câu tiếp theo →" ở thanh điều hướng bên dưới để tiếp tục.
             </p>
-            {!playtestMode && (
-              <button
-                type="button"
-                onClick={handleNextQuestion}
-                style={{
-                  marginTop: '1rem',
-                  minHeight: '44px',
-                  padding: '0.65rem 1.5rem',
-                  borderRadius: '12px',
-                  border: 'none',
-                  backgroundColor: 'var(--primary)',
-                  color: 'var(--primary-ink)',
-                  fontWeight: 800,
-                  fontSize: '0.92rem',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.45rem',
-                  boxShadow: '0 0 16px var(--primary-subtle)',
-                }}
-              >
-                <span>
-                  {!isLastQuestion ? 'Tiếp Tục Câu Kế Tiếp' : 'Tiếp Tục — Xem Kết Quả'}
-                </span>
-                <ArrowRightIcon size={16} />
-              </button>
-            )}
           </div>
         ) : (
           /* ACTIVE ANSWER INPUT / OPTIONS */
           <div>
-            {/* MULTIPLE CHOICE / CHOICES */}
+            {/* MULTIPLE CHOICE / CHOICES — Balanced 2x2 Grid on Laptop/Desktop */}
             {(currentQuestion.type === 'MULTIPLE_CHOICE' || currentQuestion.type === 'QUIZ') && currentQuestion.choices && (
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))',
-                  gap: playtestMode ? '0.65rem' : '1rem',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 310px), 1fr))',
+                  gap: '0.7rem',
                 }}
               >
                 {currentQuestion.choices.map((opt: string, idx: number) => {
@@ -4293,14 +4376,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                       }}
                       className="k-btn"
                       style={{
-                        padding: playtestMode ? '0.8rem 1rem' : '1.15rem 1.25rem',
-                        minHeight: playtestMode ? '54px' : '68px',
+                        padding: '0.85rem 1.05rem',
+                        minHeight: '58px',
                         borderRadius: '14px',
                         border: isSelected ? '3px solid #ffffff' : 'none',
                         backgroundColor: cfg.bg,
                         color: cfg.text,
                         fontWeight: 900,
-                        fontSize: playtestMode ? '0.96rem' : '1.05rem',
+                        fontSize: '0.98rem',
                         cursor: isSubmitting ? 'not-allowed' : 'pointer',
                         display: 'flex',
                         alignItems: 'center',
@@ -4316,8 +4399,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                     >
                       <span
                         style={{
-                          width: playtestMode ? '32px' : '36px',
-                          height: playtestMode ? '32px' : '36px',
+                          width: '32px',
+                          height: '32px',
                           borderRadius: '9px',
                           backgroundColor: 'rgba(0, 0, 0, 0.2)',
                           color: '#ffffff',
@@ -4325,13 +4408,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                           alignItems: 'center',
                           justifyContent: 'center',
                           fontWeight: 900,
-                          fontSize: '1.05rem',
+                          fontSize: '0.98rem',
                           flexShrink: 0,
                         }}
                       >
                         {cfg.icon}
                       </span>
-                      <span style={{ flex: 1, wordBreak: 'break-word', lineHeight: 1.35 }}>{opt}</span>
+                      <span style={{ flex: 1, wordBreak: 'break-word', lineHeight: 1.38 }}>{opt}</span>
                     </button>
                   );
                 })}
@@ -4880,25 +4963,25 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         )}
       </div>
 
-      {/* 4. Bottom Question Navigation & Action Bar for Playtest / Demo Mode (Never overlaps question content on mobile) */}
-      {playtestMode && (
-        <div
-          data-testid="playtest-question-nav-bar"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            flexWrap: 'wrap',
-            gap: '0.55rem',
-            padding: '0.6rem 0.95rem',
-            borderRadius: '14px',
-            backgroundColor: 'var(--bg-surface)',
-            border: '1.5px solid var(--border-strong)',
-            boxShadow: 'var(--shadow-sm)',
-          }}
-        >
-          {/* Left: Previous Question */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+      {/* 4. Unified Bottom Question Navigation & Action Bar (Shared across Playtest, Demo, and Real Solo Play) */}
+      <div
+        data-testid="playtest-question-nav-bar"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '0.55rem',
+          padding: '0.6rem 0.95rem',
+          borderRadius: '14px',
+          backgroundColor: 'var(--bg-surface)',
+          border: '1.5px solid var(--border-strong)',
+          boxShadow: 'var(--shadow-sm)',
+        }}
+      >
+        {/* Left: Previous Question (Playtest / Demo) or Question Progress Status (Real Solo Play) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {playtestMode ? (
             <button
               type="button"
               data-testid="playtest-prev-question-btn"
@@ -4922,119 +5005,140 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             >
               ← Câu trước
             </button>
-          </div>
-
-          {/* Center: Question Indicator + Edit Action (Creator Playtest only) */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.6rem',
-              flexWrap: 'wrap',
-              justifyContent: 'center',
-            }}
-          >
+          ) : (
             <span
-              data-testid="playtest-nav-counter"
               style={{
-                fontSize: '0.85rem',
-                fontWeight: 900,
-                color: 'var(--text-secondary)',
+                fontSize: '0.8rem',
+                fontWeight: 700,
+                color: hasAnsweredOrTimedOut ? 'var(--accent-emerald)' : 'var(--text-secondary)',
+                padding: '0.32rem 0.7rem',
+                borderRadius: '8px',
+                backgroundColor: hasAnsweredOrTimedOut
+                  ? 'rgba(16, 185, 129, 0.1)'
+                  : 'var(--bg-input)',
               }}
             >
-              Câu {currentQuestion.questionIndex + 1} / {currentQuestion.totalQuestions}
+              {hasAnsweredOrTimedOut
+                ? '✓ Đã ghi nhận kết quả câu này'
+                : '⏳ Chọn hoặc gửi đáp án trước khi hết giờ'}
             </span>
-
-            {isReviewingPreviousAnswer && (
-              <span
-                data-testid="playtest-reviewing-prev-badge"
-                style={{
-                  fontSize: '0.72rem',
-                  fontWeight: 800,
-                  padding: '0.16rem 0.5rem',
-                  borderRadius: '999px',
-                  backgroundColor: 'rgba(99, 102, 241, 0.12)',
-                  color: 'var(--primary)',
-                }}
-              >
-                Đã trả lời
-              </span>
-            )}
-
-            {!demoMode && (
-              <button
-                type="button"
-                data-testid="playtest-inline-edit-btn"
-                onClick={() => handleOpenInlineEditor(currentQuestion.questionIndex)}
-                style={{
-                  minHeight: '36px',
-                  padding: '0.35rem 0.8rem',
-                  borderRadius: '9px',
-                  border: '1.5px solid var(--primary)',
-                  backgroundColor: 'rgba(99, 102, 241, 0.1)',
-                  color: 'var(--primary)',
-                  fontSize: '0.8rem',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.3rem',
-                }}
-              >
-                <span>✎ Chỉnh sửa câu này</span>
-              </button>
-            )}
-          </div>
-
-          {/* Right: Manual Next Question Button */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            {hasAnsweredOrTimedOut ? (
-              <button
-                type="button"
-                data-testid="solo-next-question-btn"
-                onClick={handleNextQuestion}
-                style={{
-                  minHeight: '40px',
-                  padding: '0.45rem 1.15rem',
-                  borderRadius: '10px',
-                  border: 'none',
-                  backgroundColor: 'var(--primary)',
-                  color: 'var(--primary-ink)',
-                  fontWeight: 900,
-                  fontSize: '0.88rem',
-                  cursor: 'pointer',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  boxShadow: '0 4px 14px var(--primary-subtle)',
-                }}
-              >
-                <span>
-                  {!isLastQuestion
-                    ? 'Câu tiếp theo →'
-                    : demoMode
-                      ? 'Hoàn thành demo →'
-                      : 'Hoàn thành chơi thử'}
-                </span>
-              </button>
-            ) : (
-              <span
-                data-testid="playtest-awaiting-answer-hint"
-                style={{
-                  fontSize: '0.78rem',
-                  fontWeight: 700,
-                  color: 'var(--text-muted)',
-                  padding: '0.35rem 0.65rem',
-                  borderRadius: '8px',
-                  backgroundColor: 'var(--bg-input)',
-                }}
-              >
-                Chọn / gửi đáp án để tiếp tục
-              </span>
-            )}
-          </div>
+          )}
         </div>
-      )}
+
+        {/* Center: Question Indicator + Edit Action (Creator Playtest only) */}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.6rem',
+            flexWrap: 'wrap',
+            justifyContent: 'center',
+          }}
+        >
+          <span
+            data-testid="playtest-nav-counter"
+            style={{
+              fontSize: '0.85rem',
+              fontWeight: 900,
+              color: 'var(--text-secondary)',
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            Câu {currentQuestion.questionIndex + 1} / {currentQuestion.totalQuestions}
+          </span>
+
+          {playtestMode && isReviewingPreviousAnswer && (
+            <span
+              data-testid="playtest-reviewing-prev-badge"
+              style={{
+                fontSize: '0.72rem',
+                fontWeight: 800,
+                padding: '0.16rem 0.5rem',
+                borderRadius: '999px',
+                backgroundColor: 'rgba(99, 102, 241, 0.12)',
+                color: 'var(--primary)',
+              }}
+            >
+              Đã trả lời
+            </span>
+          )}
+
+          {playtestMode && !demoMode && (
+            <button
+              type="button"
+              data-testid="playtest-inline-edit-btn"
+              onClick={() => handleOpenInlineEditor(currentQuestion.questionIndex)}
+              style={{
+                minHeight: '36px',
+                padding: '0.35rem 0.8rem',
+                borderRadius: '9px',
+                border: '1.5px solid var(--primary)',
+                backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                color: 'var(--primary)',
+                fontSize: '0.8rem',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.3rem',
+              }}
+            >
+              <span>✎ Chỉnh sửa câu này</span>
+            </button>
+          )}
+        </div>
+
+        {/* Right: Manual Next Question Button (Shared across Playtest, Demo, and Real Solo Play) */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {hasAnsweredOrTimedOut ? (
+            <button
+              type="button"
+              data-testid="solo-next-question-btn"
+              disabled={isLoading}
+              onClick={handleNextQuestion}
+              style={{
+                minHeight: '40px',
+                padding: '0.45rem 1.2rem',
+                borderRadius: '10px',
+                border: 'none',
+                backgroundColor: 'var(--primary)',
+                color: 'var(--primary-ink)',
+                fontWeight: 900,
+                fontSize: '0.88rem',
+                cursor: isLoading ? 'wait' : 'pointer',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                boxShadow: '0 4px 14px var(--primary-subtle)',
+              }}
+            >
+              <span>
+                {!isLastQuestion
+                  ? 'Câu tiếp theo →'
+                  : demoMode
+                    ? 'Hoàn thành demo →'
+                    : playtestMode
+                      ? 'Hoàn thành chơi thử'
+                      : 'Hoàn thành — Xem kết quả →'}
+              </span>
+            </button>
+          ) : (
+            <span
+              data-testid="playtest-awaiting-answer-hint"
+              style={{
+                fontSize: '0.78rem',
+                fontWeight: 700,
+                color: 'var(--text-muted)',
+                padding: '0.35rem 0.65rem',
+                borderRadius: '8px',
+                backgroundColor: 'var(--bg-input)',
+              }}
+            >
+              Chọn / gửi đáp án để tiếp tục
+            </span>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

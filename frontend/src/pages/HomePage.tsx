@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { GameModeSelectionModal } from '../components/GameModeSelectionModal.js';
 import { GameTypeDemoModal } from '../components/GameTypeDemoModal.js';
+import { SoloPlayer } from '../components/SoloPlayer.js';
 import { soundManager } from '../services/audio.js';
 import { useToast } from '../components/ToastContext.js';
 import {
@@ -171,6 +172,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   const [modeModalSpec, setModeModalSpec] = useState<GameSpecification | null>(null);
   const [loadingGameId, setLoadingGameId] = useState<string | null>(null);
   const [previewDemoType, setPreviewDemoType] = useState<GameType | null>(null);
+  const [homePlaytestSpec, setHomePlaytestSpec] = useState<GameSpecification | null>(null);
 
   const canManageGame = (game: { ownerUserId?: string | null } | null | undefined): boolean => {
     if (!game) return false;
@@ -1881,6 +1883,10 @@ export const HomePage: React.FC<HomePageProps> = ({
             onSelectSavedGame(spec, true);
           }
         }}
+        onStartPlaytest={(spec) => {
+          setIsModeModalOpen(false);
+          setHomePlaytestSpec(spec);
+        }}
         onCreateMultiplayerRoom={async (spec) => {
           try {
             const roomData = await createRoom({
@@ -1922,6 +1928,35 @@ export const HomePage: React.FC<HomePageProps> = ({
           onNavigateToCreate(gt);
         }}
       />
+
+      {/* Chế độ Chơi thử (Playtest Overlay trên Trang Chủ) */}
+      {homePlaytestSpec && (
+        <div
+          data-testid="home-playtest-overlay"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 1300,
+            backgroundColor: 'var(--bg-body, #0f172a)',
+            color: 'var(--text-primary)',
+            overflowY: 'auto',
+            overscrollBehavior: 'contain',
+            padding: '1rem',
+            boxSizing: 'border-box',
+          }}
+        >
+          <SoloPlayer
+            key={`home_playtest_${homePlaytestSpec.gameId}`}
+            initialSpec={homePlaytestSpec}
+            playtestMode={true}
+            onLeave={() => setHomePlaytestSpec(null)}
+            onSpecUpdated={(updatedSpec) => {
+              setHomePlaytestSpec(updatedSpec);
+              loadDashboardGames();
+            }}
+          />
+        </div>
+      )}
     </div>
   );
 };
