@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { GameModeSelectionModal } from '../components/GameModeSelectionModal.js';
+import { GameTypeDemoModal } from '../components/GameTypeDemoModal.js';
 import { SoloPlayer } from '../components/SoloPlayer.js';
 import { useToast } from '../components/ToastContext.js';
 import {
@@ -653,7 +654,7 @@ export const GameCoverIllustration: React.FC<{
     );
   }
 
-  if (game.gameType === 'CROSSWORD' || game.gameType === 'PUZZLE') {
+  if (game.gameType === 'CROSSWORD') {
     const wordLetters = ['T', 'R', 'I', 'T', 'H', 'Ứ', 'C'];
     return (
       <svg
@@ -662,6 +663,7 @@ export const GameCoverIllustration: React.FC<{
         height="100%"
         preserveAspectRatio="xMidYMid slice"
         aria-hidden="true"
+        data-illustration-type="CROSSWORD"
         style={{ display: 'block', backgroundColor: 'var(--cover-cross-bg, #0d1f1e)' }}
       >
         <rect width="320" height="136" fill="var(--cover-cross-bg, #0d1f1e)" />
@@ -728,6 +730,107 @@ export const GameCoverIllustration: React.FC<{
             </g>
           );
         })}
+      </svg>
+    );
+  }
+
+  if (game.gameType === 'PUZZLE') {
+    const puzzleSteps = [
+      { stepNum: '1', y: 18, barWidth: 112, active: true, badgeColor: '#ec4899' },
+      { stepNum: '2', y: 53, barWidth: 96, active: false, badgeColor: '#db2777' },
+      { stepNum: '3', y: 88, barWidth: 124, active: false, badgeColor: '#be185d' },
+    ];
+    return (
+      <svg
+        viewBox="0 0 320 136"
+        width="100%"
+        height="100%"
+        preserveAspectRatio="xMidYMid slice"
+        aria-hidden="true"
+        data-illustration-type="PUZZLE"
+        style={{ display: 'block', backgroundColor: 'var(--cover-puzzle-bg, #231224)' }}
+      >
+        <rect width="320" height="136" fill="var(--cover-puzzle-bg, #231224)" />
+        <circle cx="278" cy="28" r="46" fill="#ec4899" fillOpacity="0.12" />
+        <circle cx="42" cy="112" r="38" fill="#f472b6" fillOpacity="0.09" />
+
+        {puzzleSteps.map((row, idx) => (
+          <g key={`puzzle-step-${row.stepNum}`}>
+            <rect
+              x="34"
+              y={row.y}
+              width="252"
+              height="28"
+              rx="7"
+              fill={row.active ? '#ec4899' : panelFill}
+              fillOpacity={row.active ? 0.22 : 1}
+              stroke={row.active ? '#ec4899' : '#831843'}
+              strokeWidth={row.active ? '1.8' : '1.2'}
+            />
+            <rect
+              x="42"
+              y={row.y + 5}
+              width="20"
+              height="18"
+              rx="5"
+              fill={row.badgeColor}
+            />
+            <text
+              x="52"
+              y={row.y + 17.5}
+              textAnchor="middle"
+              fill="#ffffff"
+              fontSize="10"
+              fontWeight="900"
+            >
+              {row.stepNum}
+            </text>
+            <rect
+              x="72"
+              y={row.y + 11}
+              width={row.barWidth}
+              height="6"
+              rx="3"
+              fill={row.active ? '#fbcfe8' : inkStrong}
+              fillOpacity={row.active ? 0.95 : 0.78}
+            />
+            {/* Up/Down Reorder Controls */}
+            <rect
+              x="236"
+              y={row.y + 5}
+              width="18"
+              height="18"
+              rx="4"
+              fill={panelFill}
+              stroke={row.active ? '#f472b6' : '#831843'}
+              strokeWidth="1"
+            />
+            <path
+              d={`M245 ${row.y + 17} L245 ${row.y + 10} M242 ${row.y + 13} L245 ${row.y + 10} L248 ${row.y + 13}`}
+              stroke={idx === 0 ? inkMuted : '#f472b6'}
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+            <rect
+              x="258"
+              y={row.y + 5}
+              width="18"
+              height="18"
+              rx="4"
+              fill={panelFill}
+              stroke={row.active ? '#f472b6' : '#831843'}
+              strokeWidth="1"
+            />
+            <path
+              d={`M267 ${row.y + 10} L267 ${row.y + 17} M264 ${row.y + 14} L267 ${row.y + 17} L270 ${row.y + 14}`}
+              stroke={idx === 2 ? inkMuted : '#ec4899'}
+              strokeWidth="1.5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </g>
+        ))}
       </svg>
     );
   }
@@ -951,6 +1054,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   const [isClosingRoom, setIsClosingRoom] = useState(false);
   const [generatingCoverGameId, setGeneratingCoverGameId] = useState<string | null>(null);
   const [duplicatingGameId, setDuplicatingGameId] = useState<string | null>(null);
+  const [previewDemoType, setPreviewDemoType] = useState<GameType | null>(null);
 
   const handleGenerateAiCover = async (
     game: Pick<PersistedGameSummary, 'gameId' | 'title' | 'coverImageUrl'>,
@@ -5899,28 +6003,50 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             </p>
                           </div>
 
-                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)' }}>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                onNavigateToLibrary
-                                  ? onNavigateToLibrary({ gameType: fmt.id, nonce: Date.now() })
-                                  : setSelectedTypeFilter(fmt.id)
-                              }
-                              style={{
-                                backgroundColor: 'var(--bg-input)',
-                                color: 'var(--text-primary)',
-                                border: '1px solid var(--border-strong)',
-                                borderRadius: '6px',
-                                padding: '0 10px',
-                                height: '30px',
-                                fontSize: '0.76rem',
-                                fontWeight: 700,
-                                cursor: 'pointer',
-                              }}
-                            >
-                              Xem trong Thư viện
-                            </button>
+                          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px', flexWrap: 'wrap', paddingTop: '8px', borderTop: '1px solid var(--border-subtle)' }}>
+                            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                              <button
+                                type="button"
+                                data-testid={`explore-demo-type-${fmt.id}`}
+                                onClick={() => setPreviewDemoType(fmt.id)}
+                                style={{
+                                  backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                                  color: '#10b981',
+                                  border: '1px solid rgba(16, 185, 129, 0.4)',
+                                  borderRadius: '6px',
+                                  padding: '0 9px',
+                                  height: '30px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 800,
+                                  cursor: 'pointer',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                ▶ Xem demo
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  onNavigateToLibrary
+                                    ? onNavigateToLibrary({ gameType: fmt.id, nonce: Date.now() })
+                                    : setSelectedTypeFilter(fmt.id)
+                                }
+                                style={{
+                                  backgroundColor: 'var(--bg-input)',
+                                  color: 'var(--text-primary)',
+                                  border: '1px solid var(--border-strong)',
+                                  borderRadius: '6px',
+                                  padding: '0 9px',
+                                  height: '30px',
+                                  fontSize: '0.75rem',
+                                  fontWeight: 700,
+                                  cursor: 'pointer',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                Xem trong Thư viện
+                              </button>
+                            </div>
                             <button
                               type="button"
                               onClick={() => handleNavigateToCreator(fmt.id)}
@@ -5929,11 +6055,12 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                                 border: '1px solid transparent',
                                 borderRadius: '6px',
                                 color: fmt.accentColor,
-                                fontSize: '0.76rem',
+                                fontSize: '0.75rem',
                                 fontWeight: 800,
                                 cursor: 'pointer',
-                                padding: '0 10px',
+                                padding: '0 9px',
                                 height: '30px',
+                                whiteSpace: 'nowrap',
                               }}
                             >
                               + Tạo mới
@@ -8167,6 +8294,16 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           />
         </div>
       )}
+
+      {/* MODAL XEM DEMO LOẠI GAME TỪ TRANG KHÁM PHÁ (8 LOẠI GAME) */}
+      <GameTypeDemoModal
+        gameType={previewDemoType}
+        onClose={() => setPreviewDemoType(null)}
+        onCreateGameType={(gt) => {
+          setPreviewDemoType(null);
+          handleNavigateToCreator(gt);
+        }}
+      />
     </div>
   );
 };

@@ -894,8 +894,12 @@ async function runAudioSystemVerification() {
         `Trong Chế độ Thi chưa công bố đáp án, chọn đáp án sai chỉ được phát âm trung tính 'recorded', nhận: ${examQ1Audio.lastSfxPlayed}`
       );
 
-      // Chờ tự động chuyển sang Câu 2 sau 1.5s trong Exam Mode và chọn đáp án ĐÚNG -> vẫn chỉ được phát 'recorded'!
-      await sleep(1700);
+      // Chuyển sang Câu 2 thủ công (theo quy tắc chuyển câu thủ công đồng nhất) và chọn đáp án ĐÚNG -> vẫn chỉ được phát 'recorded'!
+      await page.eval(`(() => {
+        const nextBtn = document.querySelector('[data-testid="solo-next-question-btn"]');
+        if (nextBtn) nextBtn.click();
+      })()`);
+      await sleep(450);
       const examQ2Audio = await page.eval(`(async () => {
         const buttons = Array.from(document.querySelectorAll('button.k-btn'));
         const rightBtn = buttons.find((b) => b.textContent.includes('recorded'));
@@ -909,12 +913,16 @@ async function runAudioSystemVerification() {
         `Trong Chế độ Thi chưa công bố đáp án, chọn đáp án đúng cũng chỉ được phát âm trung tính 'recorded', nhận: ${examQ2Audio.lastSfxPlayed}`
       );
 
-      // Chờ kết thúc bài thi sau 1.5s -> nhạc nền dừng và phát âm thanh hoàn thành 'finish'
-      await sleep(1800);
+      // Bấm nút hoàn thành bài thi -> nhạc nền dừng và phát âm thanh hoàn thành 'finish'
+      await page.eval(`(() => {
+        const nextBtn = document.querySelector('[data-testid="solo-next-question-btn"]');
+        if (nextBtn) nextBtn.click();
+      })()`);
+      await sleep(500);
       const examFinishAudio = await page.eval(`window.__aiGameSoundManager.getDiagnostics()`);
       assert.equal(examFinishAudio.isPlayingBgm, false, 'Kết thúc bài thi phải dừng nhạc nền');
       assert.equal(examFinishAudio.lastSfxPlayed, 'finish', 'Kết thúc bài thi phải phát âm hiệu hoàn thành');
-      console.log('✓ [D3.5] Chế độ Thi (Exam Mode) bảo mật tuyệt đối âm thanh (chỉ phát "recorded", tự chuyển câu sau 1.5s, phát "finish" khi hoàn tất)');
+      console.log('✓ [D3.5] Chế độ Thi (Exam Mode) bảo mật tuyệt đối âm thanh (chỉ phát "recorded", chuyển câu thủ công, phát "finish" khi hoàn tất)');
 
       // 6. Kiểm tra Mobile Viewport 390x844 trên Chromium
       const mobilePage = await browser.newPage({ width: 390, height: 844 });

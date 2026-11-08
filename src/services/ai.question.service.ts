@@ -57,6 +57,75 @@ export function sanitizeAiErrorMessage(rawMessage: string, apiKey?: string): str
   return sanitized;
 }
 
+export function classifyGeminiHttpError(status: number, rawBody: string, apiKey?: string): AppError {
+  const safeBody = sanitizeAiErrorMessage(rawBody || '', apiKey);
+  const normalized = safeBody.toLowerCase();
+
+  let retryDelaySeconds: number | null = null;
+  const retryMatch = safeBody.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/i);
+  if (retryMatch) {
+    const parsed = Math.ceil(Number(retryMatch[1]));
+    if (Number.isFinite(parsed) && parsed > 0) {
+      retryDelaySeconds = parsed;
+    }
+  }
+
+  if (status === 429) {
+    const isQuotaExhausted =
+      normalized.includes('exceeded your current quota') ||
+      normalized.includes('billing') ||
+      normalized.includes('perday') ||
+      normalized.includes('generaterequestsperday') ||
+      normalized.includes('limit: 0') ||
+      (normalized.includes('quota') && !normalized.includes('perminute'));
+
+    if (isQuotaExhausted) {
+      return new AppError(
+        'AI_QUOTA_EXCEEDED',
+        'AI đã đạt giới hạn sử dụng (hết hạn mức/quota API hiện tại). Vui lòng thử lại sau hoặc kiểm tra hạn mức cấu hình Gemini API.',
+        429
+      );
+    }
+
+    const retryHint = retryDelaySeconds ? ` (vui lòng thử lại sau khoảng ${retryDelaySeconds} giây)` : '';
+    return new AppError(
+      'AI_RATE_LIMITED',
+      `AI đang bị giới hạn tốc độ truy cập tạm thời${retryHint}. Vui lòng chờ ít phút rồi thử lại.`,
+      429
+    );
+  }
+
+  if (
+    status === 503 ||
+    status === 502 ||
+    status === 504 ||
+    normalized.includes('overloaded') ||
+    normalized.includes('high demand') ||
+    normalized.includes('"status": "unavailable"') ||
+    normalized.includes('"status":"unavailable"')
+  ) {
+    return new AppError(
+      'AI_SERVICE_OVERLOADED',
+      'Dịch vụ AI đang quá tải hoặc tạm thời không khả dụng. Vui lòng thử lại sau ít phút.',
+      503
+    );
+  }
+
+  if (status === 401 || status === 403) {
+    return new AppError(
+      'AI_AUTH_ERROR',
+      'Không thể xác thực kết nối với dịch vụ AI. Vui lòng kiểm tra cấu hình khóa API của hệ thống.',
+      502
+    );
+  }
+
+  return new AppError(
+    'AI_PROVIDER_ERROR',
+    'Dịch vụ AI gặp sự cố kỹ thuật khi tạo câu hỏi. Vui lòng thử lại sau ít phút.',
+    502
+  );
+}
+
 export class GeminiModelProvider implements AiModelProvider {
   private apiKey: string;
   private model: string;
@@ -120,12 +189,7 @@ export class GeminiModelProvider implements AiModelProvider {
 
       if (!response.ok) {
         const errorBody = await response.text();
-        const safeErrorBody = sanitizeAiErrorMessage(errorBody, this.apiKey);
-        throw new AppError(
-          'AI_PROVIDER_ERROR',
-          `Gemini API returned status ${response.status}: ${safeErrorBody}`,
-          502
-        );
+        throw classifyGeminiHttpError(response.status, errorBody, this.apiKey);
       }
 
       const data = await response.json();
@@ -177,7 +241,11 @@ export class GeminiModelProvider implements AiModelProvider {
         throw err;
       }
       if (err instanceof Error && err.name === 'AbortError') {
-        throw new AppError('AI_TIMEOUT', `AI generation timed out after ${LIMITS.AI_GENERATION_TIMEOUT_MS}ms`, 504);
+        throw new AppError(
+          'AI_TIMEOUT',
+          'Yêu cầu tạo câu hỏi AI đã quá thời gian chờ. Vui lòng thử lại với số lượng câu hỏi ít hơn hoặc thử lại sau.',
+          504
+        );
       }
       const safeErrMsg = sanitizeAiErrorMessage(
         err instanceof Error ? err.message : String(err),

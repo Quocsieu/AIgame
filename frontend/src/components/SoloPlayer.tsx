@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useToast } from './ToastContext.js';
 import {
   ArrowRightIcon,
@@ -472,6 +473,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const [playerWrongCount, setPlayerWrongCount] = useState(0);
   const submittingLockRef = useRef(false);
   const advancingLockRef = useRef(false);
+  const lastAdvancedQuestionKeyRef = useRef<string | null>(null);
+  const lastAdvanceTimestampRef = useRef<number>(0);
   const answeredQuestionIdsRef = useRef<Set<string>>(new Set());
   const playtestResultsByIndexRef = useRef<Record<number, PracticeQuestionResult>>({});
   const [timeLeft, setTimeLeft] = useState(20);
@@ -484,6 +487,20 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const playtestMaxStreakRef = useRef<number>(0);
   const playtestQuestionResultsRef = useRef<PracticeQuestionResult[]>([]);
   const adventureCheckpointOpenRef = useRef<boolean>(false);
+
+  // Keep audioMuted and audioVolume synchronized with soundManager
+  useEffect(() => {
+    const unsubscribe = soundManager.subscribe(() => {
+      setAudioMuted(soundManager.isMuted());
+      setAudioVolume(soundManager.getVolume());
+    });
+    return unsubscribe;
+  }, []);
+
+  // Release question-advance key tracker when question index changes
+  useEffect(() => {
+    lastAdvancedQuestionKeyRef.current = null;
+  }, [currentQuestion?.questionIndex, currentQuestion?.id, Boolean(finalResult)]);
 
   const recomputePlaytestAggregates = (spec: GameSpecification | null | undefined) => {
     const total = spec?.questions?.length || 0;
@@ -527,7 +544,11 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
 
   const handleToggleAudioMute = () => {
     const nextMuted = soundManager.toggleMute();
-    setAudioMuted(nextMuted);
+    const nextVol = soundManager.getVolume();
+    flushSync(() => {
+      setAudioMuted(nextMuted);
+      setAudioVolume(nextVol);
+    });
     if (!nextMuted && !finalResult) {
       const spec = loadedSpec || initialSpec;
       soundManager.startSessionAudio(spec?.settings?.audioConfig);
@@ -537,11 +558,16 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   const handleAudioVolumeChange = (volPercent: number) => {
     const clamped = Math.max(0, Math.min(100, Math.round(volPercent)));
     soundManager.setVolume(clamped);
-    setAudioVolume(clamped);
-    if (audioMuted && clamped > 0) {
+    const shouldUnmute = audioMuted && clamped > 0;
+    if (shouldUnmute) {
       soundManager.setMuted(false);
-      setAudioMuted(false);
     }
+    flushSync(() => {
+      setAudioVolume(soundManager.getVolume());
+      if (shouldUnmute) {
+        setAudioMuted(false);
+      }
+    });
   };
 
   const handleLeave = () => {
@@ -1301,7 +1327,26 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   };
 
   const handleNextQuestion = async () => {
-    if (!sessionId || advancingLockRef.current) return;
+    if (!sessionId || !currentQuestion || advancingLockRef.current) return;
+    const nowMs = Date.now();
+    if (nowMs - lastAdvanceTimestampRef.current < 80) return;
+    if (playtestMode) {
+      const currentIdx = currentQuestion.questionIndex;
+      const canAdvancePlaytest = Boolean(
+        questionFeedback ||
+          isQuestionTimedOut ||
+          isReviewingPreviousAnswer ||
+          playtestResultsByIndexRef.current[currentIdx]
+      );
+      if (!canAdvancePlaytest) return;
+    } else if (!questionFeedback && !isQuestionTimedOut) {
+      return;
+    }
+
+    const advanceKey = `${currentQuestion.questionIndex}:${currentQuestion.id}`;
+    if (lastAdvancedQuestionKeyRef.current === advanceKey) return;
+    lastAdvancedQuestionKeyRef.current = advanceKey;
+    lastAdvanceTimestampRef.current = nowMs;
     advancingLockRef.current = true;
     clearAutoAdvanceTimer();
     setIsLoading(true);
@@ -1429,8 +1474,14 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         toast.error(err.message || 'Không thể tải câu hỏi tiếp theo.', 'Lỗi chuyển câu');
       }
     } finally {
-      advancingLockRef.current = false;
       setIsLoading(false);
+      if (!playtestMode) {
+        advancingLockRef.current = false;
+      } else {
+        window.setTimeout(() => {
+          advancingLockRef.current = false;
+        }, 0);
+      }
     }
   };
 
@@ -1613,15 +1664,50 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       setLoadedSpec(updatedSpec);
       onSpecUpdated?.(updatedSpec);
 
-      // Reset the edited question's playtest result and jump to it so the creator can immediately re-test
-      loadPlaytestQuestionAtIndex(updatedSpec, inlineEditIndex, { forceResetResult: true });
+      const editedQ = updatedQuestions[inlineEditIndex];
+      const editedDisplayAnswer =
+        (editedQ?.type || updatedSpec.gameType) === 'CROSSWORD'
+          ? editedQ?.crosswordAnswer || editedQ?.correctAnswer
+          : (editedQ?.type || updatedSpec.gameType) === 'SLIDER' && editedQ?.sliderConfig
+            ? `${editedQ.sliderConfig.correctValue}${editedQ.sliderConfig.unit ? ` ${editedQ.sliderConfig.unit}` : ''}`
+            : editedQ?.correctAnswer;
+
+      if (finalResult) {
+        if (playtestResultsByIndexRef.current[inlineEditIndex]) {
+          playtestResultsByIndexRef.current[inlineEditIndex] = {
+            ...playtestResultsByIndexRef.current[inlineEditIndex],
+            correctAnswer: editedDisplayAnswer,
+            explanation: editedQ?.explanation,
+          };
+        }
+        setFinalResult((prev) => {
+          if (!prev || !Array.isArray(prev.questionResults)) return prev;
+          return {
+            ...prev,
+            questionResults: prev.questionResults.map((qr, idx) =>
+              idx === inlineEditIndex
+                ? {
+                    ...qr,
+                    correctAnswer: editedDisplayAnswer,
+                    explanation: editedQ?.explanation,
+                  }
+                : qr
+            ),
+          };
+        });
+      } else {
+        // Reset the edited question's playtest result and jump to it so the creator can immediately re-test
+        loadPlaytestQuestionAtIndex(updatedSpec, inlineEditIndex, { forceResetResult: true });
+      }
 
       setEditorCloseConfirmOpen(false);
       setEditorPendingSwitchIdx(null);
       setInlineEditOpen(false);
       toast.success(
-        `Đã lưu Câu #${inlineEditIndex + 1}. Bạn có thể trả lời lại câu này ngay để kiểm thử.`,
-        'Đã lưu & đặt lại câu hỏi'
+        finalResult
+          ? `Đã lưu chỉnh sửa Câu #${inlineEditIndex + 1} trên màn hình tổng kết.`
+          : `Đã lưu Câu #${inlineEditIndex + 1}. Bạn có thể trả lời lại câu này ngay để kiểm thử.`,
+        finalResult ? 'Đã cập nhật câu hỏi' : 'Đã lưu & đặt lại câu hỏi'
       );
     } finally {
       setSavingInlineEdit(false);
@@ -3095,11 +3181,60 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         }}
       >
         <style>{`
-          @media (max-width: 639px), (max-height: 580px) {
+          @media (max-width: 639px) and (min-height: 540px) {
+            .solo-finish-screen-card {
+              max-height: ${ demoMode ? 'calc(100dvh - 108px)' : playtestMode ? 'calc(100dvh - 2rem)' : 'calc(100dvh - 4.5rem)' } !important;
+              overflow: hidden !important;
+              padding: 0.6rem 0.75rem !important;
+              margin: 0 auto !important;
+            }
+            .solo-finish-screen-card [data-testid="solo-finish-top-summary"] h2 {
+              font-size: 1.02rem !important;
+            }
+            .solo-finish-screen-card [data-testid="playtest-mode-banner"] {
+              padding: 0.28rem 0.55rem !important;
+              margin-bottom: 0.35rem !important;
+              font-size: 0.72rem !important;
+            }
+            .solo-finish-screen-card [data-testid="solo-result-evaluation"] {
+              padding: 0.35rem 0.6rem !important;
+              margin-bottom: 0.38rem !important;
+            }
+            .solo-finish-score-grid {
+              grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+              gap: 0.35rem !important;
+              margin-bottom: 0.4rem !important;
+            }
+            .solo-finish-score-grid > div {
+              padding: 0.32rem 0.4rem !important;
+            }
+            .solo-finish-screen-card [data-testid="solo-result-question-review"] {
+              margin-bottom: 0.4rem !important;
+              padding: 0.45rem 0.6rem !important;
+              flex: 1 1 auto !important;
+              min-height: 110px !important;
+            }
+            .solo-finish-review-scroll {
+              flex: 1 1 auto !important;
+              min-height: 0 !important;
+              max-height: none !important;
+              overflow-y: auto !important;
+            }
+            .solo-finish-screen-card [data-testid="solo-finish-actions-bar"] {
+              gap: 0.4rem !important;
+              padding-top: 0.1rem !important;
+            }
+            .solo-finish-screen-card [data-testid="solo-finish-actions-bar"] button {
+              min-height: 36px !important;
+              padding: 0.35rem 0.75rem !important;
+              font-size: 0.78rem !important;
+            }
+          }
+          @media (max-height: 539px) {
             .solo-finish-screen-card {
               max-height: none !important;
               overflow: visible !important;
-              padding: 0.85rem 0.9rem !important;
+              padding: 0.75rem 0.85rem !important;
               margin: 0.25rem auto !important;
             }
             .solo-finish-review-scroll {
@@ -3850,6 +3985,8 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
             <button
               type="button"
               data-testid="audio-mute-toggle-btn"
+              aria-pressed={audioMuted}
+              data-muted={audioMuted ? 'true' : 'false'}
               onClick={handleToggleAudioMute}
               title={audioMuted ? 'Bật âm thanh' : 'Tắt âm thanh'}
               style={{

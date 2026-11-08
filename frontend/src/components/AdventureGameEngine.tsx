@@ -3498,12 +3498,12 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                     game.settings?.examAnswerRevealPolicy ||
                     'AFTER_PUBLISH';
                   const canShowResultAnswers =
-                    isExam &&
-                    (isPlaytest ||
-                      Boolean(resObj?.canRevealAnswers) ||
-                      Boolean(resObj?.answersPublished) ||
-                      policy === 'IMMEDIATE' ||
-                      policy === 'AFTER_SUBMIT');
+                    Boolean(isPlaytest) ||
+                    (isExam &&
+                      (Boolean(resObj?.canRevealAnswers) ||
+                        Boolean(resObj?.answersPublished) ||
+                        policy === 'IMMEDIATE' ||
+                        policy === 'AFTER_SUBMIT'));
                   const qResults = Array.isArray(resObj?.questionResults)
                     ? resObj!.questionResults!
                     : [];
@@ -3533,35 +3533,114 @@ export const AdventureGameEngine: React.FC<AdventureGameEngineProps> = ({
                           Chi tiết đáp án từng trạm ({qResults.length} câu)
                         </div>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                          {qResults.map((qr, idx) => (
-                            <div
-                              key={qr.questionId || idx}
-                              data-testid={`solo-result-review-item-${idx}`}
-                              style={{
-                                padding: '8px 10px',
-                                borderRadius: '8px',
-                                backgroundColor: uiTheme.cardBg,
-                                border: `1px solid ${
-                                  qr.isCorrect ? uiTheme.choiceCorrectBorder : uiTheme.choiceWrongBorder
-                                }`,
-                                fontSize: '12px',
-                              }}
-                            >
-                              <div style={{ fontWeight: 800, color: qr.isCorrect ? uiTheme.choiceCorrectText : uiTheme.choiceWrongText }}>
-                                Trạm #{idx + 1}: {qr.isCorrect ? `✓ Đúng (+${qr.pointsEarned}đ)` : qr.timedOut ? '⏰ Hết giờ (+0đ)' : '✕ Sai (+0đ)'}
+                          {qResults.map((qr, idx) => {
+                            const specQ =
+                              game.questions?.[idx] ||
+                              game.questions?.find((item) => item.id === qr.questionId);
+                            const displayCorrectAns = qr.correctAnswer || specQ?.correctAnswer;
+                            const displayExplanation =
+                              typeof qr.explanation === 'string' && qr.explanation.trim().length > 0
+                                ? qr.explanation.trim()
+                                : typeof specQ?.explanation === 'string'
+                                  ? specQ.explanation.trim()
+                                  : '';
+                            return (
+                              <div
+                                key={qr.questionId || idx}
+                                data-testid={`solo-result-review-item-${idx}`}
+                                style={{
+                                  padding: '8px 10px',
+                                  borderRadius: '8px',
+                                  backgroundColor: uiTheme.cardBg,
+                                  border: `1px solid ${
+                                    qr.isCorrect ? uiTheme.choiceCorrectBorder : uiTheme.choiceWrongBorder
+                                  }`,
+                                  fontSize: '12px',
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'space-between',
+                                    gap: '8px',
+                                    flexWrap: 'wrap',
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      fontWeight: 800,
+                                      color: qr.isCorrect ? uiTheme.choiceCorrectText : uiTheme.choiceWrongText,
+                                    }}
+                                  >
+                                    Trạm #{idx + 1}:{' '}
+                                    {qr.isCorrect
+                                      ? `✓ Đúng (+${qr.pointsEarned}đ)`
+                                      : qr.timedOut
+                                        ? '⏰ Hết giờ (+0đ)'
+                                        : '✕ Sai (+0đ)'}
+                                  </div>
+                                  {isPlaytest && !isDemoMode && onEditCheckpointQuestion && (
+                                    <button
+                                      type="button"
+                                      data-testid={`playtest-finish-edit-q-${idx}`}
+                                      onClick={() => onEditCheckpointQuestion(idx)}
+                                      style={{
+                                        padding: '3px 8px',
+                                        borderRadius: '6px',
+                                        border: `1px solid ${uiTheme.subCardBorder}`,
+                                        backgroundColor: uiTheme.subCardBg,
+                                        color: uiTheme.textPrimary,
+                                        fontSize: '11px',
+                                        fontWeight: 800,
+                                        cursor: 'pointer',
+                                      }}
+                                    >
+                                      ✎ Sửa câu này
+                                    </button>
+                                  )}
+                                </div>
+                                {specQ?.question && (
+                                  <div
+                                    style={{
+                                      fontWeight: 700,
+                                      color: uiTheme.textPrimary,
+                                      marginTop: '4px',
+                                      lineHeight: 1.38,
+                                    }}
+                                  >
+                                    {specQ.question}
+                                  </div>
+                                )}
+                                <div style={{ color: uiTheme.textSecondary, marginTop: '3px' }}>
+                                  Câu trả lời của bạn:{' '}
+                                  <strong
+                                    style={{
+                                      color: qr.isCorrect ? uiTheme.choiceCorrectText : uiTheme.choiceWrongText,
+                                    }}
+                                  >
+                                    {qr.timedOut || !qr.answer ? 'Chưa trả lời (Hết thời gian)' : qr.answer}
+                                  </strong>
+                                </div>
+                                {displayCorrectAns && (
+                                  <div style={{ color: uiTheme.textSecondary, marginTop: '2px' }}>
+                                    Đáp án đúng:{' '}
+                                    <strong style={{ color: uiTheme.choiceCorrectText }}>
+                                      {displayCorrectAns}
+                                    </strong>
+                                  </div>
+                                )}
+                                {displayExplanation && (
+                                  <div
+                                    data-testid={`solo-result-review-explanation-${idx}`}
+                                    style={{ color: uiTheme.textMuted, marginTop: '2px' }}
+                                  >
+                                    Giải thích: {displayExplanation}
+                                  </div>
+                                )}
                               </div>
-                              {qr.correctAnswer && (
-                                <div style={{ color: uiTheme.textSecondary, marginTop: '2px' }}>
-                                  Đáp án đúng: <strong style={{ color: uiTheme.choiceCorrectText }}>{qr.correctAnswer}</strong>
-                                </div>
-                              )}
-                              {typeof qr.explanation === 'string' && qr.explanation.trim().length > 0 && (
-                                <div style={{ color: uiTheme.textMuted, marginTop: '2px' }}>
-                                  Giải thích: {qr.explanation.trim()}
-                                </div>
-                              )}
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     );

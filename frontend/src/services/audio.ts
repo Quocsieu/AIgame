@@ -1163,11 +1163,8 @@ class GameAudioManager {
       }
     }
 
-    // Prevent overlapping SFX when user clicks rapidly
+    // Prevent overlapping SFX when a new cue is triggered: stop previous active SFX immediately
     if (cue !== 'countdown') {
-      if (!forcePlayForPreview && this.isCueDebounced(cue, 70)) {
-        return false;
-      }
       this.stopActiveSfxPlayback();
     }
 
@@ -1187,7 +1184,26 @@ class GameAudioManager {
     let packNotes =
       PACK_SYNTH_PATTERNS[pack.packId]?.[cue] || PACK_SYNTH_PATTERNS.ARCADE_FUN[cue];
 
-    if (variantKey === 'wrong_tete') {
+    if (variantKey === 'correct_applause') {
+      packNotes = [
+        { freq: 523.25, dur: 0.08, wave: 'sine', gain: 0.21, delay: 0 },
+        { freq: 659.25, dur: 0.1, wave: 'sine', gain: 0.23, delay: 0.06 },
+        { freq: 783.99, dur: 0.18, wave: 'triangle', gain: 0.24, delay: 0.13 },
+      ];
+    } else if (variantKey === 'correct_wow') {
+      packNotes = [
+        { freq: 587.33, dur: 0.08, wave: 'sine', gain: 0.21, delay: 0 },
+        { freq: 739.99, dur: 0.1, wave: 'triangle', gain: 0.23, delay: 0.06 },
+        { freq: 880.0, dur: 0.2, wave: 'sine', gain: 0.25, delay: 0.13 },
+      ];
+    } else if (variantKey === 'correct_cheer') {
+      packNotes = [
+        { freq: 523.25, dur: 0.07, wave: 'triangle', gain: 0.2, delay: 0 },
+        { freq: 659.25, dur: 0.08, wave: 'sine', gain: 0.22, delay: 0.05 },
+        { freq: 783.99, dur: 0.09, wave: 'sine', gain: 0.23, delay: 0.11 },
+        { freq: 1046.5, dur: 0.2, wave: 'triangle', gain: 0.25, delay: 0.17 },
+      ];
+    } else if (variantKey === 'wrong_tete') {
       packNotes = [
         { freq: 311.13, dur: 0.14, wave: 'triangle', gain: 0.19, delay: 0 },
         { freq: 246.94, dur: 0.2, wave: 'sine', gain: 0.2, delay: 0.13 },
