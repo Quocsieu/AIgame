@@ -38,15 +38,23 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
   const [isCreatingRoom, setIsCreatingRoom] = useState(false);
   const [isPublishingSolo, setIsPublishingSolo] = useState(false);
   const [showPublishConfirm, setShowPublishConfirm] = useState(false);
+  const [isPublishedLocal, setIsPublishedLocal] = useState<boolean>(Boolean(gameSpec?.isPublic));
   const [rosterBlockedError, setRosterBlockedError] = useState<string | null>(null);
+  const publishingLockRef = useRef(false);
   const modalRef = useRef<HTMLDivElement>(null);
   const previousActiveElement = useRef<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setIsPublishedLocal(Boolean(gameSpec?.isPublic));
+  }, [gameSpec?.gameId, gameSpec?.isPublic]);
 
   useEffect(() => {
     if (isOpen) {
       setIsCreatingRoom(false);
       setIsPublishingSolo(false);
       setShowPublishConfirm(false);
+      setIsPublishedLocal(Boolean(gameSpec?.isPublic));
+      publishingLockRef.current = false;
       setRosterBlockedError(null);
       previousActiveElement.current = document.activeElement as HTMLElement | null;
       const handleKeyDown = (e: KeyboardEvent) => {
@@ -63,9 +71,12 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
         previousActiveElement.current?.focus();
       };
     }
-  }, [isOpen, onClose]);
+  }, [isOpen, onClose, gameSpec?.isPublic]);
 
   if (!isOpen || !gameSpec) return null;
+
+  const isGamePublished = Boolean(gameSpec.isPublic || isPublishedLocal);
+  const canPublishDraft = !isGamePublished && Boolean(isOwner) && Boolean(onPublishGame);
 
   const isExamWithEmptyRoster =
     gameSpec.settings?.sessionMode === 'EXAM' &&
@@ -78,17 +89,38 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
     onStartPlaytest(gameSpec);
   };
 
+  const handlePublishDraftNow = async () => {
+    if (!canPublishDraft || !onPublishGame || isPublishingSolo || isCreatingRoom || publishingLockRef.current) {
+      return;
+    }
+    publishingLockRef.current = true;
+    setIsPublishingSolo(true);
+    try {
+      const ok = await onPublishGame(gameSpec.gameId);
+      if (ok) {
+        gameSpec.isPublic = true;
+        setIsPublishedLocal(true);
+        setShowPublishConfirm(false);
+      }
+    } catch {
+      // Handled by parent or toast
+    } finally {
+      publishingLockRef.current = false;
+      setIsPublishingSolo(false);
+    }
+  };
+
   const handleSelectSolo = async () => {
     if (isExamWithEmptyRoster) {
       setRosterBlockedError('Bạn cần thêm danh sách thí sinh trước khi mở kỳ thi.');
       return;
     }
-    if (!gameSpec.isPublic) {
+    if (!isGamePublished) {
       setShowPublishConfirm(true);
       return;
     }
     onClose();
-    onStartSoloPresentation(gameSpec);
+    onStartSoloPresentation({ ...gameSpec, isPublic: true });
   };
 
   const handleConfirmPublishAndSolo = async () => {
@@ -97,15 +129,19 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
       return;
     }
     if (!onPublishGame) {
+      if (!isOwner) return;
       onClose();
       onStartSoloPresentation(gameSpec);
       return;
     }
+    if (isPublishingSolo || publishingLockRef.current) return;
+    publishingLockRef.current = true;
     setIsPublishingSolo(true);
     try {
       const ok = await onPublishGame(gameSpec.gameId);
       if (ok) {
         gameSpec.isPublic = true;
+        setIsPublishedLocal(true);
         setShowPublishConfirm(false);
         onClose();
         onStartSoloPresentation({ ...gameSpec, isPublic: true });
@@ -113,6 +149,7 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
     } catch {
       // Handled by parent or toast
     } finally {
+      publishingLockRef.current = false;
       setIsPublishingSolo(false);
     }
   };
@@ -213,11 +250,11 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
                   fontWeight: 800,
                   padding: '0.2rem 0.55rem',
                   borderRadius: '6px',
-                  backgroundColor: gameSpec.isPublic ? 'rgba(16, 185, 129, 0.14)' : 'rgba(245, 158, 11, 0.16)',
-                  color: gameSpec.isPublic ? 'var(--accent-emerald)' : 'var(--accent-amber)',
+                  backgroundColor: isGamePublished ? 'rgba(16, 185, 129, 0.14)' : 'rgba(245, 158, 11, 0.16)',
+                  color: isGamePublished ? 'var(--accent-emerald)' : 'var(--accent-amber)',
                 }}
               >
-                {gameSpec.isPublic ? 'Đã xuất bản' : 'Bản nháp (Chưa xuất bản)'}
+                {isGamePublished ? 'Đã xuất bản' : 'Bản nháp (Chưa xuất bản)'}
               </span>
             </div>
           </div>
@@ -245,85 +282,108 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
           </button>
         </div>
 
-        {/* CẢNH BÁO XÁC NHẬN KHI GAME ĐANG Ở TRẠNG THÁI BẢN NHÁP */}
-        {showPublishConfirm && !gameSpec.isPublic && (
+        {/* CẢNH BÁO VÀ NÚT XUẤT BẢN NGAY KHI CREATOR MỞ GAME ĐANG Ở TRẠNG THÁI BẢN NHÁP */}
+        {canPublishDraft && (
           <div
             data-testid="mode-modal-draft-publish-confirm"
             style={{
               marginBottom: '1.1rem',
-              padding: '1rem 1.15rem',
+              padding: '0.9rem 1.1rem',
               borderRadius: '12px',
               backgroundColor: 'rgba(245, 158, 11, 0.12)',
               border: '1.5px solid rgba(245, 158, 11, 0.45)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '0.65rem',
+              gap: '0.6rem',
             }}
           >
-            <div style={{ fontSize: '0.86rem', fontWeight: 800, color: 'var(--accent-amber)' }}>
-              Bộ câu hỏi này đang ở trạng thái Bản nháp (Draft)
-            </div>
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
-              Để mở phiên <strong>Chơi Đơn chính thức</strong> (có lưu lịch sử / điểm thi / phát mã QR công khai), hệ thống cần <strong>Xuất bản</strong> bộ câu hỏi. Nếu bạn chỉ muốn kiểm tra thử nội dung và giữ nguyên trạng thái Bản nháp, hãy chọn <strong>Chơi thử (Playtest)</strong>.
-            </div>
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+              <div style={{ fontSize: '0.86rem', fontWeight: 800, color: 'var(--accent-amber)' }}>
+                Bộ câu hỏi này đang ở trạng thái Bản nháp (Draft)
+              </div>
               <button
                 type="button"
-                data-testid="mode-modal-cancel-publish-btn"
-                disabled={isPublishingSolo}
-                onClick={() => setShowPublishConfirm(false)}
-                style={{
-                  padding: '0.45rem 0.85rem',
-                  borderRadius: '8px',
-                  border: '1px solid var(--border-strong)',
-                  backgroundColor: 'var(--bg-surface)',
-                  color: 'var(--text-secondary)',
-                  fontWeight: 700,
-                  fontSize: '0.8rem',
-                  cursor: 'pointer',
-                }}
-              >
-                Giữ Bản nháp
-              </button>
-              {onStartPlaytest && (
-                <button
-                  type="button"
-                  data-testid="mode-modal-switch-playtest-btn"
-                  disabled={isPublishingSolo}
-                  onClick={handleSelectPlaytest}
-                  style={{
-                    padding: '0.45rem 0.95rem',
-                    borderRadius: '8px',
-                    border: '1px solid var(--accent-sky)',
-                    backgroundColor: 'rgba(56, 189, 248, 0.14)',
-                    color: 'var(--accent-sky)',
-                    fontWeight: 800,
-                    fontSize: '0.8rem',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Chơi thử (Không xuất bản)
-                </button>
-              )}
-              <button
-                type="button"
-                data-testid="mode-modal-confirm-publish-solo-btn"
-                disabled={isPublishingSolo}
-                onClick={handleConfirmPublishAndSolo}
+                data-testid="mode-modal-publish-btn"
+                disabled={isPublishingSolo || isCreatingRoom}
+                onClick={handlePublishDraftNow}
                 style={{
                   padding: '0.45rem 1rem',
                   borderRadius: '8px',
                   border: 'none',
-                  backgroundColor: 'var(--primary)',
-                  color: 'var(--primary-ink)',
+                  backgroundColor: 'var(--accent-emerald, #10b981)',
+                  color: '#ffffff',
                   fontWeight: 900,
-                  fontSize: '0.8rem',
+                  fontSize: '0.82rem',
                   cursor: isPublishingSolo ? 'wait' : 'pointer',
+                  boxShadow: '0 4px 12px rgba(16, 185, 129, 0.25)',
                 }}
               >
-                {isPublishingSolo ? 'Đang xuất bản...' : 'Xác nhận Xuất bản & Chơi Đơn'}
+                {isPublishingSolo ? 'Đang xuất bản...' : 'Xuất bản'}
               </button>
             </div>
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+              Bạn có thể nhấn <strong>Xuất bản</strong> ngay để công khai bộ câu hỏi và mở khóa Chơi Đơn / Chơi Nhóm, hoặc chọn <strong>Chơi thử (Playtest)</strong> để kiểm tra nội dung mà vẫn giữ nguyên Bản nháp.
+            </div>
+            {showPublishConfirm && (
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', justifyContent: 'flex-end', paddingTop: '0.25rem' }}>
+                <button
+                  type="button"
+                  data-testid="mode-modal-cancel-publish-btn"
+                  disabled={isPublishingSolo}
+                  onClick={() => setShowPublishConfirm(false)}
+                  style={{
+                    padding: '0.45rem 0.85rem',
+                    borderRadius: '8px',
+                    border: '1px solid var(--border-strong)',
+                    backgroundColor: 'var(--bg-surface)',
+                    color: 'var(--text-secondary)',
+                    fontWeight: 700,
+                    fontSize: '0.8rem',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Giữ Bản nháp
+                </button>
+                {onStartPlaytest && (
+                  <button
+                    type="button"
+                    data-testid="mode-modal-switch-playtest-btn"
+                    disabled={isPublishingSolo}
+                    onClick={handleSelectPlaytest}
+                    style={{
+                      padding: '0.45rem 0.95rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--accent-sky)',
+                      backgroundColor: 'rgba(56, 189, 248, 0.14)',
+                      color: 'var(--accent-sky)',
+                      fontWeight: 800,
+                      fontSize: '0.8rem',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Chơi thử (Không xuất bản)
+                  </button>
+                )}
+                <button
+                  type="button"
+                  data-testid="mode-modal-confirm-publish-solo-btn"
+                  disabled={isPublishingSolo}
+                  onClick={handleConfirmPublishAndSolo}
+                  style={{
+                    padding: '0.45rem 1rem',
+                    borderRadius: '8px',
+                    border: 'none',
+                    backgroundColor: 'var(--primary)',
+                    color: 'var(--primary-ink)',
+                    fontWeight: 900,
+                    fontSize: '0.8rem',
+                    cursor: isPublishingSolo ? 'wait' : 'pointer',
+                  }}
+                >
+                  {isPublishingSolo ? 'Đang xuất bản...' : 'Xác nhận Xuất bản & Chơi Đơn'}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -397,7 +457,7 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
                 Chơi thử kiểm tra đề (Playtest)
               </div>
               <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)', marginTop: '0.15rem' }}>
-                Trải nghiệm đầy đủ câu hỏi, thời gian, điểm số. Không lưu lịch sử, không tính lượt thi, giữ nguyên trạng thái {gameSpec.isPublic ? 'Đã xuất bản' : 'Bản nháp'}.
+                Trải nghiệm đầy đủ câu hỏi, thời gian, điểm số. Không lưu lịch sử, không tính lượt thi, giữ nguyên trạng thái {isGamePublished ? 'Đã xuất bản' : 'Bản nháp'}.
               </div>
             </div>
             <button
@@ -491,7 +551,7 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
                   Chơi Đơn
                 </h3>
                 <span style={{ fontSize: '0.78rem', color: 'var(--text-secondary)' }}>
-                  {gameSpec.isPublic ? 'Tự luyện tập / Thi cá nhân' : 'Cần xác nhận xuất bản'}
+                  {isGamePublished ? 'Tự luyện tập / Thi cá nhân' : 'Cần xác nhận xuất bản'}
                 </span>
               </div>
             </div>

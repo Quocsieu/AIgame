@@ -996,6 +996,7 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
   } | null>(null);
   const [detailSaveBanner, setDetailSaveBanner] = useState<string | null>(null);
   const [modeModalParticipantCount, setModeModalParticipantCount] = useState<number | null>(null);
+  const [isPublishingDetailGameId, setIsPublishingDetailGameId] = useState<string | null>(null);
 
   // Xác nhận xóa bộ câu hỏi
   const [confirmDeleteGame, setConfirmDeleteGame] = useState<PersistedGameSummary | null>(null);
@@ -1808,6 +1809,25 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
       toast.success(`Đã xuất bộ câu hỏi sang định dạng ${format.toUpperCase()}`, 'Xuất tệp thành công');
     } catch (err: any) {
       toast.error(err.message || 'Không thể xuất bộ câu hỏi.', 'Lỗi xuất tệp');
+    }
+  };
+
+  const handlePublishDraftInDetail = async (gameId: string) => {
+    if (!gameId || isPublishingDetailGameId === gameId) return;
+    setIsPublishingDetailGameId(gameId);
+    try {
+      await publishGame(gameId);
+      toast.success('Đã xuất bản game công khai thành công!', 'Xuất bản thành công');
+      setActiveGameSpec((prev) => (prev && prev.gameId === gameId ? { ...prev, isPublic: true } : prev));
+      setModeModalSpec((prev) => (prev && prev.gameId === gameId ? { ...prev, isPublic: true } : prev));
+      setSavedGames((prev) =>
+        prev.map((item) => (item.gameId === gameId ? { ...item, isPublic: true } : item))
+      );
+      loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter, discoverTab).catch(() => {});
+    } catch (err: any) {
+      toast.error(err.message || 'Không thể xuất bản game.', 'Lỗi xuất bản');
+    } finally {
+      setIsPublishingDetailGameId(null);
     }
   };
 
@@ -4266,6 +4286,34 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                   </button>
                   {isLibraryMode && canManageGame(activeGameSpec) ? (
                     <>
+                      {!activeGameSpec.isPublic && (
+                        <button
+                          type="button"
+                          data-testid="library-detail-publish-btn"
+                          disabled={isPublishingDetailGameId === activeGameSpec.gameId}
+                          onClick={() => handlePublishDraftInDetail(activeGameSpec.gameId)}
+                          style={{
+                            backgroundColor: 'var(--accent-emerald, #10b981)',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '8px',
+                            padding: '0 14px',
+                            height: '38px',
+                            fontWeight: 800,
+                            fontSize: '0.84rem',
+                            cursor: isPublishingDetailGameId === activeGameSpec.gameId ? 'wait' : 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            boxShadow: '0 4px 12px rgba(16, 185, 129, 0.25)',
+                          }}
+                          title="Xuất bản bộ câu hỏi đang ở trạng thái Bản nháp"
+                        >
+                          <span>
+                            {isPublishingDetailGameId === activeGameSpec.gameId ? 'Đang xuất bản...' : 'Xuất bản'}
+                          </span>
+                        </button>
+                      )}
                       <button
                         type="button"
                         data-testid="library-detail-playtest-btn"
@@ -8247,9 +8295,11 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
           try {
             await publishGame(gameId);
             toast.success('Đã xuất bản game công khai thành công!', 'Xuất bản thành công');
-            if (activeGameSpec?.gameId === gameId) {
-              setActiveGameSpec({ ...activeGameSpec, isPublic: true });
-            }
+            setActiveGameSpec((prev) => (prev && prev.gameId === gameId ? { ...prev, isPublic: true } : prev));
+            setModeModalSpec((prev) => (prev && prev.gameId === gameId ? { ...prev, isPublic: true } : prev));
+            setSavedGames((prev) =>
+              prev.map((item) => (item.gameId === gameId ? { ...item, isPublic: true } : item))
+            );
             loadSavedGames(page, searchQuery, selectedTypeFilter, statusFilter, discoverTab);
             return true;
           } catch (err: any) {

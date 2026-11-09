@@ -634,7 +634,12 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
     if (existingResult && !options?.forceResetResult) {
       stopTimer();
       soundManager.resetCountdownTracker();
-      setTimeLeft(0);
+      const totalQSeconds = clientQ.timePerQuestion || 20;
+      const elapsedSeconds = Math.floor((existingResult.responseTimeMs || 0) / 1000);
+      const remainingSeconds = existingResult.timedOut
+        ? 0
+        : Math.max(0, totalQSeconds - elapsedSeconds);
+      setTimeLeft(remainingSeconds);
       setIsQuestionTimedOut(false);
       setIsReviewingPreviousAnswer(true);
       setSelectedChoice(existingResult.answer || null);
@@ -1318,7 +1323,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
   };
 
   const handleRetestCurrentQuestion = () => {
-    if (!playtestMode || demoMode || !currentQuestion) return;
+    if (!playtestMode || !currentQuestion) return;
     const spec = loadedSpec || initialSpec;
     if (!spec) return;
     soundManager.playSelect();
@@ -3799,13 +3804,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
       data-advance-policy={questionAdvancePolicy}
       data-question-phase={questionPhase}
       style={{
-        maxWidth: '880px',
+        maxWidth: demoMode ? '100%' : '880px',
         width: '100%',
         margin: '0 auto',
-        padding: '0.6rem 0.85rem 0.85rem',
+        padding: demoMode ? '0' : '0.6rem 0.85rem 0.85rem',
         display: 'flex',
         flexDirection: 'column',
-        gap: '0.6rem',
+        gap: '0.65rem',
         boxSizing: 'border-box',
       }}
     >
@@ -4094,17 +4099,19 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         <div
           data-testid="demo-how-to-play-guide"
           style={{
-            padding: '0.45rem 0.85rem',
-            borderRadius: '11px',
-            backgroundColor: 'rgba(16, 185, 129, 0.08)',
-            border: '1px solid rgba(16, 185, 129, 0.3)',
-            color: 'var(--text-secondary)',
-            fontSize: '0.79rem',
+            padding: '0.6rem 0.95rem',
+            borderRadius: '12px',
+            backgroundColor: 'var(--bg-surface)',
+            border: '1px solid rgba(16, 185, 129, 0.45)',
+            borderLeft: '4px solid var(--accent-emerald)',
+            color: 'var(--text-primary)',
+            fontSize: '0.82rem',
             fontWeight: 700,
-            lineHeight: 1.4,
+            lineHeight: 1.48,
+            boxShadow: 'var(--shadow-sm)',
           }}
         >
-          <strong style={{ color: 'var(--accent-emerald)' }}>💡 Hướng dẫn cách chơi:</strong>{' '}
+          <strong style={{ color: 'var(--accent-emerald)', fontWeight: 900 }}>💡 Hướng dẫn cách chơi:</strong>{' '}
           {demoGuideText}
         </div>
       )}
@@ -4276,7 +4283,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                       +{questionFeedback.pointsEarned ?? 0} điểm
                     </span>
 
-                    {playtestMode && !demoMode && (
+                    {playtestMode && (
                       <button
                         type="button"
                         data-testid="playtest-retest-question-btn"
@@ -4293,7 +4300,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                           cursor: 'pointer',
                         }}
                       >
-                        ↻ Kiểm thử lại câu này
+                        {demoMode ? '↻ Làm lại câu này' : '↻ Kiểm thử lại câu này'}
                       </button>
                     )}
                   </div>
@@ -4516,7 +4523,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
                         border: '1px solid var(--border-subtle)',
                         borderLeft: '3px solid var(--primary)',
                         fontSize: '0.85rem',
-                        color: 'var(--text-secondary)',
+                        color: 'var(--text-primary)',
                         lineHeight: 1.5,
                         maxHeight: '100px',
                         overflowY: 'auto',

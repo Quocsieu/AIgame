@@ -1908,6 +1908,13 @@ export const HomePage: React.FC<HomePageProps> = ({
           try {
             await publishGame(gameId);
             toast.success('Đã xuất bản game công khai thành công!', 'Xuất bản thành công');
+            setModeModalSpec((prev) => (prev && prev.gameId === gameId ? { ...prev, isPublic: true } : prev));
+            setSavedGames((prev) =>
+              prev.map((item) => (item.gameId === gameId ? { ...item, isPublic: true } : item))
+            );
+            setMyOwnedGames((prev) =>
+              prev.map((item) => (item.gameId === gameId ? { ...item, isPublic: true } : item))
+            );
             loadDashboardGames();
             return true;
           } catch (err: any) {
