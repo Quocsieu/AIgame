@@ -3812,14 +3812,41 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         flexDirection: 'column',
         gap: '0.65rem',
         boxSizing: 'border-box',
+        ...(demoMode
+          ? {
+              flex: 1,
+              minHeight: 0,
+              maxHeight: '100%',
+              overflow: 'hidden',
+            }
+          : {}),
       }}
     >
       {inlineEditModalNode}
 
+      {/* Scrollable upper area in Demo Mode so bottom navigation bar is always visible on all viewports */}
+      <div
+        style={
+          demoMode
+            ? {
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.65rem',
+                paddingRight: '2px',
+              }
+            : {
+                display: 'contents',
+              }
+        }
+      >
       {/* Unified Compact Single-Row Header Bar (Identical across Playtest, Demo, and Real Solo Play) */}
       <div
         data-testid={playtestMode ? 'playtest-mode-banner' : 'solo-active-top-bar'}
         style={{
+          flexShrink: 0,
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -4099,6 +4126,7 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
         <div
           data-testid="demo-how-to-play-guide"
           style={{
+            flexShrink: 0,
             padding: '0.6rem 0.95rem',
             borderRadius: '12px',
             backgroundColor: 'var(--bg-surface)',
@@ -5197,11 +5225,13 @@ export const SoloPlayer: React.FC<SoloPlayerProps> = ({
           </div>
         )}
       </div>
+      </div>
 
       {/* 4. Unified Bottom Question Navigation & Action Bar (Shared across Playtest, Demo, and Real Solo Play) */}
       <div
         data-testid="playtest-question-nav-bar"
         style={{
+          flexShrink: 0,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',

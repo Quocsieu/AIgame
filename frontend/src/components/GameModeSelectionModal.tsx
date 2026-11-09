@@ -123,37 +123,6 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
     onStartSoloPresentation({ ...gameSpec, isPublic: true });
   };
 
-  const handleConfirmPublishAndSolo = async () => {
-    if (isExamWithEmptyRoster) {
-      setRosterBlockedError('Bạn cần thêm danh sách thí sinh trước khi mở kỳ thi.');
-      return;
-    }
-    if (!onPublishGame) {
-      if (!isOwner) return;
-      onClose();
-      onStartSoloPresentation(gameSpec);
-      return;
-    }
-    if (isPublishingSolo || publishingLockRef.current) return;
-    publishingLockRef.current = true;
-    setIsPublishingSolo(true);
-    try {
-      const ok = await onPublishGame(gameSpec.gameId);
-      if (ok) {
-        gameSpec.isPublic = true;
-        setIsPublishedLocal(true);
-        setShowPublishConfirm(false);
-        onClose();
-        onStartSoloPresentation({ ...gameSpec, isPublic: true });
-      }
-    } catch {
-      // Handled by parent or toast
-    } finally {
-      publishingLockRef.current = false;
-      setIsPublishingSolo(false);
-    }
-  };
-
   const handleSelectMultiplayer = async () => {
     if (isExamWithEmptyRoster) {
       setRosterBlockedError('Bạn cần thêm danh sách thí sinh trước khi mở kỳ thi.');
@@ -364,24 +333,6 @@ export const GameModeSelectionModal: React.FC<GameModeSelectionModalProps> = ({
                     Chơi thử (Không xuất bản)
                   </button>
                 )}
-                <button
-                  type="button"
-                  data-testid="mode-modal-confirm-publish-solo-btn"
-                  disabled={isPublishingSolo}
-                  onClick={handleConfirmPublishAndSolo}
-                  style={{
-                    padding: '0.45rem 1rem',
-                    borderRadius: '8px',
-                    border: 'none',
-                    backgroundColor: 'var(--primary)',
-                    color: 'var(--primary-ink)',
-                    fontWeight: 900,
-                    fontSize: '0.8rem',
-                    cursor: isPublishingSolo ? 'wait' : 'pointer',
-                  }}
-                >
-                  {isPublishingSolo ? 'Đang xuất bản...' : 'Xác nhận Xuất bản & Chơi Đơn'}
-                </button>
               </div>
             )}
           </div>

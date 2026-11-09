@@ -702,8 +702,8 @@ export const GameTypeDemoModal: React.FC<GameTypeDemoModalProps> = ({
         style={{
           width: '100%',
           maxWidth: normalizedType === 'ADVENTURE' ? '1060px' : '900px',
-          maxHeight: '95vh',
-          overflowY: 'auto',
+          maxHeight: 'min(94dvh, 94vh)',
+          overflow: 'hidden',
           backgroundColor: 'var(--bg-body, #090c15)',
           color: 'var(--text-primary)',
           border: '1.5px solid var(--border-strong)',
@@ -716,6 +716,7 @@ export const GameTypeDemoModal: React.FC<GameTypeDemoModalProps> = ({
         {/* Top Modal Header */}
         <div
           style={{
+            flexShrink: 0,
             padding: '0.75rem 1.15rem',
             borderBottom: '1px solid var(--border-subtle)',
             backgroundColor: 'var(--bg-surface)',
@@ -797,7 +798,16 @@ export const GameTypeDemoModal: React.FC<GameTypeDemoModalProps> = ({
         </div>
 
         {/* Interactive Demo Player Body */}
-        <div style={{ padding: '0.75rem 1rem 1rem', flex: 1 }}>
+        <div
+          style={{
+            padding: '0.75rem 1rem 1rem',
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: normalizedType === 'ADVENTURE' ? 'auto' : 'hidden',
+          }}
+        >
           <SoloPlayer
             key={`demo_${normalizedType}`}
             initialSpec={config.spec}

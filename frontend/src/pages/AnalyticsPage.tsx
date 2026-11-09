@@ -6461,9 +6461,8 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
 
                           <div
                             style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
+                              display: 'grid',
+                              gridTemplateColumns: '1fr 1fr',
                               gap: '6px',
                               paddingTop: '8px',
                               borderTop: '1px solid var(--border-subtle)',
@@ -6474,7 +6473,6 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                               data-testid={`discover-card-open-btn-${item.gameId}`}
                               onClick={() => handleOpenModeModal(item.gameId)}
                               style={{
-                                flex: 1,
                                 backgroundColor: 'var(--primary)',
                                 color: 'var(--primary-ink, #060913)',
                                 border: '1px solid var(--primary)',
@@ -6495,40 +6493,6 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                             </button>
                             <button
                               type="button"
-                              data-testid={`discover-card-duplicate-btn-${item.gameId}`}
-                              disabled={duplicatingGameId === item.gameId}
-                              onClick={() =>
-                                handleDuplicateGame({
-                                  gameId: item.gameId,
-                                  title: item.title,
-                                })
-                              }
-                              style={{
-                                backgroundColor: 'var(--bg-surface)',
-                                color: 'var(--accent-sky)',
-                                border: '1px solid var(--border-strong)',
-                                borderRadius: '6px',
-                                padding: '0 8px',
-                                height: '32px',
-                                fontSize: '0.75rem',
-                                fontWeight: 700,
-                                cursor: duplicatingGameId === item.gameId ? 'not-allowed' : 'pointer',
-                                display: 'inline-flex',
-                                alignItems: 'center',
-                                gap: '4px',
-                                flexShrink: 0,
-                              }}
-                              title="Sao chép game về Thư viện của bạn"
-                            >
-                              {duplicatingGameId === item.gameId ? (
-                                <SpinnerIcon size={12} />
-                              ) : (
-                                <CopyIcon size={12} />
-                              )}
-                              <span>Sao chép</span>
-                            </button>
-                            <button
-                              type="button"
                               data-testid={`discover-card-detail-btn-${item.gameId}`}
                               onClick={() => handleViewOrEditGame(item.gameId, false)}
                               style={{
@@ -6541,7 +6505,9 @@ export const AnalyticsPage: React.FC<AnalyticsPageProps> = ({
                                 fontSize: '0.76rem',
                                 fontWeight: 700,
                                 cursor: 'pointer',
-                                flexShrink: 0,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
                               }}
                             >
                               Chi tiết
